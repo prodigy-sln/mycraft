@@ -969,11 +969,31 @@ on disk.
   Putting the fact in the error rather than beside it needs no public struct
   change, breaks no test, and is more accurate about the sidecar case.
 
-- **Deferred observation, not fixed:** when the golden image writes but its
-  sidecar does not, the outcome is still `Failed(standing)` — so the reported
-  verdict says "no golden exists" while one has in fact just been written. That
-  is pre-existing phase-2 behaviour under ruling 5 and outside this correction's
-  brief. It is much rarer than the case above (it needs the directory to be
-  creatable and the image to write and only the JSON to fail) and the message now
-  at least does not claim the golden was left alone. Worth a ruling if the update
-  path is ever revisited.
+- **~~Deferred observation, not fixed~~ — RESOLVED at validation pass 1 (Minor 4).**
+  The deferral below was wrong and the reviewer was right to reject it. The
+  reasoning was "no scenario covers a partial write"; **FR-4.4-S3 does** — it
+  requires the update path to report every golden path it wrote, and this path
+  reported none while having just replaced the golden on disk. That makes it a
+  scenario violation, not an inconsistency to file. It is also ruling 5's defect
+  with the sign reversed: there the write failed and the message implied success,
+  here it succeeded and the message implied it never happened.
+
+  Fixed by `GoldenOutcome::GoldenWrittenWithoutProvenance { paths, failure }`,
+  which names the golden path that *was* written and carries the sidecar failure
+  beside it. `write_golden` now reports how far it got rather than merely that it
+  failed. Verified end to end against a real provocation (the sidecar path
+  occupied by a directory, so the image write succeeds and only the JSON write
+  fails): the golden is replaced on disk, the written path is reported, and the
+  failure names the sidecar.
+
+  The original note follows, kept because task text is appended to, never
+  rewritten:
+
+  > **Deferred observation, not fixed:** when the golden image writes but its
+  > sidecar does not, the outcome is still `Failed(standing)` — so the reported
+  > verdict says "no golden exists" while one has in fact just been written. That
+  > is pre-existing phase-2 behaviour under ruling 5 and outside this correction's
+  > brief. It is much rarer than the case above (it needs the directory to be
+  > creatable and the image to write and only the JSON to fail) and the message now
+  > at least does not claim the golden was left alone. Worth a ruling if the update
+  > path is ever revisited.

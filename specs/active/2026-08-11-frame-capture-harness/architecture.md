@@ -19,6 +19,11 @@ amended: 2026-08-11 (sdd-implement phase 3, lead ruling) — remaining stale lin
   CaptureRequest::new added to § GPU layer, the capture sequence's repeat of the
   old field list corrected, and § Error contracts gains the four scenario-less
   variants phase 3 added
+amended: 2026-08-11 (validation pass 1, Minors 1/2/4) — ArtifactError's variant
+  list corrected (File never existed; Image and Report were missing), SkipNotice
+  moved out of the feature-gated block to the core types where it is defined, and
+  GoldenOutcome gains GoldenWrittenWithoutProvenance with the two-failure-point
+  table under § Golden lifecycle behaviour
 ---
 
 # Architecture: Headless Frame-Capture Harness
@@ -778,8 +783,21 @@ pub enum GoldenOutcome {
     Pass,                                                                    // FR-4.1-S1/S2
     GoldenUnchanged,                                                         // FR-4.4-S4
     GoldenWritten { paths: Vec<PathBuf> },                                   // FR-4.4-S3
+    // Added 2026-08-11 (validation pass 1, Minor 4). The golden was replaced
+    // but its sidecar was not, and neither neighbour can say so truthfully:
+    // `Failed` would report "no golden exists" about a file just written and
+    // name none of the paths FR-4.4-S3 requires, while `GoldenWritten` would
+    // hide that the golden now carries no record of the adapter behind it.
+    GoldenWrittenWithoutProvenance {                                         // FR-4.4-S3, FR-5.1-S4
+        paths: Vec<PathBuf>, failure: ArtifactError,
+    },
     Failed(GoldenFailure),
 }
+
+/// `SkipNotice` is core-side and ungated — `classify_acquisition` returns it and
+/// FR-1.2-S2 asserts its literal text with no adapter in the process (D13).
+pub struct SkipNotice { /* message contains the literal "MYCRAFT_ALLOW_NO_GPU" */ }
+impl SkipNotice { pub fn message(&self) -> &str; }
 pub enum GoldenFailureReason {
     MissingGolden { path: PathBuf },                                         // FR-4.4-S1
     UndecodableGolden { path: PathBuf, cause: String },                      // FR-4.4-S5
@@ -810,6 +828,17 @@ decomposition: one small function per row, dispatched by a match.
 | Present, matches | `Pass`; artifact dir left with no file, stale files from an earlier mismatch removed by allowlist (FR-4.1-S1/S2/S3) | `GoldenUnchanged`; golden bytes **and** sidecar untouched, no paths reported (FR-4.4-S4) |
 | Present, mismatches | `Failed(Mismatch)` + the artifact set: `expected.png`, `actual.png`, `diff.png` (omitted on a dimension mismatch, with the reason recorded in the report — FR-4.3-S3), `report.json` (FR-4.2-S1) | Overwrite golden + sidecar, `GoldenWritten{paths}`; the mismatch artifact set is **not** written (audit contradiction 1) |
 
+**A write on the update path can fail in two places, and they are not the same
+event** (added 2026-08-11, validation pass 1, Minor 4). The image write is the
+line: before it, nothing has reached disk and the standing verdict — missing, or
+mismatching — is still true. After it, the golden **has been replaced**, whatever
+becomes of the sidecar.
+
+| Where it failed | Outcome | Why not the other one |
+|---|---|---|
+| The golden image | `Failed(standing)` with `ArtifactError::GoldenNotUpdated` in `artifacts`, whose `Display` says the golden was **not** updated | The golden really is still missing or still wrong, so the standing verdict is the truth |
+| The sidecar, after the image landed | `GoldenWrittenWithoutProvenance { paths, failure }`, naming the golden path that *was* written | `Failed` would say "no golden exists" about a file written a moment earlier and name zero paths where FR-4.4-S3 demands every one; `GoldenWritten` would hide that FR-5.1-S4's provenance record is missing |
+
 ### GPU layer (`feature = "gpu"`)
 
 ```rust
@@ -825,7 +854,12 @@ impl Default for AcquireOptions { /* Backends::PRIMARY, Limits::downlevel_defaul
 // poisoned" is about the per-capture texture and buffer dropping at the end of
 // each capture, which is what FR-2.1-S6 asserts and passes.
 pub struct CaptureContext { /* device, queue, provenance, limits */ }
-pub struct SkipNotice { /* message contains the literal "MYCRAFT_ALLOW_NO_GPU" */ }
+// `SkipNotice` was declared here and is NOT part of this feature-gated block.
+// Corrected 2026-08-11 (validation pass 1, Minor 2): it lives core-side and
+// ungated in `frame/selection.rs`, because `classify_acquisition` returns it and
+// FR-1.2-S2 asserts its literal text under `--no-default-features`. D13's rule
+// already said so; this line had simply never been edited to match. Its
+// declaration is in the Core types block above.
 pub enum Acquisition { Ready(Box<CaptureContext>), Skipped(SkipNotice) }
 
 impl CaptureContext {
@@ -899,7 +933,7 @@ work, so FR-2.2-S2/S3's "SHALL NOT submit any GPU work" is structural:
 | `ImageIoError` | `Directory { path: PathBuf, #[source] cause }` · `Write { path: PathBuf, #[source] cause }` · `Decode { path: PathBuf, #[source] cause }` | FR-2.4-S3, FR-4.4-S5 |
 | `ThresholdError` | `Invalid { field: &'static str, value: f64 }` | FR-3.5-S3 |
 | `CaptureIdError` | `Empty` · `IllegalCharacter { name: String, character: char }` | — (guard, see Assumptions) |
-| `ArtifactError` | `Directory { path: PathBuf, #[source] cause }` · `File { path: PathBuf, #[source] cause }` | FR-4.2-S3 |
+| `ArtifactError` | `Directory { path: PathBuf, #[source] cause }` · `Image { path: PathBuf, #[source] cause: Box<ImageIoError> }` · `Report { path: PathBuf, #[source] cause: ReportError }` | FR-4.2-S3 |
 
 Every `Display` names the offending value (path, dimension, backend list,
 deadline), per code-quality §4's "specific and actionable".
