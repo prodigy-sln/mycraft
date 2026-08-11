@@ -156,12 +156,14 @@ difference: (128,128,128) vs (129,129,129) is ΔE ≈ 0.40, vs (140,140,140) is
     tolerance is ΔE 2.0, THEN THE SYSTEM SHALL report those 3 pixels as failing.
 
 - **FR-3.2**: A comparison fails when the share of failing pixels exceeds the
-  area budget.
-  - FR-3.2-S1: WHEN 4 pixels of a 64×64 image (0.098%) exceed the per-pixel
-    tolerance and the area budget is 0.1% THE SYSTEM SHALL report a match and
-    state the failing-pixel count as 4.
-  - FR-3.2-S2: IF 5 pixels of a 64×64 image (0.122%) exceed the per-pixel
-    tolerance and the area budget is 0.1% THEN THE SYSTEM SHALL report a
+  area budget. These scenarios use a 320×180 image (57 600 pixels), because
+  0.01% of a 64×64 image is 0.41 pixels — too small to express a boundary at
+  all, since any single failing pixel would breach it.
+  - FR-3.2-S1: WHEN 5 pixels of a 320×180 image (0.0087%) exceed the per-pixel
+    tolerance and the area budget is 0.01% THE SYSTEM SHALL report a match and
+    state the failing-pixel count as 5.
+  - FR-3.2-S2: IF 6 pixels of a 320×180 image (0.0104%) exceed the per-pixel
+    tolerance and the area budget is 0.01% THEN THE SYSTEM SHALL report a
     mismatch and state both the failing-pixel count and the budget.
 
 - **FR-3.3**: A comparison fails when any single pixel exceeds the hard ceiling,
@@ -169,8 +171,8 @@ difference: (128,128,128) vs (129,129,129) is ΔE ≈ 0.40, vs (140,140,140) is
   - FR-3.3-S1: WHEN the largest per-pixel distance in a pair is (128, 128, 128)
     against (140, 140, 140) and the hard ceiling is ΔE 10.0 THE SYSTEM SHALL
     report a match and state ΔE ≈ 4.67 as the maximum per-pixel distance.
-  - FR-3.3-S2: IF exactly 1 pixel of a 64×64 image is (128, 128, 128) against
-    (180, 180, 180) — a failing share of 0.024%, inside the 0.1% area budget —
+  - FR-3.3-S2: IF exactly 1 pixel of a 320×180 image is (128, 128, 128) against
+    (180, 180, 180) — a failing share of 0.0017%, inside the 0.01% area budget —
     and the hard ceiling is ΔE 10.0 THEN THE SYSTEM SHALL report a mismatch
     naming the ceiling as the reason.
 
@@ -185,10 +187,11 @@ difference: (128,128,128) vs (129,129,129) is ΔE ≈ 0.40, vs (140,140,140) is
   - FR-3.4-S3: WHILE the process holds no GPU adapter THE SYSTEM SHALL report a
     comparison verdict for two caller-supplied 64×64 images.
 
-- **FR-3.5**: Thresholds default to ΔE 2.0 per pixel, a 0.1% area budget and a
-  ΔE 10.0 hard ceiling, and each is overridable per comparison.
+- **FR-3.5**: Thresholds default to ΔE 2.0 per pixel, a 0.01% area budget and a
+  ΔE 10.0 hard ceiling, and each is overridable per comparison. A comparison
+  that loosens a default records the reason.
   - FR-3.5-S1: WHEN a comparison is requested without explicit thresholds THE
-    SYSTEM SHALL apply a per-pixel tolerance of ΔE 2.0, an area budget of 0.1%
+    SYSTEM SHALL apply a per-pixel tolerance of ΔE 2.0, an area budget of 0.01%
     and a hard ceiling of ΔE 10.0.
   - FR-3.5-S2: WHERE the caller sets the per-pixel tolerance to ΔE 0.2 and two
     64×64 images are identical except for 3 pixels that are (128, 128, 128) in
@@ -291,8 +294,29 @@ comparison:
 | Threshold | Default | Rationale |
 |-----------|---------|-----------|
 | per-pixel tolerance | ΔE 2.0 | ΔE ≈ 1.0 is a just-noticeable difference; 2.0 absorbs rounding and dithering differences between adapters while staying invisible |
-| area budget | 0.1% of pixels | ~921 px at 1280×720 — enough for anti-aliased edges to drift on a differently-rasterising adapter, far too few to hide a lighting, texture or geometry regression |
+| area budget | 0.01% of pixels | ~92 px at 1280×720. Absorbs isolated rounding and dithering, nowhere near a block-sized artifact — see below |
 | hard ceiling | ΔE 10.0 | A single pixel this far off is a defect, not sampling noise. Without it, a small-area but severe error hides inside the area budget |
+
+The area budget is deliberately an order of magnitude tighter than the 0.1%
+that would suit an anti-aliasing-heavy renderer, because MVP 1's frames are not
+that. PRO-851 is a **binary greedy mesher**, whose entire purpose is merging
+coplanar faces into large quads — it maximises flat area and minimises edge
+count. PRO-852 is flat shading with procedural placeholder textures and one
+block family, and no MSAA or anti-aliasing appears anywhere in `docs/`,
+`PLAN.md` or the crate `CLAUDE.md` files for MVP 1. The soft-edge drift a 0.1%
+budget exists to absorb is largely absent; the hard silhouettes that do exist
+(sky against terrain) flip whole pixels at very high ΔE and are caught by the
+ceiling, not the budget.
+
+The deciding number: 0.1% at 1280×720 is 921 pixels, and a single block face at
+mid distance is comfortably 900+ pixels. That budget could have forgiven an
+entire wrong block face so long as each pixel stayed under ΔE 10 — which is
+exactly the shape of a same-family texture regression. At 0.01% it cannot.
+Since MVP 1 runs on one machine and one adapter, and same-adapter rendering is
+deterministic for identical command streams, the tighter budget should not cost
+flakiness. FR-3.5's per-comparison override is the release valve: a later spec
+may loosen it **with a recorded reason**. Start tight and loosen on evidence,
+never the reverse — the reverse is how a golden suite rots into a rubber stamp.
 
 Rejected alternatives, with reasons, are recorded in `requirements.md` (D1):
 byte-exact comparison (drivers differ), per-channel RGB deltas (equal RGB steps
@@ -332,9 +356,12 @@ only reductions — a count and a maximum — are order-independent.
 - Adapter selection prefers hardware and may fall back to software (FR-1.1-S5);
   whichever is used is recorded (FR-5.1). Making selection a pure function over
   an enumerated candidate list keeps FR-1.1-S5 testable without two physical
-  GPUs. Whether hardware and software adapters can share one golden set is left
-  to observation — per-adapter golden variants are Out of Scope until drift is
-  demonstrated.
+  GPUs. Per-adapter golden variants are Out of Scope here but not hypothetical
+  — `crates/mc-render/CLAUDE.md` already makes them project policy for any
+  discrete-only feature's fallback path. The golden path and naming convention
+  must therefore leave room for an adapter discriminator from the start, so
+  that adding variants later is a new file rather than a migration of every
+  existing golden.
 - Dependencies: `wgpu`, `image` and `bytemuck` are already pinned in
   `[workspace.dependencies]`. Blocking on `map_async` needs an executor there
   (e.g. `pollster`), and FR-5.1-S1 fixes the report format as JSON, so
@@ -374,7 +401,15 @@ Binding. None of the following is built by this spec.
   is not a requirement of this spec; the FR-2.3 deadline is a liveness bound,
   not a performance budget.
 - **Per-adapter or per-platform golden variants**, and any golden-set migration
-  tooling. One golden per capture until adapter drift is actually observed.
+  tooling. One golden per capture. This deferral is conditional, not open-ended:
+  it ends at **a second adapter running the gate, or the first discrete-only
+  feature with a fallback path, whichever comes first**. `mc-render`'s
+  `CLAUDE.md` already requires a fallback path to carry its own golden frame, so
+  the policy exists — MVP 1 simply ships no discrete-only feature, since
+  flat-shaded placeholder terrain renders identically on an Intel UHD 770 and an
+  RTX 4090. FR-5.1-S4 is what makes the trigger actionable: every written golden
+  records the adapter that produced it, so the day a second adapter appears, the
+  existing set's provenance is already known.
 - **CI runner integration.** The gate is run locally today; making capture tests
   run on a hosted runner is a separate concern.
 - **Video, animation or multi-frame sequence capture.** Single frames only.
@@ -402,6 +437,9 @@ Binding. None of the following is built by this spec.
   FR-5.1-S4 records which one. Cross-adapter reproducibility is expected to hold
   within the tolerance model, and if it does not, the response is a spec for
   per-adapter goldens, not a widened tolerance.
+- The golden path and naming convention leave room for an adapter discriminator
+  even though nothing uses one yet, so that the deferral above can end by adding
+  files rather than by renaming the whole set.
 - Golden PNGs are small enough to live in git without LFS at the sizes this
   harness will use for its self-verification scenes.
 - There is no hosted CI; "headless" here means "no window and no display
@@ -416,9 +454,17 @@ None.
 ### Session 2026-08-11
 
 - Q: What tolerance model does golden comparison use? → A: Per-pixel CIELAB
-  CIE76 ΔE with three thresholds — per-pixel tolerance 2.0, area budget 0.1%,
+  CIE76 ΔE with three thresholds — per-pixel tolerance 2.0, area budget 0.01%,
   hard per-pixel ceiling 10.0, each a strictly-greater-than comparison. The
   ceiling exists because an area budget alone forgives small severe errors.
+- Q: Why is the area budget 0.01% rather than the 0.1% a renderer usually wants?
+  → A: MVP 1 has no anti-aliasing and a greedy mesher that maximises flat area,
+  so there is little soft-edge drift to absorb. At 0.1%, the 921-pixel budget at
+  720p exceeds the size of one block face, so it could have hidden an entire
+  wrong face. Loosening later requires a recorded reason (FR-3.5).
+- Q: When does the per-adapter golden deferral end? → A: At a second adapter
+  running the gate, or the first discrete-only feature with a fallback path,
+  whichever comes first. Not "when drift is observed" — that has no owner.
 - Q: What happens on a machine with no usable GPU adapter? → A: Hard failure by
   default; `MYCRAFT_ALLOW_NO_GPU` downgrades it to a skip that names itself in
   the warning. A silent skip would let the gate go green while verifying

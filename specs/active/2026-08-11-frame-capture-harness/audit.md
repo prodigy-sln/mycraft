@@ -38,8 +38,11 @@ resolution carries 53 scenarios across 17 FRs.
 
 **#3 — no threshold has a scenario at its boundary, so inclusive vs exclusive
 is undefined for all three.** The ambiguity is real and had to be closed. Two of
-the four suggested scenarios landed: FR-3.2-S1/S2 use 4/4096 (0.098%) and
-5/4096 (0.122%) against a 0.1% budget, which straddles the boundary exactly.
+the four suggested scenarios landed as an exact straddle of the area budget.
+The auditor's own figures (4/4096 and 5/4096 against 0.1%) were superseded when
+the conductor revised the budget to 0.01% — see `requirements.md` D8. At 0.01%
+a 64×64 image cannot express a boundary at all (0.41 px), so FR-3.2-S1/S2 now
+use 320×180: 5 px = 0.0087% passes, 6 px = 0.0104% fails.
 The per-pixel tolerance and hard ceiling boundaries are closed in FR text
 instead — both are **strictly greater than** comparisons — rather than by two
 more tests. Reason: the comparison operator is one decision shared by all three

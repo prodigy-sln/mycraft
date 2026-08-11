@@ -60,7 +60,7 @@ XYZ → CIELAB, and compared per pixel by Euclidean distance in Lab (CIE76 ΔE).
 | Threshold | Default | Why |
 |-----------|---------|-----|
 | `per_pixel_delta_e` | 2.0 | ΔE 1.0 is roughly a just-noticeable difference under ideal viewing. 2.0 leaves headroom for rounding and dithering differences between adapters while staying below anything a human would call a visual change |
-| `max_failing_fraction` | 0.001 (0.1%) | At 1280×720 that is ~921 pixels — enough for anti-aliased edges to drift on a differently-rasterising adapter, nowhere near enough to hide a lighting, texture or geometry regression |
+| `max_failing_fraction` | 0.0001 (0.01%) | ~92 px at 1280×720. Revised down from 0.1% by the conductor — see D8 |
 | `hard_ceiling_delta_e` | 10.0 | A single pixel this far off is a defect, not sampling noise. Without it, a small-area but catastrophic error (one wrong sprite, a black hole in a texture) hides inside the area budget |
 
 The ceiling is the part that makes the model honest: an area budget alone is a
@@ -77,6 +77,44 @@ Its two reductions — a count and a maximum — are order-independent, so the
 verdict does not depend on iteration order or on whether the work is
 parallelised. No GPU is involved in comparison, which also means the differ is
 unit-testable on any machine.
+
+### D8 — Area budget revised 0.1% → 0.01% (conductor ruling, post-audit)
+
+The original 0.1% was calibrated for an anti-aliasing-heavy frame. The conductor
+holds the MVP-wide picture and corrected it with three facts this stage could
+not see:
+
+- PRO-851 is a **binary greedy mesher** — its purpose is merging coplanar faces
+  into large quads, which maximises flat area and minimises edge count.
+- PRO-852 is flat shading, procedural placeholder textures, one block family,
+  and **no MSAA or anti-aliasing anywhere in MVP 1**.
+- 0.1% at 1280×720 is 921 px; a block face at mid distance is comfortably 900+
+  px. The budget could have forgiven an entire wrong block face while every
+  pixel stayed under the ΔE 10 ceiling — the exact shape of a same-family
+  texture regression.
+
+0.01% (~92 px at 720p) still absorbs isolated rounding and dithering. Same-
+adapter rendering is deterministic for identical command streams and MVP 1 runs
+on one machine, so the tighter budget should not cost flakiness. FR-3.5's
+per-comparison override is the release valve, and loosening requires a recorded
+reason.
+
+Consequence for the scenarios: 0.01% of a 64×64 image is 0.41 pixels, so any
+single failing pixel breaches it and no pass/fail straddle exists at that size.
+FR-3.2 and FR-3.3-S2 moved to 320×180 (57 600 px), where 5 px = 0.0087% passes
+and 6 px = 0.0104% fails. The tolerance-model change did not turn out to be
+wrong; the 64×64 test image was simply too small to express it.
+
+### D9 — Per-adapter goldens: conditional deferral, not open-ended
+
+`crates/mc-render/CLAUDE.md` already requires a discrete-only feature's fallback
+path to carry its own golden frame, so per-adapter variants are project policy
+rather than a hypothesis. They stay out of scope for MVP 1 only because MVP 1
+ships no discrete-only feature. The deferral therefore names its trigger — a
+second adapter running the gate, or the first fallback path, whichever comes
+first — instead of "until drift is demonstrated", which has no owner and no
+moment. The golden path and naming convention leave room for an adapter
+discriminator so the trigger is satisfied by adding files, not migrating them.
 
 ### D2 — Absent GPU fails by default; skipping requires an explicit opt-in
 
