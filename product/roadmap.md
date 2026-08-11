@@ -2,103 +2,73 @@
 
 Tracked in Linear — team `prodigy-solutions` (`PRO-`), initiative
 [**MyCraft**](https://linear.app/prodigy-solutions/initiative/57bd5125-175b-4347-8ab7-b3284f17d744).
-Each phase below is a Linear project. This file is the local mirror; Linear is authoritative for
-issue status.
+Each MVP below is a Linear project; each spec is one flat `PRO-` issue inside it. Linear is
+authoritative for issue status.
 
-Rationale for every locked decision lives in `PLAN.md`; as-built detail lands in `docs/`.
+## How this roadmap works
 
-## Overview
+**Incremental, not waterfall.** Every MVP ends with a *playable game* — not a finished layer.
+MVP 1 is a game you can start, walk around in, and build in. Each later increment adds capability
+to a thing that already runs. There is no point on this roadmap where the project is "half a
+renderer and no gameplay".
 
-Build order is driven by one constraint: **verification capability comes before the thing it
-verifies.** The frame-capture harness precedes the renderer, the bot harness precedes multiplayer,
-and the adversarial suite precedes public servers. Nothing gets built that cannot be checked
-without a human watching a screen.
+Two rules follow from that:
+
+1. **An increment is not done until you can play it.** A green gate is necessary, not sufficient.
+   Every MVP's exit criterion includes a human-playable build.
+2. **Depth of planning decreases with distance.** MVP 1 is specified; later MVPs are a sketch and
+   are expected to change once you have played the earlier ones. Planning MVP 5 in detail now
+   would be the waterfall this structure exists to avoid.
+
+Quality is *not* traded away for increment size. The gate, TDD discipline, and rigor tier apply
+identically to a small MVP — small means narrow scope, never lower standards.
 
 ---
 
-## Current Milestone: Phase 1 — Foundation
+## MVP 1 — Playable Sandbox ← current
 
-**Linear**: [MyCraft Phase 1: Foundation](https://linear.app/prodigy-solutions/project/mycraft-phase-1-foundation)
-**Theme**: Make the project buildable, gated, and observable without a human at the screen.
-
-### Features
+**Linear**: [MyCraft MVP 1: Playable Sandbox](https://linear.app/prodigy-solutions/project/mycraft-phase-1-foundation)
+**Goal**: A game that starts, renders a world, and lets you move and build in it.
 
 | Priority | Feature | Status | Spec |
 |----------|---------|--------|------|
-| P0 | M0 — Workspace, quality gate, **headless frame-capture harness**, bot-client skeleton | Not Started | - |
-| P0 | M1 — Chunk storage + palette, binary greedy mesher, wgpu terrain pipeline, fly camera | Not Started | - |
-| P1 | M2 — Player physics, raycast, block place/break, singleplayer loop | Not Started | - |
+| P0 | Workspace, quality gate, **headless frame-capture harness** | Not Started | - |
+| P0 | Chunk storage + palette, binary greedy mesher, wgpu terrain pipeline | Not Started | - |
+| P0 | Camera, player physics, collision | Not Started | - |
+| P0 | Raycast targeting, block break and place | Not Started | - |
+| P1 | World persistence — quit and resume where you left off | Not Started | - |
+| P1 | Minimal HUD: crosshair, held block, debug overlay | Not Started | - |
 
-**Exit criteria**: `sdd-gate` green · harness writes inspectable PNGs · mesher benchmark
-< 200 µs/section · scripted replay places and breaks 10 000 blocks with asserted world state.
+**Exit criteria** — all must hold:
+- `sdd-gate.ps1` exits 0
+- Mesher benchmark < 200 µs/section
+- Scripted replay places and breaks 10 000 blocks with asserted world state
+- **You can launch the client, walk around, break and place blocks, quit, relaunch, and your
+  changes are still there**
 
-### To start a feature from this roadmap:
+The frame-capture harness is first and non-negotiable: without it the agent building the renderer
+cannot see its own output.
 
-```
-/sdd-start [feature name from above]
-```
-
----
-
-## Next Milestone: Phase 2 — Scripting & Hot Reload
-
-**Linear**: [MyCraft Phase 2: Scripting & Hot Reload](https://linear.app/prodigy-solutions/project/mycraft-phase-2-scripting-and-hot-reload)
-**Theme**: The headline feature. Everything after this is authored in Luau.
-
-- [ ] M3 — Luau host: sandbox, instruction-budget interrupts, memory caps, fault isolation
-- [ ] M3 — Definition `Registry` + `ArcSwap` swap at tick boundary
-- [ ] M3 — Watch → candidate build → validate → mod self-tests → swap or roll back
-- [ ] M3 — Stable string↔numeric ID mapping persisted with the world
-- [ ] M3 — `content/base/` blocks defined entirely in Luau
-
-**Exit criteria**: edit a `.luau` file on a running server; behaviour changes with no restart and
-no loss of world or player state. A mod that fails to compile never reaches the live world.
+Everything is a placeholder — procedural textures, no audio, one block type family. That is
+correct for MVP 1. Do not gold-plate it.
 
 ---
 
-## Later
+## Provisional — revised after you play MVP 1
 
-### Phase 3 — Multiplayer & Public Servers
-[Linear](https://linear.app/prodigy-solutions/project/mycraft-phase-3-multiplayer-and-public-servers)
+Sketch only. Order and contents are expected to change based on feedback.
 
-- [ ] M4 — Client/server split, QUIC transport, protocol
-- [ ] M4 — ed25519 identity, challenge-response auth, account store in `redb`
-- [ ] M4.5 — Moderation: whitelist/ban, roles and permissions, rate limits, edit journal + region rollback
-- [ ] M4.5 — Server-side validation of movement, reach, and inventory transactions
-- [ ] M5 — Interest management, delta replication, prediction and reconciliation
+| MVP | Adds | Still playable because |
+|-----|------|------------------------|
+| **2 — Scriptable Content** | Luau host, sandbox, registry, hot reload; `content/base/` blocks defined in script | The blocks you already had become script-defined; you can now add one live |
+| **3 — Multiplayer** | QUIC transport, ed25519 identity, replication, prediction; 2 players → 32 | The same sandbox, now with someone else in it |
+| **4 — Survival Loop** | Items, inventory, tools, crafting — all script-defined | Building gains purpose and progression |
+| **5 — Living World** | NPCs with pathfinding and scripted brains; then quests, dialogue, storyline | The world is inhabited and has things to do |
+| **6 — Public & Polished** | Moderation, anti-abuse, rollback; lighting, audio, UI polish, mod packaging | Ready for strangers on a public server |
 
-**Exit criteria**: 32 authenticated bots, p99 tick < 25 ms, zero desyncs over 10 minutes; the
-adversarial suite (speed, reach, edit flood, chat flood, inventory dupe) is fully rejected and
-logged with no server impact.
-
-### Phase 4 — Content Systems
-[Linear](https://linear.app/prodigy-solutions/project/mycraft-phase-4-content-systems)
-
-- [ ] M6 — Items, inventory, tools, crafting — all defined in `content/base/`
-- [ ] M7 — NPCs: voxel pathfinding, coroutine brains, behaviour trees, LOD scheduler
-- [ ] M8 — Quests, dialogue, storyline; event bus with Rust-side predicate matching
-
-**Exit criteria**: 500 scripted NPCs inside a 50 ms tick with 32 bots connected; a multi-stage
-quest survives both a server restart and a hot reload.
-
-### Phase 5 — Polish & Release
-[Linear](https://linear.app/prodigy-solutions/project/mycraft-phase-5-polish-and-release)
-
-- [ ] M9 — Lighting polish, audio, game UI per `standards/global/ui-design.md`
-- [ ] M9 — Mod packaging, dependency resolution and load order
-- [ ] M9 — World save/load, migration, backup
-
----
-
-## Backlog
-
-Considered, not scheduled:
-
-- WASM mod backend via `wasmtime` for compute-heavy mods (designed for in `PLAN.md` §4.6)
-- Cross-server identity federation (the ed25519 key is already the right primitive)
-- Real art assets — placeholders carry us to Phase 4; decide by M6
-- Dimensions / portals
-- Redstone-equivalent logic system (would be a strong test of the scripting API's expressiveness)
+Backlog, unscheduled: WASM mod backend · cross-server identity · real art assets (decide by
+MVP 4) · dimensions and portals · a redstone-equivalent logic system (a strong test of scripting
+API expressiveness).
 
 ---
 
@@ -114,5 +84,6 @@ Considered, not scheduled:
 
 - Priorities: P0 = Critical, P1 = High, P2 = Medium, P3 = Low
 - Features move to specs via `/sdd-start`; branches are `feature/PRO-123-short-name`
-- Completed specs are recorded in `specs/REGISTRY.md` (spec folders are removed at finalize)
+- Completed specs are recorded in `specs/REGISTRY.md`
 - Default rigor is `high` — see `product/mission.md`
+- No pull requests; `origin` is a backup remote. See `standards/global/git-workflow.md` §0.
