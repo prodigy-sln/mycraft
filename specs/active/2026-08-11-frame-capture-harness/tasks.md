@@ -832,7 +832,23 @@ on disk.
   can re-run it at any time to confirm the committed bytes are still what the
   generator produces. Run it with
   `cargo nextest run -p mc-testkit --no-default-features --run-ignored ignored-only`.
-- **Coverage inflation from `*_test.rs` siblings is now moot**: `$CoverageExclude`
-  gained `\|_test\.rs$` at 735cfef, before phase 2 added `layout_test.rs` and
-  `selection_test.rs`. The T11 note's prediction stands but the gate already
-  answers it.
+- **Coverage inflation from `*_test.rs` siblings is settled, and measured.**
+  `$CoverageExclude` gained `\|_test\.rs$` at 735cfef, before phase 2 added
+  `layout_test.rs` and `selection_test.rs`. The T11 note's prediction was
+  correct at the time it was written and is now spent: the gate already answers
+  it, and no further `$CoverageExclude` change is wanted.
+
+  Verified at the phase-2 boundary by re-running the gate's own coverage command
+  without `--summary-only`, so the per-file list is visible:
+
+  | | Phase 1 boundary | Phase 2 boundary |
+  |---|---|---|
+  | Files in the denominator | 8 (2 of them siblings) | **12, none a sibling** |
+  | Tracked lines | 440 | **775** |
+  | Line coverage | 87.95% | **86.71%** (672 covered) |
+
+  All twelve are production `src/frame/*.rs`. All four siblings —
+  `color_test.rs`, `readback_test.rs`, `layout_test.rs`, `selection_test.rs` —
+  are absent from the report. The figure is therefore honest production
+  coverage, and the 1.24-point drop from phase 1 is the denominator nearly
+  doubling with real code, not dilution.
