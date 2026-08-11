@@ -116,9 +116,26 @@ For each stage:
    - any correction from a previous failed attempt
 3. End every child prompt with:
    `When finished, report back via SendMessage to: <your own name>.`
-   Substitute your actual agent name — not `main`. You are the parent; the
-   report is for you.
-4. **You** report to `main` via SendMessage when the MVP is done or you are
+   Substitute the name you are actually addressable by. If you were spawned as
+   a named subagent, that is your name. **If you are running as the main
+   conversation — the usual case when the user invokes `/loop` on you directly
+   — your name is `main`.** Work out which you are before writing the prompt;
+   a report sent to a name nobody answers to is a report lost.
+4. Give every child a **mid-stage question channel**, not just a completion
+   report. A stage subagent that meets a genuine decision has three bad options
+   and one good one: guess, stall, or fail the whole stage — or ask you. Tell it
+   explicitly, in the same prompt:
+
+   > If you hit a decision you cannot resolve from the spec, the standards, or
+   > the repo — competing viable approaches, an ambiguous scenario, a conflict
+   > with an invariant — do NOT guess and do NOT fail the stage. Send me the
+   > question via SendMessage, with the options you see and your recommendation,
+   > and wait for my answer. Asking is cheap; a wrong guess costs the stage.
+
+   You hold the whole picture and the child holds one stage of it. Decisions
+   that need the whole picture are yours — that is the point of the split, and
+   it only works if the child can actually reach you.
+5. **You** report to `main` via SendMessage when the MVP is done or you are
    blocked.
 
 Run stages sequentially — each depends on the last. Parallelism is only
@@ -259,6 +276,8 @@ trust any of your reports.
 
 - Writing product code yourself instead of delegating
 - Spawning a stage without telling it how to report back — its work is lost
+- Spawning a stage without telling it how to *ask* — it guesses instead, and
+  you find out at validation
 - Passing conversational context instead of disk paths; the child cannot see
   your conversation
 - Marking an increment done without launching it
