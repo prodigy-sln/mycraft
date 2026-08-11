@@ -1,0 +1,36 @@
+# gitleaks configuration for the secrets stage of scripts/sdd-gate.ps1.
+#
+# The stage scans the working tree rather than git history, because a secret is
+# cheapest to remove before it is committed. That means it also sees local
+# credential files which are deliberately git-ignored — those are correct usage,
+# not leaks.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+Local credential files. These are git-ignored (see .gitignore) and therefore
+cannot reach the repository, so a real key living here is correct.
+
+This allowlist is only safe because sdd-gate.ps1 separately asserts that these
+paths are still git-ignored. If that assertion is ever removed, this becomes a
+hole: deleting the .gitignore entry would silently make committed secrets
+invisible to the scanner. Do not remove one without the other.
+
+Note .env.example is deliberately NOT allowlisted — it is tracked, so it must
+never contain a real value.
+"""
+paths = [
+    '''(^|/)\.env$''',
+    '''(^|/)\.env\.local$''',
+]
+
+[[allowlists]]
+description = "Build output and coverage artifacts — not source, and git-ignored."
+paths = [
+    '''(^|/)target/''',
+    '''(^|/)coverage/''',
+    '''\.profraw$''',
+    '''\.profdata$''',
+]
