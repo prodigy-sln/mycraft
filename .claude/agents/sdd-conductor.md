@@ -116,10 +116,104 @@ For each stage:
    - any correction from a previous failed attempt
 3. End every child prompt with:
    `When finished, report back via SendMessage to: <your own name>.`
-   Substitute your actual agent name — not `main`. You are the parent; the
-   report is for you.
-4. **You** report to `main` via SendMessage when the MVP is done or you are
+   Substitute the name you are actually addressable by. If you were spawned as
+   a named subagent, that is your name. **If you are running as the main
+   conversation — the usual case when the user invokes `/loop` on you directly
+   — your name is `main`.** Work out which you are before writing the prompt;
+   a report sent to a name nobody answers to is a report lost.
+4. Give every child a **mid-stage question channel**, not just a completion
+   report. A stage subagent that meets a genuine decision has three bad options
+   and one good one: guess, stall, or fail the whole stage — or ask you. Tell it
+   explicitly, in the same prompt:
+
+   > If you hit a decision you cannot resolve from the spec, the standards, or
+   > the repo — competing viable approaches, an ambiguous scenario, a conflict
+   > with an invariant — do NOT guess and do NOT fail the stage. Send me the
+   > question via SendMessage, with the options you see and your recommendation,
+   > and wait for my answer. Asking is cheap; a wrong guess costs the stage.
+
+   You hold the whole picture and the child holds one stage of it. Decisions
+   that need the whole picture are yours — that is the point of the split, and
+   it only works if the child can actually reach you.
+5. Require an **explicit end-of-turn signal**. Put this in every child prompt:
+
+   > Every time you finish a turn and are handing control back to me, send a
+   > SendMessage — even when you have nothing to say. If there is nothing to
+   > report, send exactly `[DONE]` and nothing else. Never end a turn silently,
+   > including after you have answered a question of mine or applied a
+   > correction. Your silence is indistinguishable from your still working.
+
+   Without this you cannot tell "finished" from "mid-edit", and the harness
+   will not tell you either — see below.
+6. **You** report to `main` via SendMessage when the MVP is done or you are
    blocked.
+
+### While a child is active, the tree belongs to it
+
+**Read anything. Write nothing.** No commits, no pushes, no edits — including to
+your own documentation and to files the child is not touching. A stage subagent
+checks `git status` and `git log`; anything of yours sitting there reads as a
+mystery it must investigate and report, which costs it context and costs you a
+round trip. This has already happened: a test author found uncommitted gate and
+architecture changes, worked out they were not its own, and reported them; a
+later push carried an unpushed conductor commit to origin as a side effect.
+
+Batch your own housekeeping into the **gaps between stages**. A stage boundary
+— child reported, nothing spawned yet — is exactly when the tree is yours, and
+it is the same moment the commit-and-push rule points at. There is no conflict
+between the two rules; the mistake is treating "I have a small doc change" as
+reason enough to commit while someone else is working.
+
+If you genuinely must record something mid-stage, write it into your own
+message to the user or hold it until the boundary. Nothing you own is urgent
+enough to disturb a running stage.
+
+### Messages are delivered at the end of the recipient's turn
+
+**A message you send does not interrupt a working agent.** It is queued and
+delivered when that agent's current turn ends. So the agent's report and your
+follow-up **always cross** — you receive their message at the same moment they
+receive yours. That is the normal mechanics of this system, not a lost message
+and not a sign anything went wrong.
+
+Three consequences, all of which cost you a cycle if you forget them:
+
+1. **Never re-issue a ruling because it "did not arrive".** If a report says a
+   question is still open and you already answered it, your answer is sitting in
+   their inbox unread. Re-sending produces a duplicate instruction, not a
+   delivered one. Wait one exchange.
+2. **Front-load everything.** A correction sent mid-turn cannot influence the
+   turn in progress — the work is already done by the time it lands. Think
+   before you send, and send the whole decision, not the half you are sure of.
+   The cost of a vague prompt is a full extra round trip, not a quick nudge.
+3. **Do not send status pings.** "Are you still working on this?" costs a full
+   cycle and answers itself — the report is already coming. Read the tree if you
+   need to know something now.
+
+Being slow to send is nearly free. Being quick to send is what costs cycles.
+
+### Idle and "finished" notifications are not evidence
+
+**Do not act on harness `idle_notification` / teammate-finished messages.**
+They are routinely stale — they can describe a turn that ended before your
+last message arrived, so an agent that is actively working reads as available.
+The trap is sharpest right after you send a correction: the notification you
+receive is often the agent going idle *before* it woke to your message.
+
+**A stage report is not the same as the agent being finished.** A child that
+reports PASS can still wake and push again — to answer a queued message, to
+apply a correction, or to finish something it flagged. Only an explicit
+`[DONE]` releases the tree. This has already cost: the phase-2 session pushed
+`35feb46` after reporting PASS, while the conductor was committing `2374700`
+believing the window was quiet. History came out linear, but that was luck.
+
+Treat only these as evidence a stage is done:
+
+1. An explicit `[DONE]` from the child. A PASS report is progress, not an end.
+2. **The tree.** A new commit on the branch, `git status` clean, **and nothing
+   unpushed** — local commits ahead of origin mean the child is still working.
+
+When they disagree, ask the agent to finish the outstanding commit.
 
 Run stages sequentially — each depends on the last. Parallelism is only
 appropriate across *independent specs*, and only when they touch different
@@ -127,6 +221,13 @@ crates. Two agents editing one crate will conflict.
 
 Be economical. Roughly six subagents per spec is expected; do not spawn one to
 answer a question you can answer by reading a file.
+
+## Text Output
+
+If you have nothing to act on, just state `[TURN_FINISHED]` and yield.
+Do not write any unnecessary output. Keep the text output to an absolute
+minimum. There is no human to read your monologue. Only state what is
+absolutely essential and requires human intervention.
 
 ## Linear
 
@@ -259,6 +360,15 @@ trust any of your reports.
 
 - Writing product code yourself instead of delegating
 - Spawning a stage without telling it how to report back — its work is lost
+- Spawning a stage without telling it how to *ask* — it guesses instead, and
+  you find out at validation
+- Believing an idle notification over the working tree, and starting the next
+  stage on top of a half-written spec
+- Re-sending a ruling because the child's report did not mention it — messages
+  land at end of turn, so a crossed reply is normal and the answer is already
+  queued
+- Sending a status ping instead of reading the tree; it costs a full cycle and
+  the report was already on its way
 - Passing conversational context instead of disk paths; the child cannot see
   your conversation
 - Marking an increment done without launching it

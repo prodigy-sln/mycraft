@@ -1,0 +1,11 @@
+# Golden frames are byte-sensitive by definition: a golden test compares the
+# bytes git hands back against the bytes the harness produced. Without these
+# rules the repo relies entirely on git's content auto-detection, which on
+# Windows is the one thing standing between a golden and a line-ending rewrite.
+
+*.png binary
+
+# The provenance sidecar sits beside its golden and is rewritten only when the
+# golden is. Pinning LF keeps it stable across platforms, so a checkout on
+# another machine does not present it as modified.
+*.provenance.json text eol=lf

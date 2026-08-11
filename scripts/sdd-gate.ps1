@@ -50,7 +50,23 @@ Push-Location $RepoRoot
 $LineThreshold = 80
 
 # ADR-008: GPU and binary crates are outside the coverage denominator.
-$CoverageExclude = 'crates[/\\](mc-render|mc-client|mc-server)[/\\]'
+#
+# `*_test.rs` files are excluded too. They are the `#[path = "x_test.rs"] mod
+# tests;` siblings used to unit-test private items, and because they are
+# included into the *lib* target llvm-cov cannot tell them from library code.
+# Being test code they are ~100% covered by construction, so counting them
+# inflates the figure rather than diluting it — measured at 62 of 440 tracked
+# lines, worth about 2 points, and growing with every sibling added.
+#
+# That matters more here than it would elsewhere: ADR-008 excludes mc-render
+# *because* golden-frame tests cover it, and mc-testkit is the crate carrying
+# that bet. Its coverage number is the one figure standing behind the exclusion,
+# so it has to measure library code and nothing else.
+#
+# Note that `crates/*/tests/` needs no entry — llvm-cov never counted it.
+# Integration tests are separate crates and are excluded by default; verified
+# against the JSON per-file list, not assumed.
+$CoverageExclude = 'crates[/\\](mc-render|mc-client|mc-server)[/\\]|_test\.rs$'
 
 # code-quality.md §2 hard size limits. Rust has no "component vs service"
 # distinction, so the general ceiling is the services limit (500) and test files
@@ -110,6 +126,26 @@ Invoke-Stage 'format (cargo fmt --check)' { cargo fmt --all -- --check }
 # complexity, banned names) come from clippy.toml and mirror code-quality.md.
 Invoke-Stage 'lint + complexity (clippy, zero warnings)' {
     cargo clippy --workspace --all-targets --all-features -- -D warnings
+}
+
+# ── 2b. GPU-free configuration ─────────────────────────────────────────────────
+# mc-testkit's frame harness splits into a GPU-free core and a wgpu layer behind
+# a default-on `gpu` feature. `--no-default-features` is the only configuration
+# in which wgpu is absent from the dependency graph, and therefore the only
+# process in which no GPU adapter *can* exist — which is what makes the
+# comparison suite's "while the process holds no GPU adapter" assert what it
+# says. Every other stage above and below runs with the feature on, so without
+# this stage the seam decays to convention.
+#
+# Deliberately NOT `--all-features`: that would re-enable `gpu` and make the
+# stage meaningless. Deliberately NOT `--no-tests=pass` either: a run with no
+# tests in it proves nothing, which is the one thing this stage exists to rule
+# out. The two commands are chained with `&&` because Invoke-Stage inspects
+# $LASTEXITCODE once, after the whole scriptblock — on separate lines a clippy
+# failure would be silently overwritten by a passing test run.
+Invoke-Stage 'gpu-free (mc-testkit, no default features)' {
+    cargo clippy -p mc-testkit --no-default-features --all-targets -- -D warnings &&
+    cargo nextest run -p mc-testkit --no-default-features
 }
 
 # ── 3. File size limits ────────────────────────────────────────────────────────

@@ -1,0 +1,6 @@
+{
+  "capture": "synthetic-gradient-64",
+  "adapter": "synthetic (cpu-generated fixture)",
+  "backend": "other",
+  "driver_description": "no adapter; generated on the CPU by the test suite"
+}
