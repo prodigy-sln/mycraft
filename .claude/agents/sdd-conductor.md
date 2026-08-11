@@ -135,8 +135,36 @@ For each stage:
    You hold the whole picture and the child holds one stage of it. Decisions
    that need the whole picture are yours — that is the point of the split, and
    it only works if the child can actually reach you.
-5. **You** report to `main` via SendMessage when the MVP is done or you are
+5. Require an **explicit end-of-turn signal**. Put this in every child prompt:
+
+   > Every time you finish a turn and are handing control back to me, send a
+   > SendMessage — even when you have nothing to say. If there is nothing to
+   > report, send exactly `[DONE]` and nothing else. Never end a turn silently,
+   > including after you have answered a question of mine or applied a
+   > correction. Your silence is indistinguishable from your still working.
+
+   Without this you cannot tell "finished" from "mid-edit", and the harness
+   will not tell you either — see below.
+6. **You** report to `main` via SendMessage when the MVP is done or you are
    blocked.
+
+### Idle and "finished" notifications are not evidence
+
+**Do not act on harness `idle_notification` / teammate-finished messages.**
+They are routinely stale — they can describe a turn that ended before your
+last message arrived, so an agent that is actively working reads as available.
+The trap is sharpest right after you send a correction: the notification you
+receive is often the agent going idle *before* it woke to your message.
+
+Treat only these as evidence a stage is done:
+
+1. An explicit `SendMessage` from the child — its report, or `[DONE]`.
+2. **The tree.** A new commit on the branch, and `git status` clean.
+
+When they disagree, the tree wins. If a notification says idle but the branch
+has no new commit and the working tree is dirty, the agent is mid-edit: hold,
+`noop:true`, and do not touch the files it is writing. Reading the same file
+twice a few seconds apart will tell you whether it is still moving.
 
 Run stages sequentially — each depends on the last. Parallelism is only
 appropriate across *independent specs*, and only when they touch different
@@ -278,6 +306,8 @@ trust any of your reports.
 - Spawning a stage without telling it how to report back — its work is lost
 - Spawning a stage without telling it how to *ask* — it guesses instead, and
   you find out at validation
+- Believing an idle notification over the working tree, and starting the next
+  stage on top of a half-written spec
 - Passing conversational context instead of disk paths; the child cannot see
   your conversation
 - Marking an increment done without launching it
