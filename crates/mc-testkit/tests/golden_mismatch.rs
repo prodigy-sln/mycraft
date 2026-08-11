@@ -83,10 +83,9 @@ fn a_reported_mismatch_names_the_directory_holding_its_artifacts() -> TestResult
     };
     let directory = artifact_dir(artifacts.path(), &capture);
     assert!(
-        failure
-            .to_string()
-            .contains(&directory.display().to_string()),
-        "a failure the reader cannot follow to the evidence is half a failure; \
+        names_whole_path(&failure.to_string(), &directory),
+        "a failure the reader cannot follow to the evidence is half a failure, \
+         and naming a file inside the directory is not naming the directory; \
          got `{failure}`"
     );
     Ok(())

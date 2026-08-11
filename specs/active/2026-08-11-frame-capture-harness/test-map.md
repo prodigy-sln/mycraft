@@ -133,6 +133,13 @@ assertion, which also confirms the second obstruction really executes). The
 superseded test survived the first mutation, because `source().is_some()` was
 all it asked of the message.
 
+**FR-4.2-S2 asserts through the same helper**, for the same reason and in the
+same file: it read `to_string().contains(directory)`, which a message naming
+only `<dir>/expected.png` would have satisfied without ever naming the
+directory. Verified by printing `artifact_dir.join("expected.png")` from
+`GoldenFailure::Display`, reverted: the old form stayed green, the new one
+fails on that message. The test name is unchanged.
+
 ### Supporting unit tests (no scenario)
 
 | Task | Test file | Test name | Why it exists |
