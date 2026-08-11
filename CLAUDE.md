@@ -165,6 +165,7 @@ Directory-specific rules live in nested `CLAUDE.md` files under `crates/mc-scrip
 ## Autonomous builds
 
 `sdd-conductor` (`.claude/agents/`) owns one MVP end to end, spawning a fresh subagent per SDD
-stage and managing the Linear issues. `.claude/loops/mvp-supervisor.md` holds the `/loop` prompt
-that drives it to completion — it supervises rather than spawns, so at most one conductor ever
-runs at a time.
+stage and managing the Linear issues. Because an MVP outlives a single context, the conductor
+invokes `/loop` **on itself** using `.claude/loops/conductor-loop.md` and advances one step per
+tick, reconstructing state from Linear and git each time. There is no outer supervisor — the
+conductor is the only owner.
