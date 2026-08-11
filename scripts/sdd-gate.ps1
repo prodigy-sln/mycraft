@@ -50,7 +50,23 @@ Push-Location $RepoRoot
 $LineThreshold = 80
 
 # ADR-008: GPU and binary crates are outside the coverage denominator.
-$CoverageExclude = 'crates[/\\](mc-render|mc-client|mc-server)[/\\]'
+#
+# `*_test.rs` files are excluded too. They are the `#[path = "x_test.rs"] mod
+# tests;` siblings used to unit-test private items, and because they are
+# included into the *lib* target llvm-cov cannot tell them from library code.
+# Being test code they are ~100% covered by construction, so counting them
+# inflates the figure rather than diluting it — measured at 62 of 440 tracked
+# lines, worth about 2 points, and growing with every sibling added.
+#
+# That matters more here than it would elsewhere: ADR-008 excludes mc-render
+# *because* golden-frame tests cover it, and mc-testkit is the crate carrying
+# that bet. Its coverage number is the one figure standing behind the exclusion,
+# so it has to measure library code and nothing else.
+#
+# Note that `crates/*/tests/` needs no entry — llvm-cov never counted it.
+# Integration tests are separate crates and are excluded by default; verified
+# against the JSON per-file list, not assumed.
+$CoverageExclude = 'crates[/\\](mc-render|mc-client|mc-server)[/\\]|_test\.rs$'
 
 # code-quality.md §2 hard size limits. Rust has no "component vs service"
 # distinction, so the general ceiling is the services limit (500) and test files
