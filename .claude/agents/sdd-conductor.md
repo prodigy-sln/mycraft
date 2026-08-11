@@ -200,10 +200,18 @@ last message arrived, so an agent that is actively working reads as available.
 The trap is sharpest right after you send a correction: the notification you
 receive is often the agent going idle *before* it woke to your message.
 
+**A stage report is not the same as the agent being finished.** A child that
+reports PASS can still wake and push again — to answer a queued message, to
+apply a correction, or to finish something it flagged. Only an explicit
+`[DONE]` releases the tree. This has already cost: the phase-2 session pushed
+`35feb46` after reporting PASS, while the conductor was committing `2374700`
+believing the window was quiet. History came out linear, but that was luck.
+
 Treat only these as evidence a stage is done:
 
-1. An explicit `SendMessage` from the child — its report, or `[DONE]`.
-2. **The tree.** A new commit on the branch, and `git status` clean.
+1. An explicit `[DONE]` from the child. A PASS report is progress, not an end.
+2. **The tree.** A new commit on the branch, `git status` clean, **and nothing
+   unpushed** — local commits ahead of origin mean the child is still working.
 
 When they disagree, ask the agent to finish the outstanding commit.
 
