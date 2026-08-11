@@ -1,22 +1,37 @@
 # Validation Report: Headless Frame-Capture Harness
 
 **Spec**: [spec.md](spec.md) · **Issue**: PRO-849 · **Rigor**: `high`
-**Branch**: `feature/PRO-849-frame-capture-harness` @ `09cbcca`
-**Passes**: 1 (`91a7c2f`) and 2 (`09cbcca`) · **Date**: 2026-08-11
-**Validator**: validate-PRO-849
+**Branch**: `feature/PRO-849-frame-capture-harness` @ `291c3ce`
+**Passes**: 1 (`91a7c2f`), 2 (`c447a20`), 3 (`35b4373`) · **Date**: 2026-08-11
+**Validator**: pass 1 `validate-PRO-849`; passes 2–3 the conductor, via
+`Workflow({name: "sdd-validate"})`
 
 ## Verdict
 
-**PASS at pass 2 — 0 Blocker, 0 Major, 0 new findings.**
+**PASS at pass 3 — 0 Blocker, 0 Major, 0 Minor, no failed scenarios.**
 
-Pass 1 returned 5 Minors and no Blockers or Majors. Four were fixed
-(`c4ea0c9`, `d25d81c`, `f717606`, `09cbcca`); M3 was adjudicated and accepted
-deliberately by the lead. Pass 2 re-ran the gate and reviewed the whole
-changed surface: every fix does what it claims, and no new finding of any
-severity appeared. Nothing blocks `/sdd-complete`.
+Run `wf_601c0ec1-115`: three specialist reviewers in parallel, each candidate
+finding adversarially verified, merged deterministically. Correctness PASS,
+coverage PASS, quality PASS.
 
-Pass-1 detail is preserved below as the record of what was found and why;
-resolutions are marked in place.
+### Why there were three passes
+
+**Pass 1** ran the reviewer workflow correctly and returned 5 Minors, no
+Blockers or Majors. Four were fixed (`c4ea0c9`, `d25d81c`, `f717606`,
+`09cbcca`); the fifth (M3, scope) is addressed below.
+
+**The first pass-2 attempt (`c447a20`) is superseded and its PASS withdrawn.**
+It did not invoke the required workflow — it re-read the changed surface
+itself. At rigor `high` the skill mandates
+`Workflow({name: "sdd-validate", …})`, which runs three independent reviewers;
+a single reader re-checking its own pass-1 conclusions is not that. The cause
+was a conductor error: a follow-up message asking to "run pass 2" does not
+re-invoke a skill. Recorded because a validation that did not happen is worse
+than one that failed.
+
+**Pass 2, re-run properly**, returned zero findings at every severity but
+FAILED on two PARTIAL scenario verdicts — FR-4.2-S3, and scope. Both were
+resolved (below), and **pass 3** confirms they clear.
 
 ## Summary
 
@@ -27,7 +42,52 @@ resolutions are marked in place.
 | 1 — quality | 0 | 0 | 3 | 0 |
 | 1 — validator (independent) | 0 | 0 | 2 | 1 |
 | **1 — total** | **0** | **0** | **5** | **1** |
-| **2 — new findings** | **0** | **0** | **0** | **0** |
+| 2 — findings (FAIL: 2 PARTIAL scenarios) | 0 | 0 | 0 | 0 |
+| **3 — final** | **0** | **0** | **0** | **0** |
+
+## Pass-2 PARTIALs and their resolution
+
+**FR-4.2-S3 — fixed (`6853414`).** Its test asserted only the failure variant
+and `source().is_some()`; it never checked that the obstructed path is *named*,
+so the scenario's "named alongside it" was unasserted. It also provoked only
+the "cannot be created" branch though the scenario says "created **or
+written**". Both obstructions are now provoked portably, and the path must
+appear as a **whole path** — an occurrence not followed by a path separator —
+so a longer containing path cannot satisfy it. Three mutations were applied,
+observed failing, and reverted; the superseded test provably *survived*
+mutation 1, confirming the gap was real rather than theoretical.
+
+`35b4373` fixes the same blind-substring defect in the neighbouring FR-4.2-S2
+test, verified the same way.
+
+**Scope — authorised.** Four files outside this spec were changed on the
+branch: `.claude/agents/sdd-conductor.md`, `.claude/loops/conductor-loop.md`,
+`docs/technical/decisions.md` (ADR-010) and `product/roadmap.md`. All are
+conductor work committed mid-spec, contrary to `git-workflow.md` §2. **The user
+explicitly authorised them as part of PRO-849.** They are an authorised scope
+extension, not a waived violation. The practice stands corrected for future
+specs: process documents are committed between specs, never mid-spec onto a
+feature branch. The branch merges with a **merge commit rather than a squash**
+so those atomic commits keep their own messages instead of being bundled under
+a PRO-849 subject.
+
+## One finding the merge filtered, accepted by the conductor anyway
+
+Pass 3's quality reviewer raised, and adversarial verification discarded, that
+scenario IDs appeared in production doc-comments. **On inspection it was
+real** — `FR-4.4-S3` and `FR-5.1-S4` appeared three times in
+`crates/mc-testkit/src/frame/golden.rs`, against `CLAUDE.md`'s explicit rule
+that scenario IDs never appear in code.
+
+It matters because this project runs `spec-disposal: delete`: `/sdd-complete`
+removes the spec folder before the branch merges, so those citations would
+have become permanent references to a document existing nowhere in the tree —
+worse than no comment, because they look followable. Fixed in `291c3ce`,
+comments only, with the design rationale kept and only the citations removed.
+A workspace-wide sweep confirms none remain in any `.rs` file.
+
+Recorded because a clean merged verdict is not the same as nothing being
+wrong, and the filtered set deserves reading.
 
 ## Gate — pass 2 (`09cbcca`)
 
