@@ -1,0 +1,32 @@
+# Complexity thresholds.
+#
+# These are not invented numbers — they are the limits already mandated by
+# standards/global/code-quality.md §2, made machine-enforceable so the gate
+# catches violations instead of a reviewer having to.
+#
+# The corresponding lints are enabled in [workspace.lints.clippy] in Cargo.toml.
+
+# code-quality.md §2: "max 4 parameters (use an object beyond that)"
+too-many-arguments-threshold = 4
+
+# code-quality.md §2: "Functions: one thing, max 30 lines"
+too-many-lines-threshold = 30
+
+# code-quality.md §2: "max 2 nesting levels".
+# Counts the function body itself as one level, so 2 nested blocks => 3.
+excessive-nesting-threshold = 3
+
+# Not in code-quality.md, but the standard measure of "this function is doing
+# too much" that line count alone misses. Clippy's default is 25; 15 is a firmer
+# bar appropriate to a codebase where the tick loop must stay auditable.
+cognitive-complexity-threshold = 15
+
+# Discourage deeply nested generic soup in public signatures (clippy default).
+type-complexity-threshold = 250
+
+# Names that carry no information. Mirrors code-quality.md §3 "Banned: generic
+# names (data, info, temp, result, item)".
+disallowed-names = ["data", "info", "temp", "tmp", "result", "item", "val", "foo", "bar", "baz"]
+
+# Enforce the MSRV declared in Cargo.toml so we don't silently require newer Rust.
+msrv = "1.97"

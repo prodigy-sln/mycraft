@@ -1,0 +1,145 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/mc-core",
+    "crates/mc-world",
+    "crates/mc-script",
+    "crates/mc-proto",
+    "crates/mc-net",
+    "crates/mc-sim",
+    "crates/mc-render",
+    "crates/mc-client",
+    "crates/mc-server",
+    "crates/mc-testkit",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/prodigy-sln/mycraft"
+
+# Central version pinning. Member crates opt in with `dep = { workspace = true }`.
+# Unused entries cost nothing at build time.
+[workspace.dependencies]
+# Internal
+mc-core = { path = "crates/mc-core" }
+mc-world = { path = "crates/mc-world" }
+mc-script = { path = "crates/mc-script" }
+mc-proto = { path = "crates/mc-proto" }
+mc-net = { path = "crates/mc-net" }
+mc-sim = { path = "crates/mc-sim" }
+mc-render = { path = "crates/mc-render" }
+mc-testkit = { path = "crates/mc-testkit" }
+
+# ECS / math
+bevy_ecs = "0.19.0"
+glam = "0.33.3"
+
+# Rendering
+wgpu = "30.0.0"
+winit = "0.30.13"
+egui = "0.36.1"
+egui-wgpu = "0.36.1"
+egui-winit = "0.36.1"
+bytemuck = { version = "1.25.2", features = ["derive"] }
+image = "0.25.10"
+
+# Scripting
+mlua = { version = "0.12.0", features = ["luau", "vendored"] }
+
+# Networking
+quinn = "0.11.11"
+rustls = "0.23"
+ed25519-dalek = "3.0.0"
+argon2 = "0.5.3"
+
+# Storage / serialization
+redb = "4.1.0"
+serde = { version = "1.0.229", features = ["derive"] }
+bincode = "3.0.0"
+rkyv = "0.8.18"
+zstd = "0.13.3"
+lz4_flex = "0.14.0"
+toml = "0.9"
+
+# Concurrency
+rayon = "1.12.0"
+flume = "0.12.0"
+parking_lot = "0.12.5"
+arc-swap = "1.9.2"
+dashmap = "6.2.1"
+
+# Utility
+thiserror = "2.0"
+anyhow = "1.0"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+notify = "8.2.0"
+notify-debouncer-full = "0.7.0"
+slotmap = "1.1.1"
+indexmap = "2.14.0"
+clap = { version = "4.5", features = ["derive"] }
+
+# Profiling
+tracy-client = "0.18.4"
+
+# Dev / test
+proptest = "1.11.0"
+criterion = "0.8.2"
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+# All of these become hard errors at the gate via `-D warnings`.
+# Thresholds for the complexity lints live in clippy.toml.
+
+# Correctness and discipline
+todo = "warn"
+dbg_macro = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+indexing_slicing = "warn"           # prefer .get() — panics in a tick loop kill 32 players
+integer_division = "warn"
+float_cmp = "warn"
+mem_forget = "warn"
+
+# Complexity — enforces standards/global/code-quality.md §2
+too_many_lines = "warn"             # pedantic; threshold 30
+too_many_arguments = "warn"         # threshold 4
+cognitive_complexity = "warn"       # nursery; threshold 15
+excessive_nesting = "warn"          # restriction; threshold 3
+type_complexity = "warn"
+
+# Naming — enforces code-quality.md §3
+disallowed_names = "warn"
+
+# Error handling — enforces code-quality.md §4 ("never swallow errors")
+let_underscore_must_use = "warn"
+map_err_ignore = "warn"
+
+# Documentation of public surface. mc-script's bindings and mc-proto's packets
+# are external contracts; undocumented public items there are a real defect.
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+
+[profile.dev]
+opt-level = 1        # voxel meshing and worldgen are unusably slow at opt-level 0
+
+[profile.dev.package."*"]
+opt-level = 3        # always optimize dependencies, even in dev
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+
+# Dedicated profile for perf work: release codegen plus symbols for Tracy.
+[profile.profiling]
+inherits = "release"
+debug = true
+panic = "unwind"
