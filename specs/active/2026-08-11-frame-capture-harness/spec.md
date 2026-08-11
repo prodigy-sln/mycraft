@@ -1,7 +1,8 @@
 ---
 id: SPEC-001
 title: Headless Frame-Capture Harness
-status: active
+status: implemented
+completed: 2026-08-11
 rigor: high
 branch: feature/PRO-849-frame-capture-harness
 jira: PRO-849
