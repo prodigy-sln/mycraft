@@ -121,7 +121,7 @@ opt in with `dep = { workspace = true }`. A version literal in
 
 21 scenarios. Nothing here links `wgpu`.
 
-- [ ] **T01** Crate skeleton and dependency wiring — root `Cargo.toml`,
+- [x] **T01** Crate skeleton and dependency wiring — root `Cargo.toml`,
       `crates/mc-testkit/Cargo.toml`, `src/lib.rs`, `src/frame/mod.rs`
       Scenarios: none (enabling)
       - Root `[workspace.dependencies]`: add `pollster = "0.4"`,
@@ -140,7 +140,7 @@ opt in with `dep = { workspace = true }`. A version literal in
         not a departure from D1 — the seam is stronger in phases 1–2 than the
         feature makes it, because the dependency is absent entirely.
 
-- [ ] **T02** `[P]` Gate: run `mc-testkit` in the `--no-default-features`
+- [x] **T02** `[P]` Gate: run `mc-testkit` in the `--no-default-features`
       configuration — `scripts/sdd-gate.ps1` (lint/test stage only)
       Scenarios: none (approved ruling 1)
       - Its own commit, touching nothing else in the gate. Suggested shape: a new
@@ -156,7 +156,7 @@ opt in with `dep = { workspace = true }`. A version literal in
       - If adding it breaks the gate for a reason visible only at the keyboard,
         **stop and ask the lead** rather than adjusting the gate further.
 
-- [ ] **T03** `[P]` Image container and frame-size validation — `frame/image.rs`,
+- [x] **T03** `[P]` Image container and frame-size validation — `frame/image.rs`,
       `tests/`
       Scenarios: FR-2.2-S2, FR-2.2-S3
       - `Rgba8Image` (`from_rgba`, `width`, `height`, `pixel`, `as_bytes`) with
@@ -169,7 +169,7 @@ opt in with `dep = { workspace = true }`. A version literal in
         and because wgpu's own oversized-texture validation is panic-shaped.
       - `ImageShapeError` for a pixel buffer whose length is not `w * h * 4`.
 
-- [ ] **T04** `[P]` sRGB → CIELAB conversion and ΔE — `frame/color.rs`,
+- [x] **T04** `[P]` sRGB → CIELAB conversion and ΔE — `frame/color.rs`,
       `frame/color_test.rs`
       Scenarios: none (supporting; the distances it produces are asserted by T07)
       - `srgb8_to_lab([u8; 3]) -> Lab` via a 256-entry `u8 → linear f64` LUT
@@ -186,7 +186,7 @@ opt in with `dep = { workspace = true }`. A version literal in
       - The LUT also makes conversion bit-reproducible run to run, which
         FR-3.3-S1's stated maximum and FR-4.3-S2's byte-identity both lean on.
 
-- [ ] **T05** `[P]` Row unpadding and 256-byte alignment — `frame/readback.rs`,
+- [x] **T05** `[P]` Row unpadding and 256-byte alignment — `frame/readback.rs`,
       `frame/readback_test.rs`
       Scenarios: none (FR-2.2-S1 is owned end-to-end by T25)
       - `padded_row_bytes(width) -> Result<u32, ReadbackError>` (private) and
@@ -200,7 +200,7 @@ opt in with `dep = { workspace = true }`. A version literal in
         ever involved. The **scenario** FR-2.2-S1 is a real capture and belongs to
         phase 3; this task proves the maths it depends on.
 
-- [ ] **T06** `[P]` Structural independence from the code under test —
+- [x] **T06** `[P]` Structural independence from the code under test —
       `tests/dependency_graph.rs`
       Scenarios: FR-6.1-S1
       - Invoke `cargo metadata --format-version 1 --locked` through the `CARGO`
@@ -216,7 +216,7 @@ opt in with `dep = { workspace = true }`. A version literal in
         Landing it early is the point: it guards the invariant for the rest of the
         spec rather than certifying it at the end.
 
-- [ ] **T07** Comparison: thresholds, verdict, area budget, hard ceiling —
+- [x] **T07** Comparison: thresholds, verdict, area budget, hard ceiling —
       `frame/compare.rs`, `tests/`
       Scenarios: FR-3.1-S1, FR-3.1-S2, FR-3.2-S1, FR-3.2-S2, FR-3.3-S1,
       FR-3.3-S2, FR-3.4-S1, FR-3.4-S2, FR-3.5-S1, FR-3.5-S2, FR-3.5-S3
@@ -236,7 +236,7 @@ opt in with `dep = { workspace = true }`. A version literal in
       - Test images: the 320×180 pair (57 600 px) for FR-3.2 and FR-3.3-S2, where
         5 px = 0.0087% passes and 6 px = 0.0104% fails; 64×64 elsewhere.
 
-- [ ] **T08** Comparison in a process that holds no adapter — `tests/`
+- [x] **T08** Comparison in a process that holds no adapter — `tests/`
       Scenarios: FR-3.4-S3
       Depends on: T07
       - One behavioural test over two caller-supplied 64×64 images, in a test file
@@ -245,7 +245,7 @@ opt in with `dep = { workspace = true }`. A version literal in
       - Its worth is entirely in the configuration it runs in. Keep it separate
         from T07's file so that dependency is visible rather than incidental.
 
-- [ ] **T09** `[P]` PNG encode, write and read — `frame/png.rs`, `tests/`
+- [x] **T09** `[P]` PNG encode, write and read — `frame/png.rs`, `tests/`
       Scenarios: FR-2.4-S1, FR-2.4-S2, FR-2.4-S3
       Depends on: T03
       - `encode_png`, `write_png` (creates the parent directory; failure to create
@@ -274,7 +274,7 @@ opt in with `dep = { workspace = true }`. A version literal in
       - `tempfile::TempDir` for the filesystem cases; FR-2.4-S3 is provoked
         portably by a path whose parent is an existing *file*.
 
-- [ ] **T10** Diff image rendering — `frame/diff.rs`, `tests/`
+- [x] **T10** Diff image rendering — `frame/diff.rs`, `tests/`
       Scenarios: FR-4.3-S1, FR-4.3-S2, FR-4.3-S3
       Depends on: T07, T09
       - `render_diff(expected, comparison) -> Option<Rgba8Image>`: failing
@@ -285,7 +285,7 @@ opt in with `dep = { workspace = true }`. A version literal in
       - FR-4.3-S2's byte-identity is asserted on `encode_png` output, not on the
         in-memory buffer.
 
-- [ ] **T11** Coverage-denominator measurement — no production change
+- [x] **T11** Coverage-denominator measurement — no production change
       Scenarios: none (approved ruling 4, measurement only)
       Depends on: T03–T10 (needs real `src/` and `tests/` to measure)
       - Run the gate's coverage command and inspect the JSON summary's per-file
@@ -680,9 +680,70 @@ six of FR-2.1, FR-2.2-S1, FR-2.3-S1, exactly as the architecture identifies.
 Deferred observations and follow-ups. Never delete task text; append status
 markers only.
 
-- **T11 measurement result** — pending. Record here: tracked lines and line
-  percentage with and without `crates/*/tests/` in the denominator. The lead
-  decides whether `$CoverageExclude` changes; this spec does not change it.
+- **T11 measurement result** — measured 2026-08-11 at the phase-1 boundary,
+  against the gate's own coverage command. `$CoverageExclude` was **not**
+  changed; the lead decides.
+
+  | Denominator | Tracked lines | Line % |
+  |---|---|---|
+  | A. As the gate measures today | 440 | **87.95%** |
+  | B. Excluding `crates/*/tests/` | 440 | **87.95%** |
+  | C. Also excluding `*_test.rs` siblings | 378 | **85.98%** |
+
+  **The risk the architecture predicted does not exist.** A and B are identical
+  because `cargo llvm-cov` never counted `crates/*/tests/` in the first place —
+  integration tests are separate crates and are excluded by default. Zero files
+  under `crates/*/tests/` appear in the report. Extending `$CoverageExclude`
+  with `\|crates[/\\][^/\\]+[/\\]tests[/\\]` would be a no-op.
+
+  **A smaller effect of the opposite sign does exist**, from a source the risk
+  register did not name: the `*_test.rs` siblings of D10 are `#[path]`-included
+  into the **lib** target, so llvm-cov cannot tell them from library code and
+  counts them. They are 100%-covered by construction, so they *inflate* the
+  figure rather than diluting it — 62 of 440 tracked lines (14%) are test code,
+  worth about 2 percentage points today. Both numbers clear the 80% bar, so
+  nothing is forced now, but the inflation grows with every sibling phase 2 adds
+  (`layout_test.rs`, `selection_test.rs`), softening the bar for exactly the
+  crate ADR-008 leans on. If the lead wants the bar honest, the change is
+  `$CoverageExclude` gaining `\|_test\.rs$` — a gate change, deliberately not
+  made here.
+
+- **Per-file coverage at the phase-1 boundary**, for context on the number
+  above: `color.rs` 100%, `compare.rs` 97.79%, `readback.rs` 90.70%,
+  `diff.rs` 90.00%, `image.rs` 76.92%, `png.rs` 53.57%. The two low files are
+  error paths with no phase-1 caller — `read_png`'s decode and shape failures
+  are first exercised by FR-4.4-S5 in phase 2 (T19), and `Rgba8Image::pixel`'s
+  bounds arithmetic by the golden lifecycle. Deferred observation, not a defect:
+  the aggregate is above threshold and the gaps close in phase 2 by design.
+
+- **T09 PNG determinism: the primary branch held.** The pre-authorised fallback
+  was **not** taken. With `CompressionType::Best` and `FilterType::Adaptive`
+  pinned explicitly, `encode_png` is byte-identical for identical input both
+  within one process and **across separate processes** — the stronger property,
+  and the one a committed golden actually depends on. FR-4.3-S2 is asserted on
+  encoded PNG bytes exactly as written, so no Clarification was added to
+  `spec.md`.
+
+- **The spec's ΔE ≈ 0.40 is arithmetically 0.3917.** Computed against CIE76 /
+  D65 / the sRGB transfer function, the three reference distances are 0.39168,
+  4.66505 and 19.72703. The 4.67 and 19.72 figures in `spec.md` are accurate;
+  0.40 rounds high, and 0.39 is the correct two-decimal value. Nothing is
+  blocked — the figure is quoted with `≈` and the tests assert a ±0.02 window —
+  but a correct implementation lands at 0.392, and a reviewer should not read
+  that as a defect. Raised to the lead; `spec.md` deliberately left unedited
+  pending their call.
+
+- **FR-2.4-S2's fixture cannot catch the failure mode it was written for.**
+  Raised to the lead at the phase-1 boundary, unresolved at time of writing.
+  The scenario's left-half-white / right-half-black frame is *invariant under a
+  vertical row flip*, so asserting (0,32) and (63,32) catches a horizontal
+  mirror rather than the compensating write-flip/read-flip pair that `spec.md`
+  § Structural constraints and architecture D5 both cite as its reason to exist.
+  The test is written exactly as specified; correcting it means changing the
+  fixture to vertical asymmetry, which is a spec change and not the test
+  author's or the implementation's to make. Partial mitigation already in place:
+  FR-2.4-S1's fixture is asymmetric in both axes, so a single flip on write *or*
+  read is caught there — only a symmetric pair survives.
 - **Exactly one golden is committed** (T22), CPU-generated and marked synthetic
   in its sidecar. Every FR-4.x *scenario* still runs against a temporary golden
   root; the committed one exists solely to exercise the git round trip — read a
