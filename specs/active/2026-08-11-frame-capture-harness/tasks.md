@@ -33,12 +33,17 @@ one test author can hold as a coherent interface design, and because there is a
 real dependency boundary between them: the golden lifecycle (phase 2) consumes
 comparison, diffing, PNG and reporting (phase 1) as finished primitives.
 
-- **Phase 1 — the pixel pipeline.** Image, colour, comparison, diff, PNG, row
-  unpadding, the structural invariant. 21 scenarios.
-- **Phase 2 — policy, lifecycle and reporting.** Opt-ins, adapter decisions,
-  deadline, paths, report, golden lifecycle. 20 scenarios.
-- **Phase 3 — the wgpu adapter.** 12 scenarios, every one an observation of real
-  hardware.
+- **Phase 1 — the pixel pipeline** (T01–T11). Image, colour, comparison, diff,
+  PNG, row unpadding, the structural invariant. 21 scenarios.
+- **Phase 2 — policy, lifecycle and reporting** (T12–T22). Opt-ins, adapter
+  decisions, deadline, paths, report, golden lifecycle, and the one committed
+  golden. 20 scenarios.
+- **Phase 3 — the wgpu adapter** (T23–T28). 12 scenarios, every one an
+  observation of real hardware.
+
+28 tasks in total. Ten carry no scenario — T01, T02, T04, T05, T11, T12, T21,
+T22, T23, T28 — and are enabling or supporting work, each with its reason stated
+in the task.
 
 ### Definition of done, phases 1 and 2
 
@@ -74,6 +79,16 @@ the only run in which FR-3.4-S3 still means what it says.
    input, `code-quality.md` §7. No scenario, and that is fine.
 4. **The coverage-denominator check is measurement only** (T11). Report the
    number; do **not** touch `$CoverageExclude`.
+5. **`.gitattributes` is added and exactly one golden is committed** (T21, T22).
+   The golden is CPU-generated, never a capture. Rationale in the tasks.
+6. **The T09 PNG-determinism fallback is pre-authorised** — byte-identity on the
+   diff buffer before encoding *plus* decoded-pixel identity after the round
+   trip, never a decoded-pixel assertion alone. Recorded as a Clarification in
+   `spec.md` if taken, and reported to the lead either way.
+
+Rulings 5 and 6, and the core-side placement of `AcquireError`, `CaptureError`
+and the provenance normalisation, are folded into `architecture.md` (D13, the
+Integration table and the Data section) so the two documents cannot disagree.
 
 Approved dependencies: `pollster = "0.4"`, `serde_json = "1.0"`,
 `tempfile = "3"` (dev-only), and narrowing `image` to
@@ -173,7 +188,7 @@ opt in with `dep = { workspace = true }`. A version literal in
 
 - [ ] **T05** `[P]` Row unpadding and 256-byte alignment — `frame/readback.rs`,
       `frame/readback_test.rs`
-      Scenarios: none (FR-2.2-S1 is owned end-to-end by T23)
+      Scenarios: none (FR-2.2-S1 is owned end-to-end by T25)
       - `padded_row_bytes(width) -> Result<u32, ReadbackError>` (private) and
         `unpad_rows(padded, row_bytes, padded_row_bytes, height) -> Result<Vec<u8>, _>`
         (public).
@@ -242,9 +257,14 @@ opt in with `dep = { workspace = true }`. A version literal in
       - **Risk check, first thing in this task:** encode the same `Rgba8Image`
         twice and compare the bytes. If `image`'s PNG encoder is not
         byte-deterministic across identical inputs, FR-4.3-S2 is unsatisfiable as
-        written — **escalate to the lead**. The fallback (asserting decoded pixels
-        instead of bytes) weakens the scenario and needs a ruling, not a quiet
-        change.
+        written on encoded bytes.
+      - **Pre-authorised fallback** (lead ruling, 2026-08-11) so implementation
+        does not stall: assert byte-identity on the **diff image buffer before
+        encoding**, *plus* decoded-pixel identity after the PNG round trip.
+        Do **not** fall back to a decoded-pixel assertion alone — that discards
+        the determinism the scenario exists to prove. If this branch is taken,
+        record it as a Clarification in `spec.md` and report it to the lead, who
+        wants to know which branch we are on but does not want the work blocked.
       - FR-2.4-S1/S2 say "a captured 64×64 image". No capture is involved: the
         test constructs the image by hand. That is the data seam (D1) working.
       - FR-2.4-S2 is the asymmetric on-disk assertion — a row flip on write plus a
@@ -441,6 +461,46 @@ opt in with `dep = { workspace = true }`. A version literal in
         what makes the per-adapter-golden deferral end by adding files rather than
         migrating them.
 
+- [ ] **T21** `[P]` `.gitattributes` for byte-sensitive files — `.gitattributes`
+      (repo root)
+      Scenarios: none (lead ruling, 2026-08-11)
+      - The repo has **no `.gitattributes` at all** today, so a committed PNG
+        relies entirely on git's content auto-detection — on Windows that is the
+        one thing standing between a golden and a line-ending rewrite.
+      - `*.png binary`, plus `*.provenance.json text eol=lf` so the committed
+        sidecar is stable across platforms. Own commit, small, before T22 commits
+        the first PNG.
+      - A golden is byte-sensitive by definition. Discovering this against a real
+        frame in PRO-852 is the failure mode being pre-empted.
+
+- [ ] **T22** One committed golden, CPU-generated, read from its real repo path —
+      `crates/mc-testkit/goldens/<capture-id>/`, `tests/`
+      Scenarios: none (lead ruling, 2026-08-11 — exercises the committed-golden
+      workflow, which no scenario covers)
+      Depends on: T09, T16, T17, T20, T21
+      - **The fixture image is produced on the CPU**, by a deterministic function
+        in the test code — never by a capture. A GPU-generated golden would couple
+        this check to the development machine's adapter and pre-empt the
+        per-adapter-golden deferral, which is precisely what FR-5.1-S4 exists to
+        keep clean.
+      - Generate it **through the harness's own update path** —
+        `verify_against_golden` with `OptIns { update_goldens: true }` passed as a
+        value — so the committed PNG and its sidecar are written by the real code,
+        not by hand. The sidecar must record the golden as synthetic (a name that
+        cannot be mistaken for a real adapter), never a fabricated adapter string.
+      - One test then loads that golden **from its real repo path**
+        (`env!("CARGO_MANIFEST_DIR")/goldens`, per D8) with the artifact root
+        pointed at a `TempDir`, and asserts a match. The temp artifact root is
+        what keeps a passing run from writing anything into the working tree.
+      - This is the git round trip — committed bytes, read back, compared, judged
+        — that no temp-root test can exercise. Running it for the first time in
+        PRO-852 would make a failure ambiguous between a wrong renderer and a
+        wrong golden workflow, which is the exact ambiguity this harness exists to
+        remove (invariant 5: the verifier is proven before the thing it verifies).
+      - Regenerating the fixture must be byte-reproducible from the committed
+        generator function, so a future contributor can rebuild it rather than
+        trusting it.
+
 ---
 
 ## Phase 3 — the wgpu adapter and hardware observations
@@ -449,7 +509,7 @@ opt in with `dep = { workspace = true }`. A version literal in
 in which `wgpu` is in the dependency graph, and therefore the first in which the
 `gpu` feature and the T02 gate stage carry weight.
 
-- [ ] **T21** Feature gate and GPU module wiring —
+- [ ] **T23** Feature gate and GPU module wiring —
       `crates/mc-testkit/Cargo.toml`, `frame/mod.rs`, `frame/gpu/mod.rs`
       Scenarios: none (enabling)
       - `[features] default = ["gpu"]`, `gpu = ["dep:wgpu", "dep:pollster"]`;
@@ -465,10 +525,10 @@ in which `wgpu` is in the dependency graph, and therefore the first in which the
         `-p mc-testkit --no-default-features` invocation is the only place the
         seam is real, which is why T02 exists.
 
-- [ ] **T22** Device acquisition, adapter selection wiring and provenance —
+- [ ] **T24** Device acquisition, adapter selection wiring and provenance —
       `frame/gpu/acquire.rs`, `tests/`
       Scenarios: FR-1.1-S2, FR-1.1-S3, FR-1.1-S4
-      Depends on: T13, T14, T16, T21
+      Depends on: T13, T14, T16, T23
       - `AcquireOptions { backends, required_limits }`, defaulting to
         `Backends::PRIMARY` and `Limits::downlevel_defaults()`;
         `CaptureContext::acquire(&OptIns, &AcquireOptions) -> Result<Acquisition, AcquireError>`;
@@ -491,10 +551,10 @@ in which `wgpu` is in the dependency graph, and therefore the first in which the
         through FR-1.1-S2's reported name and backend. A two-adapter machine is
         not available.
 
-- [ ] **T23** Offscreen target, readback and frame geometry —
+- [ ] **T25** Offscreen target, readback and frame geometry —
       `frame/gpu/target.rs`, `frame/gpu/mod.rs`, `tests/`
       Scenarios: FR-1.1-S1, FR-2.2-S1, FR-2.3-S1
-      Depends on: T03, T05, T15, T22
+      Depends on: T03, T05, T15, T24
       - `CaptureRequest { capture, size, deadline }` (default 30 s), `Capture
         { image, readback }`, `CaptureContext::capture(...)`.
       - Sequence, in this order, so FR-2.2-S2/S3's "SHALL NOT submit any GPU work"
@@ -517,10 +577,10 @@ in which `wgpu` is in the dependency graph, and therefore the first in which the
         against the docs; the sequence above is behavioural.
         `COPY_BYTES_PER_ROW_ALIGNMENT = 256` is confirmed.
 
-- [ ] **T24** Caller draw work: colour, alpha and the sRGB contract — `tests/`
+- [ ] **T26** Caller draw work: colour, alpha and the sRGB contract — `tests/`
       (self-verification scene), `frame/gpu/mod.rs`
       Scenarios: FR-2.1-S1, FR-2.1-S2, FR-2.1-S3, FR-2.1-S4
-      Depends on: T23
+      Depends on: T25
       - `trait DrawWork` over `(&mut wgpu::CommandEncoder, &wgpu::TextureView)`
         plus the `draw_fn` coercion helper — passing a bare closure makes rustc
         infer a higher-ranked bound over two independent lifetimes and fail with
@@ -541,9 +601,9 @@ in which `wgpu` is in the dependency graph, and therefore the first in which the
         that is information about cross-adapter drift feeding the
         per-adapter-golden trigger — **not** grounds for widening a tolerance.
 
-- [ ] **T25** Draw-work failure and context reuse — `tests/`
+- [ ] **T27** Draw-work failure and context reuse — `tests/`
       Scenarios: FR-2.1-S5, FR-2.1-S6
-      Depends on: T23
+      Depends on: T25
       - FR-2.1-S5: the caller's error is returned unchanged and no image is
         produced. `CaptureError::DrawWork(#[source] Box<dyn Error + Send + Sync>)`
         preserves it in the `source()` chain, downcastable. No submission has
@@ -552,19 +612,19 @@ in which `wgpu` is in the dependency graph, and therefore the first in which the
         after a failed one. A test binary captures many frames from one context,
         so a poisoned context would be a silent cliff.
 
-- [ ] **T26** Composition root: capture then verify, end to end — `frame/gpu/mod.rs`,
+- [ ] **T28** Composition root: capture then verify, end to end — `frame/gpu/mod.rs`,
       `tests/`
       Scenarios: none (no scenario exercises the composition root end to end)
-      Depends on: T17–T20, T23
+      Depends on: T17–T20, T25
       - `capture_and_verify(context, request, draw, settings) -> Result<GoldenOutcome, CaptureError>`.
         It lives in the GPU layer, not the core, so the core never needs to invoke
         a device.
       - One round-trip test against a **temporary** golden root: capture a known
         clear, write the golden with `OptIns { update_goldens: true }` passed as a
-        value, capture again, assert a pass. No environment variable is set and no
-        golden is committed by this spec — the harness proves itself against
-        computed ground truth (D5), and the first committed golden arrives with
-        the renderer it verifies.
+        value, capture again, assert a pass. No environment variable is set, and
+        nothing GPU-produced is ever committed — the harness proves its capture
+        path against computed ground truth (D5). The one committed golden is
+        T22's CPU-generated fixture and stays out of this test.
       - Without this test `capture_and_verify` is uncovered code inside the
         coverage denominator.
 
@@ -576,24 +636,24 @@ All 53 scenarios, each in exactly one task.
 
 | Scenario | Task | Phase | | Scenario | Task | Phase |
 |---|---|---|---|---|---|---|
-| FR-1.1-S1 | T23 | 3 | | FR-3.5-S1 | T07 | 1 |
-| FR-1.1-S2 | T22 | 3 | | FR-3.5-S2 | T07 | 1 |
-| FR-1.1-S3 | T22 | 3 | | FR-3.5-S3 | T07 | 1 |
-| FR-1.1-S4 | T22 | 3 | | FR-4.1-S1 | T17 | 2 |
+| FR-1.1-S1 | T25 | 3 | | FR-3.5-S1 | T07 | 1 |
+| FR-1.1-S2 | T24 | 3 | | FR-3.5-S2 | T07 | 1 |
+| FR-1.1-S3 | T24 | 3 | | FR-3.5-S3 | T07 | 1 |
+| FR-1.1-S4 | T24 | 3 | | FR-4.1-S1 | T17 | 2 |
 | FR-1.1-S5 | T13 | 2 | | FR-4.1-S2 | T17 | 2 |
 | FR-1.2-S1 | T14 | 2 | | FR-4.1-S3 | T17 | 2 |
 | FR-1.2-S2 | T14 | 2 | | FR-4.2-S1 | T18 | 2 |
 | FR-1.2-S3 | T14 | 2 | | FR-4.2-S2 | T18 | 2 |
-| FR-2.1-S1 | T24 | 3 | | FR-4.2-S3 | T18 | 2 |
-| FR-2.1-S2 | T24 | 3 | | FR-4.3-S1 | T10 | 1 |
-| FR-2.1-S3 | T24 | 3 | | FR-4.3-S2 | T10 | 1 |
-| FR-2.1-S4 | T24 | 3 | | FR-4.3-S3 | T10 | 1 |
-| FR-2.1-S5 | T25 | 3 | | FR-4.4-S1 | T19 | 2 |
-| FR-2.1-S6 | T25 | 3 | | FR-4.4-S2 | T19 | 2 |
-| FR-2.2-S1 | T23 | 3 | | FR-4.4-S3 | T20 | 2 |
+| FR-2.1-S1 | T26 | 3 | | FR-4.2-S3 | T18 | 2 |
+| FR-2.1-S2 | T26 | 3 | | FR-4.3-S1 | T10 | 1 |
+| FR-2.1-S3 | T26 | 3 | | FR-4.3-S2 | T10 | 1 |
+| FR-2.1-S4 | T26 | 3 | | FR-4.3-S3 | T10 | 1 |
+| FR-2.1-S5 | T27 | 3 | | FR-4.4-S1 | T19 | 2 |
+| FR-2.1-S6 | T27 | 3 | | FR-4.4-S2 | T19 | 2 |
+| FR-2.2-S1 | T25 | 3 | | FR-4.4-S3 | T20 | 2 |
 | FR-2.2-S2 | T03 | 1 | | FR-4.4-S4 | T20 | 2 |
 | FR-2.2-S3 | T03 | 1 | | FR-4.4-S5 | T19 | 2 |
-| FR-2.3-S1 | T23 | 3 | | FR-5.1-S1 | T16 | 2 |
+| FR-2.3-S1 | T25 | 3 | | FR-5.1-S1 | T16 | 2 |
 | FR-2.3-S2 | T15 | 2 | | FR-5.1-S2 | T16 | 2 |
 | FR-2.4-S1 | T09 | 1 | | FR-5.1-S3 | T16 | 2 |
 | FR-2.4-S2 | T09 | 1 | | FR-5.1-S4 | T20 | 2 |
@@ -610,7 +670,7 @@ All 53 scenarios, each in exactly one task.
 
 **Counts.** Phase 1: 21 (T03 ×2, T06 ×1, T07 ×11, T08 ×1, T09 ×3, T10 ×3).
 Phase 2: 20 (T13 ×1, T14 ×3, T15 ×1, T16 ×3, T17 ×3, T18 ×3, T19 ×3, T20 ×3).
-Phase 3: 12 (T22 ×3, T23 ×3, T24 ×4, T25 ×2). Total 53.
+Phase 3: 12 (T24 ×3, T25 ×3, T26 ×4, T27 ×2). Total 53.
 
 GPU-free: 41 (phases 1–2). GPU-requiring: 12 (phase 3) — FR-1.1-S1/S2/S3/S4, all
 six of FR-2.1, FR-2.2-S1, FR-2.3-S1, exactly as the architecture identifies.
@@ -623,12 +683,14 @@ markers only.
 - **T11 measurement result** — pending. Record here: tracked lines and line
   percentage with and without `crates/*/tests/` in the denominator. The lead
   decides whether `$CoverageExclude` changes; this spec does not change it.
-- **No golden is committed by this spec.** D5 has the harness prove itself
-  against computed ground truth, and every FR-4.x scenario runs against a
-  temporary golden root, so `crates/mc-testkit/goldens/` has no committed content
-  yet — git cannot track an empty directory. The path shape (T12) and the
-  provenance sidecar (T20) are in place for the first real golden, which arrives
-  with PRO-852.
+- **Exactly one golden is committed** (T22), CPU-generated and marked synthetic
+  in its sidecar. Every FR-4.x *scenario* still runs against a temporary golden
+  root; the committed one exists solely to exercise the git round trip — read a
+  golden from its real repo path, compare, judge — which no temp-root test
+  reaches and which would otherwise run for the first time in PRO-852, where a
+  failure would be ambiguous between a wrong renderer and a wrong workflow. It is
+  deliberately **not** GPU-produced: an adapter-specific committed golden would
+  pre-empt the per-adapter deferral this spec keeps open.
 - **Out of Scope is binding.** No `mc-render` pipeline work, no chunk/mesh/block
   types, no `winit` or surface, no benchmarks, no per-adapter golden variants, no
   CI integration, no multi-frame capture, no depth/stencil/MRT. Anything

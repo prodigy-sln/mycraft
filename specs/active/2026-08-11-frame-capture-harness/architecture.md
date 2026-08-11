@@ -8,6 +8,8 @@ created: 2026-08-11
 updated: 2026-08-11
 author: Claude (sdd-architect)
 reviewed-by: persona-architect (Mode B, 2026-08-11) — 1 blocker, 6 major, 8 minor; all folded
+amended: 2026-08-11 (sdd-tasks, lead ruling) — D13 added; Integration table gains
+  .gitattributes and one committed CPU-generated golden; Data section records it
 ---
 
 # Architecture: Headless Frame-Capture Harness
@@ -530,12 +532,29 @@ been inverted and the test goes red.
 | `bytemuck` | **Not needed and must not be added.** Readback is byte-oriented: the mapped range is `&[u8]` and the output is `Vec<u8>`. Adding it would fail `cargo machete` |
 | `wgpu` 30, `serde`, `thiserror` | Already pinned; opt in with `{ workspace = true }` |
 
+### D13 — Types that pure functions consume live in the core, not behind the feature — **BINDING**
+
+Added at task-breakdown time (lead ruling, 2026-08-11). This is bookkeeping the
+decisions above already implied rather than new design: the "41 GPU-free" figure
+in FR traceability is only reachable if three things sit on the core side of the
+seam. Stated explicitly so the implementer does not have to infer it.
+
+| Type | Placement | Why it cannot be feature-gated |
+|---|---|---|
+| `AcquireError` — `NoAdapter { tried: Vec<Backend> }`, `DeviceRejected { adapter, requirement }` | `frame/selection.rs` | `classify_acquisition` takes it as *input* (D2). Behind `gpu` it would drag FR-1.2-S1/S2/S3 into phase 3 with it |
+| `CaptureError` — `Size`, `DrawWork(Box<dyn Error + Send + Sync>)`, `ReadbackTimeout { capture, deadline }`, `Readback` | core, beside `clock.rs` | FR-2.3-S2 asserts the timeout names both the capture and the deadline, and must do so under `--no-default-features` |
+| The `"unknown"` normalisation of `AdapterProvenance::driver_description` | `frame/report.rs`, as a constructor over `Option<&str>` | FR-5.1-S3 is one of the 41. "Normalised in the adapter" below means the adapter *calls* it, not that it is *implemented* there |
+
+None of the three names a `wgpu` type, so all three compile with the feature
+off. Together they are what make FR-1.2-S1/S2/S3, FR-2.3-S2 and FR-5.1-S3
+reachable without hardware.
+
 ### Trivial decisions (one line each)
 
 - `thiserror` for every error enum; one enum per boundary, no `anyhow` in library code.
 - `FailingMask` is a `Vec<bool>` (≈900 KB at 720p); a bitset is a later optimisation with no caller impact.
 - PNG encoding pins `CompressionType` and `FilterType` explicitly rather than relying on `image`'s defaults, so FR-4.3-S2's byte-identity does not depend on an upstream default.
-- Provenance `driver_description` is normalised to the literal `"unknown"` **in the adapter**, so the core type is `String` and never `Option` (FR-5.1-S3 requires the field present, never omitted).
+- Provenance `driver_description` is normalised to the literal `"unknown"` by a pure core constructor over `Option<&str>` that **the adapter calls**, so the core type is `String` and never `Option` (FR-5.1-S3 requires the field present, never omitted) and the scenario stays testable without hardware — D13.
 - `Acquisition::Ready` boxes the context to keep the enum's variants comparable in size (`clippy::large_enum_variant`).
 - The skip notice (FR-1.2-S2) is a returned value carrying the literal text `MYCRAFT_ALLOW_NO_GPU`, additionally printed with `eprintln!`; no logging dependency is added for one line.
 - Comparison is single-threaded. Its reductions are order-independent (spec, "Determinism"), so `rayon` remains available later without changing any verdict.
@@ -578,9 +597,11 @@ crates/mc-testkit/src/
     layout.rs             CaptureId, GoldenPaths, ArtifactPaths             FR-4.1..4.4 paths
     golden.rs             verify_against_golden                             FR-4.1, 4.2, 4.4
     optins.rs             OptIns, from_lookup, from_environment             FR-1.2, FR-4.4
-    clock.rs              Clock, SystemClock, poll_until_deadline           FR-2.3
+    clock.rs              Clock, SystemClock, poll_until_deadline,
+                          CaptureError (core-side — D13)                    FR-2.3
     selection.rs          AdapterDescription, select_preferred,
-                          unsatisfied_limit, classify_acquisition           FR-1.1, FR-1.2
+                          unsatisfied_limit, classify_acquisition,
+                          AcquireError (core-side — D13)                    FR-1.1, FR-1.2
     readback.rs           padded_row_bytes, unpad_rows                      FR-2.2-S1
     gpu/                  #[cfg(feature = "gpu")] — the ONLY `wgpu::` in the crate
       mod.rs              CaptureContext, CaptureRequest, DrawWork, draw_fn,
@@ -835,6 +856,14 @@ Retention: goldens and their sidecars are permanent, versioned in git (spec
 Assumptions: small enough without LFS). Artifacts are transient under `target/`,
 git-ignored, and cleared by the next non-mismatch run of the same capture.
 
+This spec commits exactly one golden: a synthetic, CPU-generated fixture whose
+sidecar records it as such rather than naming a real adapter. Its purpose is the
+git round trip — a golden read from its real committed path, compared, and
+judged — which no temp-root test can exercise and which would otherwise run for
+the first time against a real frame in PRO-852. Every other golden-lifecycle
+test uses a temporary golden root, and the harness still proves its *capture*
+path against computed ground truth, never against a committed image (D5).
+
 ## Integration
 
 | File | What changes | What must not break |
@@ -842,7 +871,8 @@ git-ignored, and cleared by the next non-mismatch run of the same capture.
 | `Cargo.toml` (root) | Add `pollster`, `serde_json`, `tempfile` to `[workspace.dependencies]`; narrow the `image` pin to `default-features = false, features = ["png"]` | No member crate gains a version literal. Existing pins keep their versions |
 | `crates/mc-testkit/Cargo.toml` | `image`, `serde`, `serde_json`, `thiserror` as `{ workspace = true }`; `wgpu`, `pollster` `optional = true`; `tempfile` under `[dev-dependencies]`; `[features] default = ["gpu"]` | Must **not** gain `mc-render`, `mc-client` or `mc-server` in any section (FR-6.1). `cargo machete` must stay clean — do not add `bytemuck` |
 | `crates/mc-testkit/src/lib.rs` | Currently empty; gains `pub mod frame;` | — |
-| `crates/mc-testkit/goldens/` | New committed directory | — |
+| `crates/mc-testkit/goldens/` | New committed directory holding exactly **one** golden: a deterministic CPU-generated fixture and its provenance sidecar (lead ruling, 2026-08-11). It exercises the read-a-committed-golden path here rather than first in PRO-852, where a failure would be ambiguous between a wrong renderer and a wrong golden workflow | The fixture must **not** be GPU-generated — that would bake this machine's adapter into the repo and pre-empt the per-adapter-golden deferral. Its sidecar records it as synthetic |
+| `.gitattributes` | **New file**: `*.png binary` (plus `*.provenance.json text eol=lf`). The repo has none today, so a byte-sensitive golden currently relies entirely on git's content auto-detection on Windows | — |
 | `.gitignore` | Verify `target/` is ignored so artifacts are never committed | The gate's gitleaks allowlist `git check-ignore` stage must stay untouched |
 | `scripts/sdd-gate.ps1` | **Recommended, not done here** (D1): the two `--no-default-features` lines in the lint stage. Possibly also extend `$CoverageExclude` — see Risks | Shared tooling; the lead's call |
 
