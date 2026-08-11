@@ -87,6 +87,15 @@ Then act on the FIRST match:
 
    Every spawned subagent must be told to report back via SendMessage to your
    own agent name — not main. A child whose turn simply ends returns nothing.
+   Require an explicit end-of-turn signal too: every child sends a SendMessage
+   on every handback, exactly "[DONE]" when it has nothing to say.
+
+   Harness idle/finished notifications are stale often enough to be misleading —
+   they can describe a turn that ended before your last message arrived, so an
+   actively-working agent reads as available. Trust only an explicit message
+   from the child, or a new commit plus a clean tree. When they disagree, ask
+   the agent to finish the outstanding commit rather than waiting on it or
+   editing its files yourself.
 
    Commit and push at every stage boundary. Unpushed work is unbacked work.
 
