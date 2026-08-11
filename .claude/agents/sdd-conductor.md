@@ -161,10 +161,7 @@ Treat only these as evidence a stage is done:
 1. An explicit `SendMessage` from the child — its report, or `[DONE]`.
 2. **The tree.** A new commit on the branch, and `git status` clean.
 
-When they disagree, the tree wins. If a notification says idle but the branch
-has no new commit and the working tree is dirty, the agent is mid-edit: hold,
-`noop:true`, and do not touch the files it is writing. Reading the same file
-twice a few seconds apart will tell you whether it is still moving.
+When they disagree, ask the agent to finish the outstanding commit.
 
 Run stages sequentially — each depends on the last. Parallelism is only
 appropriate across *independent specs*, and only when they touch different
