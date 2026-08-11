@@ -152,6 +152,42 @@ fn a_failed_golden_update_still_reports_the_verdict_that_stands() -> TestResult 
     Ok(())
 }
 
+#[test]
+fn a_golden_written_without_its_sidecar_still_reports_the_path_it_wrote() -> TestResult {
+    let goldens = TempDir::new()?;
+    let artifacts = TempDir::new()?;
+    let capture = CaptureId::new(CAPTURE)?;
+    install_golden(goldens.path(), &capture, &reference_frame()?)?;
+    // A directory standing exactly where the sidecar's file has to go. The
+    // golden beside it is written normally, so only the JSON fails — which is
+    // the narrow case: the image landed, the record of which adapter produced
+    // it did not.
+    fs::create_dir(golden_sidecar_path(goldens.path(), &capture))?;
+    let settings = golden_settings(goldens.path(), artifacts.path(), capture.clone(), UPDATING);
+    let captured = drifted_frame()?;
+
+    let outcome = verify_against_golden(&captured, &synthetic_provenance(), &settings);
+
+    let golden = golden_image_path(goldens.path(), &capture);
+    assert!(
+        read_png(&golden)?.as_bytes() == captured.as_bytes(),
+        "this test means nothing unless the image write succeeded and the \
+         sidecar was the only casualty"
+    );
+    let GoldenOutcome::GoldenWrittenWithoutProvenance { paths, .. } = &outcome else {
+        return Err(format!(
+            "a golden that was replaced must not be reported as one that never was, got {outcome:?}"
+        )
+        .into());
+    };
+    assert!(
+        paths.contains(&golden),
+        "the golden on disk was replaced a moment earlier, so its path is one \
+         the run has to report; got {paths:?}"
+    );
+    Ok(())
+}
+
 /// Runs the update path against a golden directory that cannot be created,
 /// and returns the failure it reported.
 ///
