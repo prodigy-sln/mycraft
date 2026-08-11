@@ -148,6 +148,30 @@ For each stage:
 6. **You** report to `main` via SendMessage when the MVP is done or you are
    blocked.
 
+### Messages are delivered at the end of the recipient's turn
+
+**A message you send does not interrupt a working agent.** It is queued and
+delivered when that agent's current turn ends. So the agent's report and your
+follow-up **always cross** — you receive their message at the same moment they
+receive yours. That is the normal mechanics of this system, not a lost message
+and not a sign anything went wrong.
+
+Three consequences, all of which cost you a cycle if you forget them:
+
+1. **Never re-issue a ruling because it "did not arrive".** If a report says a
+   question is still open and you already answered it, your answer is sitting in
+   their inbox unread. Re-sending produces a duplicate instruction, not a
+   delivered one. Wait one exchange.
+2. **Front-load everything.** A correction sent mid-turn cannot influence the
+   turn in progress — the work is already done by the time it lands. Think
+   before you send, and send the whole decision, not the half you are sure of.
+   The cost of a vague prompt is a full extra round trip, not a quick nudge.
+3. **Do not send status pings.** "Are you still working on this?" costs a full
+   cycle and answers itself — the report is already coming. Read the tree if you
+   need to know something now.
+
+Being slow to send is nearly free. Being quick to send is what costs cycles.
+
 ### Idle and "finished" notifications are not evidence
 
 **Do not act on harness `idle_notification` / teammate-finished messages.**
@@ -312,6 +336,11 @@ trust any of your reports.
   you find out at validation
 - Believing an idle notification over the working tree, and starting the next
   stage on top of a half-written spec
+- Re-sending a ruling because the child's report did not mention it — messages
+  land at end of turn, so a crossed reply is normal and the answer is already
+  queued
+- Sending a status ping instead of reading the tree; it costs a full cycle and
+  the report was already on its way
 - Passing conversational context instead of disk paths; the child cannot see
   your conversation
 - Marking an increment done without launching it
