@@ -182,10 +182,28 @@ pub fn validate_frame_size(width: u32, height: u32, max_dimension: u32)
     -> Result<FrameSize, FrameSizeError>;                                         // FR-2.2-S2/S3
 
 // frame/readback.rs
-pub fn padded_row_bytes(width: u32) -> Result<u32, ReadbackError>;                // 256-byte align
+fn padded_row_bytes(width: u32) -> Result<u32, ReadbackError>;           // private — 256-byte align
 pub fn unpad_rows(padded: &[u8], row_bytes: usize, padded_row_bytes: usize,
                   height: u32) -> Result<Vec<u8>, ReadbackError>;                 // FR-2.2-S1
 ```
+
+**Visibility in this block is illustrative; D10 is authoritative.** The point
+here is that each of these is a *pure function over plain values*, not that each
+is public. `padded_row_bytes` is **private** (amended 2026-08-11, lead ruling —
+it previously read `pub` here and `private` in D10 and tasks T05, and a
+contradiction left on disk gets resolved differently by whoever reads it next).
+It is tested through its `readback_test.rs` sibling and, until the phase-3
+capture path calls it, carries `#[cfg_attr(not(test), expect(dead_code))]` naming
+that caller — `expect` rather than `allow`, so the annotation becomes a warning
+the moment T25 wires it and cannot rot silently.
+
+D10 also lists `unsatisfied_limit` and `classify_acquisition` as private, which
+this block still shows as `pub`. Those two are phase-2 surface and are **not**
+resolved here: tasks T14 places `classify_acquisition`'s scenarios
+(FR-1.2-S1..S3) in `tests/`, which would require it to be public, so the
+contradiction is a real design question rather than a typo. Raised to the lead;
+whoever implements phase 2 must settle it before writing those tests, not while
+writing them.
 
 **Adapter ranking (FR-1.1-S5):** `Discrete > Integrated > Virtual > Other > Cpu`,
 ties broken by enumeration order. `Cpu` ranks **last**, below `Other`, because
