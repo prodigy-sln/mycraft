@@ -35,7 +35,8 @@ the Routing Guide below is where future destinations are declared.
 | File | Purpose | Sources |
 |------|---------|---------|
 | decisions.md | Architecture decision records — stack choices and their rejected alternatives | PLAN.md |
-| testing.md | Quality gate stages, verification harnesses, and what automation cannot check | PLAN.md, sdd-init-project |
+| rendering.md | Draw-target conventions established ahead of `mc-render`: orientation and capture pixel-format contract | SPEC-001 |
+| testing.md | Quality gate stages, verification harnesses, and what automation cannot check | PLAN.md, sdd-init-project, SPEC-001 |
 
 ### modding/ · user/ · ops/
 

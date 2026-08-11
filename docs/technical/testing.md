@@ -18,6 +18,7 @@ Every stage runs even when an earlier one fails, so one invocation reports every
 |---|-------|------|----------|
 | 1 | format | `cargo fmt --check` | any deviation |
 | 2 | lint + complexity | `cargo clippy -D warnings` | any lint, incl. complexity thresholds |
+| 2b | gpu-free (`mc-testkit`, no default features) | `cargo clippy` + `cargo nextest` with `--no-default-features` | any lint, or any test failure, in the configuration where `wgpu` is absent from the dependency graph |
 | 3 | size | built-in | source > 500 lines, tests > 600 |
 | 4 | deps | `cargo machete` | any unused dependency |
 | 5 | sast | `cargo deny` | vulnerabilities, bad licenses, banned crates, untrusted sources |
@@ -76,18 +77,145 @@ mechanism is always built before the thing it verifies.**
 ### Rendering — golden frames
 
 `mc-render` is excluded from coverage (ADR-008), so golden frames are the only automated check on
-it. That makes the harness load-bearing.
+it. That makes the harness load-bearing, and it exists ahead of the renderer it will verify: the
+headless frame-capture harness lives in `crates/mc-testkit`, module `frame`, and lands before a
+single line of `mc-render` is written (invariant 5). It renders caller-supplied draw work to an
+offscreen colour target, reads the pixels back, and compares them against a committed golden under
+an explicit tolerance — no window, no compositor, no display server.
 
-- Headless wgpu renders to an offscreen texture and writes PNG; no window, no compositor.
-- Fixed world seed, scripted camera path, fixed tick count — byte-identical inputs every run.
-- Comparison is **perceptual**, not byte-wise, because GPU drivers legitimately differ.
-- A changed golden must be justified in the commit. An unexplained golden update is a review stop
-  (`validation-calibration.md`).
-- Anything expressible as a pure function — meshing, vertex packing, culling maths, atlas layout,
-  light propagation — is unit-tested normally and gets no exemption. Only GPU-resident work does.
+The harness deliberately does not depend on the code it verifies. `mc-testkit` never names
+`mc-render`, `mc-client` or `mc-server` in any dependency of any kind, and this is not a convention
+someone has to remember: a test walks `cargo metadata`'s *resolved* dependency graph breadth-first
+from the `mc-testkit` node and fails if any of the three ever appears in it. A direct-dependency
+check would miss a renderer reached through an intermediary; the resolved graph cannot.
 
-Keeping logic out of the GPU-touching layer is therefore a testability requirement, not a style
-preference.
+**The orientation and pixel-format contract** — row 0 is the top of the image at every stage, and
+the capture format is 8-bit sRGB-encoded RGBA with straight alpha — is asserted by this harness but
+belongs to the renderer as much as to the harness that checks it, so it is recorded once, in
+`technical/rendering.md`, not repeated here.
+
+#### Tolerance model
+
+Two images never compare byte-for-byte, because GPU drivers legitimately differ in rounding and
+dithering. Comparison is per-pixel perceptual distance — CIE76 ΔE in CIELAB, computed sRGB → linear
+→ XYZ (D65) → Lab — judged against three thresholds, each a **strictly greater-than** comparison so
+a value sitting exactly on a threshold passes:
+
+| Threshold | Default | What it absorbs |
+|-----------|---------|------------------|
+| per-pixel tolerance | ΔE 2.0 | ΔE ≈ 1.0 is a just-noticeable difference; 2.0 absorbs rounding and dithering differences between adapters while staying invisible |
+| area budget | 0.01% of pixels | Isolated rounding and dithering — nowhere near a block-sized artifact |
+| hard ceiling | ΔE 10.0 | A single pixel this far off is a defect, not sampling noise. Without it, the area budget alone could forgive a small but severe error |
+
+Every threshold is overridable per comparison, and loosening a default requires a recorded reason —
+never the reverse. The area budget's default is the number worth explaining: a renderer with
+anti-aliasing usually wants something closer to 0.1%, but at 0.1% the budget at 1280×720 is 921
+pixels, comfortably more than one block face at mid distance. That budget could forgive an entire
+wrong block face so long as every pixel on it stayed under the ΔE 10 ceiling — which is exactly the
+shape of a same-family texture regression, the kind of bug this harness exists to catch rather than
+wave through. At 0.01% it cannot. The project starts tight and loosens only on evidence, because
+loosening first is how a golden suite quietly rots into a rubber stamp.
+
+`delta_e` is the sole place a distance is computed, and the sole swap point if CIE76 is later
+replaced with CIEDE2000: the three-threshold contract above stays the same regardless of which
+metric produces the scalar.
+
+#### The GPU-free seam
+
+`mc-testkit`'s `gpu` Cargo feature is default-on and is the only place `wgpu::` may appear in the
+crate. `cargo build --no-default-features` removes wgpu from the dependency graph entirely — not
+merely leaves it unused — so a stray `use wgpu::` outside the gated module is a build error rather
+than something a reviewer has to catch. The quality gate runs both clippy and `nextest` in that
+configuration (stage 2b above), which is what makes the seam a compile-time fact rather than a
+convention that can quietly rot: it is the only process in which no GPU adapter can exist at all,
+which is what makes assertions like "the process holds no adapter" mean what they say rather than
+merely describing a test that declined to acquire one.
+
+Every decision the harness makes — adapter preference, frame-size validation, row unpadding,
+readback-deadline expiry, image comparison, diff rendering, the golden lifecycle, and golden/artifact
+path construction — is a pure function over plain values that never sees a device. The wgpu-touching
+module is left with only the mechanical part: create an instance, enumerate, request, allocate,
+encode, submit, map, copy bytes out. Anything expressible as a pure function — meshing, vertex
+packing, culling maths, atlas layout, light propagation — is unit-tested normally and gets no
+exemption; only GPU-resident work does. Keeping logic out of the GPU-touching layer is therefore a
+testability requirement here, and the same discipline is expected of `mc-render` once it exists.
+
+#### Golden and artifact layout
+
+```
+crates/mc-testkit/goldens/<capture-id>/default.png                  # committed
+crates/mc-testkit/goldens/<capture-id>/default.provenance.json      # committed
+
+<artifact-root>/<capture-id>/expected.png     # transient, git-ignored under target/
+<artifact-root>/<capture-id>/actual.png
+<artifact-root>/<capture-id>/diff.png
+<artifact-root>/<capture-id>/report.json
+```
+
+A directory per capture, with `default.<ext>` inside it, is deliberate headroom: a future
+per-adapter golden variant is a **new file in an existing directory** (e.g.
+`goldens/<capture-id>/intel-uhd-770.png`), never a rename of the committed set. No variant-selection
+logic exists today — the headroom is in the path shape only, waiting for the day a second adapter
+runs the gate or the first discrete-only feature needs a fallback path.
+
+Artifact paths are deliberately stable across runs — no process id, no timestamp — so that a passing
+run can find and remove the previous run's stale mismatch files. Clearing is by explicit filename
+allowlist, never a recursive directory delete, because the artifact root is caller-supplied and
+`remove_dir_all` on caller-supplied input is a foot-gun aimed at whatever they passed.
+
+The diff image sets exactly the failing positions to opaque magenta (255, 0, 255, 255) and carries
+the expected image's pixel everywhere else, so the marks read as an overlay on the frame that was
+supposed to be produced. It is omitted when the two images differ in dimensions — there is no
+position-by-position diff between frames that share no positions — and the omission's reason is
+recorded in the mismatch report instead.
+
+#### The two environment opt-ins
+
+| Opt-in | Effect |
+|--------|--------|
+| `MYCRAFT_ALLOW_NO_GPU` | Downgrades "no usable adapter" from a hard failure to an announced skip whose warning contains that literal string |
+| `MYCRAFT_UPDATE_GOLDENS` | The only way a golden is ever created or overwritten |
+
+Both are a contract, not a convenience. The default with no GPU present is hard failure, deliberately:
+a silent skip would let the gate go green while verifying nothing, which is exactly the risk ADR-008
+accepts on this harness's behalf, and a skip that does not announce itself would make that risk
+invisible on top of accepted. A missing golden fails the same way — it never mints itself, it fails
+and writes the captured image as an artifact, naming the missing path. Presence of either variable
+enables it, not its value: `MYCRAFT_ALLOW_NO_GPU=0` still enables the skip, because a variable
+someone bothered to set is a request.
+
+The mechanism is only half of it. A changed golden must be justified in the commit that changes it;
+an unexplained golden update is a review stop (`validation-calibration.md`). `MYCRAFT_UPDATE_GOLDENS`
+makes minting a golden a deliberate act rather than an accident — it cannot make it a *justified*
+one.
+
+#### Reporting and provenance
+
+Every mismatch report is JSON, carrying the adapter name, backend, driver description (normalised to
+the literal `"unknown"` when the adapter reports none, so a reader can tell "the adapter did not say"
+from "nobody looked"), the three thresholds the verdict was judged against, the failing-pixel count,
+and the maximum per-pixel distance found. Every golden the harness writes records the adapter that
+produced it in its `.provenance.json` sidecar, which is what lets the per-adapter-golden deferral end
+by adding files rather than by migrating an already-committed set whose provenance nobody recorded.
+
+One golden is committed today, and it is **CPU-generated**, deliberately not captured from real
+hardware — baking this machine's adapter into the repository as the one committed golden would
+pre-empt the per-adapter-golden deferral before it has a reason to end. Its purpose is narrower than
+verifying a frame: it exercises the read-a-committed-golden-from-git path here, on a synthetic fixture
+with a sidecar that honestly records it as synthetic, rather than for the first time against a real
+rendered frame in PRO-852, where a failure would be ambiguous between a wrong renderer and a wrong
+golden workflow.
+
+What the harness does **not** yet supply is the scene-side half of golden testing: a fixed world
+seed, a scripted camera path and a fixed tick count, which together are what make a real frame's
+inputs byte-identical every run. Those need a world and a camera to exist, so they belong to the
+specs that own one. Until then the harness proves its own capture path against computed ground
+truth — analytically known pixels on a trivial scene it renders itself — never against a committed
+image of something it cannot generate.
+
+See `technical/rendering.md` for the orientation and pixel-format contract this harness asserts —
+recorded there once, not repeated here, because it binds every future caller of draw work, not only
+this harness.
 
 ### Multiplayer — bot clients
 
