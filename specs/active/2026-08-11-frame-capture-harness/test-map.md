@@ -96,7 +96,7 @@ core.
 | FR-4.1-S3 | `crates/mc-testkit/tests/golden_pass.rs` | `clearing_one_captures_artifacts_leaves_another_captures_alone` |
 | FR-4.2-S1 | `crates/mc-testkit/tests/golden_mismatch.rs` | `a_mismatching_capture_writes_the_whole_artifact_set` |
 | FR-4.2-S2 | `crates/mc-testkit/tests/golden_mismatch.rs` | `a_reported_mismatch_names_the_directory_holding_its_artifacts` |
-| FR-4.2-S3 | `crates/mc-testkit/tests/golden_mismatch.rs` | `an_artifact_directory_that_cannot_be_created_still_reports_the_mismatch` |
+| FR-4.2-S3 | `crates/mc-testkit/tests/golden_mismatch.rs` | `an_artifact_set_that_cannot_reach_disk_still_reports_the_mismatch` |
 | FR-4.4-S1 | `crates/mc-testkit/tests/golden_missing.rs` | `a_missing_golden_fails_naming_the_path_and_is_not_created` |
 | FR-4.4-S2 | `crates/mc-testkit/tests/golden_missing.rs` | `a_missing_golden_writes_the_captured_frame_into_the_artifact_directory` |
 | FR-4.4-S5 | `crates/mc-testkit/tests/golden_missing.rs` | `a_golden_that_is_not_a_decodable_png_fails_without_being_replaced` |
@@ -106,6 +106,32 @@ core.
 | FR-5.1-S1 | `crates/mc-testkit/tests/frame_report.rs` | `a_written_mismatch_report_parses_as_json_whose_failing_pixel_count_is_a_number` |
 | FR-5.1-S2 | `crates/mc-testkit/tests/frame_report.rs` | `a_mismatch_report_records_the_environment_and_the_thresholds_that_judged_it` |
 | FR-5.1-S3 | `crates/mc-testkit/tests/frame_report.rs` | `an_adapter_reporting_no_driver_description_records_the_field_as_unknown` |
+
+**FR-4.2-S3 covers both of its conditions and asserts the path as a whole**
+(validation pass 2, correctness PARTIAL). Its test was renamed from
+`an_artifact_directory_that_cannot_be_created_still_reports_the_mismatch`, for
+two reasons.
+
+The scenario says "cannot be created **or written**", and only creation was
+provoked. The write half is now provoked by pre-creating `expected.png` as a
+*directory* inside an artifact directory that is created without trouble — the
+same portable trick the sidecar test uses, needing no permission bits. Both
+obstructions run through one test, so the scenario keeps its single mapping.
+
+And the naming assertion had to be able to fail. `<dir>` is a substring of
+`<dir>/expected.png`, so a plain `contains` cannot tell "the failure named the
+directory" from "the failure named a file inside it", and would stay green for
+an implementation that never named the directory at all. `names_whole_path`
+requires an occurrence that is **not** followed by a path separator. Verified
+against three mutations of the implementation, each reverted:
+`ArtifactError::Directory` carrying `expected.png` instead of the directory
+(directory half fails on the naming assertion); `GoldenFailure::Display` using
+`{cause}` instead of `describe(cause)` (both halves fail on the cause
+assertion); and the image write reporting its parent directory with
+`ImageIoError::Write` dropping its path (write half fails on the naming
+assertion, which also confirms the second obstruction really executes). The
+superseded test survived the first mutation, because `source().is_some()` was
+all it asked of the message.
 
 ### Supporting unit tests (no scenario)
 
