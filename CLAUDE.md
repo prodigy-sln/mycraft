@@ -65,12 +65,12 @@ downgrade only with explicit user confirmation.
 | `/sdd-tasks` | Scenario-grouped task breakdown |
 | `/sdd-implement` | TDD implementation per the tier's engine |
 | `/sdd-validate` | Gate + tier-scaled review |
-| `/sdd-complete` | Publish (docs, registry, PR); finalize after approval |
+| `/sdd-complete` | Consolidate docs, register spec, dispose folder, merge to main, push. Runs after **every** spec. |
 | `/consolidate-docs [path]` | Merge any source material into docs/ |
 
 ## Locations
 
-- Active specs: `specs/active/YYYY-MM-DD-name/` (stay active through PR review)
+- Active specs: `specs/active/YYYY-MM-DD-name/` (removed by `/sdd-complete` at the end of the spec)
 - Registry: `specs/REGISTRY.md` — permanent one-line record per completed spec
 - Templates: `specs/_templates/` · Living docs: `docs/` (routed by `INDEX.md`)
 - Quality gate: `scripts/sdd-gate.ps1` (PowerShell 7, cross-platform — deliberately the only
@@ -79,11 +79,11 @@ downgrade only with explicit user confirmation.
 
 ## Prospect Settings
 
-- `spec-disposal: delete` — default: the spec folder is removed at finalize
-  (after PR approval); `main` never carries it. Set `archive` (+
-  `retention: [days]`, default 180) for regulated projects or when branch
-  protection dismisses approvals on new commits: the folder moves to
-  `specs/archive/YYYY/` at publish and expired folders are pruned there.
+- `spec-disposal: delete` — the spec folder is removed by `/sdd-complete` on the
+  feature branch before it merges, so `main`'s tree never carries it. There is no
+  approval wait: a PASS validation plus a green gate is the merge condition.
+  Set `archive` (+ `retention: [days]`, default 180) to instead move the folder to
+  `specs/archive/YYYY/` and prune expired ones there.
 
 ## Standards
 

@@ -86,4 +86,5 @@ API expressiveness).
 - Features move to specs via `/sdd-start`; branches are `feature/PRO-123-short-name`
 - Completed specs are recorded in `specs/REGISTRY.md`
 - Default rigor is `high` — see `product/mission.md`
-- No pull requests; `origin` is a backup remote. See `standards/global/git-workflow.md` §0.
+- No pull requests; `origin` is a backup remote. See `standards/global/git-workflow.md`.
+- `/sdd-complete` runs after every spec — that is what keeps `docs/` as-built.

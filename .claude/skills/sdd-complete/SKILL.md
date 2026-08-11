@@ -1,70 +1,70 @@
 ---
 name: sdd-complete
-description: "Finalize a validated feature: consolidate into docs/, register the spec, open the PR — then dispose of the spec folder after approval"
+description: "Finalize a validated feature: consolidate into docs/, register the spec, dispose of the spec folder, then merge to main and push"
 argument-hint: "[spec folder name]"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Task
 ---
 
 # Complete
 
-Completion is a two-phase state machine. Determine the state, run the
-matching phase:
+Run after every feature, not once per release. This is what keeps `docs/`
+as-built and `specs/active/` free of finished work.
 
-| State | Action |
-|-------|--------|
-| Validation PASS, no PR open | Phase 1: Publish |
-| PR open and approved, spec still in `specs/active/` | Phase 2: Finalize |
-| PR open, not yet approved | Report review status, stop |
+**This project has no pull requests** (`standards/global/git-workflow.md`).
+Completion is therefore a single pass with no approval wait: the quality gate
+and a PASS validation *are* the merge condition. There is no second phase and
+nothing to come back to later.
+
+Prerequisites — all four, no exceptions:
+
+- `validation-report.md` PASS (low tier: green gate note in `spec.md`)
+- at high+, the user has signed off
+- `scripts/sdd-gate.ps1` exits 0
+- working tree clean
+
+Any prerequisite unmet → report which one and stop. Never complete around a red
+gate.
 
 The disposal mode comes from CLAUDE.md Prospect settings:
 `spec-disposal: delete` (default) or `archive` with `retention: [days]`.
 
-## Phase 1: Publish
+## Steps
 
-Prerequisites: `validation-report.md` PASS (low tier: green gate note in
-`spec.md`); at high+ the user has signed off; working tree clean.
-
-1. Run `scripts/sdd-gate.*` once more — red gate = stop.
+1. Run `scripts/sdd-gate.ps1` once more — red gate = stop.
 2. Spec frontmatter: `status: implemented`, `completed: [today]`.
 3. Consolidate into `docs/`: when `docs/INDEX.md` exists, delegate to the
-   `docs-consolidator` agent with the spec folder path. When missing, offer
-   to generate it from `specs/_templates/docs-index.template.md`; if
-   declined, append a completion summary to `docs/CHANGELOG-features.md`.
-4. **Archive mode only**: `git mv` the folder to
-   `specs/archive/YYYY/[folder]/`, and in the same commit `git rm` archive
-   folders older than the retention setting.
+   `docs-consolidator` agent with the spec folder path. When missing, offer to
+   generate it from `specs/_templates/docs-index.template.md`; if declined,
+   append a completion summary to `docs/CHANGELOG-features.md`.
+   Register every new or updated file in `docs/INDEX.md` — the File Registry
+   lists only files that exist.
+4. Append one line to `specs/REGISTRY.md`:
+   `[folder] · [date] · [rigor] · [topic tags] · [one-line summary] · [branch]`
 5. Commit: `docs: consolidate [feature] into living docs`.
-6. Open the PR: title = feature title; body = what/why/how, validation
-   verdict, outstanding Info findings, checklist (gate green, validation
-   PASS, docs consolidated, no out-of-scope changes). Delete mode: state in
-   the body that the spec folder is removed on finalize after approval.
-7. Append one line to `specs/REGISTRY.md` and push:
-   `[folder] · [date] · [rigor] · [topic tags] · [one-line summary] · PR #N`
-8. Outstanding Info findings → one issue each in the connected tracker
-   (reference the registry line); without a tracker, they stay in the PR
-   body. Spec has `jira:` and Jira MCP available → transition the issue to
-   Done with a completion comment.
-
-Delete mode ends Phase 1 with: *"After the PR is approved, run
-`/sdd-complete` again to finalize."* Archive mode: merging the PR is the
-last step — nothing further runs.
-
-## Phase 2: Finalize (delete mode)
-
-Verify via `gh`: PR approved, all checks green. Otherwise report and stop.
-
-1. `git rm -r specs/active/[folder]` — commit
-   `chore: remove spec working folder`, push.
-2. Squash-merge: `gh pr merge --squash`. The folder was added and removed
-   within the branch, so `main` never carries it; the registry line and
-   docs changes do land.
-3. If branch protection dismissed the approval on that push, tell the user
-   one re-approval of the single deletion commit is required, then merge.
+6. Dispose of the spec folder **on the feature branch, before merging**:
+   - **delete mode**: `git rm -r specs/active/[folder]`, commit
+     `chore: remove spec working folder`
+   - **archive mode**: `git mv` to `specs/archive/YYYY/[folder]/`, and in the
+     same commit `git rm` archive folders older than the retention setting
+7. Merge to `main` locally with `--no-ff`. The TDD `test:` → `feat:` →
+   `refactor:` sequence is meaningful history and is worth preserving; the spec
+   folder was removed in step 6, so `main`'s tree never carries it.
+8. Push `main` to `origin` (backup remote), then delete the feature branch
+   locally and on the remote.
+9. Outstanding Info findings → one Linear issue each, referencing the registry
+   line:
+   `linear-cli issues create "<finding>" --team PRO --project <id> -s Backlog -d "<detail + registry ref>"`
+   Then move the feature's own issue to Done:
+   `linear-cli issues update PRO-123 -s Done`
+   A `linear-cli` failure is reported, never a reason to leave the merge
+   half-done.
 
 ## Output
 
 ```
-[Published | Finalized]: [title]
+Completed: [title]
 Docs: [files updated] · Registry: [line appended]
-PR: [url] · Spec disposal: [pending finalize | removed | archived to path]
+Merged: [branch] → main ([sha]) · Pushed: [yes/no]
+Spec disposal: [removed | archived to path]
+Deferred: [n Info findings → PRO-…]
 ```

@@ -88,10 +88,9 @@ The pillars:
   variants — the chosen direction is binding.
 - **Living docs.** `/sdd-complete` consolidates each finished spec into
   `docs/` (routed by `docs/INDEX.md`), registers it in `specs/REGISTRY.md`,
-  and — after PR approval — removes the spec folder so `main` never carries
-  process artifacts (an archive mode with rolling retention exists for
-  regulated projects). `docs/` always reads as-built; future concepts live
-  in specs and the roadmap.
+  and removes the spec folder so `main` never carries process artifacts (an
+  archive mode with rolling retention exists for regulated projects). `docs/`
+  always reads as-built; future concepts live in specs and the roadmap.
 
 ## What's Included
 
