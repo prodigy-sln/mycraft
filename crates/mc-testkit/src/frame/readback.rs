@@ -10,18 +10,33 @@ use thiserror::Error;
 
 /// `wgpu::COPY_BYTES_PER_ROW_ALIGNMENT`. Stated as a plain constant so this
 /// module carries no dependency on the GPU layer.
-#[cfg_attr(not(test), expect(dead_code))]
+///
+/// The `expect` here and on the three items below states the seam as a compile
+/// condition: everything the capture path needs from this module is reachable
+/// from the GPU layer or from a test, and from nowhere else. With the feature
+/// off there is genuinely no caller — and `expect` rather than `allow` means
+/// that if one ever appears in the core, the annotation becomes a warning
+/// rather than rotting quietly.
+#[cfg_attr(all(not(test), not(feature = "gpu")), expect(dead_code))]
 const COPY_ROW_ALIGNMENT: u32 = 256;
 
 /// Bytes per pixel in the harness's capture format.
-#[cfg_attr(not(test), expect(dead_code))]
-const BYTES_PER_PIXEL: u32 = 4;
+#[cfg_attr(all(not(test), not(feature = "gpu")), expect(dead_code))]
+pub(crate) const BYTES_PER_PIXEL: u32 = 4;
 
 /// A readback buffer that cannot be interpreted as the frame it claims to hold.
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ReadbackError {
     #[error("a frame {width} pixels wide needs a padded row longer than the addressable range")]
     RowTooWide { width: u32 },
+    /// The device never handed the frame over.
+    ///
+    /// The cause is a string rather than a driver error type because this enum
+    /// sits on the GPU-free side of the seam: it is an *input* to
+    /// [`super::clock::poll_until_deadline`], which must stay compilable with no
+    /// wgpu in the dependency graph.
+    #[error("the device did not hand over the captured frame: {cause}")]
+    DeviceLost { cause: String },
     #[error("a padded row of {padded_row_bytes} bytes cannot carry a row of {row_bytes} bytes")]
     RowLayout {
         row_bytes: usize,
@@ -48,12 +63,7 @@ pub enum ReadbackError {
 ///
 /// Returns [`ReadbackError::RowTooWide`] when the padded stride does not fit in
 /// a `u32`, which is the only reason this is fallible.
-///
-/// Its production caller is the capture path in the GPU layer, which does not
-/// exist yet — the arithmetic lands first so that the first device-backed
-/// capture is testing the device rather than this. `expect` rather than `allow`
-/// so the annotation becomes a warning the moment that caller arrives.
-#[cfg_attr(not(test), expect(dead_code))]
+#[cfg_attr(all(not(test), not(feature = "gpu")), expect(dead_code))]
 pub(crate) fn padded_row_bytes(width: u32) -> Result<u32, ReadbackError> {
     width
         .checked_mul(BYTES_PER_PIXEL)

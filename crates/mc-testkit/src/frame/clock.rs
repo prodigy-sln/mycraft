@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
-use super::image::FrameSizeError;
+use super::image::{FrameSizeError, ImageShapeError};
 use super::layout::CaptureId;
 use super::readback::ReadbackError;
 
@@ -55,7 +55,7 @@ pub struct Elapsed<T> {
 }
 
 /// Why a wait ended without the value it was waiting for.
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum DeadlineExpired {
     #[error("the wait passed its {deadline:?} deadline after {elapsed:?}")]
     Expired {
@@ -98,6 +98,14 @@ pub enum CaptureError {
     },
     #[error("the frame could not be read back from the device")]
     Readback(#[source] ReadbackError),
+    /// The unpadded readback did not describe the frame that was asked for.
+    ///
+    /// Unreachable by arithmetic — the unpadding produces exactly
+    /// `width * height * 4` bytes — and present anyway because the alternative
+    /// is an `expect` on the one path that would tell us the arithmetic is
+    /// wrong.
+    #[error("the frame that was read back does not match the frame that was requested")]
+    Shape(#[source] ImageShapeError),
 }
 
 /// Runs `step` until it reports the value, `deadline` passes, or it fails.

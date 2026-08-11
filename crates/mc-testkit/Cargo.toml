@@ -14,9 +14,46 @@ image = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# The GPU half, and the blocking executor its immediately-ready futures need.
+# Optional, so that `--no-default-features` removes wgpu from the dependency
+# graph entirely rather than merely leaving it unused.
+pollster = { workspace = true, optional = true }
+wgpu = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+# `--no-default-features` is the only configuration in which no GPU adapter
+# *can* exist in the process, which is what makes the comparison suite's
+# "while the process holds no GPU adapter" assert what it says. The quality
+# gate runs it; see scripts/sdd-gate.ps1's `gpu-free` stage.
+[features]
+default = ["gpu"]
+gpu = ["dep:pollster", "dep:wgpu"]
+
+# The five hardware suites name `frame::gpu` unconditionally, with no `cfg` of
+# their own — a `#![cfg(feature = "gpu")]` would make them silently vanish from
+# the default run rather than fail in it. `required-features` is what lets the
+# GPU-free configuration skip building them instead.
+[[test]]
+name = "adapter_acquisition"
+required-features = ["gpu"]
+
+[[test]]
+name = "offscreen_capture"
+required-features = ["gpu"]
+
+[[test]]
+name = "capture_color"
+required-features = ["gpu"]
+
+[[test]]
+name = "capture_failure"
+required-features = ["gpu"]
+
+[[test]]
+name = "capture_and_verify"
+required-features = ["gpu"]
 
 [lints]
 workspace = true

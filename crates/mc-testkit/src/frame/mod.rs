@@ -37,6 +37,8 @@ mod color;
 mod compare;
 mod diff;
 mod golden;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 mod image;
 mod layout;
 mod optins;
@@ -44,6 +46,17 @@ mod png;
 mod readback;
 mod report;
 mod selection;
+
+/// The wgpu this crate was built against.
+///
+/// Re-exported so that a consumer's draw work links the *same* wgpu rather than
+/// a second copy that happens to have the same version number — two wgpu crates
+/// in one graph produce type mismatches that read as nonsense. The coupling this
+/// makes explicit is real and deliberate: draw work *is* wgpu by nature, and
+/// wrapping it in a scene type would require the harness to know about
+/// renderable content, which is the dependency it exists not to have.
+#[cfg(feature = "gpu")]
+pub use ::wgpu;
 
 pub use clock::{
     CaptureError, Clock, DeadlineExpired, Elapsed, Progress, SystemClock, poll_until_deadline,

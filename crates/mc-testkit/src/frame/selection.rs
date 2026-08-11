@@ -63,6 +63,15 @@ pub enum AcquireError {
         adapter: String,
         requirement: UnsatisfiedLimit,
     },
+    /// The adapter refused the device for something other than the one limit
+    /// this harness asks about.
+    ///
+    /// [`UnsatisfiedLimit`] can only name a capability the harness models, and
+    /// it models exactly one — the 2D texture dimension of its single colour
+    /// target. A refusal for any other reason has no requirement to name, so it
+    /// carries the driver's own words instead of a fabricated limit.
+    #[error("the adapter `{adapter}` refused a device: {cause}")]
+    DeviceUnavailable { adapter: String, cause: String },
 }
 
 /// The announcement that a capture was skipped rather than run.
@@ -82,6 +91,13 @@ impl SkipNotice {
     }
 
     /// The notice for an acquisition that failed while the opt-in was set.
+    ///
+    /// The `expect` here and on the three items below states the seam as a
+    /// compile condition: these decisions exist to be called by the GPU layer,
+    /// so with the feature off they have no caller outside a test. `expect`
+    /// rather than `allow`, so a caller appearing in the core turns the
+    /// annotation into a warning instead of leaving it to rot.
+    #[cfg_attr(all(not(test), not(feature = "gpu")), expect(dead_code))]
     fn for_failure(cause: &AcquireError) -> Self {
         Self {
             message: format!("capture skipped because {ALLOW_NO_GPU} is set: {cause}"),
@@ -91,7 +107,7 @@ impl SkipNotice {
 
 /// What to do about an attempt to acquire an adapter.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(not(test), expect(dead_code))]
+#[cfg_attr(all(not(test), not(feature = "gpu")), expect(dead_code))]
 pub(crate) enum AcquisitionVerdict {
     /// Run the capture on this adapter.
     Use(AdapterDescription),
@@ -135,11 +151,11 @@ const fn preference(kind: AdapterKind) -> u8 {
 ///
 /// A limit met exactly is satisfied: the bound is what the adapter offers.
 ///
-/// Its production caller is the device request in the GPU layer, which does not
-/// exist yet. `expect` rather than `allow`, so the annotation becomes a warning
-/// the moment that caller arrives.
-#[cfg_attr(not(test), expect(dead_code))]
-fn unsatisfied_limit(
+/// `pub(crate)` rather than public: the harness's public surface is capture,
+/// compare and verify, and this is an error-detail helper the GPU layer calls
+/// when a device request comes back rejected.
+#[cfg_attr(all(not(test), not(feature = "gpu")), expect(dead_code))]
+pub(crate) fn unsatisfied_limit(
     required: &AdapterLimits,
     available: &AdapterLimits,
 ) -> Option<UnsatisfiedLimit> {
@@ -158,10 +174,11 @@ fn unsatisfied_limit(
 /// opt-in, and the resulting notice names that opt-in — a silent skip would let
 /// the gate go green while verifying nothing.
 ///
-/// Its production caller is the GPU layer's acquisition path, which does not
-/// exist yet; see [`unsatisfied_limit`] on the annotation.
-#[cfg_attr(not(test), expect(dead_code))]
-fn classify_acquisition(
+/// `pub(crate)` rather than public, for the reason given on
+/// [`unsatisfied_limit`]: this is internal policy, and the GPU layer's
+/// acquisition path is the only caller it will ever have.
+#[cfg_attr(all(not(test), not(feature = "gpu")), expect(dead_code))]
+pub(crate) fn classify_acquisition(
     outcome: Result<AdapterDescription, AcquireError>,
     opt_ins: &OptIns,
 ) -> AcquisitionVerdict {
