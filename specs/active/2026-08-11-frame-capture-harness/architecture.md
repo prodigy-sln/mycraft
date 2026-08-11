@@ -586,20 +586,45 @@ been inverted and the test goes red.
 
 ### D13 — Types that pure functions consume live in the core, not behind the feature — **BINDING**
 
-Added at task-breakdown time (lead ruling, 2026-08-11). This is bookkeeping the
-decisions above already implied rather than new design: the "41 GPU-free" figure
-in FR traceability is only reachable if three things sit on the core side of the
-seam. Stated explicitly so the implementer does not have to infer it.
+Added at task-breakdown time (lead ruling, 2026-08-11); **generalised from a list
+into a rule at the phase-3 boundary** (lead ruling, 2026-08-11), after a fourth
+type was pulled across the seam case by case. Four occurrences of the same
+correction is a class, and fixing the class beats fixing instances — the same
+move `spec.md` § Structural constraints made when it replaced fixture-by-fixture
+row-order corrections with a standing requirement.
 
-| Type | Placement | Why it cannot be feature-gated |
+**The rule.** A type belongs on the **core** side of the seam — declared outside
+`frame/gpu/**` and **not** feature-gated — when all three hold:
+
+1. a **pure function consumes or produces it** (as input, return type, or a field
+   of either), and
+2. it **names no `wgpu` type** anywhere in its definition, and
+3. it is **not** feature-gated, so it compiles under `--no-default-features`.
+
+The GPU layer may still be its only production *caller*; that is placement of the
+call, not of the declaration. Where the two documents appear to disagree — the
+module map or § Interfaces listing a type under `gpu/` — **this rule wins**, and
+the disagreement is a documentation defect to record, not a design question to
+re-open.
+
+Why the rule rather than the list: the "41 GPU-free" figure in FR traceability is
+only reachable if every such type sits core-side. A type placed behind the
+feature drags its scenarios into phase 3 with it, silently — the scenario still
+passes, it simply now needs hardware, and nothing announces that the count moved.
+
+**The four instances found so far**, each an application of the rule and none of
+them new design:
+
+| Type | Placement | Which pure function consumes it, and what would break |
 |---|---|---|
 | `AcquireError` — `NoAdapter { tried: Vec<Backend> }`, `DeviceRejected { adapter, requirement }` | `frame/selection.rs` | `classify_acquisition` takes it as *input* (D2). Behind `gpu` it would drag FR-1.2-S1/S2/S3 into phase 3 with it |
 | `CaptureError` — `Size`, `DrawWork(Box<dyn Error + Send + Sync>)`, `ReadbackTimeout { capture, deadline }`, `Readback` | core, beside `clock.rs` | FR-2.3-S2 asserts the timeout names both the capture and the deadline, and must do so under `--no-default-features` |
 | The `"unknown"` normalisation of `AdapterProvenance::driver_description` | `frame/report.rs`, as a constructor over `Option<&str>` | FR-5.1-S3 is one of the 41. "Normalised in the adapter" below means the adapter *calls* it, not that it is *implemented* there |
+| `SkipNotice` — the announced skip carrying the literal `MYCRAFT_ALLOW_NO_GPU` (found in phase 2; § Interfaces lists it under the GPU layer, and the rule overrides that) | `frame/selection.rs`, public | `classify_acquisition` *returns* it inside `AcquisitionVerdict::Skip`. FR-1.2-S2 asserts its literal text under `--no-default-features` |
 
-None of the three names a `wgpu` type, so all three compile with the feature
-off. Together they are what make FR-1.2-S1/S2/S3, FR-2.3-S2 and FR-5.1-S3
-reachable without hardware.
+None of the four names a `wgpu` type, so all four compile with the feature off.
+Together they are what make FR-1.2-S1/S2/S3, FR-2.3-S2 and FR-5.1-S3 reachable
+without hardware.
 
 ### Trivial decisions (one line each)
 
