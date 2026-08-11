@@ -143,4 +143,72 @@ inversion nor a transposition survives it.
 
 ## Phase 3 — the wgpu adapter (12 scenarios)
 
-Not yet authored.
+Test command — the default build, where `wgpu` is in the graph:
+
+```
+cargo nextest run -p mc-testkit
+```
+
+Phases 1 and 2 keep their `--no-default-features` command. The five binaries
+below name `mc_testkit::frame::gpu`, so each must be declared in
+`crates/mc-testkit/Cargo.toml` with `required-features = ["gpu"]`; without that
+they would break the GPU-free configuration the seam is only real in.
+
+Every test here starts by acquiring a real device and **fails when none
+answers**. No test in this phase skips itself, and none sets an environment
+variable: a green run that verified nothing is the one outcome this harness may
+not have.
+
+| Scenario | Test file | Test name |
+|---|---|---|
+| FR-1.1-S1 | `crates/mc-testkit/tests/offscreen_capture.rs` | `a_headless_context_captures_a_single_pixel_frame` |
+| FR-1.1-S2 | `crates/mc-testkit/tests/adapter_acquisition.rs` | `an_acquired_device_reports_the_adapter_it_selected` |
+| FR-1.1-S3 | `crates/mc-testkit/tests/adapter_acquisition.rs` | `a_backend_with_no_adapters_fails_naming_every_backend_it_tried` |
+| FR-1.1-S4 | `crates/mc-testkit/tests/adapter_acquisition.rs` | `a_device_request_past_the_adapters_limits_names_the_adapter_and_the_requirement` |
+| FR-2.1-S1 | `crates/mc-testkit/tests/capture_color.rs` | `a_frame_cleared_to_opaque_red_comes_back_opaque_red` |
+| FR-2.1-S2 | `crates/mc-testkit/tests/capture_color.rs` | `a_fill_of_the_top_half_comes_back_at_the_top_of_the_frame` |
+| FR-2.1-S3 | `crates/mc-testkit/tests/capture_color.rs` | `a_quarter_alpha_clear_leaves_the_colour_channels_unscaled` |
+| FR-2.1-S4 | `crates/mc-testkit/tests/capture_color.rs` | `a_mid_tone_clear_comes_back_srgb_encoded` |
+| FR-2.1-S5 | `crates/mc-testkit/tests/capture_failure.rs` | `a_capture_whose_draw_work_fails_returns_that_error_and_no_image` |
+| FR-2.1-S6 | `crates/mc-testkit/tests/capture_failure.rs` | `a_context_still_captures_after_a_failed_capture` |
+| FR-2.2-S1 | `crates/mc-testkit/tests/offscreen_capture.rs` | `a_frame_whose_rows_defeat_the_copy_alignment_comes_back_unpadded` |
+| FR-2.3-S1 | `crates/mc-testkit/tests/offscreen_capture.rs` | `a_completed_capture_reports_how_long_its_readback_took` |
+
+### Supporting tests (no scenario)
+
+| Task | Test file | Test name | Why it exists |
+|---|---|---|---|
+| T28 | `crates/mc-testkit/tests/capture_and_verify.rs` | `a_captured_frame_written_as_a_golden_matches_the_next_capture_of_that_scene` | The composition root end to end, against a **temporary** golden root with the update opt-in passed as a value. Nothing GPU-produced is committed; without this test `capture_and_verify` is uncovered code inside the coverage denominator |
+
+### Shared fixtures
+
+`crates/mc-testkit/tests/scene/mod.rs` — the device fixture (`device_context`,
+`request`), the self-verification scene (`clear`,
+`top_half_white_over_black`), the four clear colours and the two pixel-counting
+helpers, plus this suite's `TestResult`.
+
+**The scene lives in the tests, not in the library** — the library ships no
+shaders. The harness hands out a canvas and never a scene, which is what keeps
+it ignorant of the renderer it exists to verify.
+
+`device_context` has no skip arm. `OptIns::default()` leaves
+`MYCRAFT_ALLOW_NO_GPU` unset, so a machine with no adapter reaches the error
+and reddens the run; a returned `Acquisition::Skipped` is itself a failure,
+because nobody asked for one.
+
+`top_half_white_over_black` is the only fixture in this phase that can witness a
+row inversion in the capture path — every other assertion is uniform
+(FR-2.1-S1/S3/S4, which assert colour *format* and say so), a count (FR-1.1-S1,
+FR-2.2-S1) or a duration (FR-2.3-S1). Its WGSL spans clip space `y = 0.0 ..=
+1.0`, because **clip-space y is up while framebuffer row 0 is the top**: the
+two point in opposite directions, and getting that backwards is where the
+ecosystem's flipped frames come from. Do not simplify the fixture to a column
+split or a uniform fill — a column split is invariant under precisely the
+inversion the scenario exists to detect.
+
+The four FR-2.1 expectations were verified against this machine's adapter
+before the tests were handed over (NVIDIA GeForce RTX 4090, Vulkan): the
+top-half fill returns white at (32, 0) and black at (32, 63); the linear clear
+of 0.215 858 4 encodes to exactly 128; and the 25%-alpha white clear returns
+(255, 255, 255, 64), colour channels unscaled. The ±1 in FR-2.1-S4 is therefore
+headroom for another backend's rounding, not slack this adapter needs.
