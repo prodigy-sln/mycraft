@@ -32,17 +32,36 @@
 //! sRGB-encoded, straight (non-premultiplied) alpha, row 0 = top. **No stage of
 //! this crate flips rows or touches alpha.**
 
+mod clock;
 mod color;
 mod compare;
 mod diff;
+mod golden;
 mod image;
+mod layout;
+mod optins;
 mod png;
 mod readback;
+mod report;
+mod selection;
 
+pub use clock::{
+    CaptureError, Clock, DeadlineExpired, Elapsed, Progress, SystemClock, poll_until_deadline,
+};
 pub use compare::{
     Comparison, FailingMask, MismatchReason, ThresholdError, Thresholds, Verdict, compare,
 };
 pub use diff::render_diff;
+pub use golden::{
+    ArtifactError, GoldenFailure, GoldenFailureReason, GoldenOutcome, verify_against_golden,
+};
 pub use image::{FrameSize, FrameSizeError, ImageShapeError, Rgba8Image, validate_frame_size};
+pub use layout::{CaptureId, CaptureIdError, GoldenSettings};
+pub use optins::OptIns;
 pub use png::{ImageIoError, encode_png, read_png, write_png};
 pub use readback::{ReadbackError, unpad_rows};
+pub use report::{AdapterProvenance, Backend, FrameReport, ReportError, write_report};
+pub use selection::{
+    AcquireError, AdapterDescription, AdapterKind, AdapterLimits, SkipNotice, UnsatisfiedLimit,
+    select_preferred,
+};

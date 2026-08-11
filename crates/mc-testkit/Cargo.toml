@@ -11,6 +11,7 @@ repository.workspace = true
 # against the resolved dependency graph in `tests/dependency_graph.rs`.
 [dependencies]
 image = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
