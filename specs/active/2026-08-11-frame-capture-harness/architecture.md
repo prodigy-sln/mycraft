@@ -10,6 +10,10 @@ author: Claude (sdd-architect)
 reviewed-by: persona-architect (Mode B, 2026-08-11) — 1 blocker, 6 major, 8 minor; all folded
 amended: 2026-08-11 (sdd-tasks, lead ruling) — D13 added; Integration table gains
   .gitattributes and one committed CPU-generated golden; Data section records it
+amended: 2026-08-11 (sdd-implement phase 3, lead ruling) — D13 generalised from a
+  list of types into a placement rule with precedence over the module map and
+  § Interfaces; § GPU layer's CaptureContext field list corrected to what the
+  implementation holds
 ---
 
 # Architecture: Headless Frame-Capture Harness
@@ -807,7 +811,15 @@ decomposition: one small function per row, dispatched by a match.
 pub struct AcquireOptions { pub backends: wgpu::Backends, pub required_limits: wgpu::Limits }
 impl Default for AcquireOptions { /* Backends::PRIMARY, Limits::downlevel_defaults() */ }
 
-pub struct CaptureContext { /* instance, adapter, device, queue, provenance, limits */ }
+// Amended 2026-08-11 (lead ruling, phase-3 boundary): the field list previously
+// read `instance, adapter, device, queue, provenance, limits`. The instance and
+// adapter handles are NOT retained — wgpu's `Device` and `Queue` hold their own
+// reference to the instance internals, so keeping them would be two fields
+// nothing reads, which `dead_code` makes a gate failure. The property this list
+// was written to guarantee is unaffected: "a failed capture leaves nothing
+// poisoned" is about the per-capture texture and buffer dropping at the end of
+// each capture, which is what FR-2.1-S6 asserts and passes.
+pub struct CaptureContext { /* device, queue, provenance, limits */ }
 pub struct SkipNotice { /* message contains the literal "MYCRAFT_ALLOW_NO_GPU" */ }
 pub enum Acquisition { Ready(Box<CaptureContext>), Skipped(SkipNotice) }
 
