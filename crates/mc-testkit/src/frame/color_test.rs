@@ -8,8 +8,9 @@
 
 use super::{delta_e, srgb8_to_lab};
 
-/// The reference distances are quoted to two decimals. This window treats a
-/// value as the same number without pinning an arithmetic accident.
+/// The expected values below are the exact distances the spec now records. This
+/// window treats a value as the same number without pinning an arithmetic
+/// accident down to the last bit.
 const WINDOW: f64 = 0.02;
 
 fn neutral_grey_distance(from: u8, to: u8) -> f64 {
@@ -25,15 +26,15 @@ fn assert_distance(actual: f64, expected: f64) {
 
 #[test]
 fn adjacent_neutral_greys_are_a_fraction_of_a_unit_apart() {
-    assert_distance(neutral_grey_distance(128, 129), 0.40);
+    assert_distance(neutral_grey_distance(128, 129), 0.39168);
 }
 
 #[test]
 fn a_twelve_level_neutral_grey_step_is_a_few_units() {
-    assert_distance(neutral_grey_distance(128, 140), 4.67);
+    assert_distance(neutral_grey_distance(128, 140), 4.66505);
 }
 
 #[test]
 fn a_fifty_two_level_neutral_grey_step_is_far_past_the_hard_ceiling() {
-    assert_distance(neutral_grey_distance(128, 180), 19.72);
+    assert_distance(neutral_grey_distance(128, 180), 19.72703);
 }

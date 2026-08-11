@@ -57,14 +57,25 @@ pub fn with_leading_pixels(
     Rgba8Image::from_rgba(base.width(), base.height(), pixels)
 }
 
-/// An opaque image split down the middle: `left` on the left, `right` on the
-/// right.
+/// One row of opaque pixels, all the same colour.
+fn solid_row(width: u32, rgb: [u8; 3]) -> Vec<u8> {
+    let [red, green, blue] = rgb;
+    let mut row = Vec::with_capacity(width as usize * 4);
+    for _ in 0..width {
+        row.extend_from_slice(&[red, green, blue, OPAQUE]);
+    }
+    row
+}
+
+/// An opaque image split down the middle **by column**: `left` on the left,
+/// `right` on the right. Vertically symmetric — a row-order flip leaves it
+/// unchanged, so never use it to assert row order.
 ///
 /// # Errors
 ///
 /// Returns [`ImageShapeError`] if the built buffer does not match the declared
 /// dimensions.
-pub fn half_split(
+pub fn split_by_column(
     width: u32,
     height: u32,
     left: [u8; 3],
@@ -81,6 +92,34 @@ pub fn half_split(
     let mut pixels = Vec::with_capacity(row.len() * height as usize);
     for _ in 0..height {
         pixels.extend_from_slice(&row);
+    }
+    Rgba8Image::from_rgba(width, height, pixels)
+}
+
+/// An opaque image split across the middle **by row**: `top` above, `bottom`
+/// below. PNG is row-ordered, so this is the fixture that can tell a
+/// right-way-up file from an inverted one.
+///
+/// # Errors
+///
+/// Returns [`ImageShapeError`] if the built buffer does not match the declared
+/// dimensions.
+pub fn split_by_row(
+    width: u32,
+    height: u32,
+    top: [u8; 3],
+    bottom: [u8; 3],
+) -> Result<Rgba8Image, ImageShapeError> {
+    let midpoint = u32::midpoint(0, height);
+    let top_row = solid_row(width, top);
+    let bottom_row = solid_row(width, bottom);
+    let mut pixels = Vec::with_capacity(top_row.len() * height as usize);
+    for row in 0..height {
+        pixels.extend_from_slice(if row < midpoint {
+            &top_row
+        } else {
+            &bottom_row
+        });
     }
     Rgba8Image::from_rgba(width, height, pixels)
 }

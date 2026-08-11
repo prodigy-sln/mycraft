@@ -19,7 +19,7 @@ cargo nextest run -p mc-testkit --no-default-features
 | FR-2.2-S2 | `crates/mc-testkit/tests/frame_size.rs` | `a_zero_extent_is_rejected_naming_the_offending_dimension` |
 | FR-2.2-S3 | `crates/mc-testkit/tests/frame_size.rs` | `a_width_past_the_maximum_texture_dimension_is_rejected_naming_both_numbers` |
 | FR-2.4-S1 | `crates/mc-testkit/tests/png_io.rs` | `an_image_written_to_a_png_decodes_back_to_the_same_pixels` |
-| FR-2.4-S2 | `crates/mc-testkit/tests/png_io.rs` | `a_written_png_keeps_the_white_half_on_the_side_it_was_drawn` |
+| FR-2.4-S2 | `crates/mc-testkit/tests/png_io.rs` | `a_written_png_keeps_the_white_half_at_the_top_where_it_was_drawn` |
 | FR-2.4-S3 | `crates/mc-testkit/tests/png_io.rs` | `a_target_whose_directory_cannot_be_created_names_the_path_and_the_cause` |
 | FR-3.1-S1 | `crates/mc-testkit/tests/comparison.rs` | `a_one_level_grey_drift_stays_inside_the_per_pixel_tolerance` |
 | FR-3.1-S2 | `crates/mc-testkit/tests/comparison.rs` | `a_twelve_level_grey_drift_counts_those_pixels_as_failing` |
@@ -45,9 +45,9 @@ they are tested through a `*_test.rs` sibling rather than from `tests/`.
 
 | Task | Test file | Test name | Why it exists |
 |---|---|---|---|
-| T04 | `crates/mc-testkit/src/frame/color_test.rs` | `adjacent_neutral_greys_are_a_fraction_of_a_unit_apart` | Pins ΔE ≈ 0.40 for (128,128,128) vs (129,129,129) |
-| T04 | `crates/mc-testkit/src/frame/color_test.rs` | `a_twelve_level_neutral_grey_step_is_a_few_units` | Pins ΔE ≈ 4.67 for (128,128,128) vs (140,140,140) |
-| T04 | `crates/mc-testkit/src/frame/color_test.rs` | `a_fifty_two_level_neutral_grey_step_is_far_past_the_hard_ceiling` | Pins ΔE ≈ 19.72 for (128,128,128) vs (180,180,180) |
+| T04 | `crates/mc-testkit/src/frame/color_test.rs` | `adjacent_neutral_greys_are_a_fraction_of_a_unit_apart` | Pins ΔE 0.39168 for (128,128,128) vs (129,129,129) |
+| T04 | `crates/mc-testkit/src/frame/color_test.rs` | `a_twelve_level_neutral_grey_step_is_a_few_units` | Pins ΔE 4.66505 for (128,128,128) vs (140,140,140) |
+| T04 | `crates/mc-testkit/src/frame/color_test.rs` | `a_fifty_two_level_neutral_grey_step_is_far_past_the_hard_ceiling` | Pins ΔE 19.72703 for (128,128,128) vs (180,180,180) |
 | T05 | `crates/mc-testkit/src/frame/readback_test.rs` | `a_row_that_defeats_the_copy_alignment_is_padded_up_to_it` | 257 px wide → 1028 content bytes → 1280 padded |
 | T05 | `crates/mc-testkit/src/frame/readback_test.rs` | `a_row_that_already_fills_the_copy_alignment_is_left_alone` | 64 px wide → 256 bytes, no padding added |
 | T05 | `crates/mc-testkit/src/frame/readback_test.rs` | `a_width_whose_row_cannot_be_addressed_is_rejected` | Justifies the fallible return of the padding function |
@@ -57,9 +57,14 @@ they are tested through a `*_test.rs` sibling rather than from `tests/`.
 ### Shared fixtures
 
 `crates/mc-testkit/tests/common/mod.rs` — hand-built `Rgba8Image` fixtures
-(`uniform`, `with_leading_pixels`, `half_split`), the shared `TestResult` alias
-and the windowed float assertion. No test in phase 1 needs a device to build its
-inputs, which is the data seam working.
+(`uniform`, `with_leading_pixels`, `split_by_column`, `split_by_row`), the
+shared `TestResult` alias and the windowed float assertion. No test in phase 1
+needs a device to build its inputs, which is the data seam working.
+
+The two split helpers name their axis on purpose. `split_by_column` is
+vertically symmetric and therefore cannot witness row order — using it for the
+on-disk orientation assertion is the defect the FR-2.4-S2 amendment corrected.
+`split_by_row` is the fixture for anything about orientation.
 
 `crates/mc-testkit/tests/comparison_without_adapter.rs` deliberately builds its
 own fixtures instead of using `common`, so the file names nothing outside the

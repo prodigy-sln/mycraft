@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{TestResult, grey, half_split, with_leading_pixels};
+use common::{TestResult, grey, split_by_column, with_leading_pixels};
 use mc_testkit::frame::{Rgba8Image, Thresholds, compare, encode_png, render_diff};
 
 const EDGE: u32 = 64;
@@ -20,7 +20,7 @@ const DRIFTED: u8 = 140;
 const MAGENTA: [u8; 4] = [255, 0, 255, 255];
 
 fn drifting_pair() -> Result<(Rgba8Image, Rgba8Image), Box<dyn std::error::Error>> {
-    let expected = half_split(EDGE, EDGE, SHADOW, HIGHLIGHT)?;
+    let expected = split_by_column(EDGE, EDGE, SHADOW, HIGHLIGHT)?;
     let actual = with_leading_pixels(&expected, grey(DRIFTED), FAILING_PIXELS)?;
     Ok((expected, actual))
 }
@@ -77,8 +77,8 @@ fn rendering_and_encoding_the_same_diff_twice_produces_identical_bytes() -> Test
 
 #[test]
 fn no_diff_is_produced_for_images_of_different_sizes() -> TestResult {
-    let expected = half_split(EDGE, EDGE, SHADOW, HIGHLIGHT)?;
-    let wider = half_split(EDGE + 1, EDGE, SHADOW, HIGHLIGHT)?;
+    let expected = split_by_column(EDGE, EDGE, SHADOW, HIGHLIGHT)?;
+    let wider = split_by_column(EDGE + 1, EDGE, SHADOW, HIGHLIGHT)?;
     let comparison = compare(&expected, &wider, &Thresholds::default());
 
     assert!(
