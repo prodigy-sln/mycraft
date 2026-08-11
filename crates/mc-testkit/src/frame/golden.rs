@@ -47,10 +47,10 @@ pub enum GoldenOutcome {
     /// A distinct outcome because neither of its neighbours can tell the truth
     /// about it. Reporting `Failed` with the standing verdict would say "no
     /// golden exists" about a file that had just been replaced, and name zero
-    /// written paths where FR-4.4-S3 requires every one; reporting
-    /// `GoldenWritten` would hide that the golden now has no record of the
-    /// adapter that produced it, which is the whole point of FR-5.1-S4 and what
-    /// makes the per-adapter deferral end by adding files.
+    /// written paths when an update has to report every golden path it wrote;
+    /// reporting `GoldenWritten` would hide that the golden now has no record
+    /// of the adapter and backend that produced it. That record is what lets
+    /// the per-adapter deferral end by adding files.
     GoldenWrittenWithoutProvenance {
         /// Every golden path that *was* written.
         paths: Vec<PathBuf>,
@@ -283,7 +283,7 @@ impl Lifecycle<'_> {
             Err(GoldenWriteFailure::Image(cause)) => self.fail(standing, Err(cause)),
             // The golden *was* replaced. Collapsing this into the standing
             // verdict would report "no golden exists" about a file written a
-            // moment earlier, and name none of the paths FR-4.4-S3 requires.
+            // moment earlier, and name none of the golden paths it did write.
             Err(GoldenWriteFailure::Provenance { written, cause }) => {
                 GoldenOutcome::GoldenWrittenWithoutProvenance {
                     paths: written,
