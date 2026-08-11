@@ -14,6 +14,11 @@ amended: 2026-08-11 (sdd-implement phase 3, lead ruling) — D13 generalised fro
   list of types into a placement rule with precedence over the module map and
   § Interfaces; § GPU layer's CaptureContext field list corrected to what the
   implementation holds
+amended: 2026-08-11 (sdd-implement phase 3, lead ruling) — remaining stale lines
+  brought in line with the approved design: CaptureContext::device/limits and
+  CaptureRequest::new added to § GPU layer, the capture sequence's repeat of the
+  old field list corrected, and § Error contracts gains the four scenario-less
+  variants phase 3 added
 ---
 
 # Architecture: Headless Frame-Capture Harness
@@ -829,10 +834,29 @@ impl CaptureContext {
     pub fn provenance(&self) -> &AdapterProvenance;                          // FR-1.1-S2
     pub fn capture(&self, request: &CaptureRequest,
                    draw: &mut dyn DrawWork) -> Result<Capture, CaptureError>;
+
+    // Added 2026-08-11 (lead ruling, phase-3 boundary). Both return *facts the
+    // layer already holds*, never decisions, so the seam is unchanged.
+    //
+    // `device` because `DrawWork::record` receives an encoder and a view, and
+    // neither can create a pipeline — without it FR-2.1-S2's real draw is
+    // unsatisfiable, since the caller owns the render pass (D6).
+    //
+    // `limits` because a `FrameSize` is obtainable only from
+    // `validate_frame_size(w, h, maximum)` and the maximum is a device fact;
+    // without an accessor every caller hard-codes a guess, which is the thing
+    // the pure check exists to avoid.
+    pub fn device(&self) -> &wgpu::Device;
+    pub fn limits(&self) -> AdapterLimits;
 }
 
 pub struct CaptureRequest { pub capture: CaptureId, pub size: FrameSize, pub deadline: Duration }
-impl CaptureRequest { /* deadline defaults to 30s — FR-2.3 */ }
+impl CaptureRequest {
+    // Added 2026-08-11 (lead ruling, phase-3 boundary): the constructor for the
+    // common case. The three fields stay public, so a caller with a reason to
+    // bound a readback differently needs no second constructor.
+    pub fn new(capture: CaptureId, size: FrameSize) -> Self;  // deadline 30s — FR-2.3
+}
 
 pub struct Capture { pub image: Rgba8Image, pub readback: Duration }         // FR-2.3-S1
 
@@ -860,8 +884,10 @@ work, so FR-2.2-S2/S3's "SHALL NOT submit any GPU work" is structural:
 6. `unpad_rows(mapped, w*4, padded_row_bytes(w), h)?` — pure (FR-2.2-S1: 257×129
    gives `row_bytes = 1028`, `padded = 1280`).
 7. Unmap; per-capture texture and buffer drop. The context keeps only
-   instance/adapter/device/queue, so a failed capture leaves nothing poisoned and
-   the next capture succeeds (FR-2.1-S6).
+   device/queue (plus the provenance and limits it reports), so a failed capture
+   leaves nothing poisoned and the next capture succeeds (FR-2.1-S6). Amended
+   2026-08-11 alongside the field list above — this sentence restated the same
+   stale claim.
 
 ### Error contracts
 
@@ -877,6 +903,24 @@ work, so FR-2.2-S2/S3's "SHALL NOT submit any GPU work" is structural:
 
 Every `Display` names the offending value (path, dimension, backend list,
 deadline), per code-quality §4's "specific and actionable".
+
+**Variants added during phase 3 that carry no scenario** (lead ruling,
+2026-08-11). Each is a reachable failure the table above left with nowhere to go,
+so the alternatives were swallowing it — barred by code-quality §4 — or filling a
+field with something untrue. None names a `wgpu` type, so all four sit on the
+core side of the seam under D13's rule.
+
+| Error | Variant | Why it exists |
+|---|---|---|
+| `AcquireError` | `DeviceUnavailable { adapter: String, cause: String }` | An adapter refusing a device for anything other than the one limit the harness models. `UnsatisfiedLimit` can only name a modelled capability, so `DeviceRejected` would have had to synthesise one and print "it offers 16384, and 8192 was required" — confidently wrong |
+| `ReadbackError` | `DeviceLost { cause: String }` | `map_async` reporting failure, `poll` failing, or the mapping being dropped unreported. This is the payload `DeadlineExpired::Step` was declared for and never had. Cost `ReadbackError` and `DeadlineExpired` their `Copy` |
+| `CaptureError` | `Shape(#[source] ImageShapeError)` | The unpadded buffer not describing the frame requested. Unreachable by arithmetic; present because the alternative is an `expect` on the one path that would reveal the arithmetic is wrong, and `expect` is lint-denied workspace-wide |
+| `ArtifactError` | `GoldenNotUpdated { path: PathBuf, #[source] cause: Box<ArtifactError> }` | The update path failing to write the golden. Added by the ruling-5 correction, and listed here for the same reason as the other three. It wraps **only** the image write: past that line the golden is on disk, so a sidecar failure stays `Report` rather than claiming a golden that *was* updated was not |
+
+`GoldenFailure`'s `Display` is written by hand rather than derived, so that a
+failed write reaches the reader at all — the derived form printed the standing
+verdict and an artifact directory and never rendered `artifacts` when it was
+`Err`.
 
 ## Data
 
