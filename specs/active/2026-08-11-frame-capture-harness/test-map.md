@@ -115,6 +115,8 @@ core.
 | T14 | `crates/mc-testkit/tests/opt_ins.rs` | `each_variable_enables_only_its_own_opt_in` | Permission to rewrite goldens is not permission to skip |
 | T22 | `crates/mc-testkit/tests/committed_golden.rs` | `the_golden_committed_to_the_repository_matches_the_frame_that_produced_it` | The git round trip — committed bytes read from their real repo path, compared, judged |
 | T22 | `crates/mc-testkit/tests/committed_golden.rs` | `regenerating_the_committed_golden_leaves_it_matching_the_generator` | `#[ignore]`d. Mints the committed golden through the harness's own update path, so the bytes in the repo are a product of the real code |
+| T20 (lead ruling, 2026-08-11) | `crates/mc-testkit/tests/golden_update.rs` | `an_update_that_cannot_write_the_golden_reports_that_it_was_not_updated` | The condition attached to approving the "reuse FR-4.2-S3's channel" design: a failed golden write must **say so**. It did not — the write failure sat in `GoldenFailure.artifacts` and never reached `Display`, so a caller who set the opt-in was shown only "no golden exists", read it as the state the update had just fixed, and re-ran into the same wall. Verified non-vacuous against the pre-fix code, where it fails on exactly that message |
+| T20 (lead ruling, 2026-08-11) | `crates/mc-testkit/tests/golden_update.rs` | `a_failed_golden_update_still_reports_the_verdict_that_stands` | The other half of the same report: naming the failed write must not cost the verdict that still holds. Passes against the pre-fix code too — a regression guard on the standing `reason`, not a test of the fix |
 
 ### Shared fixtures
 

@@ -10,10 +10,13 @@
 
 mod support;
 
+use std::error::Error;
 use std::fs;
+use std::path::Path;
 
 use mc_testkit::frame::{
-    AdapterProvenance, Backend, CaptureId, GoldenOutcome, read_png, verify_against_golden,
+    AdapterProvenance, Backend, CaptureId, GoldenFailure, GoldenFailureReason, GoldenOutcome,
+    read_png, verify_against_golden,
 };
 use serde_json::Value;
 use support::{
@@ -25,6 +28,11 @@ use tempfile::TempDir;
 const CAPTURE: &str = "clear-red-64";
 const ADAPTER: &str = "NVIDIA GeForce RTX 4090";
 const BACKEND: &str = "vulkan";
+
+/// The words a caller who set the opt-in has to find. Asserted as a substring:
+/// the operating system's own wording for the underlying failure follows it and
+/// differs per platform.
+const NOT_UPDATED: &str = "the golden was NOT updated";
 
 fn identified_adapter() -> AdapterProvenance {
     AdapterProvenance::new(ADAPTER, Backend::Vulkan, Some("566.36"))
@@ -110,4 +118,61 @@ fn a_written_golden_records_the_adapter_and_backend_that_produced_it() -> TestRe
          has to already be known"
     );
     Ok(())
+}
+
+#[test]
+fn an_update_that_cannot_write_the_golden_reports_that_it_was_not_updated() -> TestResult {
+    let goldens = TempDir::new()?;
+    let artifacts = TempDir::new()?;
+
+    let failure = update_into_a_blocked_golden_directory(goldens.path(), artifacts.path())?;
+
+    assert!(
+        failure.to_string().contains(NOT_UPDATED),
+        "a caller who asked for the golden to be rewritten is otherwise shown \
+         only the verdict the update was supposed to have fixed, and walks into \
+         the same wall on the next run; got `{failure}`"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_failed_golden_update_still_reports_the_verdict_that_stands() -> TestResult {
+    let goldens = TempDir::new()?;
+    let artifacts = TempDir::new()?;
+
+    let failure = update_into_a_blocked_golden_directory(goldens.path(), artifacts.path())?;
+
+    assert!(
+        matches!(failure.reason, GoldenFailureReason::MissingGolden { .. }),
+        "a golden that could not be written is still missing, and the write \
+         failure must not swallow that; got {:?}",
+        failure.reason
+    );
+    Ok(())
+}
+
+/// Runs the update path against a golden directory that cannot be created,
+/// and returns the failure it reported.
+///
+/// The golden is never installed — it is missing, and writing it is exactly
+/// what the opt-in asked for. A plain file stands where the capture's golden
+/// directory would have to go, so creating it fails on every platform with no
+/// lock-injection machinery.
+fn update_into_a_blocked_golden_directory(
+    goldens: &Path,
+    artifacts: &Path,
+) -> Result<GoldenFailure, Box<dyn Error>> {
+    let capture = CaptureId::new(CAPTURE)?;
+    fs::write(goldens.join(capture.as_str()), b"a file, not a directory")?;
+    let settings = golden_settings(goldens, artifacts, capture, UPDATING);
+
+    let outcome = verify_against_golden(&reference_frame()?, &synthetic_provenance(), &settings);
+
+    let GoldenOutcome::Failed(failure) = outcome else {
+        return Err(
+            format!("a golden that could not be written is a failure, got {outcome:?}").into(),
+        );
+    };
+    Ok(failure)
 }
