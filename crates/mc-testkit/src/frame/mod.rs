@@ -31,3 +31,18 @@
 //! One format, fixed, so captures are comparable across runs: 8-bit RGBA,
 //! sRGB-encoded, straight (non-premultiplied) alpha, row 0 = top. **No stage of
 //! this crate flips rows or touches alpha.**
+
+mod color;
+mod compare;
+mod diff;
+mod image;
+mod png;
+mod readback;
+
+pub use compare::{
+    Comparison, FailingMask, MismatchReason, ThresholdError, Thresholds, Verdict, compare,
+};
+pub use diff::render_diff;
+pub use image::{FrameSize, FrameSizeError, ImageShapeError, Rgba8Image, validate_frame_size};
+pub use png::{ImageIoError, encode_png, read_png, write_png};
+pub use readback::{ReadbackError, unpad_rows};
