@@ -42,6 +42,21 @@ pub enum GoldenOutcome {
     GoldenWritten {
         paths: Vec<PathBuf>,
     },
+    /// The golden was overwritten, but its provenance sidecar was not.
+    ///
+    /// A distinct outcome because neither of its neighbours can tell the truth
+    /// about it. Reporting `Failed` with the standing verdict would say "no
+    /// golden exists" about a file that had just been replaced, and name zero
+    /// written paths where FR-4.4-S3 requires every one; reporting
+    /// `GoldenWritten` would hide that the golden now has no record of the
+    /// adapter that produced it, which is the whole point of FR-5.1-S4 and what
+    /// makes the per-adapter deferral end by adding files.
+    GoldenWrittenWithoutProvenance {
+        /// Every golden path that *was* written.
+        paths: Vec<PathBuf>,
+        /// Why the sidecar did not follow it.
+        failure: ArtifactError,
+    },
     Failed(GoldenFailure),
 }
 
@@ -162,6 +177,22 @@ pub fn verify_against_golden(
     .run()
 }
 
+/// How far writing a golden got before it failed.
+///
+/// Private, because it exists only to carry that distinction the few lines from
+/// [`Lifecycle::write_golden`] to [`Lifecycle::on_update`]. The distinction
+/// itself is public, as two [`GoldenOutcome`] variants.
+#[derive(Debug)]
+enum GoldenWriteFailure {
+    /// Nothing was written; the golden on disk is untouched.
+    Image(ArtifactError),
+    /// The golden was replaced; its sidecar was not.
+    Provenance {
+        written: Vec<PathBuf>,
+        cause: ArtifactError,
+    },
+}
+
 /// What was found where the golden should be.
 enum GoldenState {
     Missing,
@@ -247,7 +278,18 @@ impl Lifecycle<'_> {
         self.clear_artifacts();
         match self.write_golden() {
             Ok(paths) => GoldenOutcome::GoldenWritten { paths },
-            Err(cause) => self.fail(standing, Err(cause)),
+            // Nothing reached disk, so the standing verdict is still true and
+            // the message says the golden was not updated.
+            Err(GoldenWriteFailure::Image(cause)) => self.fail(standing, Err(cause)),
+            // The golden *was* replaced. Collapsing this into the standing
+            // verdict would report "no golden exists" about a file written a
+            // moment earlier, and name none of the paths FR-4.4-S3 requires.
+            Err(GoldenWriteFailure::Provenance { written, cause }) => {
+                GoldenOutcome::GoldenWrittenWithoutProvenance {
+                    paths: written,
+                    failure: cause,
+                }
+            }
         }
     }
 
@@ -260,25 +302,33 @@ impl Lifecycle<'_> {
     /// The golden and its provenance sidecar, reported together: an unexplained
     /// golden update is a review stop, so every path written has to be named.
     ///
-    /// Only the image write is wrapped as [`ArtifactError::GoldenNotUpdated`].
-    /// Past that line the golden is on disk, so a sidecar that then fails leaves
-    /// a golden that *was* updated and a provenance record that was not — two
-    /// different things to tell a reader.
-    fn write_golden(&self) -> Result<Vec<PathBuf>, ArtifactError> {
+    /// The failure reports **how far the write got**, not merely that it
+    /// failed. The image write is the line: before it nothing is on disk and
+    /// the standing verdict is still true, after it the golden has been
+    /// replaced whatever happens to the sidecar. Reporting both the same way
+    /// would make one of the two messages false.
+    fn write_golden(&self) -> Result<Vec<PathBuf>, GoldenWriteFailure> {
         let path = self.goldens.image();
         let image = write_frame(self.captured, path.clone()).map_err(|cause| {
-            ArtifactError::GoldenNotUpdated {
+            GoldenWriteFailure::Image(ArtifactError::GoldenNotUpdated {
                 path,
                 cause: Box::new(cause),
-            }
+            })
         })?;
+
         let sidecar = self.goldens.provenance();
-        write_golden_provenance(&self.settings.capture, self.provenance, &sidecar).map_err(
-            |cause| ArtifactError::Report {
-                path: sidecar.clone(),
-                cause,
-            },
-        )?;
+        if let Err(cause) =
+            write_golden_provenance(&self.settings.capture, self.provenance, &sidecar)
+        {
+            return Err(GoldenWriteFailure::Provenance {
+                // The image alone: the sidecar is precisely what did not land.
+                written: vec![image],
+                cause: ArtifactError::Report {
+                    path: sidecar,
+                    cause,
+                },
+            });
+        }
         Ok(vec![image, sidecar])
     }
 
