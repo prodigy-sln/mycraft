@@ -161,3 +161,10 @@ work, and record why.
 
 Directory-specific rules live in nested `CLAUDE.md` files under `crates/mc-script/`,
 `crates/mc-net/`, `crates/mc-render/`, and `content/`.
+
+## Autonomous builds
+
+`sdd-conductor` (`.claude/agents/`) owns one MVP end to end, spawning a fresh subagent per SDD
+stage and managing the Linear issues. `.claude/loops/mvp-supervisor.md` holds the `/loop` prompt
+that drives it to completion — it supervises rather than spawns, so at most one conductor ever
+runs at a time.
