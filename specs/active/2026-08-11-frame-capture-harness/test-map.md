@@ -66,6 +66,18 @@ vertically symmetric and therefore cannot witness row order — using it for the
 on-disk orientation assertion is the defect the FR-2.4-S2 amendment corrected.
 `split_by_row` is the fixture for anything about orientation.
 
+**FR-2.4-S2 decodes the written file without `read_png`** (validation pass 1,
+Minor 5). The row-split fixture alone was not enough: writing with `write_png`
+and reading with `read_png` is a round trip, and a round trip is exactly what a
+compensating flip pair defeats — flip on write, flip on read, the buffer that
+comes back is the one that went in, and the file on disk is upside-down. Since
+that pair is the *sole* property `spec.md` gives S2, the test decoded the file
+through `image` directly instead, with no `frame::png` code on the read side.
+Verified by injecting the compensating pair into `encode_png` and `read_png`:
+FR-2.4-S1 and the previous FR-2.4-S2 both still passed, and the independent
+decode failed on `[0, 0, 0, 255]` at the top of the file. Do not "simplify" the
+read side back to `read_png`.
+
 `crates/mc-testkit/tests/comparison_without_adapter.rs` deliberately builds its
 own fixtures instead of using `common`, so the file names nothing outside the
 core.

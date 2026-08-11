@@ -6,13 +6,22 @@
 //! harness's output actually opens. It is split across rows because PNG is
 //! row-ordered — a column split would be invariant under exactly the inversion
 //! the assertion exists to catch.
+//!
+//! **Nothing from `frame::png` sits on the read side of that assertion.**
+//! Decoding with `read_png` would make it a round trip again, and a round trip
+//! is precisely what the compensating pair defeats: flip on write, flip on
+//! read, and the buffer that comes back is the one that went in while the file
+//! on disk is upside-down. The independent decode below is the only thing
+//! standing between that bug and every golden this project commits.
 
 mod common;
 
 use std::error::Error;
 use std::fs;
+use std::path::Path;
 
 use common::{TestResult, grey, split_by_row, uniform, with_leading_pixels};
+use image::{ImageFormat, RgbaImage};
 use mc_testkit::frame::{ImageIoError, read_png, write_png};
 use tempfile::TempDir;
 
@@ -62,23 +71,40 @@ fn a_written_png_keeps_the_white_half_at_the_top_where_it_was_drawn() -> TestRes
     let original = split_by_row(EDGE, EDGE, WHITE, BLACK)?;
 
     write_png(&original, &target)?;
-    let decoded = read_png(&target)?;
+    let on_disk = decode_without_the_harness(&target)?;
 
     assert_eq!(
-        decoded
-            .pixel(MIDDLE_COLUMN, 0)
-            .ok_or("the decoded file is missing its first row")?,
+        on_disk
+            .get_pixel_checked(MIDDLE_COLUMN, 0)
+            .ok_or("the written file is missing its first row")?
+            .0,
         OPAQUE_WHITE,
-        "the first row of the file must decode to white"
+        "the first row of the file must be white"
     );
     assert_eq!(
-        decoded
-            .pixel(MIDDLE_COLUMN, EDGE - 1)
-            .ok_or("the decoded file is missing its last row")?,
+        on_disk
+            .get_pixel_checked(MIDDLE_COLUMN, EDGE - 1)
+            .ok_or("the written file is missing its last row")?
+            .0,
         OPAQUE_BLACK,
-        "the last row of the file must decode to black"
+        "the last row of the file must be black"
     );
     Ok(())
+}
+
+/// Decodes `path` with no code from `frame::png` on the read side.
+///
+/// This is what makes the assertion above about the **file** rather than about
+/// a round trip. `read_png` would cancel any flip `encode_png` introduced, so
+/// putting it here would leave the one failure mode this test exists for
+/// unobserved — which is what it did before.
+///
+/// # Errors
+///
+/// Returns the read or decode failure.
+fn decode_without_the_harness(path: &Path) -> Result<RgbaImage, Box<dyn Error>> {
+    let encoded = fs::read(path)?;
+    Ok(image::load_from_memory_with_format(&encoded, ImageFormat::Png)?.to_rgba8())
 }
 
 #[test]
