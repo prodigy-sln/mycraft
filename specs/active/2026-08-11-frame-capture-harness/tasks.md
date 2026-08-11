@@ -337,6 +337,13 @@ opt in with `dep = { workspace = true }`. A version literal in
       - `unsatisfied_limit(required, available) -> Option<UnsatisfiedLimit>`
         (private, unit-tested here). Its scenario, FR-1.1-S4, is a real wgpu
         rejection in phase 3.
+      - **CONFIRMED 2026-08-11 (lead ruling): no change needed here.** This task
+        already routes `unsatisfied_limit` to `frame/selection_test.rs` and
+        already marks it private, which is exactly what the ruling requires.
+        `select_preferred` (FR-1.1-S5) is public per D10, so it may live in
+        either place; keeping it in the sibling alongside its neighbours is
+        fine. Note T14 now also writes to `frame/selection_test.rs` — two tasks,
+        one file, 600-line budget between them.
 
 - [ ] **T14** Environment opt-ins and acquisition classification —
       `frame/optins.rs`, `frame/selection.rs`, `tests/`
@@ -358,6 +365,27 @@ opt in with `dep = { workspace = true }`. A version literal in
         -> AcquisitionVerdict`. FR-1.2-S2 requires the **literal string**
         `MYCRAFT_ALLOW_NO_GPU` in the skip notice — assert the literal, not a
         paraphrase.
+      - **AMENDED 2026-08-11 (lead ruling): `tests/` in this task's header is
+        superseded — FR-1.2-S1/S2/S3 go in `frame/selection_test.rs`.** The
+        header line is kept intact per this file's own rule; this bullet is
+        authoritative. `classify_acquisition` stays **private**: it is internal
+        policy, not a caller-facing capability, and widening a public API so a
+        test can reach it is the API leaking to serve its tests. The `*_test.rs`
+        sibling is precisely the D10 mechanism for testing internals without
+        publishing them. `AcquisitionVerdict` is its return type and is
+        `pub(crate)` for the same reason — phase 3's `gpu/acquire.rs` calls it
+        from inside the crate, so nothing needs it public.
+      - `OptIns` **is** public per D10, so its own behaviour (presence-not-value
+        through `from_lookup`, Assumption 5) may stay in `tests/`. Only the three
+        `classify_acquisition` scenarios must move.
+      - **Verified, not assumed:** siblings compile into the lib target, and the
+        phase-2 `--no-default-features` DoD is unaffected. `AcquireError`,
+        `AdapterDescription`, `AdapterLimits`, `UnsatisfiedLimit`, `OptIns` and
+        `AcquisitionVerdict` are all core-side (D13 puts `AcquireError` there for
+        exactly this reason), so none names a `wgpu` type. Empirically confirmed
+        by phase 1: its two siblings (`color_test.rs`, `readback_test.rs`) run in
+        that configuration today — `frame::color::tests::*` and
+        `frame::readback::tests::*` are in the 29/29 `--no-default-features` run.
 
 - [ ] **T15** Deadline-bounded readback wait — `frame/clock.rs`, `tests/`
       Scenarios: FR-2.3-S2

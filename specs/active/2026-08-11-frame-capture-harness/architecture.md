@@ -197,13 +197,27 @@ capture path calls it, carries `#[cfg_attr(not(test), expect(dead_code))]` namin
 that caller — `expect` rather than `allow`, so the annotation becomes a warning
 the moment T25 wires it and cannot rot silently.
 
-D10 also lists `unsatisfied_limit` and `classify_acquisition` as private, which
-this block still shows as `pub`. Those two are phase-2 surface and are **not**
-resolved here: tasks T14 places `classify_acquisition`'s scenarios
-(FR-1.2-S1..S3) in `tests/`, which would require it to be public, so the
-contradiction is a real design question rather than a typo. Raised to the lead;
-whoever implements phase 2 must settle it before writing those tests, not while
-writing them.
+`unsatisfied_limit` and `classify_acquisition` are **also private** (settled
+2026-08-11, lead ruling), as D10 always said and as this block's `pub` markers
+wrongly suggested otherwise. Neither is a caller-facing capability: the harness's
+public surface is capture, compare and verify; `classify_acquisition` is internal
+policy and `unsatisfied_limit` an error-detail helper. Widening a public API so a
+test can reach it is the API leaking to serve its tests.
+
+The consequence lands on **tasks T14, which changes**: FR-1.2-S1/S2/S3 move from
+`tests/` into `frame/selection_test.rs`, which is exactly what the D10 sibling
+pattern exists for. `AcquisitionVerdict` is `pub(crate)` for the same reason —
+phase 3's `gpu/acquire.rs` calls `classify_acquisition` from inside the crate, so
+nothing needs it public. T13 already complied and is unchanged.
+
+Note the timing, because it changed the answer: until the coverage denominator
+excluded `*_test.rs` siblings, pushing tests into them carried a real cost —
+they inflated the figure. With that removed the choice stands on its merits, and
+on the merits internals get sibling tests. **This does not weaken the phase-2
+`--no-default-features` DoD:** every type involved is core-side (D13 places
+`AcquireError` there for precisely this reason), so no sibling names a `wgpu`
+type. Confirmed empirically by phase 1, whose `color_test.rs` and
+`readback_test.rs` siblings run in that configuration today.
 
 **Adapter ranking (FR-1.1-S5):** `Discrete > Integrated > Virtual > Other > Cpu`,
 ties broken by enumeration order. `Cpu` ranks **last**, below `Other`, because
