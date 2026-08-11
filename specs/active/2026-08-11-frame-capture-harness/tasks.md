@@ -537,7 +537,7 @@ opt in with `dep = { workspace = true }`. A version literal in
 in which `wgpu` is in the dependency graph, and therefore the first in which the
 `gpu` feature and the T02 gate stage carry weight.
 
-- [ ] **T23** Feature gate and GPU module wiring —
+- [x] **T23** Feature gate and GPU module wiring —
       `crates/mc-testkit/Cargo.toml`, `frame/mod.rs`, `frame/gpu/mod.rs`
       Scenarios: none (enabling)
       - `[features] default = ["gpu"]`, `gpu = ["dep:wgpu", "dep:pollster"]`;
@@ -553,7 +553,7 @@ in which `wgpu` is in the dependency graph, and therefore the first in which the
         `-p mc-testkit --no-default-features` invocation is the only place the
         seam is real, which is why T02 exists.
 
-- [ ] **T24** Device acquisition, adapter selection wiring and provenance —
+- [x] **T24** Device acquisition, adapter selection wiring and provenance —
       `frame/gpu/acquire.rs`, `tests/`
       Scenarios: FR-1.1-S2, FR-1.1-S3, FR-1.1-S4
       Depends on: T13, T14, T16, T23
@@ -579,7 +579,7 @@ in which `wgpu` is in the dependency graph, and therefore the first in which the
         through FR-1.1-S2's reported name and backend. A two-adapter machine is
         not available.
 
-- [ ] **T25** Offscreen target, readback and frame geometry —
+- [x] **T25** Offscreen target, readback and frame geometry —
       `frame/gpu/target.rs`, `frame/gpu/mod.rs`, `tests/`
       Scenarios: FR-1.1-S1, FR-2.2-S1, FR-2.3-S1
       Depends on: T03, T05, T15, T24
@@ -605,7 +605,7 @@ in which `wgpu` is in the dependency graph, and therefore the first in which the
         against the docs; the sequence above is behavioural.
         `COPY_BYTES_PER_ROW_ALIGNMENT = 256` is confirmed.
 
-- [ ] **T26** Caller draw work: colour, alpha and the sRGB contract — `tests/`
+- [x] **T26** Caller draw work: colour, alpha and the sRGB contract — `tests/`
       (self-verification scene), `frame/gpu/mod.rs`
       Scenarios: FR-2.1-S1, FR-2.1-S2, FR-2.1-S3, FR-2.1-S4
       Depends on: T25
@@ -638,7 +638,7 @@ in which `wgpu` is in the dependency graph, and therefore the first in which the
         clip-space y right (y is up; the top half is y > 0). Do not "simplify" it
         back to a column split.
 
-- [ ] **T27** Draw-work failure and context reuse — `tests/`
+- [x] **T27** Draw-work failure and context reuse — `tests/`
       Scenarios: FR-2.1-S5, FR-2.1-S6
       Depends on: T25
       - FR-2.1-S5: the caller's error is returned unchanged and no image is
@@ -649,7 +649,7 @@ in which `wgpu` is in the dependency graph, and therefore the first in which the
         after a failed one. A test binary captures many frames from one context,
         so a poisoned context would be a silent cliff.
 
-- [ ] **T28** Composition root: capture then verify, end to end — `frame/gpu/mod.rs`,
+- [x] **T28** Composition root: capture then verify, end to end — `frame/gpu/mod.rs`,
       `tests/`
       Scenarios: none (no scenario exercises the composition root end to end)
       Depends on: T17–T20, T25
@@ -852,3 +852,79 @@ on disk.
   are absent from the report. The figure is therefore honest production
   coverage, and the 1.24-point drop from phase 1 is the denominator nearly
   doubling with real code, not dilution.
+
+### Phase-3 resolutions and observations (2026-08-11)
+
+- **FR-2.1-S2 passed on the first run.** The capture path preserves row order:
+  the top-half fill came back at (32, 0) white and (32, 63) black with no
+  correction anywhere. Nothing in `gpu/target.rs` flips rows, and the test
+  author's WGSL spans `y = 0.0 ..= 1.0` per D6 (clip-space y up, framebuffer row
+  0 the top). The scenario cost nothing to satisfy, which is the outcome worth
+  having — it was written to be the one thing that *could* have caught the
+  opposite, and now it is a standing guard rather than a one-off check.
+
+- **Three core-side error paths gained a variant.** Each is a real, reachable
+  failure that the phase-1/2 enums had nowhere to put, so the alternatives were
+  swallowing it or filling a field with something untrue — both barred by
+  `code-quality.md` §4. All three name no `wgpu` type and compile with the
+  feature off, which is the amended D13 rule applied rather than bent.
+
+  | Variant | Where it fires | Why the existing enum could not carry it |
+  |---|---|---|
+  | `AcquireError::DeviceUnavailable { adapter, cause }` | An adapter refuses a device for anything other than the one limit the harness models | `UnsatisfiedLimit` can only name a modelled capability. `DeviceRejected` with a synthesised limit would have printed "it offers 16384, and 8192 was required" |
+  | `ReadbackError::DeviceLost { cause }` | `map_async` reports failure, `poll` fails, or the mapping is dropped unreported | Phase 2 recorded that `DeadlineExpired::Step` had no covered branch; this is the payload that branch was waiting for |
+  | `CaptureError::Shape(ImageShapeError)` | The unpadded buffer does not describe the frame requested | Unreachable by arithmetic, and the alternative was an `expect` on the one path that would reveal the arithmetic is wrong |
+
+  `ReadbackError` and `DeadlineExpired` lost `Copy` to make room for the owned
+  cause string. No test depended on it.
+
+- **`classify_acquisition` and `unsatisfied_limit` are `pub(crate)`, not `pub`.**
+  T14's ruling that they stay "private" meant "not caller-facing", and the same
+  task text names `gpu/acquire.rs` as their in-crate caller. `pub(crate)` is that
+  ruling, not a departure from it.
+
+- **The dead-code annotations moved from `not(test)` to
+  `all(not(test), not(feature = "gpu"))`.** Seven core-side items exist to be
+  called by the GPU layer, so with the feature off they genuinely have no caller.
+  The condition now states the seam instead of approximating it, and `expect`
+  still turns into a warning the moment a core caller appears.
+
+- **`CaptureContext` does not retain the instance or the adapter**, against the
+  field list in architecture.md § Interfaces. wgpu's `Device` and `Queue` hold
+  their own reference to the instance internals, so retaining the handles would
+  be two fields nothing reads — a `dead_code` failure at the gate. The stated
+  purpose of that list ("a failed capture leaves nothing poisoned") is about the
+  per-capture texture and buffer dropping, which is unchanged and is what
+  FR-2.1-S6 asserts.
+
+- **Two accessors the architecture omits: `CaptureContext::device()` and
+  `::limits()`.** Raised by the test author and accepted. `DrawWork::record`
+  receives an encoder and a view, neither of which can create a pipeline, so
+  FR-2.1-S2's real draw is unsatisfiable without `device()`; and `FrameSize` is
+  only obtainable from `validate_frame_size(w, h, maximum)`, where the maximum is
+  a device fact, so without `limits()` every caller hard-codes a guess. Both
+  return facts, not decisions — the seam is unchanged.
+
+- **`CaptureRequest::new(capture, size)` supplies the 30-second deadline**; the
+  three fields stay public so a caller with a reason to bound a readback
+  differently needs no second constructor. The architecture declared the fields
+  and the default but no constructor.
+
+- **The five hardware suites carry `required-features = ["gpu"]`** in the
+  manifest rather than a `#![cfg(feature = "gpu")]` of their own. A file-level
+  `cfg` would make them compile to an empty binary under `--no-default-features`
+  and pass silently; `required-features` makes cargo skip building them, which is
+  the difference between "not run here" and "vacuously green".
+
+- **Coverage at the phase-3 boundary: 89.83% over 1101 tracked lines**, up from
+  86.71% over 775 at phase 2. The wgpu layer is 326 new lines and did not dilute
+  the figure, because D2's two real-failure acquisition tests reach
+  `gpu/acquire.rs`'s error branches and the twelve hardware scenarios reach the
+  rest. That is the risk register's "the wgpu module is uncoverable without a
+  GPU" entry closing in the intended direction.
+
+- **The hardware these twelve scenarios ran on**: NVIDIA GeForce RTX 4090,
+  Vulkan, driver 596.21. FR-2.1-S4's mid-tone landed on exactly 128 on all three
+  channels — the ±1 in the scenario is headroom for another backend, not slack
+  this one needed. FR-5.1-S4's sidecar means the day a second adapter runs the
+  gate, this provenance is already on record.
