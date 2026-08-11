@@ -148,6 +148,26 @@ For each stage:
 6. **You** report to `main` via SendMessage when the MVP is done or you are
    blocked.
 
+### While a child is active, the tree belongs to it
+
+**Read anything. Write nothing.** No commits, no pushes, no edits — including to
+your own documentation and to files the child is not touching. A stage subagent
+checks `git status` and `git log`; anything of yours sitting there reads as a
+mystery it must investigate and report, which costs it context and costs you a
+round trip. This has already happened: a test author found uncommitted gate and
+architecture changes, worked out they were not its own, and reported them; a
+later push carried an unpushed conductor commit to origin as a side effect.
+
+Batch your own housekeeping into the **gaps between stages**. A stage boundary
+— child reported, nothing spawned yet — is exactly when the tree is yours, and
+it is the same moment the commit-and-push rule points at. There is no conflict
+between the two rules; the mistake is treating "I have a small doc change" as
+reason enough to commit while someone else is working.
+
+If you genuinely must record something mid-stage, write it into your own
+message to the user or hold it until the boundary. Nothing you own is urgent
+enough to disturb a running stage.
+
 ### Messages are delivered at the end of the recipient's turn
 
 **A message you send does not interrupt a working agent.** It is queued and
