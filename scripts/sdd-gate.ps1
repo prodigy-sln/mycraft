@@ -112,6 +112,26 @@ Invoke-Stage 'lint + complexity (clippy, zero warnings)' {
     cargo clippy --workspace --all-targets --all-features -- -D warnings
 }
 
+# ── 2b. GPU-free configuration ─────────────────────────────────────────────────
+# mc-testkit's frame harness splits into a GPU-free core and a wgpu layer behind
+# a default-on `gpu` feature. `--no-default-features` is the only configuration
+# in which wgpu is absent from the dependency graph, and therefore the only
+# process in which no GPU adapter *can* exist — which is what makes the
+# comparison suite's "while the process holds no GPU adapter" assert what it
+# says. Every other stage above and below runs with the feature on, so without
+# this stage the seam decays to convention.
+#
+# Deliberately NOT `--all-features`: that would re-enable `gpu` and make the
+# stage meaningless. Deliberately NOT `--no-tests=pass` either: a run with no
+# tests in it proves nothing, which is the one thing this stage exists to rule
+# out. The two commands are chained with `&&` because Invoke-Stage inspects
+# $LASTEXITCODE once, after the whole scriptblock — on separate lines a clippy
+# failure would be silently overwritten by a passing test run.
+Invoke-Stage 'gpu-free (mc-testkit, no default features)' {
+    cargo clippy -p mc-testkit --no-default-features --all-targets -- -D warnings &&
+    cargo nextest run -p mc-testkit --no-default-features
+}
+
 # ── 3. File size limits ────────────────────────────────────────────────────────
 Write-StageHeader 'size (code-quality.md file limits)'
 $oversized = @()
