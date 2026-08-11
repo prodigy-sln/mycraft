@@ -301,7 +301,7 @@ opt in with `dep = { workspace = true }`. A version literal in
 
 20 scenarios. Still nothing links `wgpu`; the phase-1 DoD applies unchanged.
 
-- [ ] **T12** Capture identity and on-disk layout — `frame/layout.rs`,
+- [x] **T12** Capture identity and on-disk layout — `frame/layout.rs`,
       `frame/layout_test.rs`
       Scenarios: none (approved ruling 3)
       - `CaptureId` validated newtype: one path segment, non-empty, `[a-z0-9_-]`
@@ -319,7 +319,7 @@ opt in with `dep = { workspace = true }`. A version literal in
       - `GoldenSettings { golden_root, artifact_root, capture, thresholds, opt_ins }`.
         Roots are always caller-supplied, never guessed.
 
-- [ ] **T13** `[P]` Adapter description DTOs and preference ranking —
+- [x] **T13** `[P]` Adapter description DTOs and preference ranking —
       `frame/selection.rs`, `frame/selection_test.rs`
       Scenarios: FR-1.1-S5
       - `Backend`, `AdapterKind`, `AdapterDescription`, `AdapterLimits`,
@@ -345,7 +345,7 @@ opt in with `dep = { workspace = true }`. A version literal in
         fine. Note T14 now also writes to `frame/selection_test.rs` — two tasks,
         one file, 600-line budget between them.
 
-- [ ] **T14** Environment opt-ins and acquisition classification —
+- [x] **T14** Environment opt-ins and acquisition classification —
       `frame/optins.rs`, `frame/selection.rs`, `tests/`
       Scenarios: FR-1.2-S1, FR-1.2-S2, FR-1.2-S3
       Depends on: T13
@@ -387,7 +387,7 @@ opt in with `dep = { workspace = true }`. A version literal in
         that configuration today — `frame::color::tests::*` and
         `frame::readback::tests::*` are in the 29/29 `--no-default-features` run.
 
-- [ ] **T15** Deadline-bounded readback wait — `frame/clock.rs`, `tests/`
+- [x] **T15** Deadline-bounded readback wait — `frame/clock.rs`, `tests/`
       Scenarios: FR-2.3-S2
       Depends on: T12
       - `trait Clock`, `SystemClock::started_now()`, `Progress<T>`, `Elapsed<T>`,
@@ -404,7 +404,7 @@ opt in with `dep = { workspace = true }`. A version literal in
         that the timeout names both the capture and the deadline, and it must do
         so under `--no-default-features`.
 
-- [ ] **T16** Report, provenance and JSON shape — `frame/report.rs`, `tests/`,
+- [x] **T16** Report, provenance and JSON shape — `frame/report.rs`, `tests/`,
       `crates/mc-testkit/Cargo.toml`
       Scenarios: FR-5.1-S1, FR-5.1-S2, FR-5.1-S3
       Depends on: T12, T13
@@ -423,7 +423,7 @@ opt in with `dep = { workspace = true }`. A version literal in
         Inlining it in `gpu/acquire.rs` would make FR-5.1-S3 need hardware, and it
         is one of the 41 that must not.
 
-- [ ] **T17** Golden lifecycle: the pass path and stale-artifact clearing —
+- [x] **T17** Golden lifecycle: the pass path and stale-artifact clearing —
       `frame/golden.rs`, `tests/`
       Scenarios: FR-4.1-S1, FR-4.1-S2, FR-4.1-S3
       Depends on: T07, T09, T12
@@ -443,7 +443,7 @@ opt in with `dep = { workspace = true }`. A version literal in
         one small named function per row, dispatched by a match, to stay inside
         `too_many_lines = 30` and `cognitive_complexity = 15`.
 
-- [ ] **T18** Golden lifecycle: the mismatch artifact set —
+- [x] **T18** Golden lifecycle: the mismatch artifact set —
       `frame/golden.rs`, `tests/`
       Scenarios: FR-4.2-S1, FR-4.2-S2, FR-4.2-S3
       Depends on: T10, T16, T17
@@ -462,7 +462,7 @@ opt in with `dep = { workspace = true }`. A version literal in
         `.map_err(|_| ..)`. Sanctioned shape:
         `if fs::remove_file(&path).is_err() { /* audit #22: recovery is Out of Scope */ }`.
 
-- [ ] **T19** Golden lifecycle: missing and undecodable goldens —
+- [x] **T19** Golden lifecycle: missing and undecodable goldens —
       `frame/golden.rs`, `tests/`
       Scenarios: FR-4.4-S1, FR-4.4-S2, FR-4.4-S5
       Depends on: T17
@@ -474,7 +474,7 @@ opt in with `dep = { workspace = true }`. A version literal in
       - This is D4 made structural: a broken renderer must never mint its own
         ground truth.
 
-- [ ] **T20** Golden lifecycle: the update path — `frame/golden.rs`, `tests/`
+- [x] **T20** Golden lifecycle: the update path — `frame/golden.rs`, `tests/`
       Scenarios: FR-4.4-S3, FR-4.4-S4, FR-5.1-S4
       Depends on: T14, T16, T17
       - With `MYCRAFT_UPDATE_GOLDENS` set (injected as an `OptIns` value, never as
@@ -489,7 +489,7 @@ opt in with `dep = { workspace = true }`. A version literal in
         what makes the per-adapter-golden deferral end by adding files rather than
         migrating them.
 
-- [ ] **T21** `[P]` `.gitattributes` for byte-sensitive files — `.gitattributes`
+- [x] **T21** `[P]` `.gitattributes` for byte-sensitive files — `.gitattributes`
       (repo root)
       Scenarios: none (lead ruling, 2026-08-11)
       - The repo has **no `.gitattributes` at all** today, so a committed PNG
@@ -501,7 +501,7 @@ opt in with `dep = { workspace = true }`. A version literal in
       - A golden is byte-sensitive by definition. Discovering this against a real
         frame in PRO-852 is the failure mode being pre-empted.
 
-- [ ] **T22** One committed golden, CPU-generated, read from its real repo path —
+- [x] **T22** One committed golden, CPU-generated, read from its real repo path —
       `crates/mc-testkit/goldens/<capture-id>/`, `tests/`
       Scenarios: none (lead ruling, 2026-08-11 — exercises the committed-golden
       workflow, which no scenario covers)
@@ -793,3 +793,46 @@ markers only.
   types, no `winit` or surface, no benchmarks, no per-adapter golden variants, no
   CI integration, no multi-frame capture, no depth/stencil/MRT. Anything
   discovered along the way is recorded here, not built.
+
+### Phase-2 resolutions and observations (2026-08-11)
+
+Four documented contradictions were resolved during implementation. All four are
+recorded here rather than silently, because each had two documents disagreeing
+on disk.
+
+- **`Backend` lives in `frame/report.rs`.** `architecture.md`'s module map and
+  its Interfaces section both put it there; T13's DTO list implied
+  `selection.rs`. `selection.rs` imports it, so the sibling's `super::Backend`
+  resolves either way and no test moved.
+- **`SkipNotice` is core-side and public**, not in the GPU layer where
+  `architecture.md` § Interfaces lists it. FR-1.2-S2 asserts its literal text
+  under `--no-default-features`, and it names no `wgpu` type, so D13's own
+  reasoning applies to it exactly as it does to `AcquireError`. Same class of
+  contradiction D13 already fixed three times.
+- **`GoldenPaths` and `ArtifactPaths` are `pub(crate)`.** The module map names
+  them; D10's public-API list omits them. They are path plumbing, not product,
+  which is D10's own category for a `*_test.rs` sibling. Cheap to widen if a
+  downstream spec wants to locate goldens through them.
+- **`DeadlineExpired` is an enum**, `Expired { deadline, elapsed }` and
+  `Step(ReadbackError)`. D4's signature gives `step` a `ReadbackError` return
+  with nowhere to go; swallowing it would have been the alternative.
+  `into_capture_error` maps the two variants to `CaptureError::ReadbackTimeout`
+  and `CaptureError::Readback`. No scenario covers the step-failure branch.
+- **A failed golden *write* on the update path** reports the verdict that still
+  stands — missing, or mismatching — with the write failure in
+  `GoldenFailure.artifacts`. No scenario covers it and `GoldenOutcome` has no
+  variant for it; this reuses the channel FR-4.2-S3 already established for "the
+  I/O failed and the verdict stands" rather than inventing a fourth outcome.
+- **`ArtifactError::Image` boxes its `ImageIoError`** (clippy `result_large_err`:
+  `image::ImageError` is large enough that every `Result` in `golden.rs` would
+  have paid for it).
+- **The `#[ignore]`d regeneration test is how the committed golden is minted**,
+  through `verify_against_golden` with `OptIns { update_goldens: true }`. It is
+  idempotent — it accepts `GoldenWritten` or `GoldenUnchanged` — so a contributor
+  can re-run it at any time to confirm the committed bytes are still what the
+  generator produces. Run it with
+  `cargo nextest run -p mc-testkit --no-default-features --run-ignored ignored-only`.
+- **Coverage inflation from `*_test.rs` siblings is now moot**: `$CoverageExclude`
+  gained `\|_test\.rs$` at 735cfef, before phase 2 added `layout_test.rs` and
+  `selection_test.rs`. The T11 note's prediction stands but the gate already
+  answers it.
