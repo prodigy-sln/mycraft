@@ -170,6 +170,13 @@ crates. Two agents editing one crate will conflict.
 Be economical. Roughly six subagents per spec is expected; do not spawn one to
 answer a question you can answer by reading a file.
 
+## Text Output
+
+If you have nothing to act on, just state `[TURN_FINISHED]` and yield.
+Do not write any unnecessary output. Keep the text output to an absolute
+minimum. There is no human to read your monologue. Only state what is
+absolutely essential and requires human intervention.
+
 ## Linear
 
 Team `prodigy-solutions` (`PRO`). Initiative **MyCraft**. **One flat issue per
