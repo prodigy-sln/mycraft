@@ -37,14 +37,30 @@ identically to a small MVP — small means narrow scope, never lower standards.
 **Linear**: [MyCraft MVP 1: Playable Sandbox](https://linear.app/prodigy-solutions/project/mycraft-phase-1-foundation)
 **Goal**: A game that starts, renders a world, and lets you move and build in it.
 
-| Priority | Feature | Status | Spec |
-|----------|---------|--------|------|
-| P0 | Workspace, quality gate, **headless frame-capture harness** | Not Started | - |
-| P0 | Chunk storage + palette, binary greedy mesher, wgpu terrain pipeline | Not Started | - |
-| P0 | Camera, player physics, collision | Not Started | - |
-| P0 | Raycast targeting, block break and place | Not Started | - |
-| P1 | World persistence — quit and resume where you left off | Not Started | - |
-| P1 | Minimal HUD: crosshair, held block, debug overlay | Not Started | - |
+Decomposed into eight specs, in dependency order. Each moves the playable thing
+forward; none is a pure layer.
+
+| Priority | Feature | Issue | Status |
+|----------|---------|-------|--------|
+| P0 | Headless frame-capture harness | PRO-849 | Todo |
+| P0 | Chunk storage and block palette | PRO-850 | Todo |
+| P0 | Binary greedy mesher | PRO-851 | Todo |
+| P0 | wgpu terrain pipeline and windowed client — *you can see terrain* | PRO-852 | Todo |
+| P0 | Camera, player physics and collision — *you can walk around* | PRO-853 | Todo |
+| P0 | Raycast targeting, block break and place — *you can build* | PRO-854 | Todo |
+| P1 | World persistence — *quit and resume* | PRO-855 | Todo |
+| P1 | Minimal HUD: crosshair, held block, debug overlay | PRO-856 | Todo |
+
+Workspace skeleton and quality gate already exist on `main` (commits `f5780f3`,
+`a93d2da`), so the first spec is the capture harness alone.
+
+Two invariants that MVP 1 could plausibly breach, resolved up front:
+
+- **No Luau host until MVP 2, yet invariant 1 still binds.** Blocks are registered
+  at runtime from a data file under `content/base/` — never `enum Block` in Rust.
+  MVP 2 swaps the loader, not the registry.
+- **Singleplayer, yet invariant 4 still binds.** `mc-sim` is authoritative in-process;
+  the client submits intents. Otherwise MVP 3 is a rewrite, not a transport swap.
 
 **Exit criteria** — all must hold:
 - `sdd-gate.ps1` exits 0
