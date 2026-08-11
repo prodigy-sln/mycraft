@@ -216,3 +216,60 @@ calibrates from measurement instead of a guessed constant.
 **Rejected.** Runtime generation with caching — still ships a key, still bills per new player, and
 turns first-encounter latency into a gameplay problem. Committing only a manifest and generating on
 first build — makes every clone cost money and every CI run non-deterministic.
+
+---
+
+## ADR-010 — Licensed third-party assets, in two classes
+
+**Status**: Accepted · **Date**: 2026-08-11
+
+**Context.** Substantial licensed asset libraries are available to this project: bundle purchases
+under `\ds01\assets\GameAssets` (music, SFX, GUI kits, 2.5D sprite art), and CC0 material —
+[PixVoxelAssets](https://github.com/tommyettinger/PixVoxelAssets) (`.vox` models and sprites) and
+`VoxelCoreLab_Watercolor_Terrain_Textures_1024px` (16 dirt/grass/stone/water PNGs). Licences are
+held for all of them. ADR-009 governs assets this project *generates*; this ADR governs assets it
+*licenses*.
+
+Two pressures collide. Restricted-licence assets should not be trivially extractable from a shipped
+build. But ADR-005 makes the base game a mod with no privileged engine access — and content that
+only the base game can reach is exactly the privilege ADR-005 forbids.
+
+**Decision.** Assets are handled in two classes by licence, not one.
+
+- **Restricted-licence assets are embedded in the binary** and referenced from script by a fixed
+  string key. They are not shipped as loose files and not extractable from `content/base/`.
+- **CC0 assets ship as plain files under `content/base/`**, extractable, with their `LICENCE.txt`
+  copied alongside so provenance travels with the bytes.
+
+**Binding condition — this is what keeps ADR-005 intact.** A third-party mod MUST reach assets
+through the *same* script-facing API, with a key resolving from either the embedded table or from
+files the mod ships. Same call site, same API, different backing store. The base game then merely
+*happens* to use embedded assets for licensing reasons; it gains no capability a mod lacks. An
+asset API reachable only by the base game is a Blocker, not a style note.
+
+**Consequences.** The CC0 class is what makes this honest: because the base game itself ships loose
+files, the mod-supplied resolution path is exercised by the base game rather than left as an
+untested theoretical capability — the same reasoning that turned invariant 5 into a failing test
+(`mc-testkit` FR-6.1) instead of prose. Embedded assets additionally gain integrity, since a texture
+cannot be silently swapped.
+
+Three practical constraints follow:
+
+- The terrain textures are 1024 px. `mc-render` uses an **array texture**, which requires a uniform
+  layer size, so they need downsampling to a single much smaller base resolution. Choosing that
+  number belongs with the array-texture design, not with whoever copies the files.
+- Adopting the watercolour set commits an **art direction**. That is a product decision, to be made
+  deliberately rather than by default because those were the textures to hand.
+- PixVoxelAssets bundles third-party tooling under **GPL** (XBRZ) alongside its CC0 art. Only the
+  art is CC0. Vendoring the repository wholesale would pull GPL into this tree.
+
+**Scope.** None of this enters MVP 1, which stays on placeholder procedural textures — real art
+moves no MVP 1 exit criterion and would pull the texture pipeline ahead of the mesher and renderer
+that justify it. It lands in MVP 2, where script-defined blocks make "reference a texture by key"
+the actual feature being built.
+
+**Rejected.** Embedding everything uniformly — needless for CC0 material, and it would leave the
+mod-supplied path unexercised until the first third-party mod discovered it broken. Shipping
+everything as loose files — cannot satisfy the restricted licences. Hardcoding asset references in
+Rust beside the embedded bytes — that is a content definition in Rust and breaches ADR-005; only the
+*bytes* are embedded, never what a block *is*.

@@ -93,6 +93,13 @@ Backlog, unscheduled: WASM mod backend · cross-server identity · real art asse
 MVP 4) · dimensions and portals · a redstone-equivalent logic system (a strong test of scripting
 API expressiveness).
 
+**Art assets are already licensed and available** — see ADR-010 for the two-class handling.
+Bundle purchases (music, SFX, GUI, 2.5D sprites) live at `\\ds01\assets\GameAssets`; CC0 material
+is [PixVoxelAssets](https://github.com/tommyettinger/PixVoxelAssets) and
+`VoxelCoreLab_Watercolor_Terrain_Textures_1024px` (dirt/grass/stone/water, four variants each).
+Earliest use is **MVP 2**, where texture-by-key becomes a real feature; the voxel character and
+dungeon models suit **MVP 5**, and audio and GUI belong to **MVP 6**. MVP 1 stays on placeholders.
+
 ---
 
 ## Completed
