@@ -17,7 +17,9 @@ Read: `specs/active/[folder]/spec.md`, `tasks.md` (medium+),
 
 Work scenario by scenario from `spec.md`:
 
-1. Write the failing test yourself (scenario ID in the test name).
+1. Write the failing test yourself. The test **name describes behaviour** —
+   scenario IDs go in `test-map.md` and commit messages, never in code or
+   test names (`standards/global/testing.md` §2).
 2. Run it and **display the failing output** — writing implementation
    before displayed failing output is prohibited.
 3. Implement the minimum to pass; run to green.
