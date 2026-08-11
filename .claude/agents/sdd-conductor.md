@@ -133,7 +133,16 @@ answer a question you can answer by reading a file.
 Team `prodigy-solutions` (`PRO`). Initiative **MyCraft**. **One flat issue per
 spec** — no sub-issues.
 
-Project IDs:
+**Resolve your MVP's project by name**, not from a hardcoded id — projects are
+named `MyCraft MVP N: <title>` and the current MVP comes from the `← current`
+marker in `product/roadmap.md`:
+
+```
+linear-cli projects list -o json
+```
+
+The table below is a convenience reference only. If it disagrees with the API,
+the API is right.
 
 | MVP | ID |
 |-----|-----|

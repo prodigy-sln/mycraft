@@ -8,6 +8,10 @@ conductor owns the MVP, and `/loop` is simply how it survives running longer
 than one context. Each tick advances the build by one step and schedules the
 next wake-up.
 
+The prompt is **generic** — it reads the current MVP and its definition of done
+out of `product/roadmap.md` rather than naming either. Use it verbatim for every
+MVP; nothing needs editing between increments.
+
 ## Usage
 
 The conductor invokes this itself, early in its run, with **no interval** so it
@@ -24,21 +28,31 @@ notification never arrives.
 
 To stop early: `/loop stop`, or tell the running conductor to stop.
 
-## The prompt (MVP 1)
+## The prompt
 
 ```
-Continue driving MyCraft MVP 1 to completion. You are the conductor: you own
-this MVP end to end — decomposition, sequencing, architecture, arbitration,
-commits and Linear are all yours.
+Continue driving the current MyCraft MVP to completion. You are the conductor:
+you own this MVP end to end — decomposition, sequencing, architecture,
+arbitration, commits and Linear are all yours.
 
-This tick may have no memory of the last one. Reconstruct state from disk
-before deciding anything:
-  - Linear project f6cf7f2f-b4ad-4bb3-ab04-473b5ae68ec2 — which issues exist
-    and what state each is in
-  - git log, git branch, git status — what merged, what branch is in flight,
+This tick may have no memory of the last one. Reconstruct everything from disk
+before deciding anything.
+
+First establish scope:
+  - product/roadmap.md marks exactly one MVP with "← current". That is your
+    scope. Its feature table is the work; its "Exit criteria" section is the
+    definition of done.
+  - Resolve that MVP's Linear project by name (they are named
+    "MyCraft MVP N: <title>") under team PRO:
+      linear-cli projects list -o json
+  - If no MVP is marked current, or the current one has no exit criteria, or
+    more than one is marked — STOP and ask the user. Never guess scope.
+
+Then read state:
+  - Linear: which issues exist in that project and what state each is in
+  - git log / git branch / git status: what merged, what branch is in flight,
     whether the tree is dirty
-  - specs/active/ — any spec mid-pipeline and which stage it reached
-  - product/roadmap.md — MVP 1 scope and exit criteria
+  - specs/active/: any spec mid-pipeline and which stage it reached
 
 Then act on the FIRST match:
 
@@ -48,24 +62,26 @@ Then act on the FIRST match:
 2. You are waiting on the user (an issue is in "Waiting for Input") → do
    nothing but restate the open question once. noop:true until answered.
 
-3. Everything in MVP 1 looks done → verify before believing it. Run
-   scripts/sdd-gate.ps1 (must exit 0), confirm the tree is clean and
-   origin/main is in sync, confirm every issue is Done, then launch the client
-   and confirm you can move and place a block. A game that does not start is
-   not a finished MVP no matter what the board says.
+3. Every feature in the current MVP looks done → verify before believing it.
+   Work through that MVP's exit criteria in roadmap.md one by one and confirm
+   each. At minimum that always includes: scripts/sdd-gate.ps1 exits 0, the
+   tree is clean and origin/main is in sync, every issue is Done, and the
+   playable behaviour the exit criteria name actually works when you launch it.
+   A build that does not do what the criteria say is not a finished MVP, no
+   matter what the board says.
    All hold → report completion via SendMessage to main, stop the loop.
-   Any fails → fix that, do not re-claim completion until it holds.
+   Any fails → fix it; do not re-claim completion until it holds.
 
 4. Otherwise advance the build by exactly ONE step, then noop:false:
-   - No spec in flight → pick the next item from MVP 1 by dependency order,
-     create its Linear issue, move it to In Progress, and spawn the /sdd-start
-     subagent.
+   - No spec in flight → pick the next feature from the MVP's table by
+     dependency order, create its Linear issue, move it to In Progress, and
+     spawn the /sdd-start subagent.
    - A spec is mid-pipeline → spawn the next stage's subagent
      (start → architect → [discuss] → tasks → implement → validate → complete).
    - The last stage failed → decide: retry with corrected guidance, re-run an
      earlier stage, or escalate. Never re-spawn an identical prompt; it will
      fail identically.
-   - The tree is dirty from an interrupted predecessor → resolve it as owner
+   - The tree is dirty from an interrupted earlier tick → resolve it as owner
      before starting new work. Finish it, commit it, or discard it
      deliberately, and say which.
 
@@ -75,8 +91,9 @@ Then act on the FIRST match:
    Commit and push at every stage boundary. Unpushed work is unbacked work.
 
 Stop the loop when:
-- MVP 1 is verified complete (step 3). Do NOT continue into MVP 2 — the user
-  reviews and gives feedback first.
+- The current MVP is verified complete (step 3). Do NOT advance to the next
+  MVP — the user reviews and gives feedback first, and may change what comes
+  next based on playing this one.
 - Three consecutive ticks produce no new commits and no Linear transitions.
   Something is systematically broken; report it and stop rather than burning
   turns.
@@ -87,49 +104,49 @@ fallback delays (1800s+). Do not poll.
 
 ## Why it is shaped this way
 
+**Generic by construction.** Scope, features and the definition of done all come
+from whichever MVP `roadmap.md` marks `← current`. Promoting the next MVP is a
+one-word edit to the roadmap; this prompt never changes. Hardcoding an MVP would
+have meant maintaining six near-identical prompts that drift.
+
+**It refuses to guess scope.** No current marker, no exit criteria, or two
+markers → stop and ask. An autonomous agent that invents its own scope is far
+worse than one that stalls, and this is the exact place that failure would
+enter.
+
 **One step per tick.** The conductor does not try to run a whole spec in one
 invocation. Each tick makes one decision, spawns one subagent, and yields. That
 is what makes a multi-hour MVP survivable: no single context has to hold it.
 
 **State comes from disk, never memory.** A tick may begin with no recollection
-of the previous one, so Linear, git, and `specs/active/` are the source of
-truth. This is the same property that makes Prospect phases resumable, applied
-one level up.
+of the previous one, so the roadmap, Linear, git and `specs/active/` are the
+source of truth. Same property that makes Prospect phases resumable, applied one
+level up — and the reason to push at every stage boundary.
 
-**Verification before claiming done.** Step 3 runs the gate and launches the
-game rather than trusting the Linear board. It is the same principle the
-conductor applies to its own subagents — *"do not take a subagent's word that
-it is green"* — turned on itself. MVP 1's definition of done is "a game that
-starts and is playable", which no number of closed issues can establish.
+**Verification before claiming done.** Step 3 walks the roadmap's exit criteria
+and launches the build rather than trusting the Linear board. Same principle the
+conductor applies to its own subagents — *"do not take a subagent's word that it
+is green"* — turned on itself.
 
-**No outer manager.** An earlier draft made this an external supervisor loop
-that spawned conductors, verified their work, and committed dirty trees. That
+**No outer manager.** An earlier draft made this an external supervisor that
+spawned conductors, verified their work and committed dirty trees. That
 contradicted the conductor's ownership and put a second actor on the same
 branch. Folding the loop *into* the conductor removes the conflict rather than
 managing it.
 
 **It stops at the MVP boundary.** Rolling into the next MVP would spend hours
-building on a foundation the user has not reviewed.
+building on a foundation the user has not reviewed — and feedback on a playable
+increment routinely changes what should come next.
 
-## Adapting for later MVPs
+## Requirement this places on the roadmap
 
-Swap the project ID and MVP name:
-
-| MVP | Linear project ID |
-|-----|-------------------|
-| 1 Playable Sandbox | `f6cf7f2f-b4ad-4bb3-ab04-473b5ae68ec2` |
-| 2 Scriptable Content | `9af3f5c2-8b51-4e08-8fa5-c04e38e43eca` |
-| 3 Multiplayer | `fff6b8f3-6238-462d-8e97-373e1d734369` |
-| 4 Survival Loop | `4bdd46a4-c442-4c51-a584-1acc24953533` |
-| 5 Living World | `9e966760-3112-4b98-8b91-e4deaf47711c` |
-| 6 Public & Polished | `417535c1-8843-4866-bf95-d48011f834e5` |
-
-Also update step 3's playability check — "playable" differs per increment. For
-MVP 3 it means two clients connected to one server, not one client launching.
+`product/roadmap.md` must always have **exactly one** MVP marked `← current`,
+with a feature table and an **Exit criteria** section stating what "playable"
+means for that increment. The loop reads all three. When promoting the next MVP,
+move the marker and write its exit criteria before starting the conductor.
 
 ## Cost
 
-Roughly six subagents per spec, and an MVP of 5–7 specs. A full MVP 1 run is
-many hours and a large number of agent invocations. Steering mid-run is
-supported: user messages are authoritative and the conductor adjusts on the
-next tick.
+Roughly six subagents per spec, and an MVP of 5–7 specs. A full MVP run is many
+hours and a large number of agent invocations. Steering mid-run is supported:
+user messages are authoritative and the conductor adjusts on the next tick.

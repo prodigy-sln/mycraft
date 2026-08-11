@@ -5,6 +5,13 @@ Tracked in Linear — team `prodigy-solutions` (`PRO-`), initiative
 Each MVP below is a Linear project; each spec is one flat `PRO-` issue inside it. Linear is
 authoritative for issue status.
 
+> **This file drives the autonomous build.** The conductor reads the MVP marked
+> `← current`, its feature table, and its **Exit criteria** section to determine
+> scope and what "done" means. Exactly one MVP must carry the marker, and it must
+> have exit criteria — otherwise the conductor stops and asks rather than
+> guessing. When promoting the next MVP, move the marker *and* write its exit
+> criteria before starting a run.
+
 ## How this roadmap works
 
 **Incremental, not waterfall.** Every MVP ends with a *playable game* — not a finished layer.
