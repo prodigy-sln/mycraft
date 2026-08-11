@@ -1,0 +1,47 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Coverage
+/coverage/
+*.profraw
+*.profdata
+lcov.info
+
+# Prospect update artifacts — review and merge, never commit
+*.prospect-incoming
+
+# Test harness output
+/artifacts/frames/
+/artifacts/traces/
+/artifacts/loadtest/
+
+# Worlds and runtime state (never commit save data)
+/worlds/
+*.redb
+*.redb-lock
+
+# Server secrets and identity keys
+/secrets/
+*.key
+server-identity.toml
+
+# Local overrides
+/config.local.toml
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Profiling
+*.tracy
+flamegraph.svg
+perf.data*
