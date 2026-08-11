@@ -6,7 +6,16 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# No `mc-*` dependency belongs in any section of this manifest: the harness must
+# not depend on the code it verifies (MyCraft invariant 5), and that is asserted
+# against the resolved dependency graph in `tests/dependency_graph.rs`.
 [dependencies]
+image = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [lints]
 workspace = true
