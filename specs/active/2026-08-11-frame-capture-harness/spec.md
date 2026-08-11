@@ -128,10 +128,10 @@ Two environment opt-ins are referenced throughout and are part of the contract:
   to the same pixels in the same orientation.
   - FR-2.4-S1: WHEN a captured 64×64 image is written to a PNG and decoded again
     THE SYSTEM SHALL yield pixel data identical to the captured image.
-  - FR-2.4-S2: WHEN a captured 64×64 image whose left half is opaque white and
-    right half is opaque black is written to a PNG THE SYSTEM SHALL produce a
-    file whose pixel at (0, 32) decodes to (255, 255, 255, 255) and whose pixel
-    at (63, 32) decodes to (0, 0, 0, 255).
+  - FR-2.4-S2: WHEN a captured 64×64 image whose **top** half is opaque white
+    and **bottom** half is opaque black is written to a PNG THE SYSTEM SHALL
+    produce a file whose pixel at (32, 0) decodes to (255, 255, 255, 255) and
+    whose pixel at (32, 63) decodes to (0, 0, 0, 255).
   - FR-2.4-S3: IF the target path's directory does not exist and cannot be
     created THEN THE SYSTEM SHALL return an error naming the path and the
     underlying cause, and SHALL NOT report the image as written.
@@ -143,8 +143,9 @@ greater than**: a pixel fails when its distance is greater than the per-pixel
 tolerance, a pair fails the budget when the failing share is greater than the
 budget, and fails the ceiling when any distance is greater than the ceiling.
 The neutral greys used in these scenarios reduce ΔE to the lightness
-difference: (128,128,128) vs (129,129,129) is ΔE ≈ 0.40, vs (140,140,140) is
-ΔE ≈ 4.67, vs (180,180,180) is ΔE ≈ 19.72.
+difference: (128,128,128) vs (129,129,129) is ΔE ≈ 0.39, vs (140,140,140) is
+ΔE ≈ 4.67, vs (180,180,180) is ΔE ≈ 19.72. To full precision these are 0.39168,
+4.66505 and 19.72703 (see Clarifications).
 
 - **FR-3.1**: Two images are compared per pixel by CIELAB distance against a
   per-pixel tolerance.
@@ -352,7 +353,13 @@ only reductions — a count and a maximum — are order-independent.
   reader cancels symmetric errors: a row flip on write plus a row flip on read
   passes FR-2.4-S1 while the PNG on disk is upside-down for the agent who is
   the whole point of user story 1. The asymmetric on-disk assertion is what
-  catches it.
+  catches it. **The fixture must therefore be split across rows, not columns.**
+  PNG is a row-ordered format, so row-order inversion is the realistic bug; a
+  column mirror is not a failure mode any encoder or unpadding step plausibly
+  produces. A left/right split asserted on one row is invariant under precisely
+  the transform the scenario exists to detect — flip the rows and the left half
+  is still white at every row — which is why the fixture is top/bottom and the
+  assertion names two rows of the same column.
 - Adapter selection prefers hardware and may fall back to software (FR-1.1-S5);
   whichever is used is recorded (FR-5.1). Making selection a pure function over
   an enumerated candidate list keeps FR-1.1-S5 testable without two physical
@@ -487,3 +494,25 @@ None.
 - Q: How does a lost device avoid hanging a test run? → A: Every capture carries
   a readback deadline (default 30 s) and returns a timeout error naming the
   capture.
+
+### Session 2026-08-11 (phase-1 implementation)
+
+- Q: FR-2.4-S2's fixture was left half white / right half black, asserted at
+  (0, 32) and (63, 32). Does that catch the failure the scenario exists for? →
+  A: **No, and the fixture has been corrected to top/bottom.** A row-order flip
+  maps row 32 to row 31, where the left half is still white and the right still
+  black, so the assertion was invariant under precisely the transform it was
+  written to detect. It caught a column mirror, which no encoder or unpadding
+  step plausibly produces. The corrected fixture splits across rows and asserts
+  (32, 0) and (32, 63). FR-2.4-S1's fixture is asymmetric in both axes and
+  already catches any *single* flip, so S2's remaining job is the compensating
+  write-flip-plus-read-flip pair — a row-axis phenomenon.
+- Q: Are the three reference ΔE values quoted under "Tolerance model" exact? →
+  A: They are rounded, and one of them rounds the wrong way. To full precision,
+  CIE76 over CIELAB (D65, sRGB transfer function) gives (128,128,128) vs
+  (129,129,129) = **0.39168**, vs (140,140,140) = **4.66505**, vs (180,180,180)
+  = **19.72703**. The 4.67 and 19.72 figures round correctly; the 0.40 did not
+  and now reads 0.39. A conforming implementation lands on 0.392, which is
+  correct rather than drift — recorded so a reviewer does not read it as one.
+  No threshold, scenario or verdict changes: 0.39 and 0.40 sit on the same side
+  of every threshold in this spec.
