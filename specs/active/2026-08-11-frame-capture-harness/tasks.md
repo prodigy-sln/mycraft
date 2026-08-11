@@ -928,3 +928,52 @@ on disk.
   channels — the ±1 in the scenario is headroom for another backend, not slack
   this one needed. FR-5.1-S4's sidecar means the day a second adapter runs the
   gate, this provenance is already on record.
+
+- **Ruling 5's condition was not met by phase 2's code, and has been amended**
+  (lead correction at the phase-3 boundary; `10922ea`). The approved design — a
+  failed golden *write* on the update path reports the verdict that still stands,
+  with the write failure in `GoldenFailure.artifacts` — was implemented, but the
+  message said nothing about the golden. Reproduced before changing anything:
+
+  ```
+  no golden exists at `…\default.png`; artifacts in `…\artifacts\clear-red-64`
+  ```
+
+  Two defects in one line. The write failure lived in the `artifacts` field and
+  never reached `Display` at all, and the standing verdict reads, to a caller who
+  set `MYCRAFT_UPDATE_GOLDENS`, as the state the update had just fixed — which is
+  exactly the wall the ruling anticipated. It also pointed at an artifact
+  directory this path never writes to.
+
+  `ArtifactError::GoldenNotUpdated { path, cause }` now carries the image write,
+  and `GoldenFailure` gained a hand-written `Display` that renders the whole cause
+  chain when a write failed, leaving the `Ok` wording untouched so FR-4.2-S2's
+  assertion is unaffected. It emits:
+
+  ```
+  no golden exists at `…\default.png`; the golden was NOT updated: could not
+  write the image `…\default.png`: could not create the directory
+  `…\clear-red-64` to hold a PNG: Cannot create a file when that file already
+  exists. (os error 183)
+  ```
+
+  **Only the image write is wrapped.** Past that line the golden is on disk, so a
+  sidecar failure stays `ArtifactError::Report` — a blanket "not updated" flag
+  would have lied in exactly the case where the golden *was* updated and only its
+  provenance was not.
+
+  A first attempt added an `attempted: FailedWrite` field to `GoldenFailure`
+  instead. It was abandoned: the extra field pushed `GoldenOutcome::Failed` past
+  `clippy::large_enum_variant`, and boxing that variant broke
+  `golden_missing.rs:84`, a phase-2 test the implementation context may not edit.
+  Putting the fact in the error rather than beside it needs no public struct
+  change, breaks no test, and is more accurate about the sidecar case.
+
+- **Deferred observation, not fixed:** when the golden image writes but its
+  sidecar does not, the outcome is still `Failed(standing)` — so the reported
+  verdict says "no golden exists" while one has in fact just been written. That
+  is pre-existing phase-2 behaviour under ruling 5 and outside this correction's
+  brief. It is much rarer than the case above (it needs the directory to be
+  creatable and the image to write and only the JSON to fail) and the message now
+  at least does not claim the golden was left alone. Worth a ruling if the update
+  path is ever revisited.
