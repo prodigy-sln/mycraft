@@ -13,7 +13,7 @@ column of every updated file, and register newly created files.
 docs/
 ├── INDEX.md              ← you are here
 ├── technical/            ← engine contributors: architecture, protocol, formats
-├── modding/    (planned) ← script authors: the Luau API surface (public contract)
+├── modding/              ← content authors: block/item/... authoring and (eventually) the Luau API surface
 ├── user/       (planned) ← players and server operators
 └── ops/        (planned) ← running a public server: deploy, backup, moderation
 ```
@@ -34,11 +34,19 @@ the Routing Guide below is where future destinations are declared.
 
 | File | Purpose | Sources |
 |------|---------|---------|
-| decisions.md | Architecture decision records — stack choices and their rejected alternatives | PLAN.md |
+| architecture.md | Crate boundaries and dependency direction established by the block registry and chunk storage work | SPEC-002 |
+| decisions.md | Architecture decision records — stack choices and their rejected alternatives | PLAN.md, SPEC-002 |
 | rendering.md | Draw-target conventions established ahead of `mc-render`: orientation and capture pixel-format contract | SPEC-001 |
-| testing.md | Quality gate stages, verification harnesses, and what automation cannot check | PLAN.md, sdd-init-project, SPEC-001 |
+| testing.md | Quality gate stages, verification harnesses, and what automation cannot check | PLAN.md, sdd-init-project, SPEC-001, SPEC-002 |
+| world-format.md | Chunk section and column storage, the block palette, and block-identity stability across a registry change | SPEC-002 |
 
-### modding/ · user/ · ops/
+### modding/
+
+| File | Purpose | Sources |
+|------|---------|---------|
+| blocks-items.md | Block authoring contract: file layout, required fields, namespaced-id rule, failure reporting | SPEC-002 |
+
+### user/ · ops/
 
 Not yet written. These branches are created by the specs that produce the behaviour they document —
 see the Routing Guide for where each topic lands.

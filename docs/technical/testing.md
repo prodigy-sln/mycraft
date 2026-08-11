@@ -68,6 +68,73 @@ Do not remove one half without the other. The check is verified by a negative te
 `.env.example` is deliberately **not** allowlisted. It is tracked, so it must never contain a real
 value, and the scanner should catch it if it ever does.
 
+## Unit test placement and structural-invariant tests
+
+**Unit tests live in sibling `*_test.rs` files, never in an inline
+`#[cfg(test)]` module.** A module under `crates/mc-world/src/section/`
+that needs a unit test gets a `foo_test.rs` beside `foo.rs`, wired in with
+a `#[path = "foo_test.rs"] mod tests;` declaration, rather than a `mod
+tests { ... }` block inside `foo.rs` itself. This mirrors the
+`mc-testkit/src/frame/` layout and is what makes a source-literal scan
+(catching, for instance, a hardcoded `base:`-namespaced block name outside
+test code — `technical/architecture.md`) implementable as a plain
+file-level filter: skip every `*_test.rs`, read everything else whole. An
+inline `#[cfg(test)]` block would force that scan to parse Rust, or fall
+back to a heuristic fragile enough to defeat the reason the scan exists.
+
+**Corollary, binding project-wide: rustdoc examples may not use a
+`base:`-namespaced name.** `/// let name = BlockName::parse("base:stone")?;`
+is the single most natural doc example for a namespaced-id type, and it
+would trip the same scan the moment it appeared, since a scan that skips
+only `*_test.rs` files still reads doc comments in production source. Use
+an unmistakably-fake namespace instead, e.g. `example:foo`.
+
+**A structural-invariant test — one that walks a dependency graph or
+scans source for an absence — needs a positive control, not just the
+negative assertion.** A test that only asserts something is *not* present
+(no `toml` in `mc-core`'s resolved graph; no `base:` literal in production
+source) goes green forever the day the thing it was guarding against is
+quietly removed — a deleted TOML loader replaced with hardcoded
+definitions would leave "no `toml` dependency" trivially true. Both
+structural-invariant tests in `mc-world` pair the negative assertion with
+a positive control in a separate test function over the same walk: the
+dependency-graph test additionally asserts that `mc-world`'s own resolved
+graph *does* reach `toml`, and the source-scan test additionally asserts
+that the same scanning function, pointed at a fixture directory
+containing one of the guarded names, *does* report a hit. Splitting each
+into two functions rather than one is deliberate — as a single test, "the
+control fails while the real assertion still passes" is not something a
+test run can show you happening; as two, it is.
+
+**Two mutation-testing results are worth keeping as illustrations of what
+"looks correct but isn't" can survive a full green suite:**
+
+- Allocating a fixed 8192 bytes at *every* index-width tier (rather than
+  the size each tier actually needs) fails five separate size assertions
+  — but only as long as the reported storage size reads the backing
+  buffer's real length. Recomputing that figure from the width instead of
+  reading the buffer makes every one of those assertions pass again,
+  against an allocation that is wrong at five of six tiers. The lesson
+  generalizes: a "storage size" accessor that recomputes rather than
+  reports is not actually testing the allocation.
+- Making a palette's reference-count release a no-op fails a handful of
+  direct tests — but that same broken write path, combined with a
+  compaction step that recomputes surviving entries from the voxel array
+  instead of trusting the maintained counts, passes the overwhelming
+  majority of the suite. Refcounting is wholly broken in that scenario,
+  and only a test that asserts refcount transitions directly — independent
+  of anything compaction-visible — catches it. The general lesson:
+  compaction (or any similar reconciliation step) must steer on the state
+  the write path maintains, not recompute it from scratch, or a "safer"
+  recomputation silently absorbs the exact defect the reconciliation step
+  exists to expose.
+
+A failing `proptest` run writes a `*.proptest-regressions` file recording
+the failing seed. When the failure came from a deliberately mutated
+implementation (mutation testing, not a real regression), delete that file
+rather than committing it — a committed seed should mean "this once broke
+the real implementation," not "this once broke a scratch mutant."
+
 ## Verification without a human at the screen
 
 Most of this project is built by an agent that cannot see the game window, cannot feel input lag,

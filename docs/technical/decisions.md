@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Source: `PLAN.md` (research, 2026-08-11).
+Sources: `PLAN.md` (research, 2026-08-11); ADR-011 and ADR-012 consolidated from SPEC-002.
 
 Each record states a decision that is **binding now**. Status `Accepted` means the decision governs
 all new work; where implementation has not yet landed, that is noted explicitly. Superseding a
@@ -273,3 +273,118 @@ mod-supplied path unexercised until the first third-party mod discovered it brok
 everything as loose files — cannot satisfy the restricted licences. Hardcoding asset references in
 Rust beside the embedded bytes — that is a content definition in Rust and breaches ADR-005; only the
 *bytes* are embedded, never what a block *is*.
+
+---
+
+## ADR-011 — A section's palette holds namespaced names, not runtime ids
+
+**Status**: Accepted · **Date**: 2026-08-11
+
+**Context.** A chunk section has to store which block occupies each voxel,
+and that storage has to remain meaningful across an MVP 2 registry hot
+swap — the moment `mc-script` builds a new candidate registry and
+`ArcSwap::store`s it at a tick boundary. Runtime ids are registry-local and
+reassigned freely whenever the definition set changes, so storing them
+directly ties a section's meaning to a registry instance that may not
+exist by the time the section is read again.
+
+**Decision.** A section's palette holds `BlockName`s. `Section::block_at`
+takes no registry argument at all — reading a voxel "against the wrong
+registry" is not an operation the type exposes. Name-taking mutators
+(`filled`, `set_block`) take a registry only as a validator, never a
+translator: it answers "is this name registered?" and cannot make the
+section store anything other than the name the caller supplied.
+`set_block_by_id` is the one operation that translates a runtime id into a
+name, confined to that single call.
+
+**Rejected.**
+
+- **`Section<'r>` borrowing `&'r BlockRegistry`.** Not viable at all:
+  `bevy_ecs::Component` requires `Send + Sync + 'static` (ADR-004 puts all
+  runtime state in the ECS), so a lifetime-parameterised section cannot be
+  a component. Independently fatal on its own terms: a borrow would pin
+  the registry it was built against for the lifetime of every loaded
+  chunk, which an MVP 2 hot swap cannot tolerate.
+- **`Section` owning `Arc<BlockRegistry>`.** `'static` and ECS-storable,
+  and a wrong-registry read becomes unrepresentable — but after a hot
+  swap, sections still holding the previous `Arc` keep serving the
+  previous definitions, so two loaded chunks can disagree about what
+  `base:stone` even is. This trades one silent-wrongness class for a
+  subtler one.
+- **A palette of `BlockId` plus a `RegistryId` token, validated on every
+  access.** Smallest memory footprint and directly usable ids. But every
+  accessor gains a mismatch-error case, export needs a fallible
+  id-to-name translation pass that can itself be wrong, and after an
+  MVP 2 registry swap *every already-loaded section* becomes unreadable
+  until a migration pass rewrites it — a migration pass MVP 2 would have
+  to design and get right, for a class of bug the chosen option removes
+  outright.
+
+**Consequences.** A registry hot swap is a no-op for already-loaded world
+data, and MVP 2 needs no migration pass over loaded chunks. Export is a
+pure projection of a section's own state, so there is no remapping code
+that could get the projection wrong. Costs, stated plainly: a palette
+entry becomes a 16-byte `Arc<str>` plus a shared allocation rather than a
+2-byte id, and any consumer wanting a numeric property of a block (the
+mesher, eventually) has to resolve each palette entry through the
+registry rather than indexing an array directly — cheap once per palette
+entry per mesh, but there is no per-voxel palette-index read path yet to
+make that cheap at the per-voxel level (see `technical/world-format.md`).
+The representation is private behind a newtype, so replacing `Arc<str>`
+with an interned id later is a one-file change if it ever becomes
+necessary. The remaining price is the de-registered-name failure class
+described in `technical/world-format.md`: a section can end up holding a
+name its current registry no longer recognises, and every solidity check
+against it then fails.
+
+---
+
+## ADR-012 — The block registry contract lives in `mc-core`
+
+**Status**: Accepted · **Date**: 2026-08-11
+
+**Context.** Something has to own the block registry's contract — the
+namespaced name, block definition, runtime id, and how definitions get
+registered. MVP 1's chunk storage needs it; MVP 2's Luau scripting host
+will need to populate the very same registry, which fixes the question of
+where it can live without inverting the workspace's inward dependency
+rule.
+
+**Decision.** The contract — `BlockName`, `TextureKey`, `BlockDefinition`,
+`BlockId`, `BlockRegistry`, and the `DefinitionSource` port — lives in
+`mc-core`. Chunk storage and the file-backed TOML loader live in
+`mc-world`, which depends on `mc-core`. `mc-core` performs no I/O and
+depends on nothing else in the workspace.
+
+**Rejected.**
+
+- **The contract in `mc-world`.** Forces `mc-script → mc-world` in MVP 2,
+  because the scripting host must populate the same registry chunk
+  storage reads from — inverting `CLAUDE.md`'s inward-dependency rule and
+  dragging chunk storage, worldgen, and eventually `redb`-backed
+  persistence into the scripting host's dependency graph. It also cannot
+  keep `toml` out of the contract-owning crate's graph by construction,
+  since the loader that parses TOML would live in the same crate as the
+  contract it populates.
+- **A new `mc-registry` crate.** Would satisfy the dependency-direction
+  concern, but adds an eleventh crate to a workspace whose ten-crate map
+  is deliberately fixed, for no capability `mc-core` does not already
+  provide — `mc-core`'s own purpose is exactly to hold primitives and
+  contracts other crates share.
+
+**Strongest argument against the decision taken, stated honestly:**
+`mc-core` is meant to hold primitives, and a registry is a stateful
+container with a registration lifecycle — not a primitive by any
+reasonable reading of the word. Putting mutable state in the primitives
+crate is a real smell, and it would compound if `mc-core` gained further
+stateful services over time. Accepted anyway, because the crate holds only
+the **contract** — what a definition is and how a name resolves to one —
+and populating that contract is done entirely from outside it, through the
+`DefinitionSource` port; `mc-core` itself never learns where a definition
+came from.
+
+**Consequences.** `mc-world → mc-core` is the only edge between the two
+crates. MVP 2's `mc-script` can depend on `mc-core` alone to populate the
+registry, without any dependency on chunk storage, worldgen, or
+persistence. `toml` is absent from `mc-core`'s entire resolved dependency
+graph, mechanically asserted (`technical/architecture.md`).

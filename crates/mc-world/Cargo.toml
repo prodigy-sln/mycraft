@@ -7,6 +7,24 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+mc-core = { workspace = true }
+# Confined to src/content/. The dependency-graph invariant asserts mechanically
+# that this never reaches mc-core, because MVP 2 replaces the format wholesale.
+toml = { workspace = true }
+serde = { workspace = true }
+# Section storage is the first thing in this crate to refuse anything of its
+# own; until now every failure it reported belonged to mc-core.
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+# The write path is asserted over arbitrary sequences of writes, not over a
+# handful of chosen ones: the widths a section steps through are what the
+# generated cases are there to cross.
+proptest = { workspace = true }
+# The dependency-graph invariant asks cargo itself what it resolved, and reads
+# the answer as JSON.
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

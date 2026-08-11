@@ -1,0 +1,3 @@
+name = "base:stone"
+texture = "base:stone"
+solid = true

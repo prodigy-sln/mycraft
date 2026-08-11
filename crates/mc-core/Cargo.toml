@@ -6,7 +6,12 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# One dependency, and it stays that way. `cargo metadata`'s resolve nodes include
+# dev-dependencies, so `[dev-dependencies]` must stay as empty as this list is
+# narrow: the block registry contract asserts that no serialization format ever
+# reaches this crate's resolved graph.
 [dependencies]
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

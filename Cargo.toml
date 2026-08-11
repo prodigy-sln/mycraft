@@ -23,15 +23,19 @@ repository = "https://github.com/prodigy-sln/mycraft"
 # Central version pinning. Member crates opt in with `dep = { workspace = true }`.
 # Unused entries cost nothing at build time.
 [workspace.dependencies]
-# Internal
-mc-core = { path = "crates/mc-core" }
-mc-world = { path = "crates/mc-world" }
-mc-script = { path = "crates/mc-script" }
-mc-proto = { path = "crates/mc-proto" }
-mc-net = { path = "crates/mc-net" }
-mc-sim = { path = "crates/mc-sim" }
-mc-render = { path = "crates/mc-render" }
-mc-testkit = { path = "crates/mc-testkit" }
+# Internal. The version is carried alongside the path because deny.toml sets
+# `wildcards = "deny"`, and a path dependency with no version is a wildcard —
+# an unpinned dependency is exactly what that ban exists to catch, and an
+# internal crate is not an exception to it. Keep these in step with
+# [workspace.package] version above.
+mc-core = { path = "crates/mc-core", version = "0.1.0" }
+mc-world = { path = "crates/mc-world", version = "0.1.0" }
+mc-script = { path = "crates/mc-script", version = "0.1.0" }
+mc-proto = { path = "crates/mc-proto", version = "0.1.0" }
+mc-net = { path = "crates/mc-net", version = "0.1.0" }
+mc-sim = { path = "crates/mc-sim", version = "0.1.0" }
+mc-render = { path = "crates/mc-render", version = "0.1.0" }
+mc-testkit = { path = "crates/mc-testkit", version = "0.1.0" }
 
 # ECS / math
 bevy_ecs = "0.19.0"
