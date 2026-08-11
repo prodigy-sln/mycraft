@@ -42,7 +42,7 @@ forward; none is a pure layer.
 
 | Priority | Feature | Issue | Status |
 |----------|---------|-------|--------|
-| P0 | Headless frame-capture harness | PRO-849 | Todo |
+| P0 | Headless frame-capture harness | PRO-849 | **Done** |
 | P0 | Chunk storage and block palette | PRO-850 | Todo |
 | P0 | Binary greedy mesher | PRO-851 | Todo |
 | P0 | wgpu terrain pipeline and windowed client — *you can see terrain* | PRO-852 | Todo |
@@ -106,7 +106,7 @@ dungeon models suit **MVP 5**, and audio and GUI belong to **MVP 6**. MVP 1 stay
 
 | Feature | Completed | Spec |
 |---------|-----------|------|
-| — | — | — |
+| Headless frame-capture harness (PRO-849) | 2026-08-11 | `2026-08-11-frame-capture-harness` |
 
 ---
 

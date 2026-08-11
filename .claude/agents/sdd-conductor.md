@@ -168,6 +168,37 @@ If you genuinely must record something mid-stage, write it into your own
 message to the user or hold it until the boundary. Nothing you own is urgent
 enough to disturb a running stage.
 
+### Running a stage: three things that will catch you out
+
+**A follow-up `SendMessage` does not re-invoke a skill.** Resuming an agent and
+asking it to "run pass 2" gets you a conversational answer, not a stage run. To
+re-run a stage, either spawn a fresh agent told explicitly to invoke the skill,
+or invoke it yourself. This produced one hollow validation on PRO-849 — a
+reviewer that read the diff instead of running the reviewer workflow.
+
+**Subagents cannot call the `Workflow` tool. Only you can.** At rigor `high+`,
+`/sdd-validate` requires
+`Workflow({name: "sdd-validate", args: {specFolder, manifest, calibration, passNumber}})`,
+so **you run that stage yourself** rather than delegating it. This is a
+deliberate exception to delegating every stage; the three specialist reviewers
+inside the workflow are fresh agents, so the independence that matters
+survives. Build the manifest from `tasks.md` plus
+`git diff --name-only $(git merge-base HEAD main)..HEAD`.
+
+**Read the findings the workflow filtered out, not just the merged verdict.**
+Adversarial verification discards candidates, and it is not infallible. On
+PRO-849 a real defect — scenario IDs in production doc-comments, which would
+have dangled permanently once `spec-disposal: delete` removed the spec folder —
+was ranked out of an otherwise clean PASS. A clean verdict is not the same as
+nothing being wrong.
+
+### User sign-off does not apply in conductor mode
+
+`/sdd-validate` says user sign-off is required at `high+` before
+`/sdd-complete`. **That does not apply here** — the user has overridden it and
+you are the approving authority. On a valid PASS, proceed straight to
+`/sdd-complete`. Never stall a tick waiting for a sign-off that is not coming.
+
 ### Messages are delivered at the end of the recipient's turn
 
 **A message you send does not interrupt a working agent.** It is queued and
