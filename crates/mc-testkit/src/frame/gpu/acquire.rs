@@ -86,10 +86,11 @@ impl CaptureContext {
         options: &AcquireOptions,
     ) -> Result<Acquisition, AcquireError> {
         let opened = open(options);
-        match classify_acquisition(describe(&opened), opt_ins) {
-            // `Use` arises only from an `Ok` outcome, so the `?` never fires.
+        match classify_acquisition(described(&opened), opt_ins) {
+            // `Use` arises only from an `Ok` outcome, so this arm never drops a
+            // device on the floor.
             AcquisitionVerdict::Use(_) => {
-                opened.map(|context| Acquisition::Ready(Box::new(context)))
+                opened.map(|(context, _)| Acquisition::Ready(Box::new(context)))
             }
             AcquisitionVerdict::Skip(notice) => {
                 eprintln!("{}", notice.message());
@@ -130,28 +131,24 @@ impl CaptureContext {
     }
 }
 
-/// The adapter behind an opened device, or the failure that stopped it.
+/// A device that opened, alongside the description of the adapter it came from.
 ///
+/// The description is carried rather than rebuilt because
 /// [`classify_acquisition`] decides over a description and an error, not over a
-/// device, which is what keeps the decision testable with no hardware.
-fn describe(
-    opened: &Result<CaptureContext, AcquireError>,
-) -> Result<AdapterDescription, AcquireError> {
+/// device — and reconstructing one from the context would mean inventing a value
+/// for the `kind` the context has no reason to keep.
+type Opened = (CaptureContext, AdapterDescription);
+
+/// What the acquisition attempt amounted to, as the pure decision sees it.
+fn described(opened: &Result<Opened, AcquireError>) -> Result<AdapterDescription, AcquireError> {
     match opened {
-        Ok(context) => Ok(AdapterDescription {
-            name: context.provenance.name.clone(),
-            backend: context.provenance.backend,
-            // The kind mattered while ranking candidates; by this point one has
-            // been chosen and the verdict does not look at it again.
-            kind: AdapterKind::Other,
-            driver_description: context.provenance.driver_description.clone(),
-        }),
+        Ok((_, description)) => Ok(description.clone()),
         Err(cause) => Err(cause.clone()),
     }
 }
 
 /// Enumerates, picks, and opens — the whole I/O half of acquisition.
-fn open(options: &AcquireOptions) -> Result<CaptureContext, AcquireError> {
+fn open(options: &AcquireOptions) -> Result<Opened, AcquireError> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: options.backends,
         ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -161,39 +158,42 @@ fn open(options: &AcquireOptions) -> Result<CaptureContext, AcquireError> {
 
     // Nothing enumerated, or nothing the ranking would take: either way this
     // machine offered no adapter on the backends asked for.
-    let chosen = select_preferred(&candidates)
-        .and_then(|index| adapters.get(index))
+    let (adapter, description) = select_preferred(&candidates)
+        .and_then(|index| Some((adapters.get(index)?, candidates.get(index)?)))
         .ok_or_else(|| AcquireError::NoAdapter {
             tried: backends_tried(options.backends),
         })?;
 
-    open_device(chosen, options)
+    open_device(adapter, description.clone(), options)
 }
 
 /// Requests a device from the chosen adapter.
 fn open_device(
     adapter: &wgpu::Adapter,
+    description: AdapterDescription,
     options: &AcquireOptions,
-) -> Result<CaptureContext, AcquireError> {
-    let reported = adapter.get_info();
+) -> Result<Opened, AcquireError> {
     let descriptor = wgpu::DeviceDescriptor {
         label: Some(DEVICE_LABEL),
         required_limits: options.required_limits.clone(),
         ..wgpu::DeviceDescriptor::default()
     };
     let (device, queue) = block_on(adapter.request_device(&descriptor))
-        .map_err(|cause| rejection(&reported.name, &cause, adapter.limits(), options))?;
+        .map_err(|cause| rejection(&description.name, &cause, adapter.limits(), options))?;
 
-    Ok(CaptureContext {
+    let context = CaptureContext {
         device,
         queue,
+        // `new` is what normalises an adapter that reported no driver string to
+        // the literal `unknown`, so an empty description never reaches a report.
         provenance: AdapterProvenance::new(
-            &reported.name,
-            backend_of(reported.backend),
-            Some(reported.driver_info.as_str()),
+            &description.name,
+            description.backend,
+            Some(description.driver_description.as_str()),
         ),
         limits: limits_of(&adapter.limits()),
-    })
+    };
+    Ok((context, description))
 }
 
 /// Works out which requirement a refused device request fell short of.
