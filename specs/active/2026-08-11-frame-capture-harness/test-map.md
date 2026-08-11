@@ -72,7 +72,74 @@ core.
 
 ## Phase 2 — GPU-free policy, lifecycle and reporting (20 scenarios)
 
-Not yet authored.
+| Scenario | Test file | Test name |
+|---|---|---|
+| FR-1.1-S5 | `crates/mc-testkit/src/frame/selection_test.rs` | `a_hardware_adapter_is_chosen_over_a_software_one` |
+| FR-1.2-S1 | `crates/mc-testkit/src/frame/selection_test.rs` | `a_failed_acquisition_without_the_opt_in_is_an_error_rather_than_a_skip` |
+| FR-1.2-S2 | `crates/mc-testkit/src/frame/selection_test.rs` | `a_failed_acquisition_with_the_opt_in_skips_with_a_warning_naming_the_variable` |
+| FR-1.2-S3 | `crates/mc-testkit/src/frame/selection_test.rs` | `a_successful_acquisition_with_the_opt_in_set_still_runs_the_capture` |
+| FR-2.3-S2 | `crates/mc-testkit/tests/readback_deadline.rs` | `a_readback_that_outlives_its_deadline_times_out_naming_the_capture_and_the_bound` |
+| FR-4.1-S1 | `crates/mc-testkit/tests/golden_pass.rs` | `a_capture_matching_its_golden_passes_and_leaves_its_artifact_directory_empty` |
+| FR-4.1-S2 | `crates/mc-testkit/tests/golden_pass.rs` | `a_pass_removes_the_artifacts_an_earlier_mismatch_left_behind` |
+| FR-4.1-S3 | `crates/mc-testkit/tests/golden_pass.rs` | `clearing_one_captures_artifacts_leaves_another_captures_alone` |
+| FR-4.2-S1 | `crates/mc-testkit/tests/golden_mismatch.rs` | `a_mismatching_capture_writes_the_whole_artifact_set` |
+| FR-4.2-S2 | `crates/mc-testkit/tests/golden_mismatch.rs` | `a_reported_mismatch_names_the_directory_holding_its_artifacts` |
+| FR-4.2-S3 | `crates/mc-testkit/tests/golden_mismatch.rs` | `an_artifact_directory_that_cannot_be_created_still_reports_the_mismatch` |
+| FR-4.4-S1 | `crates/mc-testkit/tests/golden_missing.rs` | `a_missing_golden_fails_naming_the_path_and_is_not_created` |
+| FR-4.4-S2 | `crates/mc-testkit/tests/golden_missing.rs` | `a_missing_golden_writes_the_captured_frame_into_the_artifact_directory` |
+| FR-4.4-S5 | `crates/mc-testkit/tests/golden_missing.rs` | `a_golden_that_is_not_a_decodable_png_fails_without_being_replaced` |
+| FR-4.4-S3 | `crates/mc-testkit/tests/golden_update.rs` | `the_update_path_overwrites_a_mismatching_golden_and_reports_every_path_it_wrote` |
+| FR-4.4-S4 | `crates/mc-testkit/tests/golden_update.rs` | `the_update_path_leaves_a_matching_golden_byte_for_byte_alone` |
+| FR-5.1-S4 | `crates/mc-testkit/tests/golden_update.rs` | `a_written_golden_records_the_adapter_and_backend_that_produced_it` |
+| FR-5.1-S1 | `crates/mc-testkit/tests/frame_report.rs` | `a_written_mismatch_report_parses_as_json_whose_failing_pixel_count_is_a_number` |
+| FR-5.1-S2 | `crates/mc-testkit/tests/frame_report.rs` | `a_mismatch_report_records_the_environment_and_the_thresholds_that_judged_it` |
+| FR-5.1-S3 | `crates/mc-testkit/tests/frame_report.rs` | `an_adapter_reporting_no_driver_description_records_the_field_as_unknown` |
+
+### Supporting unit tests (no scenario)
+
+| Task | Test file | Test name | Why it exists |
+|---|---|---|---|
+| T12 | `crates/mc-testkit/src/frame/layout_test.rs` | `a_golden_is_the_default_image_inside_a_directory_named_for_its_capture` | Pins `<root>/<capture>/default.png`, the shape an adapter variant later adds a file to |
+| T12 | `crates/mc-testkit/src/frame/layout_test.rs` | `a_goldens_provenance_sidecar_sits_beside_it` | Pins `default.provenance.json` next to its golden |
+| T12 | `crates/mc-testkit/src/frame/layout_test.rs` | `a_captures_four_artifacts_share_a_directory_named_for_it` | Pins the artifact directory and its four filenames — and that nothing run-specific is in the path, which FR-4.1-S2 depends on |
+| T12 | `crates/mc-testkit/tests/capture_identity.rs` | `a_lowercase_name_with_digits_and_separators_is_accepted` | The accepted alphabet |
+| T12 | `crates/mc-testkit/tests/capture_identity.rs` | `a_nameless_capture_is_rejected` | An empty segment would put a capture's files in the root |
+| T12 | `crates/mc-testkit/tests/capture_identity.rs` | `a_name_carrying_a_path_separator_is_rejected_naming_the_character` | Path-traversal guard on a path-forming public input |
+| T12 | `crates/mc-testkit/tests/capture_identity.rs` | `a_parent_directory_reference_is_rejected` | `..` must never reach a path the harness writes to |
+| T12 | `crates/mc-testkit/tests/capture_identity.rs` | `an_uppercase_name_is_rejected` | Two captures must not collide on a case-insensitive filesystem |
+| T13 | `crates/mc-testkit/src/frame/selection_test.rs` | `an_adapter_of_unknown_kind_outranks_a_software_rasteriser` | `Cpu` ranks below `Other` — D2 calls this ordering the tested contract |
+| T13 | `crates/mc-testkit/src/frame/selection_test.rs` | `an_empty_candidate_list_selects_nothing` | The no-adapter case feeding `AcquireError::NoAdapter` |
+| T13 | `crates/mc-testkit/src/frame/selection_test.rs` | `a_limit_the_adapter_exactly_meets_is_not_reported` | The boundary: a limit met exactly is satisfied |
+| T13 | `crates/mc-testkit/src/frame/selection_test.rs` | `a_limit_beyond_the_adapter_is_reported_with_both_numbers` | The detail FR-1.1-S4's real wgpu rejection carries in phase 3 |
+| T14 | `crates/mc-testkit/tests/opt_ins.rs` | `an_opt_in_set_to_a_falsy_value_is_still_enabled` | Assumption 5: presence, not value |
+| T14 | `crates/mc-testkit/tests/opt_ins.rs` | `each_variable_enables_only_its_own_opt_in` | Permission to rewrite goldens is not permission to skip |
+| T22 | `crates/mc-testkit/tests/committed_golden.rs` | `the_golden_committed_to_the_repository_matches_the_frame_that_produced_it` | The git round trip — committed bytes read from their real repo path, compared, judged |
+| T22 | `crates/mc-testkit/tests/committed_golden.rs` | `regenerating_the_committed_golden_leaves_it_matching_the_generator` | `#[ignore]`d. Mints the committed golden through the harness's own update path, so the bytes in the repo are a product of the real code |
+
+### Shared fixtures
+
+`crates/mc-testkit/tests/support/mod.rs` — the golden-lifecycle fixtures
+(`reference_frame`, `drifted_frame`, the path helpers, `golden_settings`,
+`synthetic_provenance`, the `UPDATING` opt-in value) and this suite's
+`TestResult`.
+
+It is deliberately **separate from and independent of `common`**: phase 1's
+suite keeps compiling while phase 2 is still being built, so it stays a live
+regression signal instead of collateral damage. Verified — phase 1's 29 tests
+pass against a working tree in which every phase-2 binary fails to compile.
+
+Both fixture frames are **split across rows**. The lifecycle writes captured
+frames to disk and reads goldens back, so a row-order inversion is a realistic
+bug in exactly this path, and a fixture symmetric down the rows cannot witness
+one (`spec.md` § Structural constraints). The path helpers spell the D8 layout
+out literally rather than calling `GoldenPaths`/`ArtifactPaths`, so a relocated
+file is a failing test and not a silent move.
+
+The committed golden's fixture is generated by `synthetic_frame` in
+`committed_golden.rs` — every channel a function of the pixel's own
+coordinates, so the file is byte-reproducible from the committed generator
+alone. Green varies down the rows and red across the columns: neither a row
+inversion nor a transposition survives it.
 
 ## Phase 3 — the wgpu adapter (12 scenarios)
 
