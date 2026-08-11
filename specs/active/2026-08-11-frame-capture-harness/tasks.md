@@ -600,6 +600,15 @@ in which `wgpu` is in the dependency graph, and therefore the first in which the
         the ±1 absorbs backend rounding. If it lands outside ±1 on this adapter,
         that is information about cross-adapter drift feeding the
         per-adapter-golden trigger — **not** grounds for widening a tolerance.
+      - **AMENDED 2026-08-11 (lead ruling): FR-2.1-S2 is now a _top_-half fill,
+        not a left-half fill**, asserting (32, 0) and (32, 63). The task text
+        above predates the change and is kept intact per this file's own rule;
+        `spec.md` and `architecture.md` D6 are authoritative. The half-fill still
+        needs a real pipeline and draw, so nothing about this task's shape
+        changes — but the fixture is now the only thing in phase 3 that can
+        witness a row inversion in the readback chain, and the WGSL must get
+        clip-space y right (y is up; the top half is y > 0). Do not "simplify" it
+        back to a column split.
 
 - [ ] **T27** Draw-work failure and context reuse — `tests/`
       Scenarios: FR-2.1-S5, FR-2.1-S6

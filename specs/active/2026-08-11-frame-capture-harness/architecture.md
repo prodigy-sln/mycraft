@@ -357,9 +357,29 @@ where F: FnMut(&mut wgpu::CommandEncoder, &wgpu::TextureView) -> DrawResult;
 The harness creates the texture and hands out an encoder and a view; the caller
 begins its own passes. Rationale: FR-2.1-S1/S3/S4 are clears with *caller-chosen*
 colours ("draw work clears the target to opaque red"), and FR-2.1-S2 needs a real
-pipeline and draw for the left-half fill, which a harness-owned single render
+pipeline and draw for the top-half fill, which a harness-owned single render
 pass could not express. This is also what keeps the harness ignorant of
 `mc-render` (FR-6.1, invariant 5): it supplies a canvas, never a scene.
+
+**Orientation is part of this contract** (amended 2026-08-11, lead ruling).
+Because the caller owns the render pass, which way is up is public interface,
+not an internal detail:
+
+- **Framebuffer row 0 is the top**, and stays the top through readback,
+  comparison, PNG encode and PNG decode. No stage flips rows (D5).
+- **Clip-space y is up.** wgpu's framebuffer origin and clip-space y point in
+  opposite directions; that mismatch is one of the most common sources of
+  flipped output in the ecosystem, and it is the caller's to get right.
+- Therefore **a caller filling the top half of the target writes y > 0**.
+
+FR-2.1-S2 is the only scenario that holds this honest, which is why its fixture
+is split by row rather than by column. Every other phase-3 assertion is uniform
+(FR-2.1-S1/S3/S4), a count (FR-1.1-S1, FR-2.2-S1) or a duration (FR-2.3-S1), and
+none is sensitive to row order; FR-2.4-S2 does not close the gap either, since it
+runs a hand-built image through the PNG writer and reader with no capture in the
+path. The readback chain is thus the only place a row inversion plausibly
+originates, and was the only place nothing asserted against one. Consolidate this
+convention into `docs/` at `/sdd-complete` so PRO-852 inherits it.
 
 FR-2.1-S5 ("return *that* error") is satisfied by
 `CaptureError::DrawWork(#[source] Box<dyn Error + Send + Sync>)` — the caller's

@@ -91,9 +91,9 @@ Two environment opt-ins are referenced throughout and are part of the contract:
     target to opaque red THE SYSTEM SHALL return an image in which all 4096
     pixels are (255, 0, 0, 255).
   - FR-2.1-S2: WHEN a caller captures a 64×64 frame whose draw work fills only
-    the left half of the target with opaque white over an opaque black clear THE
-    SYSTEM SHALL return an image whose pixel at (0, 32) is (255, 255, 255, 255)
-    and whose pixel at (63, 32) is (0, 0, 0, 255).
+    the **top** half of the target with opaque white over an opaque black clear
+    THE SYSTEM SHALL return an image whose pixel at (32, 0) is
+    (255, 255, 255, 255) and whose pixel at (32, 63) is (0, 0, 0, 255).
   - FR-2.1-S3: WHEN a caller captures a 64×64 frame whose draw work clears the
     target to white at 25% alpha THE SYSTEM SHALL return an image whose red,
     green and blue channels are 255 in every pixel, unscaled by the alpha value.
@@ -344,6 +344,45 @@ only reductions — a count and a maximum — are order-independent.
   tests without a GPU, which FR-3.4-S3 asserts and which matches
   `crates/mc-render/CLAUDE.md`'s rule that logic stays out of the GPU-touching
   layer.
+- **Row-axis asymmetry is required of any content assertion.** Any scenario
+  asserting image *content* must use a fixture that is asymmetric on the **row**
+  axis, unless it states why row order is irrelevant to what it asserts. This is
+  a structural rule, not a style note: three separate scenarios in this spec were
+  written with fixtures invariant under the exact row-order inversion they
+  existed to detect (FR-2.4-S1 self-cancelling, caught by the scenario audit;
+  FR-2.4-S2 and FR-2.1-S2 column-split, caught during phase-1 implementation).
+  Three occurrences is a pattern, so the requirement moves from something a
+  reviewer must remember to something this document demands. Uniform fixtures
+  satisfy it by stating their exemption: FR-2.1-S1, FR-2.1-S3 and FR-2.1-S4
+  assert colour *format* — channel values, alpha handling, sRGB encoding — and
+  not layout, so row order cannot affect their outcome.
+
+- **The y-orientation convention is a caller contract, not an internal detail.**
+  The harness takes caller-supplied draw work, so which way is up is part of its
+  public interface. Stated plainly, and binding on every caller:
+  - **Framebuffer row 0 is the top** of the image, and stays the top through
+    readback, comparison, PNG encode and PNG decode. No stage flips rows.
+  - **Clip-space y is up.** wgpu's framebuffer origin and clip-space y point in
+    opposite directions, which is one of the most common sources of flipped
+    output in the ecosystem.
+  - Consequently **a caller filling the top half of the target writes y > 0**.
+
+  FR-2.1-S2 is what holds this honest, and it is the only scenario that does:
+  the readback chain (`copy_texture_to_buffer` → row unpadding) is simultaneously
+  the only place a row inversion plausibly originates and — before this scenario
+  was given a row-split fixture — the only place nothing asserted against one.
+  A capture path that inverts rows would make **every golden this project ever
+  commits wrong in the same direction**, consistently and therefore invisibly.
+  That is worse than having no harness, because it is confidently wrong: the
+  agent building the renderer would chase phantom geometry bugs against ground
+  truth that is itself upside-down. Settling the convention here, against
+  computed ground truth on a 64×64 image, is far cheaper than settling it
+  against terrain, where a vertically mirrored world looks entirely plausible
+  and would be blamed on worldgen, the camera or the mesher first.
+
+  **This convention must be consolidated into `docs/` at `/sdd-complete`** so
+  the renderer spec inherits it rather than rediscovering it.
+
 - The harness fixes one capture format — 8-bit RGBA, sRGB-encoded, straight
   alpha (FR-2.1-S3, FR-2.1-S4) — so captures are comparable across runs, and
   unpads the 256-byte-aligned buffer rows wgpu requires on texture-to-buffer
@@ -507,6 +546,21 @@ None.
   (32, 0) and (32, 63). FR-2.4-S1's fixture is asymmetric in both axes and
   already catches any *single* flip, so S2's remaining job is the compensating
   write-flip-plus-read-flip pair — a row-axis phenomenon.
+- Q: Does anything assert that the **capture** path preserves row order? → A:
+  **It does now — FR-2.1-S2, whose fixture changed from a left/right split to a
+  top/bottom one for that reason.** It previously did not, and the gap was the
+  most consequential defect found in this spec. Every other phase-3 assertion is
+  uniform (FR-2.1-S1/S3/S4), a count (FR-1.1-S1, FR-2.2-S1) or a duration
+  (FR-2.3-S1); none is sensitive to row order. FR-2.4-S2 does not close it
+  either, since it runs a hand-built image through the PNG writer and reader
+  with no capture in the path. So the readback chain
+  (`copy_texture_to_buffer` → row unpadding) was simultaneously the only place a
+  row inversion plausibly originates and the only place nothing asserted against
+  one, while "no vertical flip at any stage" was already binding. The scenario's
+  purpose is unchanged — a half-fill needs the same real pipeline and draw on
+  either axis — and the change additionally forces the caller's WGSL to get
+  clip-space y right, which is where the ecosystem's flipped-output bugs come
+  from and is better settled here than against terrain.
 - Q: Are the three reference ΔE values quoted under "Tolerance model" exact? →
   A: They are rounded, and one of them rounds the wrong way. To full precision,
   CIE76 over CIELAB (D65, sRGB transfer function) gives (128,128,128) vs
