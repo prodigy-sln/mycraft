@@ -15,7 +15,11 @@ elsewhere, which is why it is strict and why a red gate is an absolute stop.
   code — happens on it.
 - It merges into `main` once `/sdd-validate` passes and the gate is green.
   Merge locally; nothing waits on review.
-- Never force-push a branch that has been pushed to `origin`.
+- Rebasing to tidy a feature branch before merge is encouraged. After an
+  intentional rebase, publish it with `git push --force-with-lease`.
+- `--force-with-lease` only. Never bare `--force`: the lease is what makes the
+  push abort instead of silently discarding a commit that arrived after your
+  last fetch.
 - `main` always builds and always passes the gate. That is the only property
   `main` is required to have.
 
@@ -53,5 +57,6 @@ elsewhere, which is why it is strict and why a red gate is an absolute stop.
 - Push `main` and the active feature branch often — at minimum at every stage
   boundary and before any long-running operation. Unpushed work is unbacked
   work.
-- A push failure is reported, never silently retried in a loop or worked
-  around by rewriting history.
+- A push failure is reported, never silently retried in a loop. Rewriting
+  history is a legitimate response to an intentional rebase, never a way to
+  paper over a push you do not understand — diagnose first, then decide.

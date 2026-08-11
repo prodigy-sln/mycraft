@@ -152,8 +152,10 @@ remote.
 - Merge to `main` only when all four hold: `/sdd-validate` PASS, gate exits 0,
   spec status `implemented`, docs consolidated and spec registered.
 - **Push at every stage boundary.** Unpushed work is unbacked work.
-- Report a push failure; never loop-retry it and never rewrite history to work
-  around it.
+- Rebasing to tidy a feature branch before merge is encouraged; publish it with
+  `git push --force-with-lease`. Never bare `--force`.
+- Report a push failure and diagnose it. Never loop-retry, and never reach for
+  a force push to make an error you have not understood go away.
 - Run `scripts/sdd-gate.ps1` yourself before merging. Do not take a subagent's
   word that it is green.
 
