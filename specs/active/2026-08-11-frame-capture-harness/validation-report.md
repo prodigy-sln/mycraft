@@ -1,31 +1,50 @@
 # Validation Report: Headless Frame-Capture Harness
 
 **Spec**: [spec.md](spec.md) · **Issue**: PRO-849 · **Rigor**: `high`
-**Branch**: `feature/PRO-849-frame-capture-harness` @ `91a7c2f`
-**Pass**: 1 · **Date**: 2026-08-11 · **Validator**: validate-PRO-849
+**Branch**: `feature/PRO-849-frame-capture-harness` @ `09cbcca`
+**Passes**: 1 (`91a7c2f`) and 2 (`09cbcca`) · **Date**: 2026-08-11
+**Validator**: validate-PRO-849
 
 ## Verdict
 
-**FINDINGS — 5 Minor, 0 Blocker, 0 Major.**
+**PASS at pass 2 — 0 Blocker, 0 Major, 0 new findings.**
 
-The gate is green and all 53 scenarios are implemented and asserted. Under
-`standards/global/validation-calibration.md` and the validate skill's Step 4,
-a PASS requires zero Blockers, Majors **and** Minors, so this pass does not
-close. Every finding is Minor; none is a behavioural defect in the shipped
-harness. Two touch documents rather than code. The lead decides fix-here
-versus defer.
+Pass 1 returned 5 Minors and no Blockers or Majors. Four were fixed
+(`c4ea0c9`, `d25d81c`, `f717606`, `09cbcca`); M3 was adjudicated and accepted
+deliberately by the lead. Pass 2 re-ran the gate and reviewed the whole
+changed surface: every fix does what it claims, and no new finding of any
+severity appeared. Nothing blocks `/sdd-complete`.
+
+Pass-1 detail is preserved below as the record of what was found and why;
+resolutions are marked in place.
 
 ## Summary
 
-| Reviewer | Blocker | Major | Minor | Info |
+| Pass | Blocker | Major | Minor | Info |
 |---|---|---|---|---|
-| Correctness | 0 | 0 | 0 | 0 |
-| Coverage | 0 | 0 | 0 | 0 |
-| Quality | 0 | 0 | 3 | 0 |
-| Validator (independent) | 0 | 0 | 2 | 1 |
-| **Total** | **0** | **0** | **5** | **1** |
+| 1 — correctness | 0 | 0 | 0 | 0 |
+| 1 — coverage | 0 | 0 | 0 | 0 |
+| 1 — quality | 0 | 0 | 3 | 0 |
+| 1 — validator (independent) | 0 | 0 | 2 | 1 |
+| **1 — total** | **0** | **0** | **5** | **1** |
+| **2 — new findings** | **0** | **0** | **0** | **0** |
 
-## Gate
+## Gate — pass 2 (`09cbcca`)
+
+`pwsh scripts/sdd-gate.ps1` — **exit 0, GATE PASSED**. Run and observed
+directly, as in pass 1.
+
+| Stage | Result |
+|---|---|
+| format · lint · size · deps · sast · secrets | ok |
+| gpu-free (`--no-default-features`) | ok — **67 passed**, 1 skipped |
+| tests (`llvm-cov nextest`) | ok — **80 passed**, 1 skipped |
+| coverage | ok — **91.08% lines, 90.7% regions, 1121 tracked lines** |
+
+Both counts rose by exactly one against pass 1 (79→80, 66→67), matching the
+one test added by `09cbcca`, and coverage rose with the denominator.
+
+## Gate — pass 1 (`91a7c2f`)
 
 `pwsh scripts/sdd-gate.ps1` — **exit 0, GATE PASSED**. Observed directly, not
 taken on report.
@@ -98,7 +117,7 @@ asserts what it says, in the one configuration where no adapter *can* exist.
 
 ## Findings
 
-### Minor 1 — `architecture.md` documents an `ArtifactError` variant that does not exist
+### Minor 1 — `architecture.md` documents an `ArtifactError` variant that does not exist — **FIXED (`d25d81c`)**
 
 `specs/active/2026-08-11-frame-capture-harness/architecture.md:902` gives
 `ArtifactError` as `Directory` · `File`. The enum at
@@ -110,7 +129,7 @@ absent from the table. The phase-3 addendum two tables down covers
 *Effect*: a reader consulting the architecture for `ArtifactError`'s shape is
 told about a variant the code does not have and not told about two it does.
 
-### Minor 2 — `architecture.md` still places `SkipNotice` behind the `gpu` feature
+### Minor 2 — `architecture.md` still places `SkipNotice` behind the `gpu` feature — **FIXED (`d25d81c`)**
 
 `architecture.md:828` declares `pub struct SkipNotice { ... }` inside the
 `### GPU layer (feature = "gpu")` code block. `SkipNotice` is defined
@@ -120,7 +139,7 @@ core-side at `crates/mc-testkit/src/frame/selection.rs:83`, with no
 overrides it, but the code block itself was never edited the way the
 `CaptureContext` field list was, so the stale line is still there to be read.
 
-### Minor 3 — unrelated conductor-tooling changes ride on this feature branch
+### Minor 3 — unrelated conductor-tooling changes ride on this feature branch — **ADJUDICATED: accepted deliberately by the lead**
 
 `.claude/agents/sdd-conductor.md` and `.claude/loops/conductor-loop.md` are
 modified on this branch across eight commits interleaved with PRO-849 work
@@ -132,7 +151,16 @@ modified on this branch across eight commits interleaved with PRO-849 work
 a side effect of a merge whose stated condition gates exactly one spec's work.
 Not a defect in the harness.
 
-### Minor 4 — a golden that writes but whose sidecar fails is reported as not written
+### Minor 4 — a golden that writes but whose sidecar fails is reported as not written — **FIXED (`c4ea0c9`, `09cbcca`)**
+
+> **Correction to this finding's wording, recorded at pass 2.** The text below
+> quotes the standing reason as `MissingGolden` ("no golden exists at X"). The
+> defect has **two** shapes, not one: when a golden was installed first, the
+> standing reason is `Mismatch` ("the capture differs from its golden"), which
+> is what the pre-fix measurement in a detached worktree at `ca19469` actually
+> returned. Both collapse identically and the fix covers both. The finding was
+> correct; its illustration was narrower than the defect.
+
 
 `crates/mc-testkit/src/frame/golden.rs:267-283` writes the golden image first,
 then the provenance sidecar. A sidecar failure returns
@@ -156,7 +184,7 @@ and re-runs into it — surviving here with the sign reversed. It is narrow (it
 needs the directory creatable, the image written, and only the JSON to fail),
 which is why it is Minor and not Major.
 
-### Minor 5 — FR-2.4-S2's test remains invariant under the transform its rationale names
+### Minor 5 — FR-2.4-S2's test remains invariant under the transform its rationale names — **FIXED (`f717606`)**
 
 `spec.md` § Technical Considerations states FR-2.4-S2's sole reason to exist:
 FR-2.4-S1 is defeated by "a row flip on write plus a row flip on read", which
@@ -270,3 +298,85 @@ Recommended before completion, in priority order:
 
 `spec.md`'s y-orientation convention must reach `docs/` at `/sdd-complete`, as
 § Technical Considerations requires.
+
+---
+
+# Pass 2 (`09cbcca`)
+
+Pass 2 accepts only **new** findings of severity Major or higher. **None were
+found — at any severity.** The changed surface is six files
+(`golden.rs`, `golden_update.rs`, `png_io.rs`, `architecture.md`, `tasks.md`,
+`test-map.md`), all reviewed in full.
+
+## Fix verification
+
+### M4 — the new `GoldenOutcome` variant
+
+`GoldenWrittenWithoutProvenance { paths, failure }` was scrutinised as a new
+public variant, not accepted on the strength of the finding that prompted it.
+
+- **Genuinely reachable.** `write_golden` (`golden.rs:302-331`) now returns a
+  private `GoldenWriteFailure` that records how far it got, and `on_update`
+  (`golden.rs:277-292`) maps `Provenance { written, cause }` onto the new
+  variant. `golden_update.rs:155` reaches it through a real provocation — the
+  sidecar path pre-created as a *directory*, so the image beside it writes
+  normally and only the JSON fails. Not a stub, not an injected error.
+- **The test cannot silently degrade.** It asserts its own precondition first —
+  the golden on disk must equal the captured frame — so it cannot quietly
+  become a second copy of the both-writes-failed test the file already carries.
+- **FR-4.4-S3 served**: `paths` carries the golden path that was written, and
+  the test asserts `paths.contains(&golden)`. The old behaviour reported zero.
+- **FR-5.1-S4 served**: the requirement cannot be met when the disk refuses the
+  sidecar, so the variant names that failure explicitly rather than reporting
+  `GoldenWritten` and implying a provenance record that does not exist.
+- **No silent-pass risk.** No consumer maps `GoldenOutcome` to a boolean.
+  Every call site (`capture_and_verify.rs:44,54`, `committed_golden.rs:78,107`,
+  and the `golden_*` suites) matches explicit variants, so the new one fails
+  those assertions rather than slipping through them.
+- **The image-write branch is unchanged**, so ruling 5's
+  `GoldenNotUpdated` behaviour and its two locking tests still hold — confirmed
+  green in the pass-2 gate.
+
+### M5 — the independent decode
+
+`png_io.rs:105` `decode_without_the_harness` reads the file and decodes it
+through `image::load_from_memory_with_format` directly, so no `frame::png` code
+sits on the read side of the orientation assertion.
+
+Confirmed independently, as asked: `read_png` still appears in that file, but
+only at line 46, inside
+`an_image_written_to_a_png_decodes_back_to_the_same_pixels` — FR-2.4-S1, which
+*is* the round-trip scenario and correctly remains one. It is absent from
+FR-2.4-S2's body.
+
+The injection evidence is stronger than the reasoning that prompted the
+finding: with a compensating flip pair in `encode_png` and `read_png`,
+FR-2.4-S1 passed and the **previous** FR-2.4-S2 passed, while the new one
+failed on `[0, 0, 0, 255]` at the top of the file. That settles it as
+measurement rather than argument — the old test demonstrably survived exactly
+the transform its rationale names, so `spec.md` was right and the test was
+underdelivering. No spec amendment was needed, and none was made.
+
+### M1 and M2 — the document corrections
+
+`ArtifactError`'s table now reads `Directory` · `Image` · `Report`, matching
+`golden.rs:100-143` with `GoldenNotUpdated` covered by the phase-3 addendum
+table. `SkipNotice` moves to the core-types block, and the line where it used
+to sit now carries an explicit note that it is *not* part of the feature-gated
+block — a correction that survives being read out of context, which the
+original ambiguity did not.
+
+`architecture.md`'s frontmatter gains a fourth `amended:` entry, and the
+lifecycle section gains a two-failure-point table distinguishing a failed image
+write from a failed sidecar. The `tasks.md` deferral is marked resolved with
+the original note preserved verbatim beneath it rather than rewritten, which is
+the correct handling for append-only task text.
+
+## Verdict
+
+**PASS.** Gate green at `09cbcca`, 53 of 53 scenarios asserted, all four fixes
+verified against the code, zero new findings.
+
+Nothing blocks `/sdd-complete`. Carried forward into it: `spec.md`'s
+y-orientation convention must reach `docs/`, so PRO-850 and PRO-852 inherit it
+rather than rediscovering it.
