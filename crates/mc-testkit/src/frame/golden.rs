@@ -61,8 +61,13 @@ pub enum GoldenFailureReason {
 }
 
 /// A failed verification, and where to look for what it left behind.
+///
+/// `Display` is written by hand rather than derived because a write that failed
+/// has to reach the reader. Deriving `{reason}; artifacts in {dir}` printed the
+/// standing verdict and a directory, and said nothing about the write — which on
+/// the update path meant a caller was shown "no golden exists" with no hint that
+/// the golden they asked for had not been written.
 #[derive(Debug, Error)]
-#[error("{reason}; artifacts in `{}`", artifact_dir.display())]
 pub struct GoldenFailure {
     pub reason: GoldenFailureReason,
     pub artifact_dir: PathBuf,
@@ -71,6 +76,23 @@ pub struct GoldenFailure {
     /// An `Err` here never replaces the verdict: a disk that would not take the
     /// evidence does not make the frames match.
     pub artifacts: Result<Vec<PathBuf>, ArtifactError>,
+}
+
+impl std::fmt::Display for GoldenFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.artifacts {
+            Ok(_) => write!(
+                formatter,
+                "{}; artifacts in `{}`",
+                self.reason,
+                self.artifact_dir.display()
+            ),
+            // The whole cause chain, not just its head: `ArtifactError`'s own
+            // `Display` names the file it could not write, and the reason it
+            // could not is one link further down.
+            Err(cause) => write!(formatter, "{}; {}", self.reason, describe(cause)),
+        }
+    }
 }
 
 /// An artifact, or the directory holding it, that could not be written.
@@ -96,6 +118,27 @@ pub enum ArtifactError {
         path: PathBuf,
         #[source]
         cause: ReportError,
+    },
+    /// The update path could not write the golden itself.
+    ///
+    /// Distinct from [`Self::Image`], and worded the way it is, because of who
+    /// reads it. The verdict reported alongside this is the one that **still
+    /// stands** — "no golden exists at X", or "the capture differs from its
+    /// golden" — and a caller who set `MYCRAFT_UPDATE_GOLDENS` would otherwise
+    /// read that verdict as the state the update had just fixed, and walk into
+    /// the same wall on the next run. So the error says outright that it did
+    /// not happen.
+    ///
+    /// It wraps only the **image** write. A sidecar that fails after the golden
+    /// landed is [`Self::Report`], because in that case the golden *was*
+    /// updated and claiming otherwise would be false.
+    /// The path is deliberately not repeated here: the wrapped cause names the
+    /// file it could not write, one link down the chain.
+    #[error("the golden was NOT updated")]
+    GoldenNotUpdated {
+        path: PathBuf,
+        #[source]
+        cause: Box<ArtifactError>,
     },
 }
 
@@ -216,8 +259,19 @@ impl Lifecycle<'_> {
 
     /// The golden and its provenance sidecar, reported together: an unexplained
     /// golden update is a review stop, so every path written has to be named.
+    ///
+    /// Only the image write is wrapped as [`ArtifactError::GoldenNotUpdated`].
+    /// Past that line the golden is on disk, so a sidecar that then fails leaves
+    /// a golden that *was* updated and a provenance record that was not — two
+    /// different things to tell a reader.
     fn write_golden(&self) -> Result<Vec<PathBuf>, ArtifactError> {
-        let image = write_frame(self.captured, self.goldens.image())?;
+        let path = self.goldens.image();
+        let image = write_frame(self.captured, path.clone()).map_err(|cause| {
+            ArtifactError::GoldenNotUpdated {
+                path,
+                cause: Box::new(cause),
+            }
+        })?;
         let sidecar = self.goldens.provenance();
         write_golden_provenance(&self.settings.capture, self.provenance, &sidecar).map_err(
             |cause| ArtifactError::Report {
