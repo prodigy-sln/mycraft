@@ -80,6 +80,29 @@ is in the diff you are looking at.
   green forever the day the thing it guarded against is quietly removed.
   Pair it with a separate test function asserting the same scan *does*
   report a fixture that contains the thing.
+- **An over-tight assertion invites a real defect.** The failure runs the
+  other way too: *red that should have been green*, whose obvious "fix" is
+  to break production code. Bit equality on a camera's two declared eye
+  positions would have failed against a **correct** camera —
+  `f32::consts::PI` sits a hair above π, so its sine is −8.7e−8, and times
+  96 that is two units in the last place of 32 — and the cheapest way to
+  green it is to round the result or special-case a tick. Note the trap:
+  the exact comparison was also the *consistent* one, matching every other
+  test in that file. **Measure the arithmetic path before choosing the
+  assertion; inspecting the literals is not enough.** Derive a tolerance
+  from both directions — above the measured error, below the smallest
+  difference the test must still catch — never by loosening until green.
+- **Agreement between two wrong things is not evidence.** A unit test of a
+  conversion, and a test comparing two configurations *to each other*, can
+  both be green while every frame ships visibly wrong: neither looks at the
+  value that actually reaches the device. When a decision is about what
+  crosses a boundary, assert it at the boundary.
+- **An absent reviewer and a clean reviewer look identical.** This applies
+  to verification itself, not only to code. A verdict aggregated from
+  structured output can read "no findings" because a reviewer returned
+  *nothing* — the same way a summary line cannot distinguish a passing
+  assertion from one that never ran. Check the per-reviewer payloads, not
+  the merged result.
 
 Test placement — sibling `foo_test.rs` files for unit tests (a considered
 departure from Rust's inline default), `tests/` for integration tests,

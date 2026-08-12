@@ -29,10 +29,16 @@ Every stage runs even when an earlier one fails, so one invocation reports every
 Flags: `-Quick` runs stages 1–3 only, for tight edit loops. `-SkipCoverage` runs tests without
 instrumentation. Neither is valid at a phase boundary or in CI.
 
-**No stage runs `rustdoc`, so a broken intra-doc link ships silently.** That is how a dangling
-reference to a moved item survives a green gate. The tree is clean under
-`RUSTDOCFLAGS="-D warnings -D rustdoc::broken_intra_doc_links" cargo doc --workspace --no-deps`
-today, so the check is a standalone command rather than a stage, with no backlog behind it.
+**Stage 2c runs `rustdoc`, because nothing else resolves intra-doc links.** A `[`Type`]` or
+`[`module::func`]` naming an item that does not exist compiles, tests, lints and ships in silence —
+SPEC-004 carried a dangling `startup::prepare_scene` reference through a green gate exactly that
+way, and it surfaced only when a human tried to import the function the doc claimed existed.
+
+The stage runs `cargo doc --workspace --no-deps` under
+`RUSTDOCFLAGS="-D warnings -D rustdoc::broken_intra_doc_links"`. It was added with **zero backlog** —
+the whole workspace already passed the day it went in — so it never needed a grace period, and a
+failure here is always something introduced rather than something inherited. Verified to bite by
+planting an unresolved link (rustdoc exits 101) and reverting by hand.
 
 ### The gate is not safe to run from two contexts at once
 
