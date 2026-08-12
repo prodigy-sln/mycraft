@@ -46,9 +46,13 @@ The disposal mode comes from CLAUDE.md Prospect settings:
      `chore: remove spec working folder`
    - **archive mode**: `git mv` to `specs/archive/YYYY/[folder]/`, and in the
      same commit `git rm` archive folders older than the retention setting
-7. Merge to `main` locally with `--no-ff`. The TDD `test:` → `feat:` →
-   `refactor:` sequence is meaningful history and is worth preserving; the spec
-   folder was removed in step 6, so `main`'s tree never carries it.
+7. **Squash merge to `main` locally** — `git merge --squash`, then one commit.
+   One spec is one commit on `main`, never a run of "feat docs docs feat test
+   docs". `standards/global/git-workflow.md` §3 is explicit that there is no
+   meaningful-history exception: the RED → GREEN → REFACTOR sequence is a
+   discipline enforced while the branch is live, not a record `main` is required
+   to carry. The spec folder was removed in step 6, so `main`'s tree never
+   carries it either.
 8. Push `main` to `origin` (backup remote), then delete the feature branch
    locally and on the remote.
 9. Outstanding Info findings → one Linear issue each, referencing the registry
