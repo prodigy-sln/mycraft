@@ -44,7 +44,7 @@ forward; none is a pure layer.
 |----------|---------|-------|--------|
 | P0 | Headless frame-capture harness | PRO-849 | **Done** |
 | P0 | Chunk storage and block palette | PRO-850 | **Done** |
-| P0 | Binary greedy mesher | PRO-851 | Todo |
+| P0 | Binary greedy mesher | PRO-851 | **Done** |
 | P0 | wgpu terrain pipeline and windowed client — *you can see terrain* | PRO-852 | Todo |
 | P0 | Camera, player physics and collision — *you can walk around* | PRO-853 | Todo |
 | P0 | Raycast targeting, block break and place — *you can build* | PRO-854 | Todo |
@@ -64,7 +64,8 @@ Two invariants that MVP 1 could plausibly breach, resolved up front:
 
 **Exit criteria** — all must hold:
 - `sdd-gate.ps1` exits 0
-- Mesher benchmark < 200 µs/section
+- Mesher benchmark < 200 µs/section — **met** (`cargo bench -p mc-world --bench meshing`,
+  terrain ~136 µs; a standalone command, deliberately not a gate stage)
 - Scripted replay places and breaks 10 000 blocks with asserted world state
 - **You can launch the client, walk around, break and place blocks, quit, relaunch, and your
   changes are still there**
@@ -108,6 +109,7 @@ dungeon models suit **MVP 5**, and audio and GUI belong to **MVP 6**. MVP 1 stay
 |---------|-----------|------|
 | Headless frame-capture harness (PRO-849) | 2026-08-11 | `2026-08-11-frame-capture-harness` |
 | Chunk storage and block palette (PRO-850) | 2026-08-12 | `2026-08-11-chunk-storage-palette` |
+| Binary greedy mesher (PRO-851) | 2026-08-12 | `2026-08-12-greedy-mesher` |
 
 ---
 
