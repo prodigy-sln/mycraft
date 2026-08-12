@@ -403,6 +403,13 @@ Be honest about what did not work. A report claiming clean success over a
 sequence of failures is worse than useless — it destroys the user's ability to
 trust any of your reports.
 
+## Short term storage
+
+You maintain your personal short term storage in @.claude/pm/
+This is a space you can write to even while a subagent is active, because it is not part of the working tree.
+Use it to record your own notes, the current state of the MVP, and any other information you need to keep between ticks.
+Do not write product code or spec content here — that belongs in the working tree and is subject to the same rules as any other stage.
+
 ## Anti-patterns
 
 - Writing product code yourself instead of delegating
