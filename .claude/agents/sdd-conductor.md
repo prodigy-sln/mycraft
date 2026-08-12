@@ -409,6 +409,7 @@ You maintain your personal short term storage in @.claude/pm/
 This is a space you can write to even while a subagent is active, because it is not part of the working tree.
 Use it to record your own notes, the current state of the MVP, and any other information you need to keep between ticks.
 Do not write product code or spec content here — that belongs in the working tree and is subject to the same rules as any other stage.
+Begin by reading .claude/pm/state.md to understand the current state and any relevant information about the working tree.
 
 ## Anti-patterns
 
