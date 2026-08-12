@@ -39,13 +39,70 @@ const SHIPPED_NAMES: [&str; 5] = [
 struct Scan {
     files_read: usize,
     hits: Vec<String>,
+    /// Every production file the exemption filter caused to be skipped.
+    ///
+    /// Recorded at the filter rather than read off [`EXEMPT_FILES`], and that is
+    /// the whole point: a second exemption need not touch that constant at all —
+    /// it can arrive as a new constant and a second clause in the filter — so a
+    /// pin that compares the constant against itself would stay green through
+    /// exactly the change it exists to catch. This measures what the scan
+    /// *does*.
+    exempted: Vec<PathBuf>,
 }
+
+/// The production files this scan does not read.
+///
+/// **This is not a weakening of invariant 1.** The invariant forbids hardcoded
+/// block *definitions*; what these files do is *reference* a block in order to
+/// place it, while texture and solidity still come only from
+/// `content/base/blocks/*.toml`. Forbidding every mention was a free
+/// over-approximation of the invariant right up until something legitimately
+/// needed to reference a block, and this list is where that over-approximation
+/// is recorded rather than where the rule is relaxed.
+///
+/// `crates/mc-sim/src/replay/world.rs` builds the scripted demo scene the
+/// renderer is verified against: a fixed world of grass over dirt over stone,
+/// with water to a declared sea level. It has to say which content-defined
+/// blocks it places where, and the signature it is built behind
+/// (`ReplayWorld::generate(seed, &BlockRegistry)`) carries no content root it
+/// could read that choice out of.
+///
+/// **Delete an entry the day content can author what it needed.** For the
+/// scripted scene the missing hook is content-authored worldgen, which is MVP
+/// 2/3 work rather than PRO-852's; closing it deletes both the entry and
+/// `the_exemption_skips_exactly_one_file_of_the_production_tree`. Until then
+/// each exempt file is held by review instead of by this scan, which is exactly
+/// what an entry costs — so that test pins how many files the filter skips, and
+/// a second one has to be argued for rather than appear in a diff nobody reads.
+///
+/// Note that the pin is on the *filter's behaviour*, not on this constant: an
+/// exemption need not be spelled as an entry here to take effect.
+const EXEMPT_FILES: [&str; 1] = ["crates/mc-sim/src/replay/world.rs"];
 
 /// A `.rs` file that is not a sibling unit-test file.
 fn is_production_source(path: &Path) -> bool {
     path.file_name()
         .and_then(OsStr::to_str)
         .is_some_and(|file_name| file_name.ends_with(".rs") && !file_name.ends_with("_test.rs"))
+}
+
+/// Whether `path` is one of [`EXEMPT_FILES`].
+///
+/// Matched on the path's trailing components rather than on a substring, so the
+/// answer depends on neither where the repository sits nor which separator the
+/// platform writes — and so that an entry cannot accidentally match a directory
+/// or a file of the same name somewhere else.
+fn is_exempt(path: &Path) -> bool {
+    let components: Vec<String> = path
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    EXEMPT_FILES.iter().any(|exempt| {
+        let wanted: Vec<&str> = exempt.split('/').collect();
+        components
+            .windows(wanted.len())
+            .any(|tail| tail.iter().map(String::as_str).eq(wanted.iter().copied()))
+    })
 }
 
 /// A file's text with its doc comments removed.
@@ -73,14 +130,26 @@ fn scan_for_shipped_names(root: &Path) -> Result<Scan, Box<dyn Error>> {
 
 fn scan_directory(directory: &Path, scan: &mut Scan) -> Result<(), Box<dyn Error>> {
     for entry in fs::read_dir(directory)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            scan_directory(&path, scan)?;
-        } else if is_production_source(&path) {
-            scan_file(&path, scan)?;
-        }
+        scan_entry(&entry?.path(), scan)?;
     }
     Ok(())
+}
+
+/// One directory entry: recursed into, read, skipped as test code, or skipped as
+/// exempt — and the last of those is recorded rather than silent, so that what
+/// the exemption actually removes from the scan is observable.
+fn scan_entry(path: &Path, scan: &mut Scan) -> Result<(), Box<dyn Error>> {
+    if path.is_dir() {
+        return scan_directory(path, scan);
+    }
+    if !is_production_source(path) {
+        return Ok(());
+    }
+    if is_exempt(path) {
+        scan.exempted.push(path.to_owned());
+        return Ok(());
+    }
+    scan_file(path, scan)
 }
 
 fn scan_file(path: &Path, scan: &mut Scan) -> Result<(), Box<dyn Error>> {
@@ -183,6 +252,79 @@ fn a_name_in_a_sibling_unit_test_file_is_skipped_and_one_beside_it_is_still_foun
         scanned.hits.len() == 1 && scanned.hits.join(" ").contains("base:stone"),
         "the sibling file is test code and must be skipped; the module beside it is production \
          source and must still be found. Exactly one hit, and it is the second: {:?}",
+        scanned.hits
+    );
+    Ok(())
+}
+
+/// The exemption is pinned by what it *removes from the real scan*, never by
+/// what a constant says.
+///
+/// An absence assertion with an escape hatch goes green forever the day somebody
+/// widens the hatch, so the hatch needs a pin — but the obvious pin is the one
+/// that cannot work. Comparing [`EXEMPT_FILES`] against a copy of itself catches
+/// only the exemption that arrives as an entry in *that* constant; one that
+/// arrives as a second constant and a second clause in the filter leaves it
+/// untouched and green. That is this project's recurring defect in miniature:
+/// green that could not have been red.
+///
+/// So this walks the production tree the real check walks and asserts the set of
+/// files the filter actually skipped. A second exemption has to skip some real
+/// file to have any effect at all, and skipping one turns this red however it was
+/// spelled. It is self-guarding in the other direction too: a walk that resolved
+/// nothing skips nothing, and an empty set is not the expected one.
+#[test]
+fn the_exemption_skips_exactly_one_file_of_the_production_tree() -> TestResult {
+    let root = repository_root()?;
+    let mut skipped = Vec::new();
+    for directory in source_directories()? {
+        for path in scan_for_shipped_names(&directory)?.exempted {
+            skipped.push(
+                path.strip_prefix(&root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            );
+        }
+    }
+    skipped.sort();
+
+    assert_eq!(
+        skipped,
+        ["crates/mc-sim/src/replay/world.rs"],
+        "every skipped file is a place invariant 1 is held by review instead of by this \
+         scan, and this is the count of them. Adding one is a decision, not an edit: say in \
+         the commit which content hook is missing and what deleting it again will depend on"
+    );
+    Ok(())
+}
+
+/// The control for the exemption, and the reason it cannot quietly grow. An
+/// exemption matched too loosely — on `mc-sim`, on `replay`, on any file called
+/// `world.rs` — would leave the real check above green while no longer reading a
+/// tree it is supposed to read. So the fixture puts a shipped name in the exempt
+/// file and another in its sibling, at the same depth, and exactly one is
+/// reported.
+#[test]
+fn a_name_in_the_scripted_scene_is_skipped_and_one_in_the_module_beside_it_is_not() -> TestResult {
+    let directory = TempDir::new()?;
+    let replay = directory.path().join("crates/mc-sim/src/replay");
+    fs::create_dir_all(&replay)?;
+    fs::write(
+        replay.join("world.rs"),
+        "const SURFACE: &str = \"base:grass\";\n",
+    )?;
+    fs::write(
+        replay.join("height.rs"),
+        "const DEPTHS: &str = \"base:stone\";\n",
+    )?;
+
+    let scanned = scan_for_shipped_names(directory.path())?;
+
+    assert!(
+        scanned.hits.len() == 1 && scanned.hits.join(" ").contains("base:stone"),
+        "the scripted scene is the one exempt file; the module beside it is not, and neither \
+         is any other `world.rs`. Exactly one hit, and it is the second: {:?}",
         scanned.hits
     );
     Ok(())

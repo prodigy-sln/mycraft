@@ -35,7 +35,12 @@ mc-proto = { path = "crates/mc-proto", version = "0.1.0" }
 mc-net = { path = "crates/mc-net", version = "0.1.0" }
 mc-sim = { path = "crates/mc-sim", version = "0.1.0" }
 mc-render = { path = "crates/mc-render", version = "0.1.0" }
-mc-testkit = { path = "crates/mc-testkit", version = "0.1.0" }
+# `default-features = false` is set here rather than per consumer because cargo
+# refuses to let a member turn a workspace default off. A consumer that wants the
+# harness's wgpu half enables it explicitly through its own `gpu` feature, which
+# is what keeps a dev-dependency on the harness from dragging wgpu into a graph
+# that is asserted not to have it.
+mc-testkit = { path = "crates/mc-testkit", version = "0.1.0", default-features = false }
 
 # ECS / math
 bevy_ecs = "0.19.0"
@@ -43,11 +48,28 @@ glam = "0.33.3"
 
 # Rendering
 wgpu = "30.0.0"
-winit = "0.30.13"
+# Winit's defaults minus `wayland-csd-adwaita`. That feature draws Wayland
+# client-side decorations through `sctk-adwaita`, whose font parser `ttf-parser`
+# is unmaintained with no safe upgrade (RUSTSEC-2026-0192). Dropping the feature
+# removes the crate from the graph, which is a better answer than an advisory
+# suppression: what is lost is decoration styling on a platform this project does
+# not yet build for, and winit still draws its own fallback decorations there.
+winit = { version = "0.30.13", default-features = false, features = [
+    "rwh_06",
+    "x11",
+    "wayland",
+    "wayland-dlopen",
+] }
 egui = "0.36.1"
 egui-wgpu = "0.36.1"
 egui-winit = "0.36.1"
 bytemuck = { version = "1.25.2", features = ["derive"] }
+# Shader validation at build time rather than at first draw. Pinned at the
+# version `cargo tree -p wgpu -i naga` reports, so the validator that gates the
+# build is the same one wgpu will hand the shader to — a newer naga could accept
+# WGSL that wgpu 30 then rejects, which would move the failure back to where
+# build-time validation exists to remove it from.
+naga = { version = "30.0.0", features = ["wgsl-in"] }
 # Only the PNG codec is used (golden frames). Default features pull jpeg/gif/
 # webp/tiff/bmp decoders that cost build time, license surface and audit surface
 # for nothing.

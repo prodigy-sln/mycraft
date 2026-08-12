@@ -33,6 +33,7 @@ mod target;
 use std::time::Duration;
 
 pub use acquire::{AcquireOptions, Acquisition, CaptureContext};
+pub use target::CAPTURE_FORMAT;
 
 use super::clock::CaptureError;
 use super::golden::{GoldenOutcome, verify_against_golden};

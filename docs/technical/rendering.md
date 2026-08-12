@@ -1,19 +1,20 @@
 # Rendering
 
 The section mesher — turning a 16³ chunk section into the visible, merged
-quads a renderer draws — is built. It lives in `mc_world::mesh`, not in
-`mc-render`: meshing is pure data transformation with no GPU involvement, so
-it belongs on the `mc-world → mc-core` edge rather than adding a new one.
-`mc-render` itself — the draw path, GPU vertex packing, culling and lighting
-— does not exist yet. PRO-852's terrain renderer is built directly on top of
-the quad contract below, which is why it is recorded here rather than left
-for that spec to reverse-engineer from `mc-world`'s source.
+quads a renderer draws — lives in `mc_world::mesh`, not in `mc-render`:
+meshing is pure data transformation with no GPU involvement, so it belongs
+on the `mc-world → mc-core` edge rather than adding a new one. The terrain
+draw path in `mc-render` is built directly on the quad contract below, and
+consumes it unchanged.
 
-The other half of this file — the capture orientation and pixel-format
-contract — predates the renderer for the same reason the mesher contract now
-does: established and asserted ahead of time, by the headless frame-capture
-harness in `crates/mc-testkit` (module `frame`), so the first line of
-`mc-render` inherits it rather than discovering it.
+The orientation and pixel-format contract in this file predates both: it was
+established and asserted ahead of time by the headless frame-capture harness
+in `crates/mc-testkit` (module `frame`), so the first line of `mc-render`
+inherited it rather than discovering it.
+
+There is no lighting model. Terrain is flat-shaded: a fragment's colour is
+its texture sample and nothing else — no ambient occlusion, no directional
+term, no shadows, no transparency pass.
 
 ## The section mesher
 
@@ -126,6 +127,25 @@ predicate, changes quad counts, and invalidates every golden frame captured
 against today's mesh.** A renderer capturing goldens today is capturing them
 against a merge predicate that is already known to be going to change.
 
+### Terrain sampling is `Nearest`, and switching to filtered invalidates goldens
+
+The terrain sampler is `Nearest` on minification, magnification and mipmaps,
+with `Repeat` addressing. That is not a preference about sharpness. A
+placeholder texture is sixteen texels of deliberate pattern whose **declared
+mean colour** is the value the frame probes cluster captured pixels against;
+linear filtering blurs a face towards that mean, so a filtered frame would
+agree with the probes for a reason that has nothing to do with the texture
+being correct — passing while carrying no evidence.
+
+Same shape as the AO warning above, and it belongs beside it: **a later switch
+to filtered sampling changes every terrain pixel and invalidates every golden
+frame captured against today's renderer.** It is a deliberate, measured change
+that re-shoots the goldens and says so, never a quiet quality improvement.
+
+Texture coordinates are a corner's two in-plane axes in **whole blocks**, so a
+face merged across four blocks shows the texture four times rather than
+stretched once. That, too, is baked into every golden.
+
 ### The error contract
 
 `mesh_section` returns a complete mesh or `Err` — never a partial mesh, never
@@ -146,9 +166,34 @@ punches a hole in the world; treating it as solid seals a cavity; both are
 silent and indistinguishable from a correct mesh at the call site. A failed
 mesh is not a breach of the "a bad mod never takes down the server"
 invariant — nothing panics, and a caller running meshing on a worker simply
-keeps its previous mesh. A failed mesh must **not** cascade once meshing is
-threaded onto workers; that is a requirement on the future threading
-integration, not something built here.
+keeps its previous mesh.
+
+**What a caller does with that error depends on the lifecycle stage, and the
+two rules are different.** The non-cascade rule above carries its own
+premise: "keeps its *previous* mesh" presupposes a previous mesh exists —
+that is, a live world being re-meshed after an edit or a stream-in.
+
+| Stage | Policy |
+|---|---|
+| Initial preparation of a fixed fixture | Fail the whole preparation, naming the column and section index |
+| Incremental re-mesh of a live or streaming world | Must not cascade; keep the previous mesh |
+
+The client's startup path is the first stage and fails outright, because
+there is no previous mesh to keep, the block set is exactly what
+`content/base/` declares, and the only way a section fails is a defect in
+the renderer's own code or content. Continuing would render a world that is
+not the declared one, and every golden and every probe would then measure
+that world. The second rule is still a requirement on the streaming
+integration, which is not built.
+
+**The reported failure must be deterministic.** Meshing runs on `rayon`, and
+`collect::<Result<Vec<_>, _>>()` short-circuits: with two failing sections it
+surfaces whichever one lost the race, so the error message is not
+reproducible. The preparation path collects `Vec<Result<…>>` and takes the
+**first `Err` in section index order** instead. More generally, only
+`IndexedParallelIterator::collect` into a `Vec` may be used on that path —
+`for_each` into a shared sink, and collecting into a set or map, are what
+would make output order lucky rather than guaranteed.
 
 Only palette entries a voxel actually references are resolved — never a
 vacated (zero-refcount) entry. This is forced by determinism, not chosen for
@@ -250,10 +295,338 @@ One colour target only: no depth buffer, no stencil, no MSAA. A renderer
 that needs depth or multisampling is adding a new draw path, not extending
 this one.
 
+## The terrain draw path
+
+Terrain reaches the screen as **one `draw_indexed_indirect` call** whose index
+count a compute shader writes. Nothing between the mesher's quads and that call
+is per-chunk CPU work.
+
+### Quads become vertices and indices
+
+`mc-render`'s pure layer turns each `Quad` into **four corner vertices and six
+indices**, expressed in the section's own frame. The world frame is
+reconstructed on the GPU from the section table's origin, which is what keeps
+the packed view and the world view from drifting apart.
+
+`QUAD_INDEX_PATTERN = [0, 1, 2, 0, 2, 3]` is one constant, not six:
+**facing-dependent winding lives entirely in the order the four corners are
+emitted**, so the index pattern is facing-independent by construction. The
+winding is fixed on the CPU by a geometric-normal test. **If culling ever looks
+inverted, the fix is `front_face`, never re-winding the geometry** — re-winding
+makes the picture look right while breaking the property the normal test
+asserts, which is the worst available outcome. The pipeline runs
+`front_face: Ccw`, `cull_mode: Some(Face::Back)`.
+
+Scene assembly order is declared once and is binding, because packed bytes are
+compared for determinism and goldens are captured against them: columns in
+`(cz, cx)` ascending, then section index ascending, then the mesher's own quad
+order, untouched.
+
+`SceneGeometry::assemble` is the **only** capacity gate — `MAX_SECTIONS = 1024`,
+`MAX_QUADS = 1 << 18` — so an over-capacity scene cannot be constructed and
+nothing downstream re-checks.
+
+### The packed vertex, and the section table
+
+A vertex is a **single `u64`, 8 bytes**, and each field is cut to the width its
+own domain needs rather than the width of the Rust type it arrives in: 5 bits
+per coordinate (corners run `0..=16`, seventeen values), 3 for the facing, 8 for
+the texture layer (the downlevel `max_texture_array_layers` is 256), and 10 for
+the section index (`MAX_SECTIONS` is 1024). Thirty-six bits of sixty-four. The
+spare bits are not margin to spend casually — ambient occlusion and per-vertex
+light will want them.
+
+**Packing refuses rather than truncates.** A coordinate of 17 masked into five
+bits becomes 1: a corner at the far side of the section, geometrically
+plausible, and indistinguishable at every later stage from one somebody meant.
+There is no honest packed form for it, so there is an error instead. The bound
+checked is the *section's*, not the field's — five bits hold 31, and a corner at
+20 is still a bug even though it fits.
+
+**The vertex carries no UV.** UVs are derived in the shader from a corner's two
+in-plane coordinates in whole blocks, which is what makes the texture-coordinate
+convention above — a face merged across four blocks shows the texture four times
+— a property of the format rather than of the mesher.
+
+A section record is **44 tightly packed bytes, eleven scalars**: three origin
+components, the first quad index, the quad count, and the AABB's two corners.
+Both WGSL shaders declare it as scalars rather than `vec3` because `vec3` carries
+16-byte alignment and would disagree with the CPU's layout — silently, and in a
+way that surfaces as a culling bug.
+
+Every uploaded buffer is built with explicit `to_le_bytes`. **`bytemuck` is
+deliberately absent from `mc-render`**: `cast_slice` is native-endian, and a byte
+order that is a property of the build host is not a byte order a determinism test
+can compare.
+
+There is **no CPU index buffer**. Indices are produced on the GPU from the
+section table's `first_quad`/`quad_count`; the assembled scene exposes vertex
+bytes and section bytes and nothing else.
+
+### Textures are array layers, never an atlas
+
+One 16×16 RGBA8 layer per texture key, in a `Rgba8UnormSrgb` array texture.
+An atlas is not an alternative here — layers give no bleeding, working mipmaps,
+and a single block texture that can hot-reload without rebuilding everything.
+
+**Layer indices are assigned in lexicographic order of the texture key** — never
+insertion, registry-id or hash order. Layer indices sit inside packed vertices,
+so the committed goldens depend on this ordering and nothing else pins it.
+
+The `Srgb` in the format is load-bearing: a texel is decoded to linear on sample
+and the sRGB colour target encodes it back on write, so the byte a capture reads
+back is the byte the texture generator produced. `Rgba8Unorm` would skip the
+decode and every frame would come back lighter than any declared mean colour —
+plausible-looking, and wrong in the same invisible direction everywhere.
+
+MVP 1 ships procedurally generated placeholder textures whose colours are
+deliberately implausible (teal stone, tan grass). They are not to be "corrected"
+per block: a per-key colour table in Rust is a block definition in Rust, which
+invariant 1 forbids. Real textures arrive as content, not as a patch.
+
+### The compute cull pass and the single indirect draw
+
+One entry point, **one workgroup per section**, `workgroup_size(64)`:
+
+1. Lane 0 tests the section's world AABB against the six frustum planes — read
+   from a **uniform** buffer, so they consume no storage binding — and writes
+   `visible[section_index]`.
+2. If visible, lane 0 reserves an index range with
+   `atomicAdd(&indirect_args.index_count, 6u * quad_count)`. The atomic counter
+   **is** the indirect arguments' `index_count` field, so there is no second
+   dispatch and no prefix sum; the CPU zeroes that one `u32` before the pass.
+3. All 64 lanes stride the section's quads, writing six indices each. Striping
+   the writes is what keeps a dense section from serialising on one lane.
+
+The indirect arguments are `instance_count: 1`, `first_index: 0`,
+`base_vertex: 0`, `first_instance: 0` — **exactly one field is dynamic**. That
+shape is chosen for portability, not tidiness: `first_instance = 0` avoids the
+`INDIRECT_FIRST_INSTANCE` device feature and `instance_count = 1` avoids
+`MULTI_DRAW_INDIRECT`, so the optional-feature set stays empty. The compaction
+invariant is `index_count == 6 × Σ quad_count` over the admitted sections.
+
+**Compaction order is nondeterministic, and that is safe only for a stated
+reason.** `atomicAdd` gives no ordering guarantee, so visible sections' index
+runs land in an arbitrary order. Terrain is fully opaque and depth-tested, and
+the mesher's property tests assert no two quads cover the same (voxel, facing)
+pair — so no two fragments ever contend for the same depth and the image is
+order-independent. **The day a transparency pass arrives, or anything emits a
+second quad for one (voxel, facing) pair, this reasoning expires and compaction
+must become order-stable.**
+
+### The frustum test exists twice, deliberately
+
+The pure Rust `Frustum::admits` and the WGSL test in the cull shader are the same
+maths written twice. That is duplication on purpose: one is the draw path and the
+other is its independent oracle, compared by a test that reads the visible buffer
+back. Merging them would delete the oracle.
+
+Both must therefore behave identically in two respects that are easy to get
+wrong. **Planes are deliberately unnormalised** — the type carries a `normal` and
+an `offset`, not a normal and a distance, because nothing asks how far a box is
+from a plane and the sign of `normal · p + offset` is scale-independent. And the
+test is **conservative in the corners**: a box clearing all six half-spaces
+individually is admitted even when it lies outside the frustum. That is the safe
+direction — a section drawn contributing nothing, never a hole — and the shader
+must use the same test, not a tighter one.
+
+### The storage-buffer budget, enforced at build time
+
+`downlevel_defaults()` allows **four storage buffers per shader stage**, and that
+is the budget this design is drawn to fit. The cull shader binds exactly four
+(section table, visible, destination indices, indirect arguments); the vertex
+stage binds one (the section table, for per-section world origins), because
+compaction lets the packed vertices be a conventional vertex buffer rather than a
+third storage binding.
+
+**A fifth storage binding in either stage is a portability break, not a
+refactor** — pack into an existing buffer instead. The build script counts each
+entry point's storage globals from naga's module info and fails the build over
+four, so this is a compile-time fact rather than a surprise on the weakest
+supported adapter.
+
+Required *downlevel capabilities* are `COMPUTE_SHADERS`, `INDIRECT_EXECUTION` and
+`VERTEX_STORAGE`, asserted against the adapter at startup. No optional device
+feature is used, which is why there is **no fallback path and no second golden
+set**. The day an adapter lacks one of the three, the fallback needs its own
+golden.
+
+### Depth
+
+`mc-render` allocates and owns its depth attachment on **both** the windowed and
+the offscreen path: `Depth32Float`, `depth_compare: Less`, cleared to 1.0, depth
+writes enabled. The frame-capture harness supplies a colour target and never a
+depth one, and a caller attaching its own depth texture in its own render pass is
+adding a draw path rather than extending the harness's — which is what the
+harness's one-colour-target contract permits.
+
+The depth texture is cached and reallocated only when the surface size changes.
+That decision is a pure function of the current and requested sizes, which is what
+makes it testable without a device.
+
+### One pass configuration, two targets
+
+`TerrainPassConfig::{offscreen, windowed}` is the **single source of every pass
+setting**, and there is exactly one parameterised pipeline builder. The two
+configurations differ in **colour format alone** — that is the property that
+keeps the path the goldens are shot through from drifting away from the path a
+player sees.
+
+`offscreen()` declares its format itself rather than reading the capture
+harness's constant, so that `mc-testkit` does not become a runtime dependency of
+the client; an agreement test asserts the two constants are equal.
+
+**Clear colours are specified in linear space.** `wgpu::Color` is linear while the
+target is sRGB, and the hardware performs the encode on write, so clearing to a
+declared sky colour's sRGB bytes reads back visibly wrong. This is the one place
+where a unit test of the conversion and a test comparing the two configurations
+to each other can both pass while every shipped frame is wrong — neither looks at
+the value that reaches the device. Only an assertion on a captured frame closes
+it.
+
+The camera matrices are `glam::camera::rh::proj::directx::perspective` (NDC z in
+`0..1`, clip-space y **up**) and `glam::camera::rh::view::look_at_mat4`. The
+`rh::proj::vulkan` sibling of the same shape is y-**down** and renders a
+vertically mirrored world that compiles and runs; `rh::proj::opengl` is the
+`−1..1` depth variant. Both are traps, recorded in `crates/mc-render/CLAUDE.md`.
+
+### Shaders are validated when the crate is built
+
+One WGSL file per pass, validated by `naga` in a build script — not at first
+draw. Validation runs at the **downlevel capability profile**
+(`Capabilities::empty()`), not at naga's defaults, so a shader using a capability
+the supported hardware range does not offer fails on a development machine's
+build rather than on the weakest adapter's first frame. The validator refuses an
+empty shader directory, so a broken glob cannot pass by validating nothing.
+
+The build script and its tests include **one source file** by `#[path]`, so the
+tests exercise the exact code the build runs. Beyond validation, that code closes
+the two duplications this design forces: the cull shader's six-element winding
+literal must equal the Rust index pattern, and the shader's plane-axis table must
+equal what `Facing` declares. The table is six rows in `Facing` declaration order
+and the shader derives nothing from a facing value — a three-row axis-indexed
+table would only be reachable by the very expression being guarded, and
+reordering the enum would move four of six shader rows while leaving every suite
+green.
+
+### Refusals, and what recovers
+
+- **Recording terrain before a scene has been uploaded is a refusal, not an
+  empty frame.** An empty picture and a picture of a world that has not arrived
+  are the same frame, and only one of them is a defect. While the scene is still
+  being prepared the frame is an explicit clear reporting zero draw calls, not an
+  unwritten surface texture.
+- **Surface loss recovers; device loss does not.** `Lost` and `Outdated`
+  reconfigure and continue; a lost device is fatal, reported, and exits non-zero
+  — never retried. wgpu 30's surface result cannot distinguish the two on its
+  own, so the client arms a flag from `set_device_lost_callback` and asks it when
+  a surface reports `Lost`. Getting that backwards in the recoverable direction
+  spins forever on a window that will never draw again.
+- **A missing adapter is fatal for the binary**, regardless of
+  `MYCRAFT_ALLOW_NO_GPU`. That opt-in downgrades adapter absence to an announced
+  skip for GPU *tests* only; a player without a usable GPU needs an error.
+
+### What the frame statistics observe, and what they only predict
+
+`sections_admitted` is computed by calling the pure frustum function on the frame
+path. It is a **prediction**, named so that nothing reads it as an observation of
+what the GPU did; the observation is a test reading `index_count` back and
+checking it equals `6 × Σ quad_count` over the admitted sections, which ties the
+GPU's compaction to the CPU's admitted set quantitatively.
+
+`terrain_draw_calls` is the constant `1`. **Nothing distinguishes one indirect
+draw from one indirect draw**: a per-section CPU loop that reported `1` would
+satisfy any assertion over that field. The single-draw property rests on the draw
+path being built this way, not on a test that could catch its loss.
+
+## Re-shooting a golden set
+
+The committed goldens live in `crates/mc-render/goldens/<capture-id>/`, one
+directory per capture id, each holding `default.png` and its provenance
+sidecar. `mc_render::capture::declared_capture_ids` is the authority on which
+directories may exist, and `crates/mc-render/tests/golden_inventory.rs` fails
+when the set on disk is not exactly that list — a stale directory left behind
+by a previous scene revision is as much a defect as a missing one.
+
+**Regenerate with the filter. The unfiltered command corrupts the set.**
+
+```
+# 1. The probes first. They are derived from the declared camera, world and
+#    colours, so they are the only thing that can tell a correct renderer from
+#    a broken one before a broken one becomes ground truth.
+cargo nextest run -p mc-client --test terrain_probes
+
+# 2. Mint, filtered to the self-comparisons alone.
+MYCRAFT_UPDATE_GOLDENS=1 cargo nextest run -p mc-client --test terrain_goldens \
+    -E 'test(matches_its_committed_golden)'
+
+# 3. Verify with the opt-in unset, including the inventory.
+cargo nextest run -p mc-client --test terrain_goldens
+cargo nextest run -p mc-render --test golden_inventory
+```
+
+`MYCRAFT_UPDATE_GOLDENS=1 cargo nextest run -p mc-client --test terrain_goldens`
+— the same command without `-E` — **is the one that must not be run.** That
+target holds one test which deliberately verifies the *tick-60* capture against
+the *tick-0* golden, because the compare-and-fail half of the lifecycle is the
+half a passing suite never exercises. Under the update opt-in that test does not
+compare: it mints, and it writes a tick-60 frame as tick 0's committed
+reference. Every later run then compares the right frame against the wrong
+ground truth and passes forever, and the diff that would have shown it is a
+binary blob nobody can read.
+
+That is the failure the whole golden discipline exists to prevent — a golden of
+a renderer nothing checked — arriving through the regeneration procedure rather
+than through the renderer. The ordering rule that goldens are shot only after
+the derived probes pass does not cover this door, which is why the filter is
+written down here as the command rather than left to be reconstructed.
+
+Any re-shoot is a deliberate change that says so in its commit message. An
+unexplained golden update in a diff remains a review stop. When the cause is a
+change to the mesh contract rather than to the renderer, bump
+`mc_render::capture::SCENE_REVISION` instead of overwriting: the ids carry the
+revision, so the set is *renamed*, the commit shows added and removed files, and
+the inventory test forces the previous set out rather than letting it linger.
+
+## What golden-frame verification cannot see
+
+Goldens and cluster-share probes verify terrain at *large scale*. Neither can see
+a scattered handful of pixels, and this is structural rather than a gap to be
+tuned away.
+
+- **A golden encodes whatever the renderer did.** It is minted from the renderer
+  it verifies, so any artifact present at minting is baked into the reference and
+  the comparison agrees with it forever. This is why the derived probes are made
+  to pass before any golden is shot — but that ordering rule only covers
+  artifacts the probes can detect.
+- **The committed set samples three ticks of a 120-tick orbit** — 0, 60 and 119,
+  at 1280×720. Anything that appears only at another orbit angle passes the whole
+  suite untouched, and anything present at a sampled tick is baked into that
+  tick's reference.
+- **Share-based probes are blind to sparse pixels by construction.** A coverage
+  assertion with a 0.25% floor over a 1280×720 frame cannot be moved by a few
+  hundred pixels spread across an orbit. Measured while building SPEC-004: 231
+  isolated pixels across all 120 ticks, 0–9 per frame, moved no cluster share at
+  all, and two of the three committed goldens contain some.
+
+Those 231 pixels turned out to be *correct* geometry — the exposed vertical side
+face of a dirt voxel at a terrain step of two blocks or more, or on the world's
+cut edge, seen nearly edge-on so it projects to roughly one pixel and winks in
+and out as the sample point crosses it. Confirmed by an independent ray-cast
+sharing no code with the renderer: 38 dots checked, 38 agreements, and the voxel
+beyond the entered face not solid in every case.
+
+The lesson is not about those pixels. It is that **a defect of that size would
+have been equally invisible**, so pixel-scale correctness in this renderer rests
+on reading the code and on a human looking at the window, not on the golden set.
+When a change could plausibly produce sparse artifacts, verify it with a
+per-pixel oracle or accept that nothing automated is watching.
+
 ## Relationship to the frame-capture harness
 
 These conventions are asserted, not merely stated: `docs/technical/testing.md`
 describes the harness that enforces them and the tolerance model comparisons
 are judged against. See that file for how a captured frame is verified, and
-`docs/technical/decisions.md` (ADR-008) for why golden-frame comparison is
-the coverage strategy for GPU-resident rendering code at all.
+`docs/technical/decisions.md` (ADR-008, as narrowed by ADR-013) for why
+golden-frame comparison is the coverage strategy for GPU-resident rendering code
+at all, and why the pure layer beside it gets no such exemption.

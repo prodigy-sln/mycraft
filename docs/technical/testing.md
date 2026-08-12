@@ -4,7 +4,8 @@ How MyCraft is checked, and — because much of this work is done by an agent th
 screen — how results are verified without a human watching.
 
 Governing standards: `standards/global/testing.md` (TDD, coverage, mocking) and
-`standards/global/code-quality.md`. Coverage exclusions: ADR-008 in `decisions.md`.
+`standards/global/code-quality.md`. Coverage exclusions: ADR-008, as narrowed by
+ADR-013, in `decisions.md`.
 
 ## The quality gate
 
@@ -18,7 +19,7 @@ Every stage runs even when an earlier one fails, so one invocation reports every
 |---|-------|------|----------|
 | 1 | format | `cargo fmt --check` | any deviation |
 | 2 | lint + complexity | `cargo clippy -D warnings` | any lint, incl. complexity thresholds |
-| 2b | gpu-free (`mc-testkit`, no default features) | `cargo clippy` + `cargo nextest` with `--no-default-features` | any lint, or any test failure, in the configuration where `wgpu` is absent from the dependency graph |
+| 2b | gpu-free (`mc-testkit` + `mc-render`, no default features) | `cargo clippy` + `cargo nextest` with `--no-default-features` | any lint, or any test failure, in the configuration where `wgpu` is absent from the dependency graph |
 | 3 | size | built-in | source > 500 lines, tests > 600 |
 | 4 | deps | `cargo machete` | any unused dependency |
 | 5 | sast | `cargo deny` | vulnerabilities, bad licenses, banned crates, untrusted sources |
@@ -28,6 +29,24 @@ Every stage runs even when an earlier one fails, so one invocation reports every
 Flags: `-Quick` runs stages 1–3 only, for tight edit loops. `-SkipCoverage` runs tests without
 instrumentation. Neither is valid at a phase boundary or in CI.
 
+**No stage runs `rustdoc`, so a broken intra-doc link ships silently.** That is how a dangling
+reference to a moved item survives a green gate. The tree is clean under
+`RUSTDOCFLAGS="-D warnings -D rustdoc::broken_intra_doc_links" cargo doc --workspace --no-deps`
+today, so the check is a standalone command rather than a stage, with no backlog behind it.
+
+### The gate is not safe to run from two contexts at once
+
+Two concurrent invocations contend over `target/llvm-cov-target` and fail in ways that look like
+defects: a phantom `error spawning child process` in one run, a cancellation in another, while
+`cargo nextest run --workspace` passed in between. **A red gate under concurrency is not evidence** —
+and a false red invites "fixing" code that is correct, which is more expensive than the wait. Run it
+on a quiet tree.
+
+The GPU suites have a related sensitivity: at nextest's default parallelism, nine test processes each
+holding its own device, buffer set and 256-layer array texture aborted a driver once
+(`code 0xc0000005`). It has not recurred at `--test-threads 2`; a nextest test-group for the GPU
+suites is the remedy if it does.
+
 ### Complexity thresholds
 
 `clippy.toml` makes `code-quality.md` §2 machine-enforceable rather than reviewer-enforced:
@@ -35,7 +54,7 @@ instrumentation. Neither is valid at a phase boundary or in CI.
 | Limit | Value | Source |
 |-------|-------|--------|
 | Function length | 30 lines | code-quality.md §2 |
-| Arguments | 4 | code-quality.md §2 |
+| Arguments | 4, **receiver included** | code-quality.md §2 |
 | Nesting depth | 3 (= 2 nested blocks) | code-quality.md §2 |
 | Cognitive complexity | 15 | firmer than clippy's default 25 |
 | File length | 500 / 600 test | code-quality.md §2 |
@@ -45,11 +64,30 @@ Also lint-denied workspace-wide: `unwrap`, `expect`, `panic!`, `dbg!`, `todo!`, 
 `mem::forget`, float equality, swallowed errors. Raw indexing matters most in `mc-net`, where a
 length prefix is attacker-controlled.
 
+**`too_many_arguments` counts `self`, so a method gets three parameters and not four.** Clippy
+measures the whole parameter list, receiver included. This is worth knowing before a signature is
+designed rather than after: a four-parameter method reads as compliant, passes review, and fails the
+gate. It cost PRO-852 one dispute and four restructurings.
+
+Two things follow when a signature does hit it. **Prefer a named parameter group over splitting a
+function that is doing one thing** — a group makes the values it carries part of the contract, where
+a split invents a boundary the design did not have. And **`#[allow(clippy::too_many_arguments)]` is
+not available to resolve it**: `code-quality.md` is constitutional, its violations need the user's
+explicit approval, and neither an agent nor a reviewer can supply that on the user's behalf. If a
+signature is fixed by an architecture document and still will not fit, the document is what changes.
+
 ### Supply chain
 
 `deny.toml` governs stage 5. The license list is an **allowlist**, not a denylist, because the
 client ships to players and a copyleft dependency reaching the binary is a distribution problem.
 Advisory suppressions require a dated justification inline — never a silent skip.
+
+**Removing a crate from the graph beats suppressing an advisory about it.** `winit`'s
+`wayland-csd-adwaita` feature is off workspace-wide because it pulls
+`sctk-adwaita → ab_glyph → owned_ttf_parser → ttf-parser`, which is unmaintained with no safe
+upgrade and fails the advisories stage. The feature draws Wayland client-side decorations on a
+platform this project does not build for, and `winit` falls back to its own — so the dependency was
+dropped rather than ignored. The ignore list is for things that cannot be removed.
 
 ### Secrets — a coupling that must not be broken
 
@@ -213,9 +251,9 @@ Sibling `*_test.rs` files are outside it as well, by the `_test\.rs$`
 term in the gate's exclusion regex — see the placement section above for
 why that term is only reachable because unit tests keep their own file.
 What remains in the denominator is library code, which is the property
-that lets mc-testkit's number stand behind ADR-008's exclusion of
-mc-render. When a specific crate's figure is load-bearing, read the
-per-file table rather than the total anyway.
+that lets mc-testkit's number stand behind the exclusion of `mc-render`'s
+GPU-resident subtree. When a specific crate's figure is load-bearing,
+read the per-file table rather than the total anyway.
 
 The answer is derivation, never a snapshot: **no expected quantity may be
 copied from a run of the code under test**, because a count committed from
@@ -242,6 +280,16 @@ measuring the opposite workload from the one the budget exists to bound. It
 is held in place by the construction in `fixtures.rs` and by a reviewer
 reading the hash, and by nothing else.
 
+The replay world the renderer captures answers that same problem by
+**derivation instead of assertion**. Its heightmap is interpolated value
+noise on a lattice period of 16 with classic smoothstep (`3t² − 2t³`,
+maximum derivative 1.5) over the height range `32..=48`, which gives a
+maximum field slope of `1.5 × 16 / 16 = 1.5` per block — so adjacent
+integer heights differ by at most 2, and the step bound the scene's
+assertions rely on is a consequence of the construction rather than a
+measurement of it. **The amplitude may be lowered; the period may not**
+without redoing that derivation.
+
 ### Assertions that are unfalsifiable alone and load-bearing together
 
 `crates/mc-world/tests/mesh_properties.rs` asserts three properties over
@@ -258,6 +306,22 @@ runs the oracle over all of them, under coverage instrumentation, at every
 gate run, and the generated sections are built through `Section::import` in
 one shot rather than through 4096 individual `set_block` calls.
 
+### A thread spawned inside a rayon pool is not in that pool
+
+**`std::thread::spawn` called from inside `ThreadPool::install` does not
+inherit the pool.** Measured: code running directly inside `install` on a
+one-worker pool sees one worker; a `std::thread` spawned from within that
+same closure sees the machine's full count — 16. The spawned thread runs
+against the global pool, and the pool the test carefully constructed is
+simply not in the picture.
+
+This silently vacates any test whose subject is *whether the worker count
+decides the result* — determinism under parallelism, most obviously, where
+the whole point is that a one-worker run and a sixteen-worker run produce
+identical bytes. Such a test passes for the wrong reason: both halves ran
+on the same global pool. Keep the work inside `install`, or hand the
+`ThreadPool` to the thread and install on the other side.
+
 ## Verification without a human at the screen
 
 Most of this project is built by an agent that cannot see the game window, cannot feel input lag,
@@ -266,8 +330,10 @@ mechanism is always built before the thing it verifies.**
 
 ### Rendering — golden frames
 
-`mc-render` is excluded from coverage (ADR-008), so golden frames are the only automated check on
-it. That makes the harness load-bearing, and it exists ahead of the renderer it will verify: the
+`mc-render`'s GPU-resident subtree is excluded from coverage (ADR-008 as narrowed by ADR-013), so
+golden frames are the only automated check on the part of the renderer that touches a device — the
+pure layer beside it is counted and unit-tested like any other library code. That makes the harness
+load-bearing, and it exists ahead of the renderer it will verify: the
 headless frame-capture harness lives in `crates/mc-testkit`, module `frame`, and lands before a
 single line of `mc-render` is written (invariant 5). It renders caller-supplied draw work to an
 offscreen colour target, reads the pixels back, and compares them against a committed golden under
@@ -313,13 +379,18 @@ metric produces the scalar.
 #### The GPU-free seam
 
 `mc-testkit`'s `gpu` Cargo feature is default-on and is the only place `wgpu::` may appear in the
-crate. `cargo build --no-default-features` removes wgpu from the dependency graph entirely — not
-merely leaves it unused — so a stray `use wgpu::` outside the gated module is a build error rather
-than something a reviewer has to catch. The quality gate runs both clippy and `nextest` in that
-configuration (stage 2b above), which is what makes the seam a compile-time fact rather than a
+crate. `mc-render` carries the same seam, with `src/gpu/` as its gated subtree. `cargo build
+--no-default-features` removes wgpu from the dependency graph entirely — not merely leaves it
+unused — so a stray `use wgpu::` outside the gated module is a build error rather than something a
+reviewer has to catch. The quality gate runs both clippy and `nextest` in that configuration for
+both crates (stage 2b above), which is what makes the seam a compile-time fact rather than a
 convention that can quietly rot: it is the only process in which no GPU adapter can exist at all,
 which is what makes assertions like "the process holds no adapter" mean what they say rather than
 merely describing a test that declined to acquire one.
+
+For `mc-render` the seam also decides the coverage denominator (ADR-013): everything outside
+`src/gpu/` is counted, so the pure layer's tests are the figure the gate reads rather than a
+promise the exclusion made on their behalf.
 
 Every decision the harness makes — adapter preference, frame-size validation, row unpadding,
 readback-deadline expiry, image comparison, diff rendering, the golden lifecycle, and golden/artifact
@@ -398,12 +469,88 @@ with a sidecar that honestly records it as synthetic, rather than for the first 
 rendered frame in PRO-852, where a failure would be ambiguous between a wrong renderer and a wrong
 golden workflow.
 
-What the harness does **not** yet supply is the scene-side half of golden testing: a fixed world
+The harness supplies the capture path only. The scene-side half of golden testing — a fixed world
 seed, a scripted camera path and a fixed tick count, which together are what make a real frame's
-inputs byte-identical every run. Those need a world and a camera to exist, so they belong to the
-specs that own one. Until then the harness proves its own capture path against computed ground
-truth — analytically known pixels on a trivial scene it renders itself — never against a committed
-image of something it cannot generate.
+inputs byte-identical every run — belongs to the crate that owns a world and a camera, and lives in
+the terrain replay: a seeded 4×4-column world, a 120-tick camera orbit computed from the tick index
+by a free function with nowhere to accumulate into, and **one tick per rendered frame with no wall
+clock anywhere in the path**. Advancing by frames rather than by elapsed time removes the
+nondeterminism instead of isolating it; the cost is that orbit speed varies with refresh rate, which
+a scripted demo can afford.
+
+#### Assertions that do not come from a golden
+
+A golden is minted from the renderer it verifies, so it cannot tell a correct renderer from a broken
+one. The **derived probes** can, and they are what makes re-shooting a golden set safe: every
+assertion they make about a captured frame is computed from the declared camera, world and colours —
+the projected pixel a known landmark must occupy, the row the horizon must fall on, the fraction of
+the frame that must lie more than ΔE 10 from the clear colour, the share of pixels clustering within
+ΔE 10 of each **declared** placeholder mean colour. **No probe reads an expected value out of any
+committed image**, which is exactly the property a golden lacks.
+
+Probes reuse the harness's metric through the public `compare` API rather than reimplementing CIE76:
+build a uniform image of the declared colour at the frame's size and compare, then read the failing
+mask or the failing fraction; for a bare distance between two colours, compare two 1×1 images and
+read `max_delta_e`. Comparing 1×1 images to obtain a scalar reads as a workaround and is deliberate —
+`delta_e` is the sole place a distance is computed and the sole swap point if CIE76 is later replaced,
+and a second copy would let goldens and probes silently judge by different metrics after such a swap.
+
+**Each probe carries its own negative control**, because a probe suite that cannot fail is
+indistinguishable from one that passes: a blank frame must fail the coverage probe, a vertically
+flipped frame must fail the horizon probe, and a horizontally mirrored frame must fail the landmark
+probe. The controls are asserted, not merely defined — the mirrored control in particular only works
+because the landmark sits far enough off centre that its mirror lands on sky; an earlier placement
+put the mirror inside the landmark's own width, where the control **could not fail**.
+
+Two standing consequences:
+
+- **Every probe threshold is derived from a screen-space budget computed from the declared camera
+  positions.** Change the camera path — even by exchanging its sine and cosine, which merely rotates
+  the orbit a quarter turn — and every threshold is silently invalidated while the probes still pass.
+  The camera path is pinned by its own scenario for that reason.
+- **When a measured figure lands under its threshold, the model is wrong and the work escalates.**
+  The threshold does not quietly move to accommodate the measurement; that is how a derived bound
+  decays into a snapshot.
+
+#### The scene contract, and the golden inventory
+
+Goldens assert the *picture*. The scene contract asserts the **world that was captured**, and closes
+the gap that an all-stone world, or a world at the wrong heights, satisfies every geometry assertion
+and is then captured into its own goldens. It follows the mesher benchmark's ordering: work
+assertions first, never waived; the snapshot only after they pass.
+
+- **Correctness, with no committed number.** An oracle walks every voxel through the public
+  per-voxel API with its own six explicit signed offsets and shares no code with the mesher or the
+  geometry builder. The summed area of the emitted quads must equal the oracle's total visible face
+  area, **and must equal it per block name** — that second equality is what an all-stone world fails,
+  by name, in a message naming the block whose area is wrong. Area is the right invariant and quad
+  count is not: greedy merging changes how faces are grouped but never which faces are visible.
+- **Numbers derived by arithmetic**, on the same standing as the mesher's `12 288 = 2048 × 6`: total
+  `+Y` visible area 4096 (one top face per column, a heightmap with no overhangs), split 4095 grass
+  and 1 stone (every column's surface is grass except the landmark column, whose cap is stone), and
+  total `−Y` area 4096 (the world floor, whose neighbour is absent). The 4095/1 split is what a
+  missing landmark fails, and it costs nothing.
+- **A labelled change-detection snapshot.** The scene's quad count is a committed snapshot and says
+  so: it verifies nothing, and its only job is to **fail first** — before any image comparison — the
+  moment the mesh contract moves. On the day ambient occlusion narrows the merge predicate, every
+  area assertion above still holds while the quad count changes, so this is the test that speaks, and
+  its message names the remedy: bump the scene revision, delete the previous revision's golden
+  directories, re-shoot under the opt-in, justify it in the commit.
+- **The inventory test** then asserts `crates/mc-render/goldens/` holds exactly the capture ids the
+  current scene revision produces. A bumped revision *renames* the directories, so the orphaned
+  previous set fails the gate until it is deleted and the commit shows added and removed PNGs rather
+  than a modified binary blob.
+
+This chain exists because documentation was losing to a one-command shortcut. `MYCRAFT_UPDATE_GOLDENS`
+is one command, produces green, and is available by design; a procedure that competes with it is a
+hope, not a policy. The quad-count failure is not fixable by that opt-in — only editing a constant
+fixes it, and that edit lands in the diff beside the revision it should have bumped.
+
+**The residual leak, stated.** A developer who edits the quad count *without* bumping the revision
+reaches green. Closing that completely means deriving the revision from a hash of the contract so the
+golden set renames itself, at the cost of opaque directory names and a change to the declared capture
+ids. Not taken: what remains is a one-line edit beside an explanatory comment, which
+`validation-calibration.md` already makes a review stop.
 
 See `technical/rendering.md` for the orientation and pixel-format contract this harness asserts —
 recorded there once, not repeated here, because it binds every future caller of draw work, not only
@@ -502,3 +649,32 @@ Stated plainly, because pretending otherwise is how these get missed:
 - **Art direction and audio quality.**
 - **Whether a scripting API is pleasant to write against** — completeness is provable (the base
   game uses it), ergonomics is not.
+- **Pixel-scale correctness in the renderer.** Goldens and share-based probes verify terrain at
+  large scale; neither can see a scattered handful of pixels (`technical/rendering.md`). What is
+  left is reading the code, and a human looking at the window.
+
+### The renderer has not been visually accepted by a human
+
+**Nobody has deliberately run `cargo run -p mc-client` and judged that the terrain looks right.** The
+window has been opened by an agent and did appear, which establishes that the binary starts and
+presents; it does not establish what is in the frame, because the thing being checked is precisely
+the judgement an agent cannot make. Every automated check the renderer has — goldens, probes, the
+scene contract — is consistent with a picture a person would call wrong, and no verdict recorded
+anywhere substitutes for that look.
+
+This is the standing verification state of the renderer, not a task that fell off a list: the check
+costs one command, and until someone runs it and says so, "terrain renders correctly" rests on the
+code review and on assertions that were all written by the same hands that wrote the renderer.
+
+### An absent reviewer and a clean reviewer look identical
+
+A verdict aggregated from several reviewers' structured output can be clean because a reviewer
+returned **nothing**, not because it found nothing. This has happened: three specialist reviews over
+an 84-file change merged to zero findings, and reading the transcripts showed one of them had
+declared a pass with an empty payload in the middle of its own investigation, its final narration
+still listing files it intended to open.
+
+The shape is the same one this whole document is about — a green test and an assertion that never
+ran are indistinguishable in a summary line. **Zero findings is a result that has to be corroborated,
+not accepted**: check that each reviewer actually produced a payload, and treat an implausibly clean
+aggregate as a reason to read the parts rather than the total.

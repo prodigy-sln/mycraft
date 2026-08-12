@@ -32,7 +32,13 @@ const POLL_INTERVAL: Duration = Duration::from_micros(100);
 /// The one capture format: 8-bit RGBA with the sRGB encode performed by the
 /// hardware, which is the path a renderer will use and the one thing that must
 /// not be re-implemented on the CPU.
-const CAPTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+///
+/// Public because a renderer has to configure its colour target to match, and a
+/// second literal on that side is a second place the two can drift apart — the
+/// captured frame would then be read back through a format the pass never wrote.
+/// Exported rather than merely readable: this is the value a consumer asserts
+/// its own against.
+pub const CAPTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 /// Captures one frame.
 ///

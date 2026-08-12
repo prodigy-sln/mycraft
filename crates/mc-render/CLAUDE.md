@@ -10,9 +10,10 @@ voxel-specific. Do not grow a general scene graph here.
 
 ## Verification — read this before writing render code
 
-**This crate is excluded from coverage thresholds (ADR-008), which means golden-frame tests are the
-only thing standing between a regression and shipping it.** The exclusion is a bet that the frame
-harness is good. Keep that bet honest:
+**The `src/gpu/` subtree of this crate is excluded from coverage thresholds (ADR-008, narrowed by
+ADR-013), which means golden-frame tests are the only thing standing between a regression there and
+shipping it.** Everything outside `src/gpu/` is counted like any other library code. The exclusion
+is a bet that the frame harness is good. Keep that bet honest:
 
 - Every visual feature gets a golden frame in `mc-testkit`, captured from a fixed seed, fixed camera
   path, and fixed tick count.
@@ -31,6 +32,13 @@ testable free function first.
 
 - Terrain draws through **one indirect draw call**; per-chunk commands are built by a compute shader
   doing frustum and occlusion culling. Adding a per-chunk CPU draw call is a regression.
+  **This rule binds whether or not the current increment measures draw calls or frame time.** The
+  absence of a benchmark is not licence to drop the property — build it properly from the start.
+  **Occlusion culling is deferred, frustum culling is not.** The compute pass, the atomic index
+  compaction and the single `draw_indexed_indirect` are built (PRO-852); a hierarchical depth
+  pyramid is a self-contained later feature that slots into the same compaction step and brings its
+  own goldens. Deferred with a reason, not quietly unimplemented — so the day it is wanted, nothing
+  about the draw path changes.
 - Vertices are bit-packed (position, normal, AO, UV). Growing the vertex format is a deliberate,
   measured decision — a 16³ section should stay cache-resident.
 - Meshing runs on `rayon` workers, never on the render or tick thread. Budget: < 200 µs per section.
@@ -58,3 +66,33 @@ testable free function first.
   is not.
 - `egui` is for debug and tooling UI **only**. Anything a player sees during normal play is custom
   and follows `standards/global/ui-design.md`.
+
+## Never take `glam::camera::rh::proj::vulkan::perspective`
+
+The camera uses `glam::camera::rh::proj::directx::perspective` and
+`glam::camera::rh::view::look_at_mat4` — right-handed, NDC z 0..1, clip-space y **up**. The
+`vulkan::` module of the same shape is y-**down**, and swapping it in compiles, runs, and renders a
+vertically mirrored world. That is precisely the failure FR-8.2-S1 and its negative control
+FR-8.2-S6 exist to catch, so it will be caught — but by a golden diff whose cause is not obvious,
+not by the type system.
+
+(The older `Mat4::perspective_rh` / `Mat4::look_at_rh` pair is deprecated as of the pinned glam
+0.33.3 and does not compile under `-D warnings`. Documents naming that pair are stale, not wrong
+about the intent.)
+
+## Known gap — texture resolution does not consult the registry
+
+`build_section_geometry` matches a quad's `BlockName` against a `TextureKey` **by identical
+spelling**. The registry is the real authority for which texture a block draws, and the builder's
+signature passes no registry, so the match is a coincidence that holds only because every
+`content/base/blocks/*.toml` happens to declare `texture` equal to `name`.
+
+Deferred deliberately for MVP 1, on two grounds: the spec contemplates the failure (FR-1.1-S5), and
+the failure mode is `UnresolvedTexture` naming the block — loud, never a wrong picture. Nothing
+silently renders the wrong thing.
+
+**MVP 2 must close it, and will hit it immediately.** A mod that draws two blocks with one texture,
+or names a texture differently from its block, is valid content this cannot express — and invariant
+1 says a missing hook is fixed in the API, never special-cased. The fix routes resolution through
+the registry and changes a binding signature, which is why it was not taken mid-implementation with
+five phases already broken down against it.

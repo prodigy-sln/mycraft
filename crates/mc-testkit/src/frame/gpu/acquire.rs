@@ -126,7 +126,16 @@ impl CaptureContext {
         &self.device
     }
 
-    pub(super) const fn queue(&self) -> &wgpu::Queue {
+    /// The queue the caller's draw work uploads through.
+    ///
+    /// Public for the same reason [`device`](Self::device) is, and the argument
+    /// there is the argument here: draw work receives an encoder and a view,
+    /// neither of which can write a buffer or a texture. A caller whose pass
+    /// needs a per-frame uniform, or an indirect argument zeroed before the
+    /// dispatch that fills it, has nowhere else to put it. It is a fact the
+    /// layer already holds, not a decision.
+    #[must_use]
+    pub const fn queue(&self) -> &wgpu::Queue {
         &self.queue
     }
 }

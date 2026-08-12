@@ -1,6 +1,7 @@
 # Architecture Decision Records
 
-Sources: `PLAN.md` (research, 2026-08-11); ADR-011 and ADR-012 consolidated from SPEC-002.
+Sources: `PLAN.md` (research, 2026-08-11); ADR-011 and ADR-012 consolidated from SPEC-002; ADR-013
+from SPEC-004.
 
 Each record states a decision that is **binding now**. Status `Accepted` means the decision governs
 all new work; where implementation has not yet landed, that is noted explicitly. Superseding a
@@ -146,7 +147,7 @@ key is already the right primitive for it.
 
 ## ADR-008 — Coverage excludes GPU and binary crates
 
-**Status**: Accepted · **Date**: 2026-08-11
+**Status**: Accepted · **Date**: 2026-08-11 · **Narrowed in part by ADR-013**
 
 **Context.** `standards/global/testing.md` sets 90% on business logic and 80% overall. wgpu pipeline
 setup is largely untestable without a GPU and a live surface.
@@ -159,6 +160,12 @@ in `scripts/sdd-gate.ps1`. The renderer is verified instead by golden-frame perc
 `mc-script`, `mc-world`, `mc-proto`, and `mc-core`, where correctness actually lives. Risk: renderer
 regressions must be caught by golden frames — if that harness is weak, the exclusion hides real
 defects. That is why the harness is M0, before the renderer exists.
+
+**Record note (2026-08-12).** ADR-013 narrows this record's `mc-render` exclusion to that crate's
+GPU-resident subtree, `crates/mc-render/src/gpu/`. Everything above stands as written about
+GPU-resident work and about `mc-client` and `mc-server`; only the extent of the `mc-render`
+exclusion changed, and only because a compile-enforced boundary now exists that did not when this
+record was made.
 
 ---
 
@@ -388,3 +395,86 @@ crates. MVP 2's `mc-script` can depend on `mc-core` alone to populate the
 registry, without any dependency on chunk storage, worldgen, or
 persistence. `toml` is absent from `mc-core`'s entire resolved dependency
 graph, mechanically asserted (`technical/architecture.md`).
+
+---
+
+## ADR-013 — Coverage excludes the GPU-resident subtree, not the whole renderer
+
+**Status**: Accepted · **Date**: 2026-08-12 · **Supersedes ADR-008 in part**
+
+**Context.** ADR-008 excluded `mc-render`, `mc-client` and `mc-server` from the coverage
+denominator on the grounds that "wgpu pipeline setup is largely untestable without a GPU and a live
+surface". That was and remains correct about wgpu pipeline setup: creating an instance, enumerating
+adapters, requesting a device, allocating buffers and textures, building pipelines, encoding passes,
+submitting and presenting cannot be exercised without a device, and golden-frame perceptual diffing
+is the right verification strategy for them. What changed is that the exclusion was written **by
+path**, and `mc-render` is no longer only pipeline setup. `crates/mc-render/CLAUDE.md` already
+stated the rule the path-based exclusion contradicted — anything expressible as a pure function is
+unit-tested normally and is not exempt, only GPU-resident work gets the exclusion — and the terrain
+renderer put real substance behind that sentence: quad → vertex/index geometry and winding, vertex
+bit packing and its range refusals, frustum-plane extraction and frustum ∩ AABB visibility,
+texture-key → array-layer resolution, procedural placeholder texel generation, sRGB → linear
+conversion, surface-format selection, resize and depth-reallocation policy, surface-error →
+frame-action policy, window-event → action policy, and the device-request description. All of it is
+pure, all of it is unit-tested, and under a by-crate exclusion none of it was counted. A coverage
+figure that omits every tested line and reports on none of them vouches for nothing while appearing
+to.
+
+**Why this is possible now and was not when ADR-008 was written.** ADR-008 predates any `mc-render`
+code, so there was no boundary to draw the exclusion at other than the crate. There is one now: a
+default-on `gpu` Cargo feature under which `wgpu::` is nameable only inside
+`crates/mc-render/src/gpu/`, so `--no-default-features` removes wgpu from the resolved dependency
+graph entirely and a stray `use wgpu::` in the pure layer is a build error. That subtree is a
+mechanical, compile-enforced boundary rather than a naming convention, which is what makes a
+narrower exclusion honest rather than aspirational. `mc-testkit` has carried the identical seam
+since the frame harness landed.
+
+**Decision.** The exclusion is the GPU-resident subtree of `mc-render`, not the crate.
+`$CoverageExclude` in `scripts/sdd-gate.ps1` is
+
+```
+crates[/\\](mc-client|mc-server)[/\\]|crates[/\\]mc-render[/\\]src[/\\]gpu[/\\]|_test\.rs$
+```
+
+- `crates/mc-render/src/gpu/**` — excluded. Instance, adapter, device, surface, buffer and texture
+  allocation and upload, pipeline creation, pass encoding, submission, present. Verified by golden
+  frames and by golden-independent derived probes.
+- Everything else in `crates/mc-render/` — **counted**, at the workspace's ordinary 80% line
+  threshold.
+- `mc-client` and `mc-server` — excluded, unchanged. `mc-client` holds only the `winit` event-loop
+  adapter and composition wiring; every policy it would otherwise have owned lives in `mc-render`'s
+  pure layer precisely so that it is counted. If logic ever accretes in `mc-client`, that is a new
+  record, not a quiet edit to this regex.
+- The `_test.rs$` clause and the reasoning recorded above it in the gate script are untouched.
+
+The gate's GPU-free stage runs `cargo clippy -p mc-render --no-default-features` and
+`cargo nextest run -p mc-render --no-default-features` alongside the same pair for `mc-testkit`, so
+the seam this record depends on is a checked fact at every gate run rather than a convention that
+can rot.
+
+**Consequences.** The coverage percentage vouches for the renderer's pure layer, which is where a
+maths bug — a sign inversion in a frustum plane, a truncating vertex pack, a layer index resolved
+to zero — actually lives. Golden frames remain the only automated check on GPU-resident work, so
+ADR-008's central bet is unchanged and its risk statement still applies: if the frame harness is
+weak, the exclusion hides real defects. The renderer strengthens that bet from the other side with
+derived probes that assert properties of a captured frame against computed expectations rather than
+against a committed image — a golden re-shot from a broken renderer is a golden of a broken
+renderer, and only an assertion that does not come from the renderer can catch that. Adding a pure
+module to `mc-render` now carries the same testing obligation as adding one to `mc-world`.
+
+**Rejected.**
+
+- **Leaving ADR-008 as written and backing the pure layer with named scenarios only.** The honest
+  short-term answer, and rejected because scenarios bind only their own spec: the next renderer
+  feature would add pure, uncounted code with no scenario obliging it to be tested, and the gate
+  would report a figure that silently excludes it. The exclusion needs to describe the boundary that
+  actually exists, not the crate that used to be a proxy for it.
+- **Excluding by feature rather than by path**, counting only the `--no-default-features`
+  configuration. Cleaner in principle, but `cargo llvm-cov` filters filenames, not cfg
+  configurations, and a second instrumented run purely to produce a denominator would double the
+  slowest gate stage for no additional signal.
+- **Dropping the exclusion entirely** and letting golden frames raise the number. Golden tests
+  execute GPU code without asserting over its lines in any way a coverage tool understands; the
+  figure would rise while meaning less.
+- **Narrowing `mc-client` at the same time.** Nothing puts logic there, so the change would be
+  speculative. Revisit when something does.

@@ -7,6 +7,21 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+# Block names, solidity and the registry the replay world is written against.
+mc-core = { workspace = true }
+# Columns, sections and the mesher. The replay is a world, and a world is what
+# this crate stores; the quad -> vertex conversion belongs to the renderer and
+# is deliberately absent from this graph.
+mc-world = { workspace = true }
+# Meshing runs on workers during preparation and never on a frame path, which is
+# what FR-6.3-S3's scan of the renderer's source asserts and FR-6.3-S4's scan of
+# this crate's source controls.
+rayon = { workspace = true }
+# Publication swaps a pointer rather than waiting on whoever is reading. A lock
+# would satisfy the same scenario only by the discipline of dropping the guard
+# immediately, and nothing enforces a discipline.
+arc-swap = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

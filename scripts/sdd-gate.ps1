@@ -21,8 +21,10 @@
     PowerShell 7 is cross-platform — this is deliberately the ONLY gate script,
     so there is no second implementation to drift out of sync.
 
-    Coverage excludes mc-render, mc-client and mc-server per ADR-008
-    (docs/technical/decisions.md); the renderer is verified by golden-frame tests.
+    Coverage excludes mc-client and mc-server wholesale, and mc-render's
+    GPU-resident subtree src/gpu/, per ADR-008 as narrowed by ADR-013
+    (docs/technical/decisions.md); that subtree is verified by golden-frame
+    tests, and mc-render's pure layer is counted like any other library code.
 
 .PARAMETER SkipCoverage
     Skip coverage instrumentation and run tests directly. Fast local iteration
@@ -49,7 +51,22 @@ Push-Location $RepoRoot
 # standards/global/testing.md §4
 $LineThreshold = 80
 
-# ADR-008: GPU and binary crates are outside the coverage denominator.
+# ADR-013 (superseding part of ADR-008): the binary crates stay outside the
+# coverage denominator wholesale, but of mc-render only the GPU-resident subtree
+# does.
+#
+# ADR-008 excluded all of mc-render by path because golden frames were the only
+# thing that could cover it. mc-render now carries a default-on `gpu` Cargo
+# feature under which `wgpu::` is nameable only in src/gpu/, and that mechanical
+# boundary did not exist when ADR-008 was written. Everything outside it —
+# geometry, packing, frustum maths, texture resolution, window and surface
+# policy — is a pure function that crates/mc-render/CLAUDE.md says gets no
+# exemption, so it is counted.
+#
+# mc-client and mc-server stay excluded wholesale: after PRO-852, mc-client
+# holds only the winit event-loop adapter and composition wiring, every policy
+# having moved into mc-render's pure layer. If logic ever accretes there, that is
+# a new ADR and not a quiet edit to this line.
 #
 # `*_test.rs` files are excluded too. They are the `#[path = "x_test.rs"] mod
 # tests;` siblings used to unit-test private items (docs/technical/testing.md),
@@ -65,15 +82,15 @@ $LineThreshold = 80
 # reachable at all, and is one of the reasons the sibling layout is this
 # project's convention.
 #
-# That matters more here than it would elsewhere: ADR-008 excludes mc-render
-# *because* golden-frame tests cover it, and mc-testkit is the crate carrying
+# That matters more here than it would elsewhere: the exclusion that remains
+# rests on golden-frame tests covering it, and mc-testkit is the crate carrying
 # that bet. Its coverage number is the one figure standing behind the exclusion,
 # so it has to measure library code and nothing else.
 #
 # Note that `crates/*/tests/` needs no entry — llvm-cov never counted it.
 # Integration tests are separate crates and are excluded by default; verified
 # against the JSON per-file list, not assumed.
-$CoverageExclude = 'crates[/\\](mc-render|mc-client|mc-server)[/\\]|_test\.rs$'
+$CoverageExclude = 'crates[/\\](mc-client|mc-server)[/\\]|crates[/\\]mc-render[/\\]src[/\\]gpu[/\\]|_test\.rs$'
 
 # code-quality.md §2 hard size limits. Rust has no "component vs service"
 # distinction, so the general ceiling is the services limit (500) and test files
@@ -142,23 +159,30 @@ Invoke-Stage 'lint + complexity (clippy, zero warnings)' {
 }
 
 # ── 2b. GPU-free configuration ─────────────────────────────────────────────────
-# mc-testkit's frame harness splits into a GPU-free core and a wgpu layer behind
-# a default-on `gpu` feature. `--no-default-features` is the only configuration
-# in which wgpu is absent from the dependency graph, and therefore the only
-# process in which no GPU adapter *can* exist — which is what makes the
-# comparison suite's "while the process holds no GPU adapter" assert what it
-# says. Every other stage above and below runs with the feature on, so without
-# this stage the seam decays to convention.
+# Two crates split into a GPU-free core and a wgpu layer behind a default-on
+# `gpu` feature: mc-testkit's frame harness, and mc-render's pure layer.
+# `--no-default-features` is the only configuration in which wgpu is absent from
+# the dependency graph, and therefore the only process in which no GPU adapter
+# *can* exist — which is what makes the comparison suite's "while the process
+# holds no GPU adapter" assert what it says. Every other stage above and below
+# runs with the feature on, so without this stage the seam decays to convention.
+#
+# Both crates are named explicitly rather than `--workspace`: the workspace flag
+# would unify features across members and re-enable `gpu` through mc-client,
+# which is the same mis-scoping mc-render's own dependency-graph test exists to
+# rule out.
 #
 # Deliberately NOT `--all-features`: that would re-enable `gpu` and make the
 # stage meaningless. Deliberately NOT `--no-tests=pass` either: a run with no
 # tests in it proves nothing, which is the one thing this stage exists to rule
-# out. The two commands are chained with `&&` because Invoke-Stage inspects
+# out. The commands are chained with `&&` because Invoke-Stage inspects
 # $LASTEXITCODE once, after the whole scriptblock — on separate lines a clippy
 # failure would be silently overwritten by a passing test run.
-Invoke-Stage 'gpu-free (mc-testkit, no default features)' {
+Invoke-Stage 'gpu-free (mc-testkit + mc-render, no default features)' {
     cargo clippy -p mc-testkit --no-default-features --all-targets -- -D warnings &&
-    cargo nextest run -p mc-testkit --no-default-features
+    cargo nextest run -p mc-testkit --no-default-features &&
+    cargo clippy -p mc-render --no-default-features --all-targets -- -D warnings &&
+    cargo nextest run -p mc-render --no-default-features
 }
 
 # ── 3. File size limits ────────────────────────────────────────────────────────

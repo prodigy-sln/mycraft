@@ -45,3 +45,6 @@ desktop.ini
 *.tracy
 flamegraph.svg
 perf.data*
+
+# Conductor working notes (untracked scratchpad)
+.claude/pm/

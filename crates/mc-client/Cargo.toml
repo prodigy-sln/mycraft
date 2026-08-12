@@ -6,7 +6,49 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# The composition root, and the only crate that resolves both halves of the
+# snapshot seam. `mc-sim` publishes a world and a camera path, `mc-render` turns
+# quads into packed vertices and draws them, and neither may name the other —
+# so everything that needs both lives here.
 [dependencies]
+mc-sim = { workspace = true }
+mc-render = { workspace = true }
+mc-world = { workspace = true }
+mc-core = { workspace = true }
+# The window and the event loop. Confined to `src/events.rs` by the boundaries
+# table and by `tests/winit_boundary.rs`, which fails the build if a second file
+# names it — everything the loop decides is a pure function in `mc-render`.
+winit = { workspace = true }
+# The surface, the device and the frame path. `mc-render` owns the draw; what is
+# left here is acquiring a texture from a window, which no offscreen capture does.
+wgpu = { workspace = true }
+# `request_device` and `enumerate_adapters` are async and resolve immediately, so
+# the executor's whole job is to stop pretending otherwise.
+pollster = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# The determinism suite prepares the scene inside pools of one and of eight
+# workers, which is the only way to ask whether the worker count decides the
+# bytes.
+rayon = { workspace = true }
+# The derived probes push the landmark's declared world position through the
+# declared camera to find the pixel it lands on, which is a matrix times a
+# vector. The renderer's own maths is the thing being asked; the answer is
+# judged against the pixel the screen-space budget derived by hand.
+glam = { workspace = true }
+# The golden suite's compare-and-fail control writes its artifacts into a
+# directory it owns, so a run of it can never disturb the artifacts a real
+# golden comparison left for a reader.
+tempfile = { workspace = true }
+# The offscreen device the replay's own frames are drawn on. It lands here, and
+# not in `mc-render`'s tests, because rendering the replay needs the world
+# `mc-sim` generates and the draw path `mc-render` owns — and neither of those
+# two crates may resolve the other in any dependency kind, dev-dependencies
+# included. This crate is the one that resolves both. The harness's `gpu` half is
+# asked for explicitly: the workspace entry turns its default features off so
+# that a consumer inherits the pure half unless it says otherwise.
+mc-testkit = { workspace = true, features = ["gpu"] }
 
 [lints]
 workspace = true

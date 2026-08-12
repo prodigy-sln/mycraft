@@ -7,6 +7,98 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+# Quads, facings and the section coordinate system the geometry builder converts
+# from. The dependency runs this way and only this way: mc-world knows nothing
+# about vertices, indices, winding or bit packing, all of which are decisions
+# about a GPU.
+mc-world = { workspace = true }
+# Block names and texture keys.
+mc-core = { workspace = true }
+# Camera, projection and frustum maths. `Mat4::perspective_rh` (depth 0..1) is
+# wgpu's clip space; the `_gl` variants are not, and picking the wrong one is a
+# whole-picture error that no unit of the maths reports on its own.
+glam = { workspace = true }
+thiserror = { workspace = true }
+
+# The GPU half. Optional, so that `--no-default-features` removes wgpu from the
+# dependency graph entirely rather than merely leaving it unused — which is what
+# makes a stray `use wgpu::` in the pure layer a build error instead of a review
+# finding.
+#
+# `bytemuck` was declared here alongside it and is deliberately gone: every
+# buffer this crate uploads is built with explicit `to_le_bytes`, because a
+# buffer's byte order has to be a stated fact rather than whatever the build
+# host happened to be, and `cast_slice` is native-endian. The GPU layer landed
+# and wanted it nowhere, so the declaration went rather than acquiring an
+# ignore that would outlive its reason.
+wgpu = { workspace = true, optional = true }
+
+# Shader validation runs when this crate is built, not at first draw, and
+# `build/validate.rs` is compiled twice: once into the build script and once
+# into the test that exercises it. A build script sees only this table, so
+# everything that file names has to appear here as well as below — and naga is
+# pinned at the one version wgpu 30 itself resolves, so the validator gating the
+# build is the validator wgpu will hand the shader to.
+[build-dependencies]
+naga = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# The build script's half of the validator, compiled a second time into
+# `tests/shader_validation.rs`. `thiserror` needs no entry here: test targets
+# resolve this package's own `[dependencies]` as well.
+naga = { workspace = true }
+# The shader-directory scenarios need directories the repository does not have:
+# one holding an invalid source, one holding no `.wgsl` file at all.
+tempfile = { workspace = true }
+# The `gpu` feature seam is asserted against cargo's own resolution rather than
+# against this manifest, so the walk reads `cargo metadata`'s JSON.
+serde_json = { workspace = true }
+# The capability assertion enumerates adapters itself, because it asks about
+# adapters the capture harness deliberately does not retain — and enumeration is
+# a future. Dev-only: adapter and device acquisition belongs to the client and to
+# the harness, never to this crate's library.
+pollster = { workspace = true }
+# Featureless by default, which is load-bearing rather than tidiness: dev-
+# dependencies are edges cargo resolves, so a default-featured harness would drag
+# wgpu into this crate's `--no-default-features` graph and fail the seam's own
+# test in a way that looks like a feature bug here rather than a manifest one.
+# The `gpu` feature below turns the harness's own half back on.
+mc-testkit = { workspace = true }
+
+# `default = ["gpu"]`: everything that draws gets the GPU layer without asking,
+# and only the deliberate `--no-default-features` selection resolves the pure
+# layer alone. `mc-testkit/gpu` rides along because the offscreen tests that
+# exercise this crate's GPU layer need the harness's own device half.
+[features]
+default = ["gpu"]
+gpu = ["dep:wgpu", "mc-testkit/gpu"]
+
+# The one test that has to name a wgpu type without needing a device: the
+# offscreen pass's colour format against the harness's own. `required-features`
+# rather than a `#[cfg]` inside the lib's test module, because the seam is about
+# where a GPU type may be *named* and a cfg-guarded one still sits in a file the
+# pure layer compiles. It also reports itself as skipped when the feature is off,
+# instead of vanishing quietly.
+[[test]]
+name = "pass_format"
+path = "tests/pass_format.rs"
+required-features = ["gpu"]
+
+# The capability assertion the GPU draw shape rests on, and the offscreen terrain
+# suite itself. Same reasoning as above and it is the reason the entries are
+# written out rather than left to autodiscovery: `required-features` reports the
+# suite as skipped when the feature is off, where a file-level `#![cfg]` would
+# let it vanish from a default run while still looking green.
+[[test]]
+name = "adapter_capabilities"
+path = "tests/adapter_capabilities.rs"
+required-features = ["gpu"]
+
+[[test]]
+name = "terrain_offscreen"
+path = "tests/terrain_offscreen.rs"
+required-features = ["gpu"]
 
 [lints]
 workspace = true
