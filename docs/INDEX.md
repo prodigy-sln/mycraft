@@ -36,9 +36,9 @@ the Routing Guide below is where future destinations are declared.
 |------|---------|---------|
 | architecture.md | Crate boundaries and dependency direction established by the block registry and chunk storage work | SPEC-002 |
 | decisions.md | Architecture decision records — stack choices and their rejected alternatives | PLAN.md, SPEC-002 |
-| rendering.md | Draw-target conventions established ahead of `mc-render`: orientation and capture pixel-format contract | SPEC-001 |
-| testing.md | Quality gate stages, verification harnesses, and what automation cannot check | PLAN.md, sdd-init-project, SPEC-001, SPEC-002 |
-| world-format.md | Chunk section and column storage, the block palette, and block-identity stability across a registry change | SPEC-002 |
+| rendering.md | The section mesher's quad, determinism and error contracts, and the draw-target conventions established ahead of `mc-render`: orientation and capture pixel-format contract | SPEC-001, SPEC-003 |
+| testing.md | Quality gate stages, verification harnesses, and what automation cannot check | PLAN.md, sdd-init-project, SPEC-001, SPEC-002, SPEC-003 |
+| world-format.md | Chunk section and column storage, the block palette, and block-identity stability across a registry change | SPEC-002, SPEC-003 |
 
 ### modding/
 

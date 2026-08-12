@@ -135,6 +135,56 @@ implementation (mutation testing, not a real regression), delete that file
 rather than committing it — a committed seed should mean "this once broke
 the real implementation," not "this once broke a scratch mutant."
 
+### The derived-oracle rule: what coverage does not vouch for
+
+`benches/` code that a test reaches through `#[path]` is **outside the
+coverage denominator** — confirmed three separate times, most recently by
+coverage staying byte-identical at 92.48% over 2262 tracked lines across
+roughly 330 newly added bench lines. The gate's coverage percentage
+therefore vouches for the mesher's benchmark fixtures, its independent
+oracle, and its budget verdict **not at all**.
+
+The answer is derivation, never a snapshot: **no expected quantity may be
+copied from a run of the code under test**, because a count committed from
+the first green run commits whatever that run happened to produce. An
+emit-nothing mesher gets `0` committed as its expected quad count and passes
+forever — this project caught exactly that, before any mesher code existed.
+As built: `solid` = 6 quads, by inspection; `checkerboard` = 12 288 = 2048
+solid voxels × 6 facings, derived by arithmetic; `terrain` is pinned by **no
+committed number at all** — the summed area of the emitted quads must equal
+what an independent per-voxel visible-face oracle counts for the same
+fixture.
+
+The oracle shares no code with the mesher: it goes through the public
+per-voxel API and re-derives adjacency from its own six explicit signed
+offsets, and it was written *before* the mesher existed, so there was
+nothing to borrow from (invariant 5). An oracle that borrowed the mesher's
+own adjacency table would agree with a sign inversion or a swapped neighbour
+slot instead of catching it.
+
+A fixture lesson worth keeping alongside this: a **spatially coherent**
+`terrain` heightmap is a binding constraint no test can enforce. Per-column
+white noise satisfies every assertion written against that fixture while
+measuring the opposite workload from the one the budget exists to bound. It
+is held in place by the construction in `fixtures.rs` and by a reviewer
+reading the hash, and by nothing else.
+
+### Assertions that are unfalsifiable alone and load-bearing together
+
+`crates/mc-world/tests/mesh_properties.rs` asserts three properties over
+generated sections: no emitted quad adjoins a solid voxel; every visible
+(solid voxel, facing) pair is covered; no two quads cover the same pair. The
+middle two are **satisfied by an over-covering mesher** and read as vacuous
+in isolation — they are falsifiable only as a trio with the first. Recorded
+here so a future reviewer meeting one of them alone does not delete it as
+dead weight; the unit of judgement is the set, not the test function.
+
+Those property tests run at ~32 `proptest` cases rather than the default
+256. Each case meshes a section against up to six generated neighbours and
+runs the oracle over all of them, under coverage instrumentation, at every
+gate run, and the generated sections are built through `Section::import` in
+one shot rather than through 4096 individual `set_block` calls.
+
 ## Verification without a human at the screen
 
 Most of this project is built by an agent that cannot see the game window, cannot feel input lag,
@@ -236,20 +286,22 @@ supposed to be produced. It is omitted when the two images differ in dimensions 
 position-by-position diff between frames that share no positions — and the omission's reason is
 recorded in the mismatch report instead.
 
-#### The two environment opt-ins
+#### The environment opt-ins
 
 | Opt-in | Effect |
 |--------|--------|
 | `MYCRAFT_ALLOW_NO_GPU` | Downgrades "no usable adapter" from a hard failure to an announced skip whose warning contains that literal string |
 | `MYCRAFT_UPDATE_GOLDENS` | The only way a golden is ever created or overwritten |
+| `MYCRAFT_SKIP_PERF_BUDGET` | Waives the mesher benchmark's timing comparison only, never its work assertions; see "The mesher budget" under Performance below |
 
-Both are a contract, not a convenience. The default with no GPU present is hard failure, deliberately:
-a silent skip would let the gate go green while verifying nothing, which is exactly the risk ADR-008
-accepts on this harness's behalf, and a skip that does not announce itself would make that risk
-invisible on top of accepted. A missing golden fails the same way — it never mints itself, it fails
-and writes the captured image as an artifact, naming the missing path. Presence of either variable
-enables it, not its value: `MYCRAFT_ALLOW_NO_GPU=0` still enables the skip, because a variable
-someone bothered to set is a request.
+All three are a contract, not a convenience. The default with no GPU present is hard failure,
+deliberately: a silent skip would let the gate go green while verifying nothing, which is exactly
+the risk ADR-008 accepts on this harness's behalf, and a skip that does not announce itself would
+make that risk invisible on top of accepted. A missing golden fails the same way — it never mints
+itself, it fails and writes the captured image as an artifact, naming the missing path. Presence of
+any of the three variables enables it, not its value: `MYCRAFT_ALLOW_NO_GPU=0` still enables the
+skip and `MYCRAFT_SKIP_PERF_BUDGET=0` still skips the timing comparison, because a variable someone
+bothered to set is a request.
 
 The mechanism is only half of it. A changed golden must be justified in the commit that changes it;
 an unexplained golden update is a review stop (`validation-calibration.md`). `MYCRAFT_UPDATE_GOLDENS`
@@ -282,7 +334,9 @@ image of something it cannot generate.
 
 See `technical/rendering.md` for the orientation and pixel-format contract this harness asserts —
 recorded there once, not repeated here, because it binds every future caller of draw work, not only
-this harness.
+this harness. That file also carries a warning any future golden of rendered terrain depends on:
+adding ambient occlusion narrows the mesher's merge predicate and changes quad counts, so every
+golden captured against today's mesh is invalidated when AO arrives.
 
 ### Multiplayer — bot clients
 
@@ -318,6 +372,51 @@ dupe, malformed and oversized packets, replayed auth challenges.
 `criterion` benchmarks with committed baselines, so regressions are caught numerically rather than
 felt. Key budgets: chunk meshing < 200 µs/section; server tick p99 < 25 ms at 32 players and 500
 active NPCs.
+
+#### The mesher budget: a standalone command, deliberately not a gate stage
+
+The chunk-meshing budget is real and measured: `crates/mc-world/benches/meshing.rs`, a
+`harness = false` bench target, run as
+
+```
+cargo bench -p mc-world --bench meshing
+```
+
+This runs as a **standalone command that the quality gate deliberately does not run.**
+`CLAUDE.md` principle 4 requires gates to be deterministic, and a wall-clock threshold is not one —
+a gate that goes red on a slower machine is a gate people learn to ignore. The command has exactly
+two required run points: a spec's own `/sdd-validate`, and MVP exit verification. Both are
+deliberate acts by a person who can account for a slow machine, which is exactly why the check does
+not live where every gate run would hit it automatically. `cargo nextest` neither runs nor builds
+the bench target — confirmed against the real tree with the `harness = false` target present (the
+binary listing reports the lib test and the integration tests only, and no bench binary) — which is
+what keeps the wall-clock threshold outside the gate without needing a `test = false` entry on the
+`[[bench]]`.
+
+Measured figures, recorded as observations with their spread rather than as a single number: the
+`terrain` fixture measured **129.885 µs** on one run and **137.452 µs** on another, on the same
+machine, against a **< 200 µs** budget — a ~6% spread, which is itself the argument for keeping the
+check out of the deterministic gate. `checkerboard` measured **~376–383 µs** against a 1 ms
+ceiling. `solid` is reported but unbudgeted by design.
+
+The command enforces a strict ordering: **work assertions for all three fixtures run first, are
+never waived, and no timing is measured or reported at all if the work does not check out.** A
+mesher that emits the wrong number of quads for a fixture fails before criterion ever runs, so a
+"passing" timing can never be measured against a mesher doing the wrong amount of work.
+
+**Two numbers exist per fixture, and only one of them gates.** The command measures its own mean —
+warm up, then run N timed iterations under `std::hint::black_box`, mean = total ÷ N as a `Duration`
+— and that is the number the exit code is judged against. Criterion's own estimate is printed
+alongside it purely as a report; no test reads it, and nothing in the repository compares the two
+numbers to each other. This is a deliberate consequence of criterion's own documentation: its
+`estimates.json` output is stated to be a private implementation detail whose structure may change,
+so the verdict is not built on it.
+
+`MYCRAFT_SKIP_PERF_BUDGET` waives the **timing** comparison only — the work assertions still run
+and can still fail, so a waived run never means "verified nothing". As with `MYCRAFT_ALLOW_NO_GPU`,
+presence enables it, not value (`MYCRAFT_SKIP_PERF_BUDGET=0` still skips), and it announces itself
+in its own output by its own literal name. It is named generically, not after the mesher, so later
+budgets — the 25 ms tick p99 above among them — can reuse the same switch.
 
 ## What automation cannot check
 

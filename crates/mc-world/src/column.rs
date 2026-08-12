@@ -123,6 +123,16 @@ impl ChunkColumn {
             .set_block(Self::inside_that_section(pos), block, registry)
     }
 
+    /// The section this column stacks at `index`, or nothing if it stacks no
+    /// such section.
+    ///
+    /// Bounded by the section array itself, exactly as [`block_at`](Self::block_at)
+    /// is: how tall a column is is its own shape, and a second constant stating
+    /// it again would be a second thing to keep in step.
+    pub fn section(&self, index: usize) -> Option<&Section> {
+        self.sections.get(index)
+    }
+
     /// Which of a column's sections would own `height`.
     ///
     /// Deliberately not bounded here. The array is asked for that index and

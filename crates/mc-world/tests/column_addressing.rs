@@ -11,17 +11,25 @@
 //! The coordinate a column is created at is signed, because half of any world sits
 //! at a negative x or z. A column that could not carry -2 would not fail loudly; it
 //! would quietly be a different column.
+//!
+//! A column also hands a whole section back, which is how a caller assembles the
+//! section above and below a section it is about to work on. The same two halves
+//! can be wrong there and are separated the same way: the section that comes back
+//! is asked for a block at a height only the right section, renamed correctly,
+//! holds.
 
 mod common;
 
 use std::error::Error;
 use std::fmt::Debug;
 
-use common::{TestResult, registry_of};
+use common::{TestResult, at, registry_of};
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
-use mc_world::column::{COLUMN_HEIGHT, ChunkColumn, ColumnCoordinate, ColumnPos};
-use mc_world::section::{Axis, SectionError};
+use mc_world::column::{
+    COLUMN_HEIGHT, ChunkColumn, ColumnCoordinate, ColumnPos, SECTIONS_PER_COLUMN,
+};
+use mc_world::section::{Axis, LocalPos, SectionError};
 
 const AIR: &str = "base:air";
 const STONE: &str = "base:stone";
@@ -52,6 +60,26 @@ fn refusal<T: Debug>(outcome: Result<T, SectionError>) -> Result<SectionError, B
         .into()),
         Err(refused) => Ok(refused),
     }
+}
+
+/// What the section `column` stacks at `index` holds at `pos`, or an explanation
+/// of why asserting on it would have been vacuous.
+///
+/// A column that answered nothing at an index it stacks would leave the
+/// assertion below with nothing to compare, so the absence is reported as the
+/// failure it is rather than unwrapped.
+fn block_in_section(
+    column: &ChunkColumn,
+    index: usize,
+    pos: LocalPos,
+) -> Result<String, Box<dyn Error>> {
+    let section = column.section(index).ok_or_else(|| {
+        format!(
+            "a column stacks {SECTIONS_PER_COLUMN} sections, so it has one at index {index}; \
+             without it the assertion below asserts nothing"
+        )
+    })?;
+    Ok(section.block_at(pos)?.as_str().to_owned())
 }
 
 /// The axis, value and limit an out-of-bounds refusal names.
@@ -183,6 +211,60 @@ fn a_read_past_the_x_bound_of_a_column_is_refused_naming_that_axis() -> TestResu
         (Axis::X, 16, 16),
         "a column is only as wide as one section, so x = 16 belongs to the neighbouring \
          column and is not this one's to answer for"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_section_handed_back_by_a_column_holds_that_column_s_blocks_at_its_own_heights() -> TestResult {
+    let (mut column, registry) = air_filled_column()?;
+    column.set_block(in_column(0, 20, 0), &BlockName::parse(STONE)?, &registry)?;
+
+    let held = block_in_section(&column, 1, at(0, 4, 0))?;
+
+    assert_eq!(
+        held,
+        STONE.to_owned(),
+        "y = 20 is the fifth voxel of the second section, so the section at index 1 is the \
+         one that holds it and it is called y = 4 in there — a column that handed back some \
+         other section, or the right one without renaming the height, would answer air"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_column_hands_back_nothing_one_index_past_the_last_section_it_stacks() -> TestResult {
+    let (column, _registry) = air_filled_column()?;
+
+    let answered = column
+        .section(SECTIONS_PER_COLUMN as usize)
+        .map(|_| "a section");
+
+    assert_eq!(
+        answered, None,
+        "a column stacks sixteen sections, so index 16 is one past the last of them; \
+         answering there — with the bottom section, or with any other — would hand a caller \
+         a vertical neighbour no column has, and the seam it was assembling would be decided \
+         against blocks from the wrong end of the world"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_last_section_a_column_stacks_holds_the_block_written_at_the_top_of_the_world() -> TestResult
+{
+    let (mut column, registry) = air_filled_column()?;
+    column.set_block(in_column(0, 255, 0), &BlockName::parse(STONE)?, &registry)?;
+
+    let held = block_in_section(&column, 15, at(0, 15, 0))?;
+
+    assert_eq!(
+        held,
+        STONE.to_owned(),
+        "y = 255 is the highest voxel a column has, so it lives in the last section it \
+         stacks — index 15 — at that section's own highest y. Both ends of the stack are \
+         asked for here because an index that was off by one, or clamped, is only visible \
+         at one of them"
     );
     Ok(())
 }

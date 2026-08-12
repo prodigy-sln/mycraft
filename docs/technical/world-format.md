@@ -137,9 +137,14 @@ before decrementing the vacated one's, so an entry written back to the
 block it already held never passes through a momentary zero — but dropping
 vacant entries and narrowing the index width happen only when a caller
 calls `Section::compact()`. This keeps that work off the block-editing hot
-path (a 20 Hz authoritative tick shared by up to 32 players): only meshing
-and persistence have a reason to want the minimal form, so only they pay
-for it.
+path (a 20 Hz authoritative tick shared by up to 32 players): only
+persistence has a reason to want the minimal form, so only it pays for it.
+Meshing (`rendering.md`) does **not** need the minimal form — it never calls
+`compact()` on what it is given, and resolves only the palette entries at
+least one voxel actually references, never consulting refcounts at all. A
+section therefore meshes identically before and after compaction, which is
+what makes a mesher indifferent to whichever caller happens to compact
+first.
 
 Compaction is **stable**: surviving entries keep their relative insertion
 order, and every voxel's index is remapped to that entry's new position.
@@ -211,11 +216,15 @@ These are current behaviour, not a roadmap.
 - **A section holding a name the current registry has stopped registering
   fails every `is_solid_at` call on it.** After a live registry swap
   (arriving with the Luau scripting host), this failure is delivered
-  mid-tick to whichever systems call `is_solid_at` — typically meshing and
-  physics, the two systems least able to react gracefully. The import-path
-  placeholder work above needs to cover this **in-memory** case too, not
-  only the import path, or the failure mode simply moves rather than
-  disappearing.
+  mid-tick to whichever systems call `is_solid_at` — typically physics, one
+  of the systems least able to react gracefully. The mesher (`rendering.md`)
+  is the other system this would have hit; it now fails a different,
+  sharper way: a section holding a name the registry cannot resolve fails
+  the **whole mesh** with `MeshError::UnresolvedBlock`, rather than failing
+  per `is_solid_at` call, and it refuses outright rather than inventing a
+  placeholder policy of its own. The import-path placeholder work above
+  still needs to cover this **in-memory** case, not only the import path, or
+  the failure mode simply moves rather than disappearing.
 - **"Not registered" is spelled two different ways on the public
   surface.** `Section::is_solid_at` propagates
   `SectionError::Registry(RegistryError::UnknownName)` for a name the
@@ -228,14 +237,15 @@ These are current behaviour, not a roadmap.
   real workload produces); worth revisiting if a mesher benchmark shows it
   material, or if a real workload produces palettes longer than roughly
   64 entries.
-- **There is no per-voxel palette-index read path.** `Section::palette_index_at`
-  and `ChunkColumn::section(index)` do not exist yet; both are additive
-  (no signature changes needed elsewhere) and are expected to arrive with
-  the mesher. `Section::is_solid_at` is **not** the intended per-voxel API
-  — with the surface as it stands today, a per-voxel consumer's only
-  options are a string-keyed lookup (`is_solid_at`, one registry hash per
-  voxel) or a whole-section `export()` (~8 KB per section). Neither is
-  what a mesher wants; the read path above is what a mesher needs.
+- **`ChunkColumn::section(index) -> Option<&Section>` now exists and is
+  public**, bounded by the section array itself — like `block_at` — never by
+  a second height constant. The per-voxel palette-position read path the
+  mesher needed also exists, but stays `pub(crate)`: the mesher lives inside
+  `mc-world`, so it needs no public accessor, and no per-voxel public read
+  API was added alongside it. `Section::is_solid_at` remains **not** the
+  intended per-voxel API — a mesher resolves solidity once per *referenced
+  palette entry*, not once per voxel; see `rendering.md` for how that keeps
+  meshing off the string-keyed-lookup cost this entry used to warn about.
 - **`SectionError::CorruptPaletteIndex` is unreachable by design.** It
   represents an internal invariant (every packed index names a position
   this section's own palette actually has) that no public API can violate,

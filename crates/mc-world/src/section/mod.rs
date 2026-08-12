@@ -32,6 +32,9 @@ pub const VOXELS_PER_SECTION: usize = (SECTION_SIZE * SECTION_SIZE * SECTION_SIZ
 /// exactly the code it exists for.
 const AXIS_SHIFT: u32 = SECTION_SIZE.trailing_zeros();
 
+/// The mask that reads one axis back out of a linear voxel index.
+const AXIS_MASK: u32 = SECTION_SIZE - 1;
+
 /// The shift above only addresses a section correctly while the section's size
 /// is the power of two it was derived from.
 const _: () = assert!(1 << AXIS_SHIFT == SECTION_SIZE);
@@ -238,11 +241,46 @@ impl Section {
     /// land on some other voxel instead: (0, 16, 0) and (0, 0, 1) fold to the
     /// same number, and answering the second when the first was asked would be
     /// a silent lie rather than a refusal.
-    fn voxel_index(pos: LocalPos) -> Result<usize, SectionError> {
+    pub(crate) fn voxel_index(pos: LocalPos) -> Result<usize, SectionError> {
         Self::within_section(Axis::X, pos.x)?;
         Self::within_section(Axis::Y, pos.y)?;
         Self::within_section(Axis::Z, pos.z)?;
         Ok((pos.x | (pos.y << AXIS_SHIFT) | (pos.z << (AXIS_SHIFT * 2))) as usize)
+    }
+
+    /// Which voxel `index` names — the inverse of
+    /// [`voxel_index`](Self::voxel_index).
+    ///
+    /// Every accessor folds a position into an index and nothing ever unfolded
+    /// one until the mesher had to name the voxel it stopped at. The two halves
+    /// are the same layout written twice and a layout written twice can be half
+    /// right, which is why they are checked against each other over every
+    /// position a section has rather than over a handful.
+    ///
+    /// Takes no bound of its own: an index past the last voxel folds back into
+    /// one, exactly as the coordinates it is built from would.
+    pub(crate) const fn position_of_voxel(index: usize) -> LocalPos {
+        let linear = index as u32;
+        LocalPos {
+            x: linear & AXIS_MASK,
+            y: (linear >> AXIS_SHIFT) & AXIS_MASK,
+            z: (linear >> (AXIS_SHIFT * 2)) & AXIS_MASK,
+        }
+    }
+
+    /// The palette position the voxel at `index` holds.
+    ///
+    /// The per-voxel read the mesher's resolution pass is built on, and
+    /// deliberately not public: the mesher lives in this crate, so nothing
+    /// outside it needs a per-voxel palette position, and a public one would be
+    /// a promise about the packing that the packing does not want to make.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SectionError::CorruptPaletteIndex`] if `index` is not a voxel
+    /// of a section.
+    pub(crate) fn palette_position_at_index(&self, index: usize) -> Result<usize, SectionError> {
+        self.indices.get(index).ok_or_else(|| self.corrupt(index))
     }
 
     /// Every voxel's index rewritten to the position its block occupies once the
@@ -337,3 +375,7 @@ impl Section {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "mod_test.rs"]
+mod tests;

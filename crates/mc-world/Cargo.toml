@@ -25,6 +25,16 @@ proptest = { workspace = true }
 # The dependency-graph invariant asks cargo itself what it resolved, and reads
 # the answer as JSON.
 serde_json = { workspace = true }
+# The 200 µs meshing budget is a measurement, not an opinion. Bench-target only:
+# `cargo nextest` neither runs nor builds a `harness = false` bench, which is what
+# keeps a wall-clock number out of the deterministic gate.
+criterion = { workspace = true }
+
+# `harness = false`: the target owns its own `main`, so the budget verdict can be
+# an exit code rather than a line of output somebody has to read.
+[[bench]]
+name = "meshing"
+harness = false
 
 [lints]
 workspace = true
