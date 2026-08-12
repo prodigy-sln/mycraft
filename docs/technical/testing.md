@@ -70,13 +70,19 @@ value, and the scanner should catch it if it ever does.
 
 ## Test placement
 
-**Rust's own convention, and this project's.** Unit tests are an inline
-`#[cfg(test)] mod tests { ... }` at the bottom of the file under test —
-what the Rust Book recommends and what rustc, tokio and serde do, and
-what gives a unit test the private access that is its only reason to
-exist. Integration tests are separate crates under `tests/`, reaching
-the public API and nothing else. Doc tests are `///` examples on the
-public item.
+**Unit tests live in a sibling `foo_test.rs`**, wired into the module it
+tests with
+
+```rust
+#[cfg(test)]
+#[path = "foo_test.rs"]
+mod tests;
+```
+
+which compiles the sibling as an inner module and so gives it the same
+private access an inline module would. Integration tests are separate
+crates under `tests/`, reaching the public API and nothing else. Doc
+tests are `///` examples on the public item.
 
 **When each — the rule that was practised for two specs before anyone
 wrote it down.** *Test through the public API in `tests/` by default;
@@ -89,46 +95,62 @@ deliberately wrote none: everything it needed was reachable from
 `tests/`, and **a unit test whose only justification is a private item
 the public surface already exercises asserts the same fact twice.**
 
-### The sibling-file deviation, and why it was reversed
+### Siblings: a considered departure from Rust's default
 
-This project used to place unit tests in sibling `*_test.rs` files wired
-in with `#[path = "foo_test.rs"] mod tests;`. The stated reason was the
-source-literal scan — the check that no hardcoded `base:`-namespaced
-block name appears outside test code (`technical/architecture.md`) —
-which a sibling layout let stay a plain file-name filter: skip every
-`*_test.rs`, read everything else whole.
+Rust's default is an inline `#[cfg(test)] mod tests { ... }` at the
+bottom of the file under test — what the Rust Book recommends and what
+rustc, tokio and serde do. **This project deliberately does not follow
+it**, and the reason is that three separate tools here are file-granular
+and none of them can reach inside a file:
 
-**That trade was backwards, and the deviation is gone.** The scan is a
-*secondary* guard. The real guarantee is a compile-time one, established
-by probe in PRO-850: a populated `BlockRegistry` cannot be constructed
-except through a `DefinitionSource` (`E0599`, `E0451`, `E0616`). Bending
-the language's test layout to keep a secondary guard's implementation
-simple bought little and cost a corollary — a project-wide ban on
-`base:` in rustdoc examples, which is the deviation charging rent on the
-single most natural doc example for a namespaced-id type. **That
-corollary is withdrawn**: `/// let name = BlockName::parse("base:stone")?;`
-is fine.
+- **Coverage.** `cargo llvm-cov` excludes files by
+  `--ignore-filename-regex` and has no region-level opt-out on stable
+  (`#[coverage(off)]` is unstable). A sibling is excluded by
+  `_test\.rs$`; an inline module is not, and lands in the denominator.
+  Measured: the inline layout moved the tracked total from 2262 to 2587
+  lines and the headline from 92.48% to 92.89% — 325 lines of test code
+  that is near-fully covered by construction, inflating the one number
+  ADR-008 leans on.
+- **Size limits.** The gate measures a `src/` file against 500 lines. A
+  sibling spends that budget on production code alone, which is the code
+  somebody has to read to understand the module.
+- **The source-literal scan** — the check that no hardcoded
+  `base:`-namespaced block name appears outside test code
+  (`technical/architecture.md`). Against siblings it is a file-name
+  filter. Against inline modules it has to find where each `#[cfg(test)]`
+  item *ends*, which means counting braces while tracking strings and
+  comments, because a `{` in either does not open a block: an eighty-line
+  state machine that is not quite a Rust parser, with a failure mode
+  (losing a closing brace, swallowing the rest of the file) that looks
+  exactly like a clean repository.
 
-The scan now walks each file rather than filtering by name, keeping the
-text outside every `#[cfg(test)]` item and outside every doc comment — a
-doc example is a doc test, so it is test code that happens to live in a
-production file, which is exactly what the withdrawn corollary refused
-to notice. Finding where a `#[cfg(test)]` item ends means counting
-braces, and a `{` inside a string or a comment does not open a block, so
-the walk tracks strings and comments; it is a state machine of about
-eighty lines and deliberately not a Rust parser. **It refuses to guess:
-a walk that does not end brace-balanced fails the scan** rather than
-silently swallowing the rest of a file, because a scanner that quietly
-gave up is indistinguishable from a clean repository and stays green
-forever.
+**This is a trade, not a universal best practice.** What it costs is
+idiom: a Rust developer arriving here expects the inline module and finds
+a `#[path]` line instead, and every new module pays a three-line wiring
+tax. What it buys is three measurements that mean what they say. The
+project has been through the alternative — the inline layout was adopted
+and reverted — and the deciding evidence was that the costs above are
+measured while the cost of the departure is stylistic.
 
-Three mutations confirm the scan still bites, each applied and reverted
-by hand: never closing a skipped region turns both the real check and the
-skip control red; keeping doc-comment text turns the doc-example control
-red and nothing else; pointing the file filter at a nonexistent extension
-turns the positive control red. The doc-example control asserts an
-absence and so, like the mesh property trio below, is falsifiable only
-alongside the others.
+**What is *not* a reason for it:** the rustdoc ban. A project-wide ban on
+`base:` in doc examples was once justified by this layout; it was
+misattributed. The ban existed because the scan read *comments*, which is
+independent of where tests live. The scan drops doc comments now — a doc
+example is a doc test, so it is test code that genuinely does live in a
+production file — and the ban is withdrawn for good:
+`/// let name = BlockName::parse("base:stone")?;` is fine.
+
+Two controls keep the scan honest, and they are separate test functions
+for the reason given under structural-invariant tests below: a name in a
+sibling `*_test.rs` is skipped while one in the module beside it is still
+found, so a filter that drifted into skipping too much shows up; and a
+name in a doc example is not reported, so the comment-skipping is asserted
+rather than assumed. Both were confirmed to bite by hand mutation, each
+applied and reverted separately — keeping doc-comment text turns the
+doc-example control red and *only* it; dropping the `_test.rs` term from
+the file filter turns the sibling control red and *only* it. That each
+mutation hits exactly one control is the evidence that the two are
+independent rather than one check written twice.
 
 ## Structural-invariant tests
 
@@ -187,17 +209,13 @@ roughly 330 newly added bench lines. The gate's coverage percentage
 therefore vouches for the mesher's benchmark fixtures, its independent
 oracle, and its budget verdict **not at all**.
 
-The denominator errs in the other direction too, and for the opposite
-reason. Inline `#[cfg(test)]` modules **are** counted: retiring the
-sibling layout moved the tracked total from 2262 to 2587 lines and the
-figure from 92.48% to 92.89%. `--ignore-filename-regex` is file-granular
-and cannot reach inside a file, and stable Rust has no region-level
-opt-out (`#[coverage(off)]` is unstable), so test code that is nearly
-fully covered by construction now sits in the denominator and pushes the
-headline up by roughly 0.4 points. Read it as an upper bound; when a
-specific crate's number is load-bearing — mc-testkit's is, since ADR-008
-excludes mc-render on the strength of it — read the per-file table
-rather than the total.
+Sibling `*_test.rs` files are outside it as well, by the `_test\.rs$`
+term in the gate's exclusion regex — see the placement section above for
+why that term is only reachable because unit tests keep their own file.
+What remains in the denominator is library code, which is the property
+that lets mc-testkit's number stand behind ADR-008's exclusion of
+mc-render. When a specific crate's figure is load-bearing, read the
+per-file table rather than the total anyway.
 
 The answer is derivation, never a snapshot: **no expected quantity may be
 copied from a run of the code under test**, because a count committed from

@@ -103,17 +103,18 @@ structure, not by convention:
   directly — exactly the regression this structure exists to prevent.
 - **No Rust source outside test code contains a `base:`-namespaced block
   name literal.** A source scan reads every `crates/*/src/**/*.rs` file
-  and fails if any of the five shipped block names appears in its
-  *production text* — the file minus every `#[cfg(test)]` item and minus
-  every doc comment, since a unit test and a doc example are both test
-  code that lives in a production file (`technical/testing.md`). This
-  scan also carries a positive control: pointed at a fixture directory
-  containing one of the five names, it must report a hit, or a broken
-  path glob or matcher could pass by never actually looking at anything.
-  It carries a second control for the skip itself — a name inside a test
-  module is skipped while one after that module is still found — because
-  a walk that lost a closing brace would swallow the rest of every file
-  with the first control still green.
+  except the sibling `*_test.rs` unit files, and fails if any of the five
+  shipped block names appears in a file's *production text* — the file
+  minus its doc comments, since a doc example is a doc test that does
+  live in a production file (`technical/testing.md`). This scan also
+  carries a positive control: pointed at a fixture directory containing
+  one of the five names, it must report a hit, or a broken path glob or
+  matcher could pass by never actually looking at anything. It carries
+  two further controls for the filters themselves — a name in a sibling
+  `*_test.rs` is skipped while one in the module beside it is still
+  found, and a name in a doc example is not reported — because a filter
+  that skipped too much would leave the first control green while
+  scanning nothing.
 
 ## Internal-crate version pinning
 

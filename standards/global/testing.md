@@ -81,8 +81,9 @@ is in the diff you are looking at.
   Pair it with a separate test function asserting the same scan *does*
   report a fixture that contains the thing.
 
-Test placement — inline `#[cfg(test)]` for unit tests, `tests/` for
-integration tests, and when each is appropriate — is recorded once in
+Test placement — sibling `foo_test.rs` files for unit tests (a considered
+departure from Rust's inline default), `tests/` for integration tests,
+and when each is appropriate — is recorded once in
 `docs/technical/testing.md`, not repeated here.
 
 ## 3. Test Quality

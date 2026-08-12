@@ -51,39 +51,39 @@ $LineThreshold = 80
 
 # ADR-008: GPU and binary crates are outside the coverage denominator.
 #
-# Unit tests get no entry, and cannot: they are inline `#[cfg(test)] mod tests`
-# blocks (docs/technical/testing.md), so they share a file with the library
-# code they test and --ignore-filename-regex is file-granular. The earlier
-# `_test\.rs$` term matched the `#[path = "x_test.rs"]` siblings that layout
-# replaced, and now matches nothing.
+# `*_test.rs` files are excluded too. They are the `#[path = "x_test.rs"] mod
+# tests;` siblings used to unit-test private items (docs/technical/testing.md),
+# and because they are compiled into the *lib* target llvm-cov cannot tell them
+# from library code. Being test code they are ~100% covered by construction, so
+# counting them inflates the figure rather than diluting it — measured at 325 of
+# 2587 tracked lines, worth about 0.4 points, and growing with every sibling
+# added.
 #
-# **Inline test modules ARE counted** — measured, not assumed: dropping the
-# term moved the denominator 2262 -> 2587 lines and the figure 92.48% ->
-# 92.89%. cargo-llvm-cov has no region-level exclusion on stable; the only
-# mechanism is `#[coverage(off)]`, which is unstable. So the number now
-# includes test code that is near-fully covered by construction, and reads
-# ~0.4 points higher than the library-only figure it used to be.
+# The filename term is the only mechanism available: --ignore-filename-regex is
+# file-granular, and stable Rust has no region-level opt-out (`#[coverage(off)]`
+# is unstable). Keeping unit tests in their own file is what makes the exclusion
+# reachable at all, and is one of the reasons the sibling layout is this
+# project's convention.
 #
-# That is a real loss of precision on the one number standing behind ADR-008 —
-# mc-render is excluded *because* golden-frame tests cover it, and mc-testkit
-# is the crate carrying that bet. It is accepted rather than fixed because the
-# alternative is bending test layout to suit a reporting tool, which is the
-# trade this project already made once and reversed. Read the figure as an
-# upper bound, and read per-file numbers when it matters.
+# That matters more here than it would elsewhere: ADR-008 excludes mc-render
+# *because* golden-frame tests cover it, and mc-testkit is the crate carrying
+# that bet. Its coverage number is the one figure standing behind the exclusion,
+# so it has to measure library code and nothing else.
 #
-# `crates/*/tests/` needs no entry either — llvm-cov never counted it.
+# Note that `crates/*/tests/` needs no entry — llvm-cov never counted it.
 # Integration tests are separate crates and are excluded by default; verified
 # against the JSON per-file list, not assumed.
-$CoverageExclude = 'crates[/\\](mc-render|mc-client|mc-server)[/\\]'
+$CoverageExclude = 'crates[/\\](mc-render|mc-client|mc-server)[/\\]|_test\.rs$'
 
 # code-quality.md §2 hard size limits. Rust has no "component vs service"
 # distinction, so the general ceiling is the services limit (500) and test files
 # get 600. The finer 400/200 caps stay reviewer judgement.
 #
-# A `src/` file carrying an inline `#[cfg(test)] mod tests` is measured whole,
-# against 500. That is deliberate: the module is part of the file somebody has
-# to read, and the pressure it applies points the right way — a unit test only
-# belongs there when the property has no public surface to test it through.
+# A sibling `*_test.rs` counts as a test file, so a `src/` file is measured on
+# its production code alone. That is the point: the 500-line ceiling should
+# pressure the code somebody has to read to understand the module, and a test
+# module bolted onto the bottom of it would spend that budget on something a
+# reader of the module never has to read.
 $MaxSourceLines = 500
 $MaxTestLines   = 600
 
@@ -168,7 +168,7 @@ Get-ChildItem -Path (Join-Path $RepoRoot 'crates') -Recurse -Filter '*.rs' -File
     ForEach-Object {
         $rel = $_.FullName.Substring($RepoRoot.Length + 1)
         $count = (Get-Content -LiteralPath $_.FullName | Measure-Object -Line).Lines
-        $isTest = $rel -match '[/\\](tests|benches)[/\\]'
+        $isTest = $rel -match '[/\\](tests|benches)[/\\]' -or $_.Name -match '_test\.rs$'
         $limit = if ($isTest) { $MaxTestLines } else { $MaxSourceLines }
         if ($count -gt $limit) {
             $oversized += [pscustomobject]@{ File = $rel; Lines = $count; Limit = $limit }
