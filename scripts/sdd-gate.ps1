@@ -185,6 +185,24 @@ Invoke-Stage 'gpu-free (mc-testkit + mc-render, no default features)' {
     cargo nextest run -p mc-render --no-default-features
 }
 
+# ── 2c. Documentation links ────────────────────────────────────────────────────
+# rustdoc is the only tool that resolves intra-doc links, and nothing else in
+# this gate runs it. A `[`Type`]` or `[`module::func`]` pointing at something
+# that does not exist compiles, tests, lints and ships in silence — SPEC-004
+# carried a dangling `startup::prepare_scene` reference through a green gate for
+# exactly that reason, and it surfaced only when a human tried to import the
+# function the doc claimed existed.
+#
+# The stage was added with zero backlog: the whole workspace already passed the
+# day it went in, so it has never needed a grace period and a failure here is
+# always something introduced rather than something inherited.
+$PreviousRustdocFlags = $env:RUSTDOCFLAGS
+$env:RUSTDOCFLAGS = '-D warnings -D rustdoc::broken_intra_doc_links'
+Invoke-Stage 'docs (rustdoc, no broken intra-doc links)' {
+    cargo doc --workspace --no-deps --quiet
+}
+$env:RUSTDOCFLAGS = $PreviousRustdocFlags
+
 # ── 3. File size limits ────────────────────────────────────────────────────────
 Write-StageHeader 'size (code-quality.md file limits)'
 $oversized = @()
