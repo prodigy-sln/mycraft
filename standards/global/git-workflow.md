@@ -39,6 +39,22 @@ elsewhere, which is why it is strict and why a red gate is an absolute stop.
   unrelated changes, secrets, `.env` files, build artifacts,
   commented-out code.
 
+### Staging
+
+- **Stage explicit paths.** `git add -A` and `git add .` are banned, with
+  no exception for "the tree is clean, I checked". A sweep once pulled a
+  test author's in-flight file into an implementation commit, which is
+  exactly the separation the TDD sequence above exists to keep.
+- **Revert a mutation check by hand** — re-edit the line you broke. Never
+  `git checkout -- <file>`: that discards everything uncommitted in the
+  file, and it once wiped a whole implementation that had not been
+  committed yet. Confirm with `git diff --exit-code` afterwards.
+- **No `.gitignore` rule for `*.proptest-regressions`.** A seed file is
+  either evidence or litter, and which one depends on why the test failed:
+  delete the seeds written by a deliberate mutation, and **commit** the
+  seeds written by a genuine failure. That is proptest's own convention
+  and the only artifact proving a real bug stays fixed.
+
 ## 3. Merging
 
 - The merge condition is: `/sdd-validate` PASS **and** `scripts/sdd-gate.ps1`
@@ -46,8 +62,12 @@ elsewhere, which is why it is strict and why a red gate is an absolute stop.
   and the spec is registered in `specs/REGISTRY.md`.
 - All four are required. A green gate alone is not sufficient, and no other
   approval substitutes for any of them.
-- Squash merge preferred; merge commit acceptable when the branch history is
-  meaningful (a full RED → GREEN → REFACTOR sequence usually is).
+- **Squash merge, always.** One spec is one commit on `main`, never a run of
+  "feat docs docs feat test docs". There is no meaningful-history exception —
+  a standing permission to keep the branch history is how the exception
+  becomes the habit. The RED → GREEN → REFACTOR sequence is a discipline
+  enforced while the branch is live, not a record `main` is required to
+  carry.
 - Delete the feature branch after merging.
 
 ## 4. Remote

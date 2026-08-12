@@ -37,7 +37,55 @@ Exceptions — test-first may be relaxed only for exploratory spikes (thrown
 away or covered before merge), pure configuration, and generated code (the
 generator is tested). Document every exception in the spec.
 
-## 2. Test Quality
+**What counts as RED.** A compile error is acceptable RED only when the
+scenario is genuinely about a type or function existing. For a behaviour
+scenario, get an *assertion* failure — implement deliberately less first
+if that is what it takes to reach the assertion. A test that never ran
+cannot show you it was checking the right thing.
+
+**One skeleton is often not enough, and which one depends on the phase.**
+An empty-output skeleton cannot falsify a scenario expecting zero results
+— it passes for the wrong reason — so that phase needs a second,
+over-eager skeleton to drive the scenario red. The inverse holds where
+scenarios assert something is *not* removed: there the over-eager
+skeleton is the one that passes vacuously. Pick the skeletons that make
+*this phase's* scenarios fail.
+
+## 2. Falsifiability
+
+**Green is not evidence unless the test could have been red, for the
+right reason.** Fifteen instances across four specs of something passing
+for the wrong reason is what this section is paid for; assume the next one
+is in the diff you are looking at.
+
+- **Prefer a derived oracle to a committed number.** No expected quantity
+  may be copied from a run of the code under test. A count snapshotted
+  from the first green run commits whatever the code happened to do that
+  day: an emit-nothing implementation gets `0` recorded as its expected
+  count and passes forever. Derive the number by arithmetic or from an
+  independent oracle that shares no code with the subject.
+- **A count cannot see shape.** A fixture measuring the wrong workload
+  satisfies every count-based check written against it. Fixture
+  construction is a constraint no assertion can enforce, so it is held by
+  the code that builds the fixture and by a reviewer reading it — say so
+  where it matters rather than assuming the numbers cover it.
+- **Prove a consequential pass non-vacuous by mutation.** Break the
+  implementation by hand, observe the suite, revert by hand, and confirm
+  `git diff --exit-code` is clean before continuing. A mutation that does
+  **not** bite is evidence about the code's structure, not automatically
+  a test gap — record the outcome either way, including the ones that
+  did not bite.
+- **A structural-invariant test needs a positive control.** A test that
+  asserts only an absence (no such dependency, no such literal) goes
+  green forever the day the thing it guarded against is quietly removed.
+  Pair it with a separate test function asserting the same scan *does*
+  report a fixture that contains the thing.
+
+Test placement — inline `#[cfg(test)]` for unit tests, `tests/` for
+integration tests, and when each is appropriate — is recorded once in
+`docs/technical/testing.md`, not repeated here.
+
+## 3. Test Quality
 
 - Tests are independent (run in any order), repeatable, self-contained,
   and fast (unit <100ms, integration <1s).
@@ -47,9 +95,10 @@ generator is tested). Document every exception in the spec.
   Use specific assertions with failure messages where complex.
 - Tests are living documentation: names state expected behavior, setup
   shows valid inputs, assertions show expected outputs.
-- Organization: `tests/unit`, `tests/integration`, `tests/e2e`.
+- Organization follows the language's own convention rather than a fixed
+  directory triple; for Rust see the placement note above.
 
-## 3. Coverage
+## 4. Coverage
 
 - Minimums: business logic 90%, API endpoints 80%, UI components 70%,
   utilities 80%, overall 80%.
@@ -58,7 +107,7 @@ generator is tested). Document every exception in the spec.
 - Exceptions only for third-party wrappers, framework boilerplate, and
   logging — configured in the coverage tool, never silently ignored.
 
-## 4. Mocking
+## 5. Mocking
 
 - Prefer real dependencies: test containers or in-memory DB, temp
   filesystem, test servers. Mock only unavailable or unreliable externals,
@@ -66,7 +115,7 @@ generator is tested). Document every exception in the spec.
 - Mock at boundaries and keep mocks simple — a complex mock signals a
   design problem.
 
-## 5. Test Types
+## 6. Test Types
 
 - **Unit**: no I/O, milliseconds — business logic, transformations,
   validation rules.
@@ -75,13 +124,13 @@ generator is tested). Document every exception in the spec.
 - **E2E**: full system, critical user journeys only, 5–10 per feature
   maximum.
 
-## 6. Test Data
+## 7. Test Data
 
 - Minimal, obvious, set up per test. Values make intent clear
   (`invalidEmail = 'not-an-email'`) — no magic values. Use factories with
   sensible defaults for complex objects.
 
-## 7. Continuous Integration
+## 8. Continuous Integration
 
 - Every PR: all tests pass, new functionality is tested, coverage
   thresholds met, lint clean. Never merge failing tests, disable tests to

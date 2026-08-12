@@ -101,15 +101,19 @@ structure, not by convention:
   assertion, the check would still pass, vacuously, the day someone
   deleted the loader and hardcoded block definitions into `mc-core`
   directly — exactly the regression this structure exists to prevent.
-- **No Rust source outside test files contains a `base:`-namespaced block
+- **No Rust source outside test code contains a `base:`-namespaced block
   name literal.** A source scan reads every `crates/*/src/**/*.rs` file
-  that is not a `*_test.rs` sibling (see `technical/testing.md` for why
-  that file-naming convention is what makes the scan a simple file filter
-  rather than a Rust parser) and fails if any of the five shipped block
-  names appears. This scan also carries a positive control: pointed at a
-  fixture directory containing one of the five names, it must report a
-  hit, or a broken path glob or matcher could pass by never actually
-  looking at anything.
+  and fails if any of the five shipped block names appears in its
+  *production text* — the file minus every `#[cfg(test)]` item and minus
+  every doc comment, since a unit test and a doc example are both test
+  code that lives in a production file (`technical/testing.md`). This
+  scan also carries a positive control: pointed at a fixture directory
+  containing one of the five names, it must report a hit, or a broken
+  path glob or matcher could pass by never actually looking at anything.
+  It carries a second control for the skip itself — a name inside a test
+  module is skipped while one after that module is still found — because
+  a walk that lost a closing brace would swallow the rest of every file
+  with the first control still green.
 
 ## Internal-crate version pinning
 

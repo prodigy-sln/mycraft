@@ -129,7 +129,7 @@ fn run() -> Result<BudgetOutcome, Box<dyn Error>> {
     }
 
     measure_with_criterion(&subjects);
-    state_which_number_gates();
+    print_gating_note();
     let means = own_means(&subjects)?;
     Ok(check(&work, &means, opt_in))
 }
@@ -203,16 +203,12 @@ fn measure_with_criterion(subjects: &[Subject]) {
 }
 
 /// Which of the two numbers a reader should act on.
-fn state_which_number_gates() {
+fn print_gating_note() {
     println!(
-        "\nTwo numbers exist for the same work, and only one of them decides anything.\n\n\
-         The verdicts below are this check's own mean over {TIMED_ITERATIONS} timed iterations, \
-         taken after {WARMUP_ITERATIONS} warmup ones. That mean is the only number that gates: it \
-         is what the exit code is computed from. Criterion's estimate above gates nothing at all \
-         — no test reads it, nothing in this repository compares the two, and it is kept for the \
-         committed baseline it carries rather than for any pass or fail. Optimise against the \
-         mean below.\n"
+        "\ngates: this check's own mean below, over {TIMED_ITERATIONS} timed iterations after \
+         {WARMUP_ITERATIONS} warmup ones."
     );
+    println!("ignored: criterion's estimate above, kept as a committed baseline only.\n");
 }
 
 /// This check's own mean for each budgeted fixture.

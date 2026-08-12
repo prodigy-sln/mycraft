@@ -320,6 +320,9 @@ remote.
 - `/sdd-start` creates `feature/PRO-123-short-name`. All work happens there.
 - Merge to `main` only when all four hold: `/sdd-validate` PASS, gate exits 0,
   spec status `implemented`, docs consolidated and spec registered.
+- **Squash, always.** One spec is one commit on `main`. There is no
+  meaningful-history exception to weigh — do not re-open that judgement per
+  spec.
 - **Push at every stage boundary.** Unpushed work is unbacked work.
 - Rebasing to tidy a feature branch before merge is encouraged; publish it with
   `git push --force-with-lease`. Never bare `--force`.
@@ -347,6 +350,19 @@ to notice.
 Also guard the process itself: tests are authored before implementation and
 failing output is displayed; the implementer never edits test files at
 `medium+`; Out of Scope is binding.
+
+### A rule binds whether or not this increment measures it
+
+**A rule requiring a performant solution binds even when nothing in the
+current increment measures the property. The absence of a measurement is not
+licence to drop the property.** "Nothing here measures draw calls or frame
+time, so the requirement is unfalsifiable and should be relaxed" is an
+argument about the test suite, not about the requirement — and taking it
+means the first increment that *does* measure inherits a design chosen when
+the constraint was switched off. On PRO-852 this overturned both a persona's
+Major and the conductor's own recommendation, which had rested on exactly
+that reasoning. Expect the argument to arrive well-made; the answer is still
+no. Add the measurement, or carry the constraint unmeasured — never drop it.
 
 ## Autonomy and escalation
 
