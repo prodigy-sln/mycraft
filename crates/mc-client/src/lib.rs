@@ -30,5 +30,7 @@ pub mod app;
 pub mod events;
 /// Adapter facts, the startup verdict, and opening a device.
 pub mod gpu_startup;
+/// The client's input dispatch, drivable with no window and no adapter.
+pub mod session;
 /// Turning shipped content into a scene the renderer can draw.
 pub mod startup;

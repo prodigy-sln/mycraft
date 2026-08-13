@@ -133,13 +133,16 @@ root and the only crate that resolves both.**
 - **One tick per rendered frame, once the world is ready.** The spawn is
   derived from the world, and the world is generated on the preparation
   worker several frames after the window opens, so there is no simulation to
-  advance until it lands: `App` holds `Option<Simulation>` and the frame path
-  advances a tick only after the scene has reached `ScenePhase::Ready`.
-  Before that the frame is the clear colour and no tick passes — a player
-  advanced during preparation would spend the load falling. Pending input is
-  drained where the tick is advanced and nowhere else, so a frame that draws
-  nothing leaves the accumulated motion where it is rather than discarding
-  it.
+  advance until it lands. `App::present` keeps a `session.tick()` call at the
+  same statement position it always advanced a tick from; what moved is the
+  call's *body* — the `Option<Simulation>` guard, the drain and the advance
+  now live inside `Session::tick` (`crates/mc-client/src/session.rs`, §"The
+  client input dispatch" below), not in the frame path, so the guard is
+  reachable by a test that opens no window. Before the world lands the frame
+  is the clear colour and no tick passes — a player advanced during
+  preparation would spend the load falling. Pending input is drained inside
+  that same guard and nowhere else, so a frame that draws nothing leaves the
+  accumulated motion where it is rather than discarding it.
 - `mc-render` defines the type it consumes, `TerrainSnapshot { tick,
   camera, scene }`, and **never names `mc-sim` in any dependency of any
   kind**. It depends on `mc-world` for the mesher's `Quad` and on
@@ -274,8 +277,11 @@ Result<Simulation, SpawnError>` resolves `SolidVoxels`, derives the spawn and co
 suites — build the simulation from the same preparation the product runs, and
 `PreparationError::Spawn` is the variant that carries a refused `SpawnError` across the crate
 boundary. Because the world is generated on the preparation worker several frames after the window
-opens, `App` holds `Option<Simulation>` and advances a tick only once the scene has reached
-`ScenePhase::Ready` — one tick per rendered frame, once the world is ready, not before.
+opens, `collect_preparation` hands the constructed `Simulation` to `Session::attach_simulation` once
+the scene reaches `ScenePhase::Ready` — the phase lives in `App`, the simulation lives in `Session`,
+and the invariant that one is `Some` exactly when the other is `Ready` is held jointly by that one
+function rather than structurally by either type alone. `App::present`'s tick advances only once the
+world has landed — one tick per rendered frame, once the world is ready, not before.
 
 **The spawn is derived, not declared.** The player starts three blocks above column (32, 32)'s own
 surface height, facing 225° toward the scene's landmark pillar. The shipped generator answers
@@ -293,14 +299,15 @@ walks down one rung at a time, and it exists because `next_capture_attempt` can 
 always releases; `capture_after_click(state)` re-enters the ladder at `first_capture_attempt` from an
 uncaptured state and leaves a captured one alone; `accepts_pointer_motion(state)` is false only when
 uncaptured. `WindowEventKind::FocusLost` maps to `LoopAction::ClearInput` in `window_event_action`, so
-losing focus is translated the same way any other event is, never decided in the adapter. The adapter
-(`crates/mc-client/src/events.rs`) holds the one thing that cannot be pure — the five-row
-`winit::keyboard::KeyCode` binding table — behind two public functions, `bound_action(key) ->
-Option<PlayerAction>` and `kind_of(event) -> WindowEventKind`, so the table and the focus chain can be
-asserted against the key codes and events the operating system actually delivers. Every key event
-reaches `InputState::apply(action: Option<PlayerAction>, pressed: bool)` in `mc-sim`, so the one
-decision in the key path — which action a code maps to — is inside the crate the coverage denominator
-counts, and the adapter is left translating rather than deciding.
+losing focus is translated the same way any other event is, never decided in the adapter.
+`crates/mc-client/src/events.rs` reduces a `winit::keyboard::KeyCode` to a `KeyKind` (`key_kind_of`)
+and forwards it, but the five-row binding table itself — `bound_action(KeyKind) ->
+Option<PlayerAction>` — lives in `Session` (`crates/mc-client/src/session.rs`) and is private to it,
+callable from nowhere outside; `kind_of` lost its public visibility for the same reason. Every key
+event still reaches `InputState::apply(action: Option<PlayerAction>, pressed: bool)` in `mc-sim`, but
+the decision of which action a code maps to is now inside `Session`, in `mc-client`, driven directly
+by the input harness described in `docs/technical/testing.md` rather than inferred from
+`InputState`'s own contract (§"The client input dispatch" below).
 
 **The camera the player's state implies is a pure derivation**,
 `mc_sim::player::eye_pose(state) -> CameraPose`: the eye stands over the feet at `EYE_HEIGHT`, and
@@ -310,6 +317,86 @@ the world origin, looking along +x — and it is a **declared** pose rather than
 `ScenePhase::Preparing` never draws anything through it, but `frame_stats` builds a view-projection
 matrix from every snapshot's camera regardless of phase, and a degenerate pose whose eye and target
 coincide would put a NaN through that matrix rather than a harmless number.
+
+## The client input dispatch: `Session`, the drivable core
+
+Before this seam existed, a keystroke, a pointer motion and a cursor grab were each verified only as
+*policy* — the pure functions above, and the binding table — never as product behaviour: a client
+wired to none of its own input passed the whole suite, because the winit `ApplicationHandler` needed
+a real `Window` and nothing in the suite constructed one. `crates/mc-client/src/session.rs`
+(`Session`) is the drivable core that closes this: it holds the capture ladder walk, the
+pointer-motion gate, the key binding table and the tick's guard-drain-advance sequence, reachable by
+a test process that opens no window, builds no event loop and acquires no GPU adapter
+(`crates/mc-client/tests/support/input/`, `docs/technical/testing.md`).
+
+`Client` owns the `Session` beside the `App`, not inside it — the pointer platform is the window,
+which `Client` owns, and a `Session` living inside `App` would need the window to travel into the
+frame path. `Session::new(pointer)` walks the capture ladder before it returns, so a session always
+starts having already asked the platform for a pointer; there is no separate `start()` a caller could
+omit. `App::present`'s tick call sits at the same statement position it always occupied — only the
+body moved into `Session::tick`, which drains the input accumulator and advances the simulation
+inside the same `Option<Simulation>` guard the frame path held before.
+
+The pointer capture crosses to the OS/compositor and answers nondeterministically, so it is a port
+rather than a direct call:
+
+```rust
+pub trait PointerPlatform {
+    fn grab(&mut self, capture: CaptureState) -> bool;
+    fn release(&mut self);
+    fn show_cursor(&mut self, visible: bool);
+}
+```
+
+`grab` attempts exactly one capture mode and reports whether the platform granted it. The ladder walk
+— which mode is attempted first, what follows a refusal, when the walk gives up — is `Session`'s own
+decision, not the port's; folding the walk into a single `hold(wanted) -> CaptureState` method would
+put it back on the window-facing side, where a client that never asked for a pointer at all would be
+indistinguishable from one that walked the ladder correctly. `crates/mc-client/src/events.rs`'s
+`WindowPointer`, over `Arc<Window>`, is the only production adapter; a recording double stands in for
+it in tests.
+
+**What stays permanently unreachable by any windowless test:**
+
+1. The `KeyEvent → (PhysicalKey::Code, is_pressed)` reduction, inside `dispatch_window_event`'s
+   `WindowEvent::KeyboardInput` arm. `winit::event::KeyEvent`'s `platform_specific` field is
+   `pub(crate)`, with no constructor and no `Default`, so no downstream crate can build one — and a
+   real window would not help either, because `winit` synthesizes no key events on any platform.
+2. The `Client` → `dispatch_*` forwarding, the `Option<Session>`/`Option<App>` guards, window and
+   surface creation, and `Client`'s match on the `LoopAction` a dispatch returns.
+3. `App::present`'s `session.tick()` call itself, behind the `wgpu` surface acquire, and
+   `App::redraw`'s early returns for an undrawable size or a failed acquire — two of the three ways a
+   frame can draw nothing. The third — no simulation yet — is exactly what `Session::tick`'s own
+   guard makes observable, which is why it is not in this list.
+4. `WindowPointer`'s bodies — `set_cursor_grab`, `set_cursor_visible`, `grab_mode`. Whether the OS
+   actually honoured a grab is a manual check (`docs/technical/testing.md`).
+
+Not in this list, despite sitting beside window-facing code: the key binding table, the
+`KeyCode → KeyKind` spelling, the `MouseMotion` destructure, `kind_of`, the pointer-motion gate, and
+the whole capture ladder. Each lives inside `Session` or inside a `dispatch_*` entry a test calls
+directly, and each is exercised by the suite.
+
+**Drivable but unasserted by any scenario today, which is not the same thing as unreachable.**
+`Session::on_mouse_pressed`, the `KeyKind::Escape` branch of `on_key`, and the `show_cursor`/`release`
+calls on the pointer port can all be driven through the same dispatch and are driven by no test — the
+requirement that would have asserted Escape releasing the pointer and a click re-capturing it was cut
+before implementation. Closing that gap needs a later spec to write a test against a seam that
+already exists, not a design change; the manual acceptance checks for it are in
+`docs/technical/testing.md`.
+
+**`mc-client`'s coverage exclusion (ADR-008, narrowed by ADR-013) is unchanged, and its stated
+rationale for this file has expired.** The gate's own comment reads: "`mc-client` holds only the
+`winit` event-loop adapter and composition wiring, every policy having moved into `mc-render`'s pure
+layer. If logic ever accretes there, that is a new ADR and not a quiet edit to this line." `session.rs`
+is that accretion. The narrowing is deferred rather than made: a single workspace-wide 80% line
+threshold cannot be moved by admitting a ~150-line file to the denominator, so narrowing today buys a
+true rationale and no working alarm. The scenario suite and the two source scans described in
+`docs/technical/testing.md` are the working alarm, unaffected either way. No ADR is amended by this
+deferral.
+
+Three `pub` entries in `events.rs` — `dispatch_window_event`, `dispatch_device_event`, `dispatch_key`
+— are what both the window adapter and a test cross to reach `Session`. Break-and-place (PRO-854)
+adds a new event to this same dispatch; the seam it needs is already in place.
 
 ## The pure/GPU seam inside `mc-render`
 
@@ -329,14 +416,19 @@ that will never have a second implementor — and `crates/mc-render/CLAUDE.md`
 forbids exactly that growth. The feature seam buys the same testability
 with a violation that is a build error rather than a review finding.
 
-**Every client decision is a pure function in `mc-render`, and that is
-what keeps `mc-client`'s coverage exclusion honest** (ADR-013). Surface
-format selection, resize and depth-reallocation policy, surface-error →
-frame-action policy, window-event → action policy and the device-request
-description all live in the pure layer, so `mc-client` is left holding the
-`winit` event-loop adapter, composition wiring, and the per-frame
-mechanics that have no pure form — acquire the surface texture, create an
-encoder, submit, present — and nothing that *decides* anything. The
+**Every rendering decision is a pure function in `mc-render`, and that is
+what keeps the GPU-facing half of `mc-client`'s coverage exclusion honest**
+(ADR-013). Surface format selection, resize and depth-reallocation policy,
+surface-error → frame-action policy, window-event → action policy and the
+device-request description all live in the pure layer, so the GPU-touching
+side of `mc-client` is left holding the `winit` event-loop adapter,
+composition wiring, and the per-frame mechanics that have no pure form —
+acquire the surface texture, create an encoder, submit, present — and
+nothing that *decides* anything there. **This no longer describes all of
+`mc-client`**: `session.rs` decides the capture ladder, the pointer-motion
+gate and the key binding (§"The client input dispatch" above). ADR-013's
+exclusion is unchanged, and its stated rationale no longer covers that file
+— see that section for why the narrowing is deferred rather than made. The
 GPU-touching layer keeps only the mechanical part: allocate, upload,
 encode, submit, present.
 

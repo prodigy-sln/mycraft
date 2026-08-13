@@ -712,34 +712,141 @@ unverified rather than clearing it.
 **A procedure to repeat, not a note about one afternoon.** Run it after any change to the client's
 window, event loop, input adapter, or camera; run it again before any release.
 
-Why it exists: every FR-5 scenario — the input bindings, the pointer adapter, the cursor fallback
-policy — is verified as *policy* and not one of them as *product behaviour*. The winit
-`ApplicationHandler` in `crates/mc-client/src/events.rs` needs a real window, and nothing in the
-suite constructs one, so no automated test observes a keystroke or a mouse motion reaching the
-simulation. That is measured, not feared: with `app.rs` submitting `MovementIntent::default()` every
+Why it exists: every check below was, until SPEC-006, verified only as *policy* — the input
+bindings, the pointer adapter, the cursor fallback policy — never as *product behaviour*. The winit
+`ApplicationHandler` in `crates/mc-client/src/events.rs` needed a real window, and nothing in the
+suite constructed one, so no automated test observed a keystroke or a mouse motion reaching the
+simulation. That was measured, not feared: with `app.rs` submitting `MovementIntent::default()` every
 tick, and separately with the adapter's `accepts_pointer_motion` gate deleted, the whole workspace
-stayed green — a client wired to none of its own input passes. The six checks below are the facts
-nothing executable reaches, and one human session is the only place they can be checked at all.
+stayed green — a client wired to none of its own input passed.
+
+**SPEC-006 closed three of the six checks — not by driving a real window, but by moving the dispatch
+below the point a real window would have had to enter it anyway.** `winit::event::KeyEvent` cannot
+be constructed outside `winit`: its `platform_specific` field is `pub(crate)`, with no constructor
+and no `Default`. The keyboard seam therefore has to sit below the reduction of a `KeyEvent` to a
+physical key and a pressed flag, and a windowed test would not have helped either way — `winit`
+synthesizes no key events on any platform, so a window still could not deliver a keystroke. The
+harness that replaces checks 1, 2 and 4 (§"The headless client-input harness" below) instead
+constructs the real `winit::event::WindowEvent` and `DeviceEvent` values it can build, and enters
+below the one reduction it cannot. It opens no window and acquires no GPU adapter — a sentence
+elsewhere in this file once claimed it drove a real window, and that was wrong about the mechanism
+before the mechanism was known.
+
+Checks **3, 5 and 6** stay, for two different reasons. Escape releasing the pointer and a click
+re-capturing it (checks 3 and 5) are driven by no scenario: the requirement that would have asserted
+them (FR-5.1) was cut before implementation, being the only one of SPEC-006's requirement groups
+behind none of its five exit-criterion mutations and the only one that would have changed what the
+client does. The code path is untouched and still runs — `Session::on_mouse_pressed` and `on_key`'s
+`KeyKind::Escape` branch are drivable through the same dispatch that replaced checks 1, 2 and 4 — but
+nothing asserts it yet, so the manual check is what stands in until a later spec writes one. Whether
+the operating system actually captured the pointer (check 6) is not something any harness can reach
+at all: it is a fact about the compositor, not about the client's own dispatch. Six checks therefore
+become **three**, not one — narrowing further would drop either an unasserted behaviour or a fact no
+harness reaches, and neither stopped being true.
 
 Run `cargo run -p mc-client` from the checkout, then:
 
 | # | Check | Observed |
 |---|-------|----------|
-| 1 | **Walk with WASD.** Each of the four keys moves the view in its own direction, relative to where you are facing. | yes |
-| 2 | **Turn with the pointer.** Moving the mouse turns the view; up is up and right is right. | yes |
-| 3 | **Escape returns the cursor.** One press frees the pointer and it becomes visible again. | yes |
-| 4 | **The view does not turn while the cursor is free.** With the cursor released, moving the mouse across the window leaves the view still. | yes |
-| 5 | **A click re-captures it.** Clicking in the window takes the cursor back and turning resumes. | yes |
-| 6 | **The operating system actually captured the pointer.** While captured, the cursor is hidden and does not leave the window or reach anything behind it — push it hard against one edge and keep turning. | yes |
+| 3 | **Escape returns the cursor.** One press frees the pointer and it becomes visible again. | not since SPEC-006 |
+| 5 | **A click re-captures it.** Clicking in the window takes the cursor back and turning resumes. | not since SPEC-006 |
+| 6 | **The operating system actually captured the pointer.** While captured, the cursor is hidden and does not leave the window or reach anything behind it — push it hard against one edge and keep turning. | not since SPEC-006 |
 
-**All six were observed by a human on the current build.** That column is the point of the table: an
-unobserved procedure and an observed one must not read alike, so a check that has not been run this
-round says so rather than being left blank or assumed. Reset the column when the procedure is
-re-run, and record what was seen rather than what was expected.
+**All three were observed by a human on the build before SPEC-006, and none has been re-run since.**
+That is what the column is for. SPEC-006 is precisely the kind of change the instruction at the top
+of this section names — the Escape branch, the re-capturing click and the whole capture ladder moved
+out of the adapter and into `Session` — so the three yeses it inherited became stale on the same
+commit that retired checks 1, 2 and 4, and carrying them forward unchanged would have been the
+assumption this column exists to refuse. The three checks are the only evidence these facts hold, and
+right now that evidence is one refactor old. Reset the column when the procedure is re-run, and
+record what was seen rather than what was expected.
 
-**PRO-873 replaces this procedure with an executable harness** that drives a real window, and it is
-a prerequisite of PRO-854. Until it lands, this table is the only evidence any of these six facts
-holds.
+Checks 1 (walk with WASD), 2 (turn with the pointer, up is up and right is right) and 4 (the view
+does not turn while the cursor is free) are retired from this table: they are now
+`every_declared_binding_moves_the_player_along_its_own_axis_and_no_other`,
+`pointer_motion_to_the_right_turns_the_camera_toward_the_players_right` /
+`pointer_motion_downward_puts_the_cameras_target_below_its_eye`, and
+`pointer_motion_arriving_while_the_cursor_is_free_leaves_the_camera_alone` in
+`crates/mc-client/tests/{input_dispatch,pointer_dispatch}.rs`.
+
+### The headless client-input harness
+
+`crates/mc-client/tests/support/input/` drives the client's real input dispatch —
+`dispatch_window_event`, `dispatch_device_event`, `dispatch_key` in
+`crates/mc-client/src/events.rs` — with no event loop, no window and no GPU adapter constructed
+anywhere in the process. It is not part of `mc-testkit`: that crate may name no `mc-*` dependency in
+any section of its own manifest (invariant 5, asserted by its own `tests/dependency_graph.rs`), and
+this harness needs `mc-client` and `mc-sim` types directly. Each scenario binary includes it by path
+(`#[path = "support/input/mod.rs"] mod input;`) rather than through `tests/support/mod.rs`, because
+that file also pulls in `frames.rs`'s `wgpu` stack — a graphics dependency in a binary whose entire
+premise is that none is acquired.
+
+The fixture is a `GroundPlane` — `is_solid(at) => at.y <= 63`, a floor and no wall — with the player
+spawned standing on it at `(32.0, 64.0, 32.0)`. `GRAVITY` is `30.0 blocks/s²` and acts every tick, so
+a `Solidity` answering `false` everywhere would put the player in free fall and turn every "unchanged"
+assertion red against a correct client; a wall would stop `FR-2.1-S1`'s 20-tick walk in four
+directions the way `camera_lens.rs`'s `WalledFloor` does after 10.
+
+**Nothing is asserted against a committed coordinate.** Every FR-2 and FR-3 scenario compares two
+runs of the same harness that differ only in what was dispatched — a no-input control against the
+dispatched run — so the oracle is independent of `WALK_SPEED`, `GRAVITY`, `JUMP_SPEED` and
+`LOOK_SENSITIVITY`, none of which this seam touches. Assertions are about direction and sign, never
+magnitude: a tick walks 0.075 blocks and 20 ticks walk 1.5, comfortably above float noise.
+
+**Every scenario asserting something is unchanged carries its own control in the same test** — the
+same quantity, under the same input undenied, must move — so a client that did nothing whatever
+satisfies none of them. The exit-criterion measurement (§"The mutation-count discipline" below) is
+what confirmed that working rather than assumed: `FR-3.1-S3` and `FR-2.1-S2/S3/S4` all go red under
+mutations that are not theirs, and in every case the assertion that broke is the control, not the
+absence claim.
+
+### The mutation-count discipline
+
+A scenario that is green when written has told you nothing yet; the evidence is a mutation applied
+by hand to the shipped production code, observed, and reverted (`standards/global/testing.md` §2).
+The client-input seam's exit criterion (SPEC-006) is stated as a property of five named mutations,
+each required to turn at least one test red, and the finished count — measured at validation, every
+run compiled and reporting a test count, every mutation reverted with `git diff --exit-code`
+confirmed clean — was:
+
+| Mutation | Site | Scenarios red |
+|---|---|---|
+| A — advance with `MovementIntent::default()` | `Session::tick` | 11 |
+| A′ — drain hoisted out of the simulation guard | `Session::tick` | 1 — FR-3.1-S6 alone |
+| B — `accepts_pointer_motion` guard deleted | `Session::on_pointer_motion` | 1 — FR-3.1-S3 |
+| C — ladder never walked | `Session::new` | 6 |
+| D — transition never reaches the accumulator | `Session::on_key` | 6 |
+| E swapped — `on_pointer_motion(*y, *x)` | `dispatch_device_event` | 5 |
+| E negated — `on_pointer_motion(*x, -*y)` | `dispatch_device_event` | 1 — FR-3.1-S2 alone |
+
+Three mutations have exactly one falsifier, and that is a durable fact rather than a validation
+footnote: it tells a future reader which scenarios cannot be trimmed without silently reopening the
+mutation they alone kill.
+
+**A mutation with a plural name has plural spellings.** Mutation E's swap (the two raw pointer axes
+exchanged) has four falsifiers; its negation (the vertical axis alone flipped) has exactly one. A
+suite that had dropped `FR-3.1-S2` would still have reported "E is killed" had E only ever been
+spelled as the swap — the axis and the sign are two different claims wearing one name, and both
+spellings must be run.
+
+**A non-biting mutation needs a biting one beside it, or the result is ambiguous.** Phase 2 hoisted
+`Session::tick`'s drain outside its simulation guard and watched all 36 tests then in the suite stay
+green — not because the scenario meant to catch it (`FR-2.1-S7`) was wrong to exist, but because
+`InputState::take_intent` drains the look delta and keeps the held keys, so a key held across an
+early drain loses nothing observable. `FR-2.1-S7`'s soundness was established, not assumed, by adding
+a second, stronger mutation to the same guard — `else { self.input.clear_held(); }` — and watching
+`FR-2.1-S7` alone go red. Without that second mutation, "the first mutation did not bite" cannot
+distinguish *the mutation could not reach this scenario* from *this scenario does not watch this* —
+the same shape the positive-control rule above states for a structural-invariant test, applied one
+level up to a mutation's result.
+
+**The near miss.** Mutation A′ kills exactly one test out of 41 — `FR-3.1-S6`, which asserts that
+pointer motion dispatched before a simulation exists is still spent at the first tick after one is
+attached. That scenario had been cut from the spec on the claim that `FR-2.1-S7` covered the same
+drain guard; phase 2 measured that claim false. Had the cut stood, the finished suite — every other
+scenario green, the gate green, validation passing — would have shipped with a mutation carrying
+**zero** falsifiers, at a site `docs/technical/architecture.md` §"The client input dispatch" names
+explicitly as a decision.
 
 ### An absent reviewer and a clean reviewer look identical
 
@@ -753,3 +860,32 @@ The shape is the same one this whole document is about — a green test and an a
 ran are indistinguishable in a summary line. **Zero findings is a result that has to be corroborated,
 not accepted**: check that each reviewer actually produced a payload, and treat an implausibly clean
 aggregate as a reason to read the parts rather than the total.
+
+**Hand-mutation is only sound with a single writer in the tree.** During SPEC-006's validation a
+reviewer observed a concurrent writer touching `crates/mc-client/src/session.rs` while running its
+own hand-mutation checks: a reverted mutation reappeared in a later diff, then the file returned to
+its original text with no edit of the reviewer's own in between. Nothing was lost — the tree was
+confirmed pristine afterward and the gate re-ran green — but the specialist reviewers use
+hand-mutation as their primary evidence, and a second writer in the tree invalidates that evidence
+rather than merely slowing it down. Worktree isolation for review agents is filed as an open issue
+rather than fixed here.
+
+**Text that was recently reviewed reads authoritative, and that is not the same as safe.** SPEC-006
+produced two verification failures worth reading as a pair — either alone reads as bad luck, together
+they are a property of how verification behaves here. First, a review nearly vanished:
+`persona-product-owner`'s first turn ended without reporting anything, and only a ping recovered it —
+the recovered review was the one that cut the spec from 36 scenarios to 17. A lost review and a clean
+review look identical from outside, which is the point made above; this is a second instance of it.
+Second, a review arrived, was acted on, and stayed half false: a Major finding correctly split an
+architecture decision on `App::redraw`'s early returns, and incorrectly on the drain guard inside
+`Session::tick` — the false half then propagated through four documents and was the stated reason
+`FR-3.1-S6` was cut, which turned out to be mutation A′'s only falsifier (§"The mutation-count
+discipline" above). It was restored once the false half was measured against `InputState::take_intent`'s
+actual contract, and the finished suite confirmed A′ kills that scenario and nothing else.
+
+The harness build produced the same shape once more, worth recording alongside these two:
+`move_pointer` landed as a no-op skeleton first, and all five phase-3 scenarios failed on their
+assertions rather than at compile time — but `FR-3.1-S3`'s own claim ("a free cursor's motion changes
+nothing") is *true* under a no-op and would have passed on its own. What went red was its control —
+the same control §"The headless client-input harness" above describes, without which a no-op adapter
+would have satisfied the scenario it exists to catch.

@@ -34,10 +34,10 @@ the Routing Guide below is where future destinations are declared.
 
 | File | Purpose | Sources |
 |------|---------|---------|
-| architecture.md | Crate boundaries and dependency direction: the registry/loader seam, the simulation/renderer snapshot seam, the player's intent/physics/collision model, the pure/GPU feature seam inside `mc-render`, and the invariants asserted mechanically rather than by convention | SPEC-002, SPEC-004, SPEC-005 |
+| architecture.md | Crate boundaries and dependency direction: the registry/loader seam, the simulation/renderer snapshot seam, the player's intent/physics/collision model, the client input dispatch (`Session`, the drivable core, and what stays unreachable), the pure/GPU feature seam inside `mc-render`, and the invariants asserted mechanically rather than by convention | SPEC-002, SPEC-004, SPEC-005, SPEC-006 |
 | decisions.md | Architecture decision records — stack choices and their rejected alternatives | PLAN.md, SPEC-002, SPEC-004, SPEC-005 |
 | rendering.md | The section mesher's quad, determinism and error contracts; the terrain draw path as built (packing, array texture, compute culling, single indirect draw, depth, pass configuration); the draw-target conventions (orientation, capture pixel format); the procedure for re-shooting a committed golden set; and what golden-frame and probe verification cannot see, measured against the player's own camera | SPEC-001, SPEC-003, SPEC-004, SPEC-005 |
-| testing.md | Quality gate stages, verification harnesses, derived probes and the scene contract, the derived-oracle pattern repeated at fixture and world scale, and what automation cannot check (including manual acceptance of input the suite cannot drive) | PLAN.md, sdd-init-project, SPEC-001, SPEC-002, SPEC-003, SPEC-004, SPEC-005 |
+| testing.md | Quality gate stages, verification harnesses, derived probes and the scene contract, the derived-oracle pattern repeated at fixture and world scale, the headless client-input harness and its mutation-count discipline, and what automation cannot check (including the manual acceptance checks no harness can drive) | PLAN.md, sdd-init-project, SPEC-001, SPEC-002, SPEC-003, SPEC-004, SPEC-005, SPEC-006 |
 | world-format.md | Chunk section and column storage, the block palette, and block-identity stability across a registry change | SPEC-002, SPEC-003 |
 
 ### modding/

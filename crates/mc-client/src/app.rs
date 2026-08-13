@@ -24,12 +24,11 @@ use mc_render::surface::{
     resize_action, select_surface_format, surface_error_action,
 };
 use mc_render::window::Ending;
-use mc_sim::player::InputState;
 use mc_sim::replay::simulation_for;
-use mc_sim::simulation::Simulation;
 use thiserror::Error;
 
 use crate::gpu_startup::Gpu;
+use crate::session::Session;
 use crate::startup::{PreparationError, PreparedScene, collect, empty_scene};
 
 /// The label the frame's command encoder carries in a driver capture.
@@ -63,15 +62,6 @@ pub struct App {
     surface: wgpu::Surface<'static>,
     configuration: wgpu::SurfaceConfiguration,
     renderer: TerrainRenderer,
-    /// The simulation, once there is a world to place the player in. `None`
-    /// while the preparation worker is still generating one — the spawn is
-    /// derived from the world, so no tick can be advanced before it lands.
-    simulation: Option<Simulation>,
-    /// What the player has asked for since the last tick. It outlives the
-    /// simulation being absent: keys held and pointer motion made while the
-    /// world is still generating are the player's input all the same, and the
-    /// first tick is what spends them.
-    input: InputState,
     /// The worker preparing the replay, until it is collected. `None` afterwards,
     /// which is also what says the collection already happened.
     preparation: Option<PreparationHandle>,
@@ -118,8 +108,6 @@ impl App {
             surface,
             configuration,
             renderer,
-            simulation: None,
-            input: InputState::default(),
             preparation: Some(preparation),
             phase: ScenePhase::Preparing,
             nothing: empty_scene(),
@@ -144,21 +132,21 @@ impl App {
     ///
     /// `None` continues — including for every frame that was deliberately not
     /// drawn. `Some` is an ending the event loop leaves on.
-    pub fn redraw(&mut self) -> Option<Ending> {
+    pub fn redraw(&mut self, session: &mut Session) -> Option<Ending> {
         if matches!(resize_action(self.size), ResizeAction::Skip) {
             return None;
         }
-        if let Err(failure) = self.collect_preparation() {
+        if let Err(failure) = self.collect_preparation(session) {
             return Some(Ending::Failed {
                 report: failure.to_string(),
             });
         }
-        self.present()
+        self.present(session)
     }
 
     /// Acquires a texture, draws into it and presents it — or does whatever the
     /// pure policy says a failed acquire calls for.
-    fn present(&mut self) -> Option<Ending> {
+    fn present(&mut self, session: &mut Session) -> Option<Ending> {
         let acquired = match self.acquire() {
             Acquired::Texture(texture) => texture,
             Acquired::Act(FrameAction::Reconfigure) => {
@@ -172,27 +160,10 @@ impl App {
         let view = acquired
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        self.draw(&view);
+        self.draw(&view, session);
         self.gpu.queue.present(acquired);
-        if let Some(simulation) = self.simulation.as_mut() {
-            simulation.advance(self.input.take_intent());
-        }
+        session.tick();
         None
-    }
-
-    /// What the player has asked for, for the adapter to feed.
-    ///
-    /// The accumulator itself rather than three methods wrapping it: its whole
-    /// surface is `mc-sim`'s tested policy, and a pass-through here would be a
-    /// second place for the same decisions to be made slightly differently.
-    ///
-    /// It is drained where the tick is advanced and nowhere else, which is what
-    /// makes "the tick it feeds consumes it" true of the tick rather than of the
-    /// frame: a frame that draws nothing because the window is a sliver, or
-    /// because the world has not landed yet, leaves the pending motion where it
-    /// is.
-    pub const fn input(&mut self) -> &mut InputState {
-        &mut self.input
     }
 
     /// Records and submits one frame into `view`.
@@ -200,14 +171,14 @@ impl App {
     /// A frame that cannot be recorded is reported and dropped rather than ending
     /// the run: a dropped frame is recoverable and a crash is not, and the depth
     /// allocation this can fail on is already ruled out by the size check above.
-    fn draw(&mut self, view: &wgpu::TextureView) {
+    fn draw(&mut self, view: &wgpu::TextureView, session: &Session) {
         let mut encoder = self
             .gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some(ENCODER_LABEL),
             });
-        let snapshot = self.snapshot();
+        let snapshot = self.snapshot(session);
         let target = RecordTarget {
             device: &self.gpu.device,
             queue: &self.gpu.queue,
@@ -227,8 +198,8 @@ impl App {
     /// Before the world lands there is no simulation to read, and nothing is
     /// drawn either: the frame is the clear colour and the camera below is never
     /// looked through.
-    fn snapshot(&self) -> TerrainSnapshot {
-        let published = self.simulation.as_ref().map(Simulation::latest);
+    fn snapshot(&self, session: &Session) -> TerrainSnapshot {
+        let published = session.latest();
         TerrainSnapshot {
             tick: published.as_ref().map_or(0, |published| published.tick),
             camera: published.as_ref().map_or_else(waiting_view, |published| {
@@ -280,7 +251,15 @@ impl App {
     /// spawn is derived from the world, and the world arrives several frames
     /// after the window opens. Ticking before then would drop the player through
     /// a world that does not exist yet for the whole of the load.
-    fn collect_preparation(&mut self) -> Result<(), PreparationError> {
+    ///
+    /// **The invariant this holds is now a cross-object one.** "There is a
+    /// simulation exactly when the phase is `Ready`" used to relate two fields
+    /// of this struct and could be checked by reading it alone. The phase still
+    /// lives here and the simulation now lives in the session, so the two are
+    /// set together by this one function and by nothing else — nothing
+    /// structural enforces it, and a reader of either type on its own cannot see
+    /// it.
+    fn collect_preparation(&mut self, session: &mut Session) -> Result<(), PreparationError> {
         if !self
             .preparation
             .as_ref()
@@ -297,7 +276,7 @@ impl App {
             .upload_textures(&self.gpu.queue, &prepared.layers)?;
         let scene = Arc::new(prepared.scene);
         self.renderer.upload_scene(&self.gpu.queue, &scene)?;
-        self.simulation = Some(simulation_for(&prepared.world, &prepared.registry)?);
+        session.attach_simulation(simulation_for(&prepared.world, &prepared.registry)?);
         self.phase = ScenePhase::Ready(scene);
         Ok(())
     }

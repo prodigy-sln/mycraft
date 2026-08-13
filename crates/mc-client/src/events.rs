@@ -2,18 +2,27 @@
 //!
 //! Everything the loop does with an event is decided by
 //! `mc_render::window::window_event_action`, a pure function tested without a
-//! display server. What is here is the translation into its vocabulary and the
-//! handful of calls that need the real thing — creating the window, asking it for
-//! its size, telling it to redraw, and asking the operating system to hold the
-//! pointer.
+//! display server, or by [`Session`](crate::session::Session), which a test
+//! drives directly. What is here is the translation into their vocabulary and
+//! the handful of calls that need the real thing — creating the window, asking
+//! it for its size, telling it to redraw, and asking the operating system to
+//! hold the pointer.
 //!
-//! **The binding table is the one decision this file holds**, and it is data
-//! rather than a procedure: a key code becomes a `PlayerAction` or nothing, and
-//! what either of those means is decided elsewhere and tested there. It is here
-//! because a key code cannot be spelled anywhere else, and it is admitted as a
-//! narrow recorded exception to this crate holding no policy. The capture ladder
-//! is the same shape — every rung is `mc_render::window`'s answer, and what is
-//! here is the asking.
+//! # Half of this file is reachable by a test and half is not, and which half is
+//! which is not visible in it
+//!
+//! The three `dispatch_*` entries below are crossed by the event loop **and** by
+//! `tests/support/input/`, so everything they call — the key table's spelling,
+//! the window-event translation, the mouse filter, the pointer destructure — runs
+//! under test. What stays unreachable is the reduction of a `winit::event::KeyEvent`
+//! to a key code and a pressed flag, the creation of the window and the surface,
+//! and this file's forwarding into the entries.
+//!
+//! That split is a fact about `KeyEvent`'s privacy rather than anything a reader
+//! can see here, which is why it is written down: the next reader who assumes the
+//! whole file is unreachable will quietly move a decision into it. `Session` is
+//! where a decision goes, and `tests/seam_boundaries.rs` fails the build if one
+//! arrives here instead.
 //!
 //! `tests/winit_boundary.rs` fails the build if a second file in this crate names
 //! the library. That is not decoration: ADR-013 leaves this whole crate out of the
@@ -24,19 +33,16 @@
 use std::sync::Arc;
 
 use mc_render::surface::SurfaceSize;
-use mc_render::window::{
-    CaptureState, Ending, LoopAction, WindowEventKind, accepts_pointer_motion, capture_after_click,
-    capture_after_escape, first_capture_attempt, next_capture_attempt, window_event_action,
-};
-use mc_sim::player::PlayerAction;
+use mc_render::window::{CaptureState, Ending, LoopAction, WindowEventKind, window_event_action};
 use winit::application::ApplicationHandler;
-use winit::event::{DeviceEvent, DeviceId, ElementState, KeyEvent, WindowEvent};
+use winit::event::{DeviceEvent, DeviceId, ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
 use crate::app::App;
 use crate::gpu_startup::{Gpu, create_surface};
+use crate::session::{KeyKind, PointerPlatform, Session};
 use crate::startup::{PreparationError, PreparedScene};
 
 /// What the window is called, and how large it opens.
@@ -71,7 +77,7 @@ pub fn run(gpu: Gpu, preparation: PreparationHandle) -> Ending {
         preparation: Some(preparation),
         window: None,
         app: None,
-        capture: CaptureState::Uncaptured,
+        session: None,
         ending: None,
     };
     if let Err(failure) = event_loop.run_app(&mut client) {
@@ -87,10 +93,10 @@ struct Client {
     preparation: Option<PreparationHandle>,
     window: Option<Arc<Window>>,
     app: Option<App>,
-    /// How firmly the pointer is currently held. What the platform granted, not
-    /// what was asked for — pointer motion is admitted against this, so a
-    /// refused grab must not leave the client believing it has the cursor.
-    capture: CaptureState,
+    /// Everything the client decides about input, once there is a window to ask
+    /// for the pointer. Events arriving before then are dropped, as they always
+    /// were.
+    session: Option<Session>,
     ending: Option<Ending>,
 }
 
@@ -105,57 +111,31 @@ impl ApplicationHandler for Client {
         }
     }
 
+    /// One window event, handed to the session and then acted on.
+    ///
+    /// With no session yet — every event before `resumed` — the loop still needs
+    /// an answer, so the same pure policy is asked directly and a close request
+    /// arriving that early still exits.
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        // Keys are read here rather than through `WindowEventKind`, because the
-        // binding table is the one piece of this feature the renderer may not
-        // hold: it is spelled in key codes (architecture D-10). Everything that
-        // follows from a key is still a call into a tested pure function, and a
-        // keyboard event reaches the table below as `Other`.
-        if let WindowEvent::KeyboardInput { event: key, .. } = &event {
-            self.on_key(key);
-        }
-        // A click is how the player takes the cursor back after Escape gave it
-        // away, and it is read here for the same reason a key is: which button
-        // was pressed cannot be spelled anywhere else. Which capture follows is
-        // `mc_render::window`'s answer, not this file's.
-        if let WindowEvent::MouseInput {
-            state: ElementState::Pressed,
-            ..
-        } = &event
-        {
-            self.set_capture(capture_after_click(self.capture));
-        }
-        match window_event_action(&kind_of(&event)) {
+        let action = self.session.as_mut().map_or_else(
+            || window_event_action(&kind_of(&event)),
+            |session| dispatch_window_event(session, &event),
+        );
+        match action {
             LoopAction::Exit => self.stop(event_loop, Ending::Closed),
             LoopAction::Resize(size) => self.on_resize(size),
             LoopAction::Redraw => self.on_redraw(event_loop),
-            LoopAction::ClearInput => self.on_input_cleared(),
-            LoopAction::Ignore => {}
+            // The session has already dropped what a lost focus asks it to, and
+            // an ignored event asks for nothing.
+            LoopAction::ClearInput | LoopAction::Ignore => {}
         }
     }
 
     /// Raw pointer motion, which is relative and arrives whatever the cursor is
     /// doing — including while it is the desktop's.
-    ///
-    /// The window's own cursor-moved event carries a *position*, which stops at
-    /// the edge of the screen and so cannot express a turn that keeps going.
-    ///
-    /// The motion is admitted against the capture the platform actually granted,
-    /// not the one that was asked for: a refused grab leaves the cursor the
-    /// desktop's, and turning the camera with it would be the game reading input
-    /// it was not given.
     fn device_event(&mut self, _: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
-        let DeviceEvent::MouseMotion { delta: (x, y) } = event else {
-            return;
-        };
-        if !accepts_pointer_motion(self.capture) {
-            return;
-        }
-        if let Some(app) = self.app.as_mut() {
-            // Device counts, which are small whole numbers per event — the
-            // narrowing loses nothing a pointer can report, and the accumulator
-            // is `f32` because the angle it becomes is.
-            app.input().look(x as f32, y as f32);
+        if let Some(session) = self.session.as_mut() {
+            dispatch_device_event(session, &event);
         }
     }
 
@@ -183,7 +163,12 @@ impl Client {
             ))
         })?;
 
-        self.capture = hold_pointer(&window, first_capture_attempt());
+        // Built here, before the app, because building it is what asks the
+        // platform for the pointer — the same point in startup that ask was made
+        // at before there was a session to make it.
+        self.session = Some(Session::new(Box::new(WindowPointer {
+            window: Arc::clone(&window),
+        })));
         self.window = Some(window);
         App::new(gpu, surface, size, preparation)
             .map_err(|failure| failed(&format!("the client could not be built: {failure}")))
@@ -202,52 +187,6 @@ impl Client {
         Ok((gpu, preparation))
     }
 
-    /// One key going down or coming up.
-    ///
-    /// Escape is not in the binding table and is not the player asking to move:
-    /// it is how they get their desktop back, so it is spent on the capture
-    /// policy and never reaches the accumulator. Every other key is whatever the
-    /// table made of it, `None` included.
-    fn on_key(&mut self, key: &KeyEvent) {
-        let PhysicalKey::Code(code) = key.physical_key else {
-            return;
-        };
-        let pressed = key.state.is_pressed();
-        if code == KeyCode::Escape {
-            self.on_escape(pressed);
-            return;
-        }
-        if let Some(app) = self.app.as_mut() {
-            app.input().apply(bound_action(code), pressed);
-        }
-    }
-
-    /// Escape, going down or coming up.
-    ///
-    /// Only the press does anything. Releasing Escape is the player letting go
-    /// of a key they have already spent, and asking for the capture back a
-    /// moment after giving it up is exactly what the release policy exists to
-    /// not do.
-    fn on_escape(&mut self, pressed: bool) {
-        if pressed {
-            self.set_capture(capture_after_escape(self.capture));
-        }
-    }
-
-    /// Asks the platform for `wanted` and records what it granted.
-    fn set_capture(&mut self, wanted: CaptureState) {
-        if let Some(window) = self.window.as_ref() {
-            self.capture = hold_pointer(window, wanted);
-        }
-    }
-
-    /// Drops every key the player was holding when the window went away.
-    fn on_input_cleared(&mut self) {
-        if let Some(app) = self.app.as_mut() {
-            app.input().clear_held();
-        }
-    }
-
     fn on_resize(&mut self, size: SurfaceSize) {
         if let Some(app) = &mut self.app {
             app.resize(size);
@@ -255,7 +194,10 @@ impl Client {
     }
 
     fn on_redraw(&mut self, event_loop: &ActiveEventLoop) {
-        let ended = self.app.as_mut().and_then(App::redraw);
+        let ended = match (self.app.as_mut(), self.session.as_mut()) {
+            (Some(app), Some(session)) => app.redraw(session),
+            _ => None,
+        };
         if let Some(ending) = ended {
             self.stop(event_loop, ending);
         }
@@ -296,30 +238,78 @@ fn size_of(window: &Window) -> SurfaceSize {
     }
 }
 
-/// What the player asked for by pressing `key`, if the binding table names it.
+/// What the session makes of one window event, and what the loop does about the
+/// rest.
 ///
-/// The declared table — W forward, S back, A strafe-left, D strafe-right, Space
-/// jump — and it lives here because this is the only file that may name the
-/// window library's key codes. `ADR-013` leaves this crate out of the coverage
-/// denominator on the grounds that it holds no policy, and a five-row data table
-/// is admitted as a narrow, recorded exception (specification §"Where each piece
-/// lives"). It stays a *table*: what an action does is `mc-sim`'s, and the one
-/// branch that acts on a `None` is `InputState::apply`'s, so nothing here
-/// decides anything a test cannot ask about.
+/// **Both the event loop and the harness enter here.** The keyboard is routed
+/// through the reduction below rather than handed on whole, because that
+/// reduction is the one thing on this side of the seam a test cannot reach.
+pub fn dispatch_window_event(session: &mut Session, event: &WindowEvent) -> LoopAction {
+    if let WindowEvent::KeyboardInput { event: key, .. } = event
+        && let PhysicalKey::Code(code) = key.physical_key
+    {
+        dispatch_key(session, code, key.state.is_pressed());
+    }
+    // A click is how the player takes the cursor back after Escape gave it
+    // away, and it is read here because which button was pressed cannot be
+    // spelled anywhere else. Which capture follows is the session's answer.
+    if let WindowEvent::MouseInput {
+        state: ElementState::Pressed,
+        ..
+    } = event
+    {
+        session.on_mouse_pressed();
+    }
+    let action = window_event_action(&kind_of(event));
+    if action == LoopAction::ClearInput {
+        session.on_input_cleared();
+    }
+    action
+}
+
+/// Raw pointer motion, which is relative and arrives whatever the cursor is
+/// doing — including while it is the desktop's.
 ///
-/// Physical key codes rather than logical keys, so a row names a position under
-/// the player's left hand rather than a letter: the same four keys walk the
-/// player on a QWERTZ keyboard and on an AZERTY one, whatever is printed on
-/// them.
-#[must_use]
-pub const fn bound_action(key: KeyCode) -> Option<PlayerAction> {
+/// The window's own cursor-moved event carries a *position*, which stops at the
+/// edge of the screen and so cannot express a turn that keeps going.
+///
+/// **An unconditional destructure and forward, deciding nothing.** Whether
+/// motion arriving now is the player looking around is the session's question,
+/// and an adapter that filtered first would move that decision to the side of
+/// the seam no test can reach.
+pub fn dispatch_device_event(session: &mut Session, event: &DeviceEvent) {
+    if let DeviceEvent::MouseMotion { delta: (x, y) } = event {
+        session.on_pointer_motion(*x, *y);
+    }
+}
+
+/// One key transition.
+///
+/// The harness enters here rather than at [`dispatch_window_event`] because
+/// `winit::event::KeyEvent` cannot be constructed outside the library: its
+/// `platform_specific` field is crate-private and it has neither a constructor
+/// nor a `Default`. A real window would not help either, because the library
+/// synthesizes no key events.
+pub fn dispatch_key(session: &mut Session, key: KeyCode, pressed: bool) {
+    session.on_key(key_kind_of(key), pressed);
+}
+
+/// One key code, in the session's vocabulary.
+///
+/// The catch-all absorbs every key the client cannot tell apart, so a library
+/// upgrade that adds key codes changes nothing here. Physical key codes rather
+/// than logical keys, so a row of the table below names a position under the
+/// player's left hand rather than a letter: the same four keys walk the player
+/// on a QWERTZ keyboard and on an AZERTY one, whatever is printed on them.
+const fn key_kind_of(key: KeyCode) -> KeyKind {
     match key {
-        KeyCode::KeyW => Some(PlayerAction::Forward),
-        KeyCode::KeyS => Some(PlayerAction::Back),
-        KeyCode::KeyA => Some(PlayerAction::StrafeLeft),
-        KeyCode::KeyD => Some(PlayerAction::StrafeRight),
-        KeyCode::Space => Some(PlayerAction::Jump),
-        _ => None,
+        KeyCode::KeyW => KeyKind::W,
+        KeyCode::KeyS => KeyKind::S,
+        KeyCode::KeyA => KeyKind::A,
+        KeyCode::KeyD => KeyKind::D,
+        KeyCode::Space => KeyKind::Space,
+        KeyCode::Escape => KeyKind::Escape,
+        _ => KeyKind::Other,
     }
 }
 
@@ -333,7 +323,7 @@ pub const fn bound_action(key: KeyCode) -> Option<PlayerAction> {
 /// dropped when focus went and a key still held is pressed again by the player
 /// or is not held at all.
 #[must_use]
-pub fn kind_of(event: &WindowEvent) -> WindowEventKind {
+fn kind_of(event: &WindowEvent) -> WindowEventKind {
     match event {
         WindowEvent::CloseRequested => WindowEventKind::CloseRequested,
         WindowEvent::Resized(size) => WindowEventKind::Resized(SurfaceSize {
@@ -359,36 +349,34 @@ const fn grab_mode(state: CaptureState) -> Option<CursorGrabMode> {
     }
 }
 
-/// Holds the pointer as firmly as `wanted` asks and the platform allows, and
-/// reports what was actually granted.
+/// The pointer as the window library holds it.
 ///
-/// The refusals are the point: `winit` refuses a grab mode a platform does not
-/// implement — a locked pointer on X11, a confined one on some Wayland
-/// compositors — and every refusal walks one rung down
-/// [`next_capture_attempt`]'s ladder rather than ending the run. The loop
-/// terminates because that ladder descends and its bottom rung has no grab to
-/// ask for.
-fn hold_pointer(window: &Window, wanted: CaptureState) -> CaptureState {
-    let mut attempt = wanted;
-    while let Some(mode) = grab_mode(attempt) {
-        if window.set_cursor_grab(mode).is_ok() {
-            window.set_cursor_visible(false);
-            return attempt;
-        }
-        attempt = next_capture_attempt(attempt);
-    }
-    release_pointer(window);
-    CaptureState::Uncaptured
+/// One attempt per call and no ladder: which capture follows a refusal, and what
+/// is left when nothing is granted, are the session's decisions. This is the
+/// asking.
+struct WindowPointer {
+    window: Arc<Window>,
 }
 
-/// Gives the pointer back to the desktop.
-///
-/// A failure here is reported rather than swallowed: it leaves the player with a
-/// cursor they asked to be let go of and cannot be, which is worth a line even
-/// though there is nothing further this client can do about it.
-fn release_pointer(window: &Window) {
-    if let Err(failure) = window.set_cursor_grab(CursorGrabMode::None) {
-        eprintln!("mycraft: the cursor could not be released: {failure}");
+impl PointerPlatform for WindowPointer {
+    /// The library refuses a grab mode a platform does not implement — a locked
+    /// pointer on X11, a confined one on some Wayland compositors — and a
+    /// refusal is an answer rather than a failure, so nothing here is
+    /// propagated.
+    fn grab(&mut self, capture: CaptureState) -> bool {
+        grab_mode(capture).is_some_and(|mode| self.window.set_cursor_grab(mode).is_ok())
     }
-    window.set_cursor_visible(true);
+
+    /// A failure here is reported rather than swallowed: it leaves the player
+    /// with a cursor they asked to be let go of and cannot be, which is worth a
+    /// line even though there is nothing further this client can do about it.
+    fn release(&mut self) {
+        if let Err(failure) = self.window.set_cursor_grab(CursorGrabMode::None) {
+            eprintln!("mycraft: the cursor could not be released: {failure}");
+        }
+    }
+
+    fn show_cursor(&mut self, visible: bool) {
+        self.window.set_cursor_visible(visible);
+    }
 }
