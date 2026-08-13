@@ -52,7 +52,12 @@ type TestResult = Result<(), Box<dyn Error>>;
 const SECOND_REVISION: &str = "r2";
 
 /// The tick whose id the missing-golden refusal is asked for.
-const TICK: u16 = 60;
+///
+/// A **declared** capture tick rather than any valid number. The refusal is
+/// about a declared id whose directory does not exist, so asking it about a tick
+/// nothing declares would leave the scenario asserted against a capture the
+/// inventory never looks for.
+const TICK: u16 = 59;
 
 /// The filename the golden lifecycle reads inside a capture's directory.
 const GOLDEN_FILE: &str = "default.png";

@@ -25,10 +25,13 @@
 //!
 //! # The camera
 //!
-//! The replay's tick-60 pose is written out from `spec.md`'s binding table
-//! rather than taken from `mc_sim::replay::pose`: the renderer may not resolve
-//! the simulation in any dependency kind, and a camera imported from the code
-//! under test would not be an independent statement of where tick 60 stands.
+//! The pose below is written out rather than taken from the simulation, and it
+//! must stay that way: the renderer may not resolve the simulation in any
+//! dependency kind, and a camera imported from the code under test would not be
+//! an independent statement of what this crate draws. It is a declared vantage
+//! over the fixture scene and is deliberately not a pose any camera reaches —
+//! the orbit it was first derived from no longer exists, and nothing here
+//! depended on it having been one.
 
 mod support;
 

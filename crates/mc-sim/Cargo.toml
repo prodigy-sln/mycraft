@@ -13,6 +13,10 @@ mc-core = { workspace = true }
 # this crate stores; the quad -> vertex conversion belongs to the renderer and
 # is deliberately absent from this graph.
 mc-world = { workspace = true }
+# Positions and velocities are vectors, and writing the arithmetic out by axis
+# is how a sign error hides. An in-process pure library, deliberately not behind
+# a port (architecture-principles §3).
+glam = { workspace = true }
 # Meshing runs on workers during preparation and never on a frame path, which is
 # what FR-6.3-S3's scan of the renderer's source asserts and FR-6.3-S4's scan of
 # this crate's source controls.

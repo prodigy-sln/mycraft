@@ -1,4 +1,5 @@
-//! Publishing what the replay is at, without waiting on whoever is reading it.
+//! Publishing what the simulation is at, without waiting on whoever is reading
+//! it.
 //!
 //! Reading a stale snapshot is correct; stalling the simulation to serve a
 //! reader is not. Publication is therefore a pointer swap: a reader holds an
@@ -6,58 +7,89 @@
 //! the pointer rather than the contents.
 //!
 //! **That the held snapshot cannot change underneath its holder is a property of
-//! the type, not of a compiler error.** It holds a tick and a pose, both plain
-//! values, and it must stay that way — a field carrying a `Mutex` or an
-//! `AtomicU32` would silently reopen the hole while every test here still
-//! passed.
+//! the type, not of a compiler error.** It holds a tick, a pose and a player
+//! state, all plain values, and it must stay that way — a field carrying a
+//! `Mutex` or an `AtomicU32` would silently reopen the hole while every test here
+//! still passed.
+//!
+//! **`advance` takes `&mut self` because of where the player's state lives, not
+//! to fend off a race.** A tick assigns `self.player`, a plain field sitting
+//! *beside* the `ArcSwap` rather than inside it, and an `&self` method cannot
+//! assign to it at all. `arc_swap` does offer `rcu` on `&self`; what rules it
+//! out is its retry semantics, since a tick's effect is not confined to the
+//! swapped cell and a re-run closure would step the player more than once for
+//! one tick number. Nor is the exclusive borrow guarding a reachable lost
+//! update: `world: Box<dyn Solidity + Send>` leaves this struct `Send` but
+//! *not* `Sync`, so no two threads can hold `&Simulation` to race through in
+//! the first place. Read the `&mut` as recording that a tick mutates state
+//! outside the published cell. `latest` still takes `&self`, so readers are
+//! unaffected.
+//!
+//! **The tick counter is free-running and never wraps.** 120 is the length of the
+//! declared *intent script*, not a period of the simulation: a windowed client
+//! runs for as long as its window is open, and a counter that restarted would
+//! republish an old tick number to everything downstream that reads one.
 
+use std::fmt;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 
-use crate::TICK_COUNT;
-use crate::replay::{CameraPose, TickIndex, pose};
+use crate::camera::CameraPose;
+use crate::player::{MovementIntent, PlayerState, Solidity, advance_player, eye_pose};
 
-/// What the simulation publishes: which tick it is at, and where the camera is.
+/// What the simulation publishes: which tick it is at, where the camera is, and
+/// everything it knows about the player.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SimSnapshot {
     pub tick: u32,
     pub camera: CameraPose,
+    pub player: PlayerState,
 }
 
-impl SimSnapshot {
-    /// The snapshot describing `tick`.
-    fn at(tick: TickIndex) -> Self {
-        Self {
-            tick: tick.get(),
-            camera: pose(tick),
-        }
-    }
-}
+/// The tick a simulation publishes before any intent has been submitted.
+const FIRST_TICK: u32 = 0;
 
-/// The replay's tick counter, and the snapshot it publishes.
-#[derive(Debug)]
+/// The simulation's own state, and the snapshot it publishes.
 pub struct Simulation {
     published: ArcSwap<SimSnapshot>,
+    player: PlayerState,
+    /// The world a tick resolves the player's motion against.
+    world: Box<dyn Solidity + Send>,
 }
 
 impl Simulation {
-    /// A simulation at the replay's first tick.
+    /// A simulation of `world`, with the player at `spawn` and its first
+    /// snapshot already published.
+    ///
+    /// The spawn's own snapshot exists before any intent is submitted, because
+    /// the state before the first tick is a state a reader can be shown — the
+    /// frame drawn while nothing has been asked for yet is drawn from it.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(spawn: PlayerState, world: Box<dyn Solidity + Send>) -> Self {
         Self {
-            published: ArcSwap::from_pointee(SimSnapshot::at(TickIndex::FIRST)),
+            published: ArcSwap::from_pointee(SimSnapshot {
+                tick: FIRST_TICK,
+                camera: eye_pose(&spawn),
+                player: spawn,
+            }),
+            player: spawn,
+            world,
         }
     }
 
-    /// Advances one tick and publishes the result.
+    /// Advances one tick under `intent` and publishes the result.
     ///
-    /// Takes `&self` rather than `&mut self` on purpose: a publisher that needed
-    /// exclusive access would make "publish while a reader holds a snapshot"
-    /// inexpressible instead of merely correct.
-    pub fn advance(&self) {
-        let next = following(self.published.load().tick);
-        self.published.store(Arc::new(SimSnapshot::at(next)));
+    /// The camera is derived from the player the tick produced rather than
+    /// carried beside it, so there is nothing to keep in step: an eye that moved
+    /// is an eye whose player moved.
+    pub fn advance(&mut self, intent: MovementIntent) {
+        self.player = advance_player(self.player, &intent, self.world.as_ref());
+        self.published.store(Arc::new(SimSnapshot {
+            tick: self.published.load().tick.saturating_add(1),
+            camera: eye_pose(&self.player),
+            player: self.player,
+        }));
     }
 
     /// Whatever was published most recently.
@@ -67,21 +99,15 @@ impl Simulation {
     }
 }
 
-impl Default for Simulation {
-    fn default() -> Self {
-        Self::new()
+/// The world is a trait object with no `Debug` of its own, so what is shown is
+/// what a reader of a panic message can use: which tick was published and where
+/// the player is.
+impl fmt::Debug for Simulation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Simulation")
+            .field("published", &self.published.load())
+            .field("player", &self.player)
+            .finish_non_exhaustive()
     }
-}
-
-/// The tick after `current`, wrapping at the replay's end.
-///
-/// Returns a [`TickIndex`] rather than a number, so nothing downstream has to
-/// re-check the bound. The wrap keeps it inside the replay by construction, and
-/// the fallback below is therefore unreachable — it is the replay's first tick
-/// rather than a panic, because a panic in the tick loop is the one failure this
-/// project does not accept.
-fn following(current: u32) -> TickIndex {
-    let next = current + 1;
-    let inside = if next < TICK_COUNT { next } else { 0 };
-    TickIndex::new(inside).unwrap_or(TickIndex::FIRST)
 }

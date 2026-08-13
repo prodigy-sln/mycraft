@@ -7,8 +7,22 @@
 //! every decision the loop makes be a pure function tested without a window, a
 //! compositor or a display server.
 //!
+//! **Cursor capture is a ladder here and an acceptance elsewhere.** Whether the
+//! operating system actually took the pointer cannot be asked without a window,
+//! a compositor and a person looking at the screen, and it is recorded as manual
+//! acceptance in `docs/technical/testing.md`. What is decidable is the policy —
+//! which capture is asked for first, what each refusal falls back to, that the
+//! bottom rung is a state the game carries on in, where Escape leaves each of
+//! the three, and where a click leaves them — and all five functions are total
+//! and infallible, so "SHALL NOT exit" is a property of their types rather than
+//! something a client has to remember not to do.
+//!
+//! **Escape and a click are a pair and only make sense as one.** A release with
+//! nothing that re-acquires is a game that ends looking around at the first
+//! keypress, with every scenario about the release still green.
+//!
 //! **The replay's length is a parameter, never a constant read here.**
-//! `mc_sim::TICK_COUNT` is where it is declared and this crate may not resolve
+//! `mc_sim::replay::SCRIPT_TICKS` is where it is declared and this crate may not resolve
 //! `mc-sim` in any dependency kind, so the wrap is a function of the count it is
 //! handed. That also makes it testable without the simulation existing.
 
@@ -20,6 +34,7 @@ pub enum WindowEventKind {
     CloseRequested,
     Resized(SurfaceSize),
     RedrawRequested,
+    FocusLost,
     Other,
 }
 
@@ -29,20 +44,115 @@ pub enum LoopAction {
     Exit,
     Redraw,
     Resize(SurfaceSize),
+    ClearInput,
     Ignore,
+}
+
+/// How firmly the pointer is held, or is being asked to be held.
+///
+/// Three states rather than a boolean because the two captured ones are not
+/// interchangeable: a locked pointer is warped back to the window's centre and
+/// reports motion with no position at all, and a confined one keeps a position
+/// that runs out at the window's edge. What the client does with a pointer that
+/// is merely confined is not this module's business; which one it asks for, and
+/// what it does when it cannot have it, is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureState {
+    Locked,
+    Confined,
+    Uncaptured,
+}
+
+/// The capture the client asks for before anything has refused it.
+///
+/// The head of the ladder [`next_capture_attempt`] walks down, and a function
+/// rather than a constant so that the client reads its first attempt out of the
+/// same policy as every later one — a client spelling the first attempt inline
+/// would be the decision moving into the adapter.
+#[must_use]
+pub const fn first_capture_attempt() -> CaptureState {
+    CaptureState::Locked
+}
+
+/// What to ask for after `refused` was refused.
+///
+/// One rung down, and the bottom rung answers itself: a platform that grants no
+/// capture at all gets a client that runs with a free cursor, because there is
+/// nothing below it to fall to. Every answer is a state the game is played in,
+/// which is what makes a refused pointer a degraded game rather than a failed
+/// start.
+#[must_use]
+pub const fn next_capture_attempt(refused: CaptureState) -> CaptureState {
+    match refused {
+        CaptureState::Locked => CaptureState::Confined,
+        CaptureState::Confined | CaptureState::Uncaptured => CaptureState::Uncaptured,
+    }
+}
+
+/// Where Escape leaves a cursor that is currently in `state`.
+///
+/// It releases and never takes, from either capture: a confined cursor is as
+/// trapped as a locked one from the player's side, and a release that only
+/// understood the capture asked for first would leave every player it fell back
+/// for with no way out but killing the process. Pressed with the cursor already
+/// free it changes nothing, because a toggle here would grab the pointer back
+/// from somebody who just asked to be let go of.
+#[must_use]
+pub const fn capture_after_escape(_state: CaptureState) -> CaptureState {
+    CaptureState::Uncaptured
+}
+
+/// Where a click leaves a cursor that is currently in `state`.
+///
+/// Escape gives the pointer back and this is how the player takes it again.
+/// Without it the first Escape ends looking around for the session: every rung
+/// of the ladder above is satisfied, every scenario passes, and the game is
+/// unplayable after a single keypress.
+///
+/// A free cursor re-enters the ladder at [`first_capture_attempt`] rather than
+/// at whatever was granted last time, so a platform that refused the lock once
+/// is asked again rather than being remembered as unable — the refusal is the
+/// platform's answer to a request, not a fact about the session. A cursor that
+/// is already held is left alone: the player is already playing, and walking the
+/// ladder again on every click would re-ask for something they have.
+#[must_use]
+pub const fn capture_after_click(state: CaptureState) -> CaptureState {
+    match state {
+        CaptureState::Uncaptured => first_capture_attempt(),
+        CaptureState::Locked | CaptureState::Confined => state,
+    }
+}
+
+/// Whether pointer motion arriving in `state` is the player looking around.
+///
+/// An uncaptured pointer is the desktop's: the player is moving a cursor over
+/// other windows, and turning the camera with it would be the game reading input
+/// it was not given — and holding the turn ready for them when they came back.
+#[must_use]
+pub const fn accepts_pointer_motion(state: CaptureState) -> bool {
+    match state {
+        CaptureState::Locked | CaptureState::Confined => true,
+        CaptureState::Uncaptured => false,
+    }
 }
 
 /// What `event` asks the event loop to do.
 ///
-/// Every window event the client cares about reaches exactly one of four
+/// Every window event the client cares about reaches exactly one of five
 /// answers, and everything else is ignored explicitly rather than by falling off
 /// the end of a match somebody has to remember to extend.
+///
+/// A window that lost focus is itself a release of everything held in it: the
+/// key-up events for those keys are delivered to whatever has focus now and
+/// never arrive here, so the decision to drop them is made in this table rather
+/// than in the adapter that noticed.
 #[must_use]
 pub const fn window_event_action(event: &WindowEventKind) -> LoopAction {
     match event {
         WindowEventKind::CloseRequested => LoopAction::Exit,
         WindowEventKind::Resized(size) => LoopAction::Resize(*size),
         WindowEventKind::RedrawRequested => LoopAction::Redraw,
+        WindowEventKind::FocusLost => LoopAction::ClearInput,
         WindowEventKind::Other => LoopAction::Ignore,
     }
 }

@@ -32,10 +32,21 @@ use thiserror::Error;
 pub const SCENE_REVISION: &str = "r1";
 
 /// The ticks of the replay that carry a committed golden.
-pub const DECLARED_CAPTURE_TICKS: [u16; 3] = [0, 60, 119];
+///
+/// Three ticks of the declared intent script, chosen because they are three
+/// different things the script puts in front of the camera: the spawn still
+/// falling, the end of the straight walk, and the tick after the turn and the
+/// jump. 59 rather than the 60 the orbit's half turn used to name — there is no
+/// half turn any more, and 59 is the last tick before the script starts turning.
+pub const DECLARED_CAPTURE_TICKS: [u16; 3] = [0, 59, 119];
 
 /// What every capture id of this replay begins with.
-const CAPTURE_PREFIX: &str = "terrain-orbit";
+///
+/// It names what the frames are *of*, so it changed with them: these are a
+/// player walking, not a camera orbiting. Renaming rather than overwriting is
+/// what makes the re-shoot a diff a reader can judge — three directories
+/// removed and three added, instead of three binary blobs quietly modified.
+const CAPTURE_PREFIX: &str = "player-walk";
 
 /// Why a revision cannot appear in a capture id.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -62,7 +73,9 @@ pub fn capture_id(tick: u16, revision: &str) -> Result<String, CaptureIdShapeErr
     check_revision(revision)?;
     // Three digits, zero-padded, so a directory listing sorts the captures in
     // tick order — which is the order a reader compares three frames of one
-    // orbit in. The replay's tick count is 120, so the width never overflows.
+    // walk in. The declared intent script is 120 ticks long, and it is the
+    // script's length rather than any period of the simulation that bounds
+    // this, so the width never overflows.
     Ok(format!("{CAPTURE_PREFIX}-t{tick:03}-{revision}"))
 }
 

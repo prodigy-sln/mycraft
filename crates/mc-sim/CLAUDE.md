@@ -2,69 +2,68 @@
 
 Headless-capable simulation core. This crate **is** the server: it owns world state, the tick, and
 everything authoritative. `mc-render` reads what it publishes and never the other way round —
-`crates/mc-render/tests/dependency_graph.rs` asserts that neither crate resolves the other, with
+`crates/mc-render/tests/dependency_graph.rs` asserts neither crate resolves the other, with
 `mc-client` as the positive control.
 
 ## Boundaries
 
-- **The sim publishes world state; it never publishes pixels.** Quads are as far as it goes. The
-  quad → vertex → packed-vertex conversion is `mc-render`'s pure layer, and the composition root
-  calls it. That is not a workaround for the dependency rule: it is the shape MVP 3 needs, where
-  chunk data arrives over the wire and the *client* meshes and packs it.
-- **Publishing never waits on a reader.** Publication is a pointer swap (`ArcSwap`), and the
-  snapshot type stays free of interior mutability so that "a later publish changed the snapshot I am
-  holding" is not expressible. A field carrying a `Mutex` or an `AtomicU32` would reopen that hole
-  silently, with every existing test still green.
-- **No wall clock.** The replay advances one tick per rendered frame. Nothing here reads a clock,
-  and nothing here may start to without a decision recorded first — a wall clock is the single
-  easiest way to make a golden frame unreproducible.
+- **The sim publishes world state; it never publishes pixels.** Quads are as far as it goes; the
+  quad → vertex → packed-vertex conversion is `mc-render`'s pure layer, called by the composition
+  root. Not a workaround for the dependency rule — it is the shape MVP 3 needs, where chunk data
+  arrives over the wire and the *client* meshes it.
+- **Publishing never waits on a reader.** Publication is a pointer swap (`ArcSwap`); `latest`
+  returns an owned `Arc`, so a reader holds nothing a publisher could wait on. Keep the snapshot
+  type free of interior mutability: a `Mutex` or `AtomicU32` field reopens that hole silently, with
+  every existing test green. Why the guard lives in the *shape* of these types, and which test
+  pins it by compiling, is documented at that test in `tests/publication.rs`.
+- **No wall clock.** The replay advances one tick per rendered frame, once the world is ready —
+  the spawn is derived from the world, so there is no simulation to tick while the preparation
+  worker is still generating one, and the frames before it lands draw the clear colour and advance
+  nothing. Nothing here reads a clock,
+  and nothing may start to without a recorded decision — a wall clock is the easiest way to make a
+  golden frame unreproducible.
 
-## The scripted scene names blocks in Rust — where invariant 1's proxy over-approximates
+## The scripted scene names blocks in Rust
 
-`src/replay/world.rs` names `base:grass`, `base:dirt`, `base:stone`, `base:water` and `base:air`,
-and it is the **only** file in the workspace listed in `EXEMPT_FILES` in
-`crates/mc-world/tests/no_hardcoded_block_names.rs`.
+`src/replay/world.rs` names `base:grass`, `base:dirt`, `base:stone`, `base:water` and `base:air`. It
+is the **only** file listed in `EXEMPT_FILES` in `crates/mc-world/tests/no_hardcoded_block_names.rs`.
 
-**This is not a weakening of invariant 1.** The invariant forbids hardcoded block *definitions*.
-`world.rs` names blocks in order to *place* them; texture and solidity still come only from
-`content/base/blocks/*.toml`, through the registry the generator is handed. The scan forbids every
-*mention*, which was a free over-approximation of the invariant right up until something
-legitimately needed to reference a block — and that has now happened. What is recorded here is where
-the proxy is stricter than the rule it enforces, not a relaxation of the rule.
+**This does not weaken invariant 1**, which forbids hardcoded block *definitions*. `world.rs` names
+blocks to *place* them; texture and solidity still come only from `content/base/blocks/*.toml` via
+the registry the generator is handed. The scan forbids every *mention* — a free over-approximation
+until something legitimately needed to reference a block. This records where the proxy is stricter
+than the rule, not a relaxation of the rule.
 
-Two mechanisms keep it from spreading. The entry is matched on the file's full trailing path, so it
-cannot widen to `mc-sim`, to `replay/`, or to any other `world.rs`. And the exemption is pinned by
-`the_exemption_skips_exactly_one_file_of_the_production_tree`, which walks the real tree and asserts
-which files the filter actually skipped — so a second exemption fails the suite and has to be argued
-for in a commit message rather than appear in a diff nobody reads.
+It cannot spread: the entry matches the full trailing path (so it cannot widen to `mc-sim`, to
+`replay/`, or to another `world.rs`), and `the_exemption_skips_exactly_one_file_of_the_production_tree`
+walks the real tree asserting which files the filter *actually* skipped, so a second exemption fails
+the suite. That pin measures behaviour rather than the contents of `EXEMPT_FILES`, because an
+exemption spelled as a second constant plus a second clause leaves the constant untouched.
 
-That pin deliberately measures the scan's *behaviour* rather than the contents of `EXEMPT_FILES`. An
-equality assertion on the constant catches only an exemption spelled as an entry in it; one spelled
-as a second constant and a second clause in the filter leaves it untouched and green. That was
-measured, not assumed: under a mutation exempting a second real file through the filter, the
-constant-equality version passed while this one failed.
-
-**Closing this deletes both the entry and its pinning test.** The missing hook is content-authored
-worldgen — a scripted demo scene is exactly what should be Luau content, and invariant 1's own
-remedy is to fix the missing hook in the API rather than to special-case it. That is MVP 2/3 work.
-It was deferred for MVP 1 because the binding signature `ReplayWorld::generate(seed, &BlockRegistry)`
-carries no content root the choice could be read out of, and changing it mid-spec would have moved a
-signature five phases of tasks were broken down against. Until the hook exists, that one file is
-held by review rather than by the scan.
+**Closing this deletes both the entry and its pin.** The missing hook is content-authored worldgen —
+a scripted demo scene is exactly what should be Luau content — which is MVP 2/3 work. Deferred for
+MVP 1 because `ReplayWorld::generate(seed, &BlockRegistry)` carries no content root to read the
+choice from. Until the hook exists, that one file is held by review rather than by the scan.
 
 ## Determinism is the product here
 
-The replay exists so that a golden frame means something, so every part of it is a pure function of
-a seed or of a tick index:
+The replay exists so that a golden frame means something, so its world is a pure function of a seed
+and its inputs a pure function of a tick index:
 
-- `pose` is a free function with no state to accumulate into, so "the pose at tick 60" is the same
-  value whether it is asked for directly or reached by advancing sixty times. An accumulated path
-  drifts, and does so only on the machine that ran it.
+- **The camera is not among them, and asking for it to be would be the wrong fix.** There was a
+  `pose` here — an orbit, a free function of the tick index, so "the pose at tick 60" was the same
+  value whether asked for directly or reached by advancing sixty times. The camera a frame is now
+  shot through is the one `Simulation` publishes, which is an *integrated* player: it can only be
+  reached by advancing `scripted_intent` from the spawn, and tick 59 cannot be asked for out of
+  order. What replaces the orbit's property is that the world and the script are both declared, so
+  the same advance produces the same camera — within a run, which is what a golden depends on.
+  Reproducibility across libm versions is not claimed and never was; `cos`/`sin` were already in
+  the orbit's path.
 - The heightmap's spatial coherence is **construction, not luck**: value noise on a lattice period
-  of 16 with smoothstep bounds the field's slope at 1.5 blocks per block, which is where the
-  "adjacent columns differ by at most 2" bound comes from. Lowering the amplitude is safe;
-  shortening the period is not, and invalidates that derivation.
+  of 16 with smoothstep bounds the slope at 1.5 blocks per block, which is where "adjacent columns
+  differ by at most 2" comes from. Lowering the amplitude is safe; shortening the period is not, and
+  invalidates that derivation.
 - Meshing runs on rayon workers and may only ever use an **indexed** collect into a `Vec`.
-  `for_each` into a shared sink, and collecting into a set or a map, are forbidden on that path —
-  they let the worker count decide the order quads reach the packer in, and it breaks invisibly,
-  because the machine the goldens were captured on never changed its worker count.
+  `for_each` into a shared sink, and collecting into a set or a map, are forbidden there — they let
+  the worker count decide the order quads reach the packer in, and it breaks invisibly, because the
+  machine the goldens were captured on never changed its worker count.

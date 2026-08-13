@@ -548,38 +548,56 @@ directories may exist, and `crates/mc-render/tests/golden_inventory.rs` fails
 when the set on disk is not exactly that list — a stale directory left behind
 by a previous scene revision is as much a defect as a missing one.
 
-**Regenerate with the filter. The unfiltered command corrupts the set.**
+**Regenerate through `terrain_goldens` and nothing wider. A run that reaches
+`golden_mismatch` with the opt-in set corrupts the set.**
 
 ```
-# 1. The probes first. They are derived from the declared camera, world and
+# 1. The probes first. They are derived from a declared pose, world and
 #    colours, so they are the only thing that can tell a correct renderer from
 #    a broken one before a broken one becomes ground truth.
 cargo nextest run -p mc-client --test terrain_probes
 
-# 2. Mint, filtered to the self-comparisons alone.
-MYCRAFT_UPDATE_GOLDENS=1 cargo nextest run -p mc-client --test terrain_goldens \
-    -E 'test(matches_its_committed_golden)'
+# 2. The oracle next. The probes judge a declared pose; this judges the frames
+#    the goldens are actually shot through, against the world's own voxels.
+cargo nextest run -p mc-client --test replay_oracle
 
-# 3. Verify with the opt-in unset, including the inventory.
-cargo nextest run -p mc-client --test terrain_goldens
+# 3. Mint. The whole binary, which holds only self-comparisons.
+MYCRAFT_UPDATE_GOLDENS=1 cargo nextest run -p mc-client --test terrain_goldens \
+    --no-tests=fail
+
+# 4. Verify with the opt-in unset, including the mismatch path and the inventory.
+cargo nextest run -p mc-client --test terrain_goldens --test golden_mismatch \
+    --no-tests=fail
 cargo nextest run -p mc-render --test golden_inventory
 ```
 
-`MYCRAFT_UPDATE_GOLDENS=1 cargo nextest run -p mc-client --test terrain_goldens`
-— the same command without `-E` — **is the one that must not be run.** That
-target holds one test which deliberately verifies the *tick-60* capture against
-the *tick-0* golden, because the compare-and-fail half of the lifecycle is the
-half a passing suite never exercises. Under the update opt-in that test does not
-compare: it mints, and it writes a tick-60 frame as tick 0's committed
-reference. Every later run then compares the right frame against the wrong
-ground truth and passes forever, and the diff that would have shown it is a
-binary blob nobody can read.
+**`MYCRAFT_UPDATE_GOLDENS` must never be set for a run that selects
+`golden_mismatch`.** That binary holds one test, which deliberately verifies the
+*tick-59* capture against the *tick-0* golden, because the compare-and-fail half
+of the lifecycle is the half a passing suite never exercises. Under the update
+opt-in that test does not compare: it mints, and it writes a tick-59 frame as
+tick 0's committed reference. Every later run then compares the right frame
+against the wrong ground truth and passes forever, and the diff that would have
+shown it is a binary blob nobody can read. So the danger extends to a bare
+`MYCRAFT_UPDATE_GOLDENS=1 cargo nextest run`, which selects everything.
 
 That is the failure the whole golden discipline exists to prevent — a golden of
 a renderer nothing checked — arriving through the regeneration procedure rather
 than through the renderer. The ordering rule that goldens are shot only after
-the derived probes pass does not cover this door, which is why the filter is
-written down here as the command rather than left to be reconstructed.
+the derived probes pass does not cover this door, which is why step 3 is written
+down here as the command rather than left to be reconstructed.
+
+**Step 3 names a binary, not a test, and that is deliberate: a document meant to
+be followed verbatim must not embed an identifier that a refactor moves
+silently.** This command used to carry `-E 'test(matches_its_committed_golden)'`,
+a suffix three separate tests shared; when they collapsed into the one
+table-driven test the scenario asks for, the filter matched nothing and minted
+nothing. A binary name is a file name — `crates/mc-client/tests/terrain_goldens.rs`
+— so renaming it is a file move a diff shows, and the mint-unsafe test was given
+its own binary rather than being excluded by name so that this selection needs no
+filter at all. `--no-tests=fail` is what turns a selection that has decayed to
+zero matches into a failure at mint time rather than a silent no-op discovered at
+step 4.
 
 Any re-shoot is a deliberate change that says so in its commit message. An
 unexplained golden update in a diff remains a review stop. When the cause is a
@@ -599,15 +617,40 @@ tuned away.
   the comparison agrees with it forever. This is why the derived probes are made
   to pass before any golden is shot — but that ordering rule only covers
   artifacts the probes can detect.
-- **The committed set samples three ticks of a 120-tick orbit** — 0, 60 and 119,
-  at 1280×720. Anything that appears only at another orbit angle passes the whole
-  suite untouched, and anything present at a sampled tick is baked into that
-  tick's reference.
+- **The committed set samples three ticks of a 120-tick walk** — 0, 59 and 119,
+  at 1280×720. Anything that appears only at another tick passes the whole suite
+  untouched, and anything present at a sampled tick is baked into that tick's
+  reference.
 - **Share-based probes are blind to sparse pixels by construction.** A coverage
   assertion with a 0.25% floor over a 1280×720 frame cannot be moved by a few
-  hundred pixels spread across an orbit. Measured while building SPEC-004: 231
+  hundred pixels spread across a replay. Measured while building SPEC-004: 231
   isolated pixels across all 120 ticks, 0–9 per frame, moved no cluster share at
   all, and two of the three committed goldens contain some.
+
+**What the player's camera actually shows, measured rather than predicted.**
+Non-sky coverage from the published camera is **77.91% at tick 0, 95.01% at
+tick 59 and 94.22% at tick 119** — measured in `crates/mc-client/tests/` by
+comparing each rendered frame against a uniform field of the declared clear
+colour through the harness's own metric, at the commit that first shot the
+frames from the player. SPEC-005's architecture predicted ≈48% and ≈75% from a
+design-time re-implementation of the heightmap that answered `surface_height(32,
+32) = 40`; the shipped generator answers **37**, so the eye stands at y = 41.62
+rather than 44.62 and a player three blocks lower on a hillside rising to 48 is
+looking *into* terrain rather than over it. The prediction was not stale, it was
+wrong by 30 and 20 points, and the figures above are what a future drift should
+be read against.
+
+Those figures are what a **coverage floor** would have been checked against, and
+this is why the player's camera has no coverage floor. A 15% floor against a
+frame that is 78% terrain is three to five times of slack: a renderer drawing a
+third of what it should would pass it. What judges these frames instead is a ray
+marched from the published camera through the world's own voxels, at 576 sample
+pixels per frame, predicting terrain at 441 / 544 / 542 of them and disagreeing
+with the rendered frame at **none**. The budget is 2 disagreements per frame and
+it may not be raised: the remedy for a sample landing on a silhouette edge is to
+move that sample, which is a declared fixture. Measured sharpness of that
+budget: a pitch error of 0.25° reaches 2 disagreements, 0.5° reaches 5 and 3°
+reaches 24.
 
 Those 231 pixels turned out to be *correct* geometry — the exposed vertical side
 face of a dirt voxel at a terrain step of two blocks or more, or on the world's

@@ -478,3 +478,48 @@ module to `mc-render` now carries the same testing obligation as adding one to `
   figure would rise while meaning less.
 - **Narrowing `mc-client` at the same time.** Nothing puts logic there, so the change would be
   speculative. Revisit when something does.
+
+## ADR-014 — Movement is submitted as an intent, never a position
+
+**Status**: Accepted · **Date**: 2026-08-13
+
+**Context.** SPEC-005 gave the player a free-look camera, WASD movement and collision. The client
+has to tell the simulation what the player is asking to do, and there are two shapes that message
+could take: the client computes where the player ends up and tells the simulation the result, or the
+client says what it is *asking for* and the simulation computes the result itself. Invariant 4 ("the
+server is authoritative — client input is a request, never a fact") already rules on this in
+principle; this feature is where it first has a concrete message to apply to, and singleplayer is
+where the rule is easiest to skip, because there is no network yet to make a submitted position look
+suspicious.
+
+**Decision.** `MovementIntent` carries exactly five fields — `forward`, `strafe`, `yaw_delta`,
+`pitch_delta`, `jump` — a direction, a magnitude, a change of view and whether a jump is wanted.
+There is no field it could use to state a position, a velocity or an absolute orientation, so a
+client cannot claim where it is even by mistake. `advance_player` is the only path from an intent to
+a new `PlayerState`, and it clamps on the receiving side before doing anything else with the intent:
+magnitude capped at 1, non-finite values rejected, per-axis displacement capped at 1.0 block — so a
+client sending `1000.0` or a `NaN` gets exactly the same treatment as a well-behaved one.
+`InputState` (held keys, pending look delta, `take_intent()`) accumulates the intent and lives in
+`mc-sim` rather than in `mc-client`, because it is *client-side behaviour that happens to live in the
+authority's crate*: in MVP 3 the client still runs this same accumulation and sends the resulting
+`MovementIntent` over the wire, and the server still clamps it on receipt, unchanged.
+
+**Rejected: the client computes and submits a position (or a velocity).** Cheaper today — no
+sanitising, no per-axis clamp, the simulation just copies the number in — and wrong for exactly the
+reason invariant 4 exists: a modified client could submit any position or velocity at all, and
+nothing downstream would have grounds to doubt it. It also does not survive contact with MVP 3: a
+server that trusts a submitted position has no work left to do except forward it, which is not
+authority, it is relay. Building the trusted-intent shape now, while the "network" is a same-process
+function call, means MVP 3 is a transport swap — the client still sends a `MovementIntent`, a server
+still owns `advance_player` — rather than a rewrite discovered under replication.
+
+**Consequences.** Every physics scenario is stated against `advance_player` and never against a
+client-reported outcome, so the physics is fully testable without a client, a window, or a world
+(`crates/mc-sim/tests/`). What is *not* reachable that way is the other side of the seam — whether
+the client actually wires its keys and pointer into the intent it submits — and that gap is real
+rather than theoretical: it is why the manual acceptance in `docs/technical/testing.md` exists and
+why PRO-873 owns its executable closure. The cost is on the simulation's side: it must sanitise an input
+it does not control, and every one of the four rejection scenarios (non-finite forward/strafe,
+non-finite look, over-deflected magnitude, over-length displacement) is a scenario that would not
+exist if the client were trusted. Nothing about this decision is specific to singleplayer — the
+clamp is exercised on every tick today, not added when a network arrives.

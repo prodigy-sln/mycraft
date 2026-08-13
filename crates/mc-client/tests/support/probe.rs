@@ -3,8 +3,15 @@
 //! A golden re-shot from a broken renderer is a golden of a broken renderer,
 //! and it passes forever. The only thing that catches that is a statement about
 //! the picture derived from somewhere else — here, from `spec.md`'s declared
-//! camera, world and colours, and from the arithmetic `architecture.md`'s
-//! screen-space budget did over them before any of this was rendered.
+//! observation pose, world and colours, and from the arithmetic done over them
+//! by hand before any of this was rendered.
+//!
+//! **Every screen-space figure below was re-derived for that pose, and none was
+//! inherited.** The suite this grew out of was shot through an orbit camera at
+//! `eye = (−64, 56, 32)`; a figure derived for one camera is a statement about
+//! that camera and about nothing else, so the landmark's sample point, the
+//! coverage floor and the per-colour floors were all worked out again from
+//! scratch. The derivations live beside the constants they produced.
 //!
 //! **Nothing in this file reads a colour, a count or a position out of a
 //! frame and then compares the frame against it.** The sky is
@@ -70,37 +77,77 @@ pub const DIFFERENT_COLOR: f64 = 10.0;
 
 /// The smallest share of the frame terrain may cover.
 ///
-/// Derived, never measured. Projecting the island's bounding box through the
-/// declared tick-60 camera and taking the shoelace area of the clipped
-/// silhouette gives 18.8% for a hypothetical all-32 world, 21.9% at the mean
-/// surface and 25.1% for an all-48 one. 15% sits a fifth below the *floor*, so
-/// it absorbs the silhouette model's error, and it is still roughly four times
-/// what the largest single quad covers — so "the renderer drew one quad" fails
-/// it too.
-pub const COVERAGE_FLOOR: f64 = 0.15;
-
-/// The smallest share of the frame one declared block colour may cover.
+/// Derived, never measured. The eye stands *inside* the 64 × 64 footprint at
+/// y = 56, with every surface between the declared 32 and 48 below it, so the
+/// island's silhouette is bracketed by projecting the flat plane each of those
+/// two bounds describes and taking the area below the footprint's two far edges
+/// — the near two are behind the camera. That gives 10.34% of the frame for an
+/// all-32 world, 25.59% at the mean surface and 41.88% for an all-48 one. The
+/// all-32 figure is a genuine lower bound over every admissible heightmap: no
+/// column's surface is under 32, so a ray reaching that plane inside the
+/// footprint has already met a solid voxel. 8% sits a fifth below it, which is
+/// the rule the orbit's own floor was derived by.
 ///
-/// Dirt is the binding case: it is exposed only where a step between adjacent
-/// columns is two blocks tall, which the heightmap's own `<= 2` coherence bound
-/// makes the minority case, and the budget puts it near 0.7% of the frame with
-/// a factor-of-two modelling error either way. 0.25% restores the margin and is
-/// still around 2 300 pixels at 1280 × 720, far above any noise floor.
-pub const COLOR_SHARE_FLOOR: f64 = 0.0025;
+/// The slack is deliberate rather than unexamined. What this probe answers is
+/// "the renderer drew more than a quad"; the tight statement about what the
+/// frame shows is the ray-marched oracle, which judges the player's camera
+/// against the world's own voxels.
+pub const COVERAGE_FLOOR: f64 = 0.08;
 
-/// The three blocks the replay's strata are made of, and therefore the three
-/// texture layers a correct frame shows.
-pub const STRATA: [&str; 3] = ["base:dirt", "base:grass", "base:stone"];
-
-/// The centre of the landmark pillar's cap.
+/// The three blocks the replay's strata are made of — and therefore the three
+/// texture layers a correct frame shows — each with the smallest share of the
+/// frame it may cover.
 ///
-/// Column (12, 12) filled with stone to y = 64, so the cap's centre is
-/// (12.5, 64, 12.5). The pillar is the only thing in the world above the eye's
-/// y = 56, which is what puts it above the horizon and its mirror on empty sky.
-pub const LANDMARK_TOP_CENTRE: [f32; 3] = [12.5, 64.0, 12.5];
+/// One floor per block rather than one for all three, because this pose shows
+/// the three strata in wildly different amounts and no single number is both
+/// meaningful for the largest and satisfiable for the smallest.
+///
+/// - **Grass, 7.5%**: every column's surface block is grass, so the all-32
+///   silhouette above less every visible face that is not grass bounds it from
+///   below.
+/// - **Stone, 0.4%**: the pillar alone projects to 0.54% of the frame above
+///   y = 48, where nothing in the world can occlude it, and 0.4% is a fifth
+///   below that.
+/// - **Dirt, presence, and deliberately nothing more**: dirt is exposed only on
+///   the side of a two-block step — three blocks of it sit under every surface
+///   and the heightmap's coherence bound holds every step to two, so a step
+///   never cuts deeper — which from this pose comes to **7 pixels of 921 600**.
+///   That figure is measured, not derived: the declared pose rendered at
+///   1280 × 720 through `frames.rs`, then every pixel counted that sits within
+///   ΔE 10 of `placeholder_mean_color("base:dirt")`, which is `share_within`'s
+///   own definition below. It is 7 at the current near plane of 0.1 and 7 at the
+///   0.5 this pose was first shot at, so the lens is not what sets it. The
+///   probe's job is to catch an *empty* cluster, and emptiness is the only
+///   threshold this pose supports: a positive floor at seven pixels would go red
+///   against a *correct* renderer on a driver that rasterised one sliver
+///   differently.
+pub const STRATA: [(&str, f64); 3] = [
+    ("base:dirt", 0.0),
+    ("base:grass", 0.075),
+    ("base:stone", 0.004),
+];
 
-/// A declared block colour, and the block it was declared for.
-type Mean = (&'static str, [u8; 3]);
+/// A point deep inside the landmark pillar's silhouette.
+///
+/// Column (12, 12) is stone from its surface at y = 36 up to and including
+/// y = 64, so (12.5, 58, 12.5) is stone with the whole width of the pillar
+/// around it and 104 px of it above. The pillar is the only column in the world
+/// holding anything above y = 48, which is what leaves this pixel's horizontal
+/// mirror on empty sky.
+///
+/// It supersedes the cap's centre, (12.5, 64, 12.5), which sat about one pixel
+/// inside the silhouette's edge — close enough that a sub-pixel drift decided
+/// the answer.
+pub const LANDMARK_SAMPLE_POINT: [f32; 3] = [12.5, 58.0, 12.5];
+
+/// One declared stratum: the block, the colour it was declared to draw as, and
+/// the smallest share of the frame it may cover.
+#[derive(Debug, Clone, Copy)]
+struct Stratum {
+    block: &'static str,
+    mean: [u8; 3],
+    floor: f64,
+}
 
 /// One thing a probe found wrong.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -246,7 +293,7 @@ pub fn landmark(frame: &Rgba8Image, camera: &CameraView) -> Result<ProbeOutcome,
         width: frame.width(),
         height: frame.height(),
     };
-    let at = project(LANDMARK_TOP_CENTRE, camera, size)?;
+    let at = project(LANDMARK_SAMPLE_POINT, camera, size)?;
     let mirror = (size.width.saturating_sub(1).saturating_sub(at.0), at.1);
     let to_pillar = distance(pixel_color(frame, at)?, CLEAR_COLOR_SRGB)?;
     let to_sky = distance(pixel_color(frame, mirror)?, CLEAR_COLOR_SRGB)?;
@@ -309,9 +356,9 @@ fn landmark_faults(
 /// Returns the image-shape or threshold failure, or an unparseable texture key.
 pub fn texture_variety(frame: &Rgba8Image) -> Result<ProbeOutcome, Box<dyn Error>> {
     let anchor = anchor_of(frame);
-    let means = declared_means()?;
-    let (detail, mut failures) = color_shares(frame, &means, anchor)?;
-    failures.extend(distinct_means(&means, anchor)?);
+    let strata = declared_strata()?;
+    let (detail, mut failures) = color_shares(frame, &strata, anchor)?;
+    failures.extend(distinct_means(&strata, anchor)?);
 
     Ok(ProbeOutcome {
         probe: TEXTURE_VARIETY,
@@ -321,60 +368,75 @@ pub fn texture_variety(frame: &Rgba8Image) -> Result<ProbeOutcome, Box<dyn Error
     })
 }
 
-/// The declared mean colour of each of the replay's three strata.
-fn declared_means() -> Result<Vec<Mean>, Box<dyn Error>> {
+/// Each of the replay's three strata, with the colour it was declared to draw
+/// as.
+fn declared_strata() -> Result<Vec<Stratum>, Box<dyn Error>> {
     STRATA
         .into_iter()
-        .map(|block| Ok((block, placeholder_mean_color(&TextureKey::parse(block)?))))
+        .map(|(block, floor)| {
+            Ok(Stratum {
+                block,
+                mean: placeholder_mean_color(&TextureKey::parse(block)?),
+                floor,
+            })
+        })
         .collect()
 }
 
 /// What share of the frame each declared colour covers, and which of them fell
-/// short.
+/// short of its own floor.
 fn color_shares(
     frame: &Rgba8Image,
-    means: &[Mean],
+    strata: &[Stratum],
     anchor: (u32, u32),
 ) -> Result<(String, Vec<ProbeFailure>), Box<dyn Error>> {
     let mut described = Vec::new();
     let mut failures = Vec::new();
-    for (block, mean) in means {
-        let share = share_within(frame, *mean, DIFFERENT_COLOR)?;
-        described.push(format!("{block} {:.3}%", share * 100.0));
-        if share <= COLOR_SHARE_FLOOR {
+    for stratum in strata {
+        let Stratum { block, mean, floor } = *stratum;
+        let share = share_within(frame, mean, DIFFERENT_COLOR)?;
+        described.push(format!(
+            "{block} {:.4}% (floor {:.4}%)",
+            share * 100.0,
+            floor * 100.0
+        ));
+        if share <= floor {
             failures.push(fault(
                 TEXTURE_VARIETY,
                 anchor,
                 format!(
-                    "{block}'s declared mean {mean:?} covers {:.3}% of the frame, at or under the \
-                 {:.2}% floor",
+                    "{block}'s declared mean {mean:?} covers {:.4}% of the frame, at or under its \
+                     own {:.4}% floor",
                     share * 100.0,
-                    COLOR_SHARE_FLOOR * 100.0
+                    floor * 100.0
                 ),
             ));
         }
     }
     let detail = format!(
-        "within ΔE {DIFFERENT_COLOR} of each declared mean: {} (floor {:.2}%)",
-        described.join(", "),
-        COLOR_SHARE_FLOOR * 100.0
+        "within ΔE {DIFFERENT_COLOR} of each declared mean: {}",
+        described.join(", ")
     );
     Ok((detail, failures))
 }
 
 /// Which declared means a viewer could not tell apart.
-fn distinct_means(means: &[Mean], anchor: (u32, u32)) -> Result<Vec<ProbeFailure>, Box<dyn Error>> {
+fn distinct_means(
+    strata: &[Stratum],
+    anchor: (u32, u32),
+) -> Result<Vec<ProbeFailure>, Box<dyn Error>> {
     let mut failures = Vec::new();
-    for ((block, mean), (other_block, other)) in pairs(means) {
-        let apart = distance(mean, other)?;
+    for (one, other) in pairs(strata) {
+        let apart = distance(one.mean, other.mean)?;
         if apart <= DIFFERENT_COLOR {
             failures.push(fault(
                 TEXTURE_VARIETY,
                 anchor,
                 format!(
-                    "the declared means of {block} {mean:?} and {other_block} {other:?} stand ΔE \
-                 {apart:.1} apart, at or under the ΔE {DIFFERENT_COLOR} that tells two \
-                 textures apart — so finding both in a frame would say nothing"
+                    "the declared means of {} {:?} and {} {:?} stand ΔE {apart:.1} apart, at or \
+                     under the ΔE {DIFFERENT_COLOR} that tells two textures apart — so finding \
+                     both in a frame would say nothing",
+                    one.block, one.mean, other.block, other.mean
                 ),
             ));
         }
@@ -382,13 +444,13 @@ fn distinct_means(means: &[Mean], anchor: (u32, u32)) -> Result<Vec<ProbeFailure
     Ok(failures)
 }
 
-/// Every unordered pair of `means`, flattened so the walk over them nests once.
-fn pairs(means: &[Mean]) -> Vec<(Mean, Mean)> {
-    means
+/// Every unordered pair of `strata`, flattened so the walk over them nests once.
+fn pairs(strata: &[Stratum]) -> Vec<(Stratum, Stratum)> {
+    strata
         .iter()
         .enumerate()
         .flat_map(|(index, one)| {
-            means
+            strata
                 .iter()
                 .skip(index + 1)
                 .map(move |other| (*one, *other))
@@ -466,7 +528,14 @@ fn project(
 }
 
 /// The colour at `at`, alpha dropped.
-fn pixel_color(frame: &Rgba8Image, at: (u32, u32)) -> Result<[u8; 3], Box<dyn Error>> {
+///
+/// Public so that the ray-marched oracle reads a pixel the way every probe here
+/// reads one.
+///
+/// # Errors
+///
+/// Returns a failure naming `at` when the frame has no pixel there.
+pub fn pixel_color(frame: &Rgba8Image, at: (u32, u32)) -> Result<[u8; 3], Box<dyn Error>> {
     let [red, green, blue, _] = frame
         .pixel(at.0, at.1)
         .ok_or_else(|| format!("the frame has no pixel at {at:?}"))?;
@@ -475,7 +544,17 @@ fn pixel_color(frame: &Rgba8Image, at: (u32, u32)) -> Result<[u8; 3], Box<dyn Er
 
 /// The perceptual distance between two colours, measured by the harness's own
 /// metric on a pair of one-pixel frames.
-fn distance(left: [u8; 3], right: [u8; 3]) -> Result<f64, Box<dyn Error>> {
+///
+/// Public so that the ray-marched oracle judges "this pixel is the sky" by the
+/// same metric the probes and the goldens judge by. A second implementation of
+/// it is how two suites come to disagree silently the day the metric changes,
+/// which is the reason this file drives `compare` rather than computing a
+/// distance itself.
+///
+/// # Errors
+///
+/// Returns the image-shape failure, which a one-pixel frame cannot produce.
+pub fn distance(left: [u8; 3], right: [u8; 3]) -> Result<f64, Box<dyn Error>> {
     let one = uniform(1, 1, left)?;
     let other = uniform(1, 1, right)?;
     Ok(compare(&one, &other, &Thresholds::default()).max_delta_e)

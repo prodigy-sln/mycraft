@@ -47,6 +47,25 @@ pub fn camera_view(eye: [f32; 3], target: [f32; 3]) -> CameraView {
     }
 }
 
+/// The camera a frame drawn before there is anything to draw is recorded with.
+///
+/// The world is generated on a worker and the player's spawn is derived from it,
+/// so for the first frames there is no published camera to draw from at all. The
+/// alternative to this is a pose invented at the call site, which is a viewpoint
+/// nothing authoritative agreed to — declared here instead, so that the client
+/// keeps naming [`camera_view`] in one file and keeps deciding nothing.
+///
+/// **It is a declared pose rather than an arbitrary one, because it is read.**
+/// Nothing is drawn through it — the scene is empty and the frame is a bare
+/// clear — but `frame_stats` builds a view-projection from every snapshot's
+/// camera whatever the phase, and a degenerate one whose eye and target
+/// coincide would put a NaN through that matrix rather than a harmless number.
+/// So: at the world origin, looking along +x, which is where yaw 0 faces.
+#[must_use]
+pub fn waiting_view() -> CameraView {
+    camera_view([0.0, 0.0, 0.0], [1.0, 0.0, 0.0])
+}
+
 /// The lens: how much of the world reaches the frame, and how far.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Projection {
@@ -79,10 +98,33 @@ const FIELD_OF_VIEW_DEGREES: f32 = 60.0;
 
 /// The nearest and furthest a fragment may be and still be drawn.
 ///
-/// The near plane is half a block: the orbit never enters the terrain, and a
-/// nearer one would spend depth precision on a range nothing occupies. The far
-/// plane clears the orbit's own diameter with room to spare.
-const NEAR_PLANE: f32 = 0.5;
+/// **The near plane is bounded by the player's own box, not by taste.** A player
+/// pressed against a wall stands its collision half-width from that face, and
+/// the eye is at the box's centre horizontally, so anything the near plane
+/// clips inside that distance is a block the player can walk up to and see
+/// through. It was half a block, justified by "the orbit never enters the
+/// terrain" — and the orbit is gone, along with the only camera that
+/// justification was ever true of.
+///
+/// The binding distance is the near **rectangle**'s corner, not its centre: the
+/// corners stand `√(1 + tan²(fov/2) + (aspect · tan(fov/2))²)` times the near
+/// distance from the eye, which is 1.54 at this field of view and 16:9 and
+/// grows with the aspect. At 0.1 the corners sit 0.155 blocks out at 16:9 and
+/// 0.236 at 32:9, both inside a half-width of 0.3 — so the bound survives an
+/// ultrawide window, which the assertion in
+/// `crates/mc-client/tests/camera_lens.rs` cannot itself see, since it asks
+/// about the declared capture aspect.
+///
+/// The cost is depth precision, and it is affordable: the buffer is
+/// `Depth32Float`, where the resolution at distance `d` goes as `d²ε/near`, so
+/// the ten-fold drop in the near plane costs a tenth of a block at the far
+/// plane — far below one voxel, which is the smallest thing this renderer draws.
+///
+/// The far plane covers the whole replay from anywhere a player can stand in
+/// it: the world is 64 blocks across and 256 tall, so its furthest corner is
+/// under 280 blocks from any eye inside it, and 512 leaves room for a camera
+/// that walks out past the edge and looks back.
+const NEAR_PLANE: f32 = 0.1;
 const FAR_PLANE: f32 = 512.0;
 
 /// The matrix taking a world position to clip space.

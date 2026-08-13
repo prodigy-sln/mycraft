@@ -296,6 +296,21 @@ assertions rely on is a consequence of the construction rather than a
 measurement of it. **The amplitude may be lowered; the period may not**
 without redoing that derivation.
 
+**The player physics repeats the same shape twice, at two different scopes.** Collision fixtures
+(`crates/mc-sim/tests/support/solidity.rs`) are hand-built voxel worlds, chosen for what each one
+would fail to catch if it were built differently: a flat floor cannot discriminate which column was
+consulted, a ledge loses support at a position the fixture's own geometry predicts, and a step gives
+adjacent columns different heights — the fixture's shape is a constraint no assertion enforces, so
+it is held by the file's own doc comments and by review, the same lesson as the terrain heightmap
+above. Over the declared replay, the same independence rule holds at world scale:
+`crates/mc-sim/tests/support/overlap.rs` re-derives whether the player's box overlaps a solid voxel
+from the world's own per-voxel accessor and the registry, sharing no lookup chain with the physics'
+own resolved `SolidVoxels` bitset — an adapter that transposed an axis, saturated a coordinate or
+resolved a name wrongly cannot make both sides wrong the same way, which is exactly what would
+happen if the invariant borrowed `SolidVoxels` itself. A resting height is checked the same way:
+against `surface_height(x, z) + 1`, read from the world's heightmap at the position the player
+actually stopped, never against a coordinate committed from a run of the code under test.
+
 ### Assertions that are unfalsifiable alone and load-bearing together
 
 `crates/mc-world/tests/mesh_properties.rs` asserts three properties over
@@ -476,13 +491,20 @@ rendered frame in PRO-852, where a failure would be ambiguous between a wrong re
 golden workflow.
 
 The harness supplies the capture path only. The scene-side half of golden testing — a fixed world
-seed, a scripted camera path and a fixed tick count, which together are what make a real frame's
-inputs byte-identical every run — belongs to the crate that owns a world and a camera, and lives in
-the terrain replay: a seeded 4×4-column world, a 120-tick camera orbit computed from the tick index
-by a free function with nowhere to accumulate into, and **one tick per rendered frame with no wall
-clock anywhere in the path**. Advancing by frames rather than by elapsed time removes the
-nondeterminism instead of isolating it; the cost is that orbit speed varies with refresh rate, which
-a scripted demo can afford.
+seed, a declared sequence of inputs and a fixed tick count, which together are what make a real
+frame's inputs byte-identical every run — belongs to the crate that owns a world and a player, and
+lives in the terrain replay: a seeded 4×4-column world, a 120-tick **intent script** read by tick
+index, a spawn derived from that world, and **one tick per rendered frame, once the world is ready,
+with no wall clock anywhere in the path**. Advancing by frames rather than by elapsed time removes
+the nondeterminism instead of isolating it; the cost is that the walk's speed varies with refresh
+rate, which a scripted demo can afford.
+
+The camera used to be a free function of the tick index — an orbit with nowhere to accumulate into,
+so tick 60 could be asked for directly. It is now the camera the simulation *publishes*, derived
+from an integrated player, so a frame's pose is reached only by advancing the script from the spawn.
+The reproducibility that a golden depends on comes from the world and the script both being
+declared, and is claimed within a run rather than across libm versions — which was already true of
+the orbit, whose path went through `cos`/`sin` too.
 
 #### Assertions that do not come from a golden
 
@@ -511,9 +533,11 @@ put the mirror inside the landmark's own width, where the control **could not fa
 Two standing consequences:
 
 - **Every probe threshold is derived from a screen-space budget computed from the declared camera
-  positions.** Change the camera path — even by exchanging its sine and cosine, which merely rotates
-  the orbit a quarter turn — and every threshold is silently invalidated while the probes still pass.
-  The camera path is pinned by its own scenario for that reason.
+  position.** Change the pose — even by exchanging a sine and a cosine, which merely turns it a
+  quarter turn — and every threshold is silently invalidated while the probes still pass. That is
+  why the probes' pose is **declared and written out** rather than taken from the simulation, and
+  why the player's own camera is judged instead by a ray marched through the world's voxels, which
+  needs no threshold to invalidate.
 - **When a measured figure lands under its threshold, the model is wrong and the work escalates.**
   The threshold does not quietly move to accommodate the measurement; that is how a derived bound
   decays into a snapshot.
@@ -659,18 +683,63 @@ Stated plainly, because pretending otherwise is how these get missed:
   large scale; neither can see a scattered handful of pixels (`technical/rendering.md`). What is
   left is reading the code, and a human looking at the window.
 
-### The renderer has not been visually accepted by a human
+### The renderer has been visually accepted by a human — and what that does not cover
 
-**Nobody has deliberately run `cargo run -p mc-client` and judged that the terrain looks right.** The
-window has been opened by an agent and did appear, which establishes that the binary starts and
-presents; it does not establish what is in the frame, because the thing being checked is precisely
-the judgement an agent cannot make. Every automated check the renderer has — goldens, probes, the
-scene contract — is consistent with a picture a person would call wrong, and no verdict recorded
-anywhere substitutes for that look.
+A human ran `cargo run -p mc-client` from the checkout and judged the live window against the three
+committed goldens, reporting that the frame matches them. That is the one check no automated verdict
+substitutes for: every check the renderer has — goldens, probes, the scene contract — is consistent
+with a picture a person would call wrong, because the goldens are minted from the renderer they
+verify. The acceptance is what closes that circle, and it is why it is recorded here rather than
+left implicit in a spec folder that no longer exists.
 
-This is the standing verification state of the renderer, not a task that fell off a list: the check
-costs one command, and until someone runs it and says so, "terrain renders correctly" rests on the
-code review and on assertions that were all written by the same hands that wrote the renderer.
+**Three things the acceptance deliberately does not cover**, all known and owned elsewhere, so that
+a later reader does not read "accepted" as "the picture is finished":
+
+- **Texture minification aliasing.** `Nearest` sampling is load-bearing for the goldens, and the
+  banding and blotching it produces are visible in live playback, not only in stills.
+- **The placeholder palette's separation.** Stone and dirt land 47 RGB units apart while either sits
+  roughly 190 from grass. Two independent observers have now misread dirt as stone — once costing a
+  full ray-cast investigation into a mesher defect that did not exist. The cost of the thin
+  separation is already being paid, not merely projected.
+- **Pixel-scale correctness**, per the entry above. The acceptance is a judgement about the picture
+  at a glance; a scattered handful of wrong pixels survives it exactly as it survives the probes.
+
+The first two are owned by the texture-sampling and palette work; the acceptance narrows what is
+unverified rather than clearing it.
+
+### Manual acceptance — walking, looking, and the pointer
+
+**A procedure to repeat, not a note about one afternoon.** Run it after any change to the client's
+window, event loop, input adapter, or camera; run it again before any release.
+
+Why it exists: every FR-5 scenario — the input bindings, the pointer adapter, the cursor fallback
+policy — is verified as *policy* and not one of them as *product behaviour*. The winit
+`ApplicationHandler` in `crates/mc-client/src/events.rs` needs a real window, and nothing in the
+suite constructs one, so no automated test observes a keystroke or a mouse motion reaching the
+simulation. That is measured, not feared: with `app.rs` submitting `MovementIntent::default()` every
+tick, and separately with the adapter's `accepts_pointer_motion` gate deleted, the whole workspace
+stayed green — a client wired to none of its own input passes. The six checks below are the facts
+nothing executable reaches, and one human session is the only place they can be checked at all.
+
+Run `cargo run -p mc-client` from the checkout, then:
+
+| # | Check | Observed |
+|---|-------|----------|
+| 1 | **Walk with WASD.** Each of the four keys moves the view in its own direction, relative to where you are facing. | yes |
+| 2 | **Turn with the pointer.** Moving the mouse turns the view; up is up and right is right. | yes |
+| 3 | **Escape returns the cursor.** One press frees the pointer and it becomes visible again. | yes |
+| 4 | **The view does not turn while the cursor is free.** With the cursor released, moving the mouse across the window leaves the view still. | yes |
+| 5 | **A click re-captures it.** Clicking in the window takes the cursor back and turning resumes. | yes |
+| 6 | **The operating system actually captured the pointer.** While captured, the cursor is hidden and does not leave the window or reach anything behind it — push it hard against one edge and keep turning. | yes |
+
+**All six were observed by a human on the current build.** That column is the point of the table: an
+unobserved procedure and an observed one must not read alike, so a check that has not been run this
+round says so rather than being left blank or assumed. Reset the column when the procedure is
+re-run, and record what was seen rather than what was expected.
+
+**PRO-873 replaces this procedure with an executable harness** that drives a real window, and it is
+a prerequisite of PRO-854. Until it lands, this table is the only evidence any of these six facts
+holds.
 
 ### An absent reviewer and a clean reviewer look identical
 

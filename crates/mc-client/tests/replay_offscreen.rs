@@ -23,13 +23,11 @@ mod support;
 use std::error::Error;
 use std::sync::Arc;
 
-use mc_render::camera::camera_view;
+use mc_render::camera::CameraView;
 use mc_render::geometry::scene::SceneGeometry;
 use mc_render::gpu::{RecordTarget, TerrainRenderer};
-use mc_render::pass::TerrainPassConfig;
 use mc_render::snapshot::{ScenePhase, TerrainSnapshot};
 use mc_render::surface::SurfaceSize;
-use mc_sim::replay::{TickIndex, pose};
 use mc_testkit::frame::gpu::{
     AcquireOptions, Acquisition, CaptureContext, CaptureRequest, draw_fn,
 };
@@ -57,18 +55,18 @@ fn each_of_the_replays_first_three_ticks_draws_sections() -> TestResult {
     let Some(context) = device()? else {
         return Ok(());
     };
+    let mut renderer = support::frames::prepared_renderer(&context, &prepared)?;
     let scene = Arc::new(prepared.scene);
-    let mut renderer = TerrainRenderer::new(
-        context.device(),
-        context.queue(),
-        &TerrainPassConfig::offscreen(),
-    )?;
-    renderer.upload_textures(context.queue(), &prepared.layers)?;
-    renderer.upload_scene(context.queue(), &scene)?;
 
     let mut drawn = Vec::new();
     for tick in TICKS {
-        drawn.push(render_tick(&context, &mut renderer, &scene, tick)?);
+        let camera = support::frames::replay_camera(tick, &prepared.world, &prepared.registry)?;
+        drawn.push(render_tick(
+            &context,
+            &mut renderer,
+            &scene,
+            (tick, camera),
+        )?);
     }
 
     assert!(
@@ -92,7 +90,7 @@ fn device() -> Result<Option<Box<CaptureContext>>, Box<dyn Error>> {
     }
 }
 
-/// Renders `scene` from the replay's pose at `tick`, and reports how many
+/// Renders `scene` from `shot`'s camera at `shot`'s tick, and reports how many
 /// sections the frame predicted and how many indices it actually compacted.
 ///
 /// The `ok_or` at the end is load-bearing: draw work that never ran leaves
@@ -102,12 +100,12 @@ fn render_tick(
     context: &CaptureContext,
     renderer: &mut TerrainRenderer,
     scene: &Arc<SceneGeometry>,
-    tick: u32,
+    shot: (u32, CameraView),
 ) -> Result<(u32, u32), Box<dyn Error>> {
-    let camera = pose(TickIndex::new(tick)?);
+    let (tick, camera) = shot;
     let snapshot = TerrainSnapshot {
         tick,
-        camera: camera_view(camera.eye, camera.target),
+        camera,
         scene: Arc::clone(scene),
     };
     let phase = ScenePhase::Ready(Arc::clone(scene));

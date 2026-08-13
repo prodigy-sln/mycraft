@@ -2,13 +2,34 @@
 //! frustum.
 //!
 //! Every box below is placed against **one** camera, declared once: the eye at
-//! the world origin looking down `-Z`, under the projection the replay declares
-//! — 60° vertical field of view, 1280 : 720, near 0.5, far 512. That camera is
-//! chosen so the frustum's six half-spaces are arithmetic anyone can redo by
-//! hand: for a point at depth `d` in front of the eye the frustum admits
-//! `|x| <= d * 1.0264` and `|y| <= d * 0.57735`, with `0.5 <= d <= 512`. The
-//! numbers in the fixtures are derived from those three inequalities and from
-//! nothing the code under test produced.
+//! the world origin looking down `-Z`, at a 60° vertical field of view, 1280 :
+//! 720, near 0.5, far 512. That camera is chosen so the frustum's six
+//! half-spaces are arithmetic anyone can redo by hand: for a point at depth `d`
+//! in front of the eye the frustum admits `|x| <= d * 1.0264` and
+//! `|y| <= d * 0.57735`, with `0.5 <= d <= 512`. The numbers in the fixtures are
+//! derived from those three inequalities and from nothing the code under test
+//! produced.
+//!
+//! **That near plane is this file's own, and no longer production's.** The
+//! renderer's `NEAR_PLANE` is 0.1, so a player standing flush against a block
+//! keeps the block; this fixture stays at 0.5 deliberately, and the divergence is
+//! the point rather than an oversight. [`Frustum::from_view_projection`] is a
+//! pure function of a *matrix*, and the near distance is an input to that matrix
+//! — extracting the near half-space correctly is not a stronger claim for having
+//! used the number production happens to hold. Reading it from
+//! [`projection_for`] instead would make the `0.5 <= d <= 512` above a
+//! restatement of a production constant, so a changed near plane would move the
+//! fixture and its expectation together and the near case would keep passing
+//! while quietly asserting something else each time. It would also shrink the
+//! near exclusion box to depth 0.04..0.08 inside a frustum 0.08 wide, which is
+//! where the "beyond exactly one plane, comfortably inside the other five"
+//! property below stops being legible.
+//!
+//! What watches production's near plane is
+//! `crates/mc-client/tests/camera_lens.rs`, which asserts the near rectangle's
+//! corner radius against the half-width a player is actually stopped at. Named
+//! here so a reader does not conclude from the paragraph above that nothing
+//! does.
 //!
 //! **A box outside all six planes proves nothing.** The exclusion scenario is
 //! six cases and each one puts its box beyond exactly one plane while leaving it
@@ -31,7 +52,12 @@
 use crate::aabb::Aabb;
 use crate::geometry::scene::SectionRecord;
 
-use super::{Frustum, Projection, camera_view, view_projection, visible_sections};
+use crate::surface::SurfaceSize;
+
+use super::{
+    Frustum, Projection, camera_view, projection_for, view_projection, visible_sections,
+    waiting_view,
+};
 
 /// The eye position every fixture is placed against.
 const EYE: [f32; 3] = [0.0, 0.0, 0.0];
@@ -40,11 +66,21 @@ const EYE: [f32; 3] = [0.0, 0.0, 0.0];
 /// right-handed view matrix looks along.
 const TARGET: [f32; 3] = [0.0, 0.0, -64.0];
 
-/// The replay's declared projection.
+/// The lens every fixture below is placed under. The replay declares these
+/// three, and the fixtures would still be hand-derivable if it stopped.
 const FOV_Y_DEGREES: f32 = 60.0;
 const ASPECT: f32 = 1280.0 / 720.0;
-const NEAR: f32 = 0.5;
 const FAR: f32 = 512.0;
+
+/// How near this fixture's own near plane stands.
+///
+/// **Not the renderer's**, which is 0.1 so that a block the player is pressed
+/// against is not clipped away. Kept at 0.5 on purpose: it is an input to the
+/// matrix under test rather than a fact about it, it leaves the near exclusion
+/// case a box at depth 0.2..0.4 where the arithmetic is still legible, and
+/// taking it from `projection_for` would make the inequality this file's header
+/// derives by hand agree with production by construction. See the header.
+const NEAR: f32 = 0.5;
 
 /// A box centred on the view axis at depth 96..104, well inside all six planes:
 /// at the nearest of those depths the frustum reaches x = +/-98.5 and
@@ -205,5 +241,30 @@ fn a_section_entirely_behind_the_camera_is_left_out_of_the_visible_set() {
         "every corner of the second box sits at a negative depth; a frustum test that \
          compares an unsigned distance against the side planes admits it and draws the \
          world behind the viewer"
+    );
+}
+
+/// The camera used before there is anything to draw is still a camera.
+///
+/// Nothing is drawn through it, which is exactly why it is worth asserting: a
+/// pose whose eye and target coincide has no look direction, and the view matrix
+/// of one is entirely `NaN`. The frame path builds that matrix for every
+/// snapshot whatever the phase — the statistics do it before the phase is
+/// consulted — so a degenerate waiting pose would put `NaN` through the frustum
+/// on every frame of the load, silently, with a clear colour on screen that
+/// looks exactly like a correct one.
+#[test]
+fn the_camera_used_before_anything_is_drawn_yields_a_matrix_of_real_numbers() {
+    let size = SurfaceSize {
+        width: 1280,
+        height: 720,
+    };
+
+    let matrix = view_projection(&waiting_view(), &projection_for(size));
+
+    assert!(
+        matrix.to_cols_array().iter().all(|value| value.is_finite()),
+        "the waiting pose has to have a look direction: {matrix:?} carries a value that is \
+         not a number, which is what an eye standing exactly on its own target produces"
     );
 }

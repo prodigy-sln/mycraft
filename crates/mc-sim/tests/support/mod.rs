@@ -14,13 +14,18 @@
 // Each test binary links this whole module and uses a subset of it.
 #![allow(dead_code)]
 
+pub mod chamber;
 pub mod oracle;
+pub mod overlap;
+pub mod solidity;
+pub mod volume;
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
+use mc_sim::player::PlayerState;
 use mc_sim::replay::{CameraPose, ReplayWorld};
 use mc_world::content::TomlFileDefinitionSource;
 
@@ -107,6 +112,23 @@ pub fn exactly(camera: &CameraPose) -> ([u32; 3], [u32; 3]) {
     (
         camera.eye.map(f32::to_bits),
         camera.target.map(f32::to_bits),
+    )
+}
+
+/// A player state as the integers its floats are.
+///
+/// Everything the specification asks two runs to agree about — where the player
+/// is, which way it faces, how fast it is going and whether it is on the ground
+/// — as one comparable value. "The same state" means the same value, not a
+/// nearly equal one, and asking the question about bits is both the exact form
+/// of it and the form `clippy::float_cmp` has no quarrel with.
+pub fn exactly_player(player: &PlayerState) -> ([u32; 3], [u32; 3], u32, u32, bool) {
+    (
+        player.position.to_array().map(f32::to_bits),
+        player.velocity.to_array().map(f32::to_bits),
+        player.yaw.to_bits(),
+        player.pitch.to_bits(),
+        player.on_ground,
     )
 }
 

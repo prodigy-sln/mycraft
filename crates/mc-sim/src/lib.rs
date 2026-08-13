@@ -7,6 +7,8 @@
 //! belongs to `mc-render`, and the two crates are asserted never to resolve each
 //! other.
 
+pub mod camera;
+pub mod player;
 pub mod replay;
 pub mod simulation;
 
@@ -16,6 +18,3 @@ pub mod simulation;
 /// golden frame mean anything: everything the camera sees has to be the same on
 /// every machine, on every run.
 pub const REPLAY_SEED: u64 = 0x4D79_4372_6166_7431;
-
-/// How many ticks the replay runs for before it repeats.
-pub const TICK_COUNT: u32 = 120;

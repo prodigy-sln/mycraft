@@ -18,15 +18,14 @@ mod support;
 
 use std::error::Error;
 
-use mc_sim::TICK_COUNT;
-use mc_sim::simulation::Simulation;
+use mc_sim::replay::SCRIPT_TICKS;
 use rayon::ThreadPoolBuilder;
 
 use support::{RenderInput, TestResult, prepare};
 
-/// The ticks the two runs are compared at: the first, the halfway point and the
-/// last, which are the three the replay declares captures for.
-const SAMPLED_TICKS: [u32; 3] = [0, 60, 119];
+/// The ticks the two runs are compared at: the spawn, the end of the straight
+/// walk and the last, which are the three the replay declares captures for.
+const SAMPLED_TICKS: [u32; 3] = [0, 59, 119];
 
 /// The two worker counts the meshing is run under.
 const ONE_WORKER: usize = 1;
@@ -71,19 +70,22 @@ fn meshing_the_replay_on_one_worker_and_on_eight_produces_the_same_bytes() -> Te
     Ok(())
 }
 
-/// One whole run of the replay: prepare the scene once, then advance tick by
-/// tick to the end, keeping the render input at each declared capture tick.
+/// One whole run of the replay: prepare the scene once, then walk the script's
+/// ticks, keeping the render input at each declared capture tick.
+///
+/// **It walks ticks rather than advancing a simulation**, because what it
+/// compares is the *render input* — the world's packed bytes, which no tick
+/// changes. Driving a simulation here would need a world to spawn a player in
+/// and would still compare the same buffer to itself; the player's own
+/// reproducibility is asserted where the player is, in `mc-sim`.
 fn run_to_the_end() -> Result<Vec<(u32, RenderInput)>, Box<dyn Error>> {
     let input = prepare()?;
-    let simulation = Simulation::new();
     let mut sampled = Vec::new();
 
-    for _ in 0..TICK_COUNT {
-        let tick = simulation.latest().tick;
+    for tick in 0..SCRIPT_TICKS {
         if SAMPLED_TICKS.contains(&tick) {
             sampled.push((tick, input.clone()));
         }
-        simulation.advance();
     }
     Ok(sampled)
 }

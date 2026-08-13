@@ -1,12 +1,12 @@
 //! One tick of the replay, rendered offscreen at the size the goldens are
 //! declared at.
 //!
-//! Both phase-5 suites need the same five steps — acquire a device, build the
+//! Every frame suite needs the same five steps — acquire a device, build the
 //! pipelines, upload the textures and the scene once, build the snapshot for a
 //! tick, record the terrain pass into a capture — and they need them at
-//! 1280 × 720, because every pixel the screen-space budget names is a pixel of
-//! a frame that size. Written once here so that the goldens and the probes
-//! cannot drift into judging two different pictures.
+//! 1280 × 720, because every pixel any of them names is a pixel of a frame that
+//! size. Written once here so that the goldens, the probes and the ray-marched
+//! oracle cannot drift into judging three different pictures.
 //!
 //! **The statistics are deliberately dropped.** Phase 4 asserts what a frame
 //! reports about itself; phase 5 asserts what a frame *looks like*. What is kept
@@ -17,13 +17,15 @@
 use std::error::Error;
 use std::sync::Arc;
 
+use mc_core::block::BlockRegistry;
 use mc_render::camera::{CameraView, camera_view};
 use mc_render::geometry::scene::SceneGeometry;
 use mc_render::gpu::{RecordTarget, TerrainRenderer};
 use mc_render::pass::TerrainPassConfig;
 use mc_render::snapshot::{ScenePhase, TerrainSnapshot};
 use mc_render::surface::SurfaceSize;
-use mc_sim::replay::{TickIndex, pose};
+use mc_sim::camera::CameraPose;
+use mc_sim::replay::{ReplayWorld, TickIndex, scripted_intent, simulation_for};
 use mc_testkit::frame::gpu::{
     AcquireOptions, Acquisition, CaptureContext, CaptureRequest, DrawWork, capture_and_verify,
     draw_fn,
@@ -37,8 +39,9 @@ use super::PreparedScene;
 /// The size every declared capture is taken at.
 ///
 /// `spec.md`'s binding table, and the size the screen-space budget projected the
-/// camera onto. A probe looking for the landmark at pixel (478, 215) is looking
-/// at this frame and no other.
+/// camera onto. A probe looking for the landmark at pixel (730, 269), or an
+/// oracle marching a ray through the sample at (1260, 700), is looking at this
+/// frame and no other.
 pub const CAPTURE_SIZE: SurfaceSize = SurfaceSize {
     width: 1280,
     height: 720,
@@ -93,13 +96,46 @@ pub fn request(context: &CaptureContext, name: &str) -> Result<CaptureRequest, B
     Ok(CaptureRequest::new(CaptureId::new(name)?, size))
 }
 
-/// Where the replay's camera stands at `tick`.
+/// Where the player's own camera stands at `tick`, as the simulation published
+/// it.
+///
+/// **Reached by advancing, never by asking.** The orbit this replaces was a pure
+/// function of the tick index, so tick 59 could be asked for directly; an
+/// integrated player cannot have that property, and pretending otherwise is how
+/// a frame comes to be shot through a camera the product never reaches. So the
+/// simulation is built from the same world the scene was meshed from, advanced
+/// under the declared script's own intents, and the camera is read off the
+/// published snapshot — which is the one the client draws through.
 ///
 /// # Errors
 ///
-/// Returns the refusal when `tick` is past the replay's length.
-pub fn replay_camera(tick: u32) -> Result<CameraView, Box<dyn Error>> {
-    let pose = pose(TickIndex::new(tick)?);
+/// Returns the spawn failure when the world cannot place a player, or the
+/// refusal when `tick` is past the declared script's length.
+pub fn player_pose(
+    tick: u32,
+    world: &ReplayWorld,
+    registry: &BlockRegistry,
+) -> Result<CameraPose, Box<dyn Error>> {
+    let mut simulation = simulation_for(world, registry)?;
+    for earlier in 0..tick {
+        simulation.advance(scripted_intent(TickIndex::new(earlier)?));
+    }
+    Ok(simulation.latest().camera)
+}
+
+/// The view the renderer is handed for `tick`, from the player's own published
+/// camera.
+///
+/// # Errors
+///
+/// Returns the spawn failure when the world cannot place a player, or the
+/// refusal when `tick` is past the declared script's length.
+pub fn replay_camera(
+    tick: u32,
+    world: &ReplayWorld,
+    registry: &BlockRegistry,
+) -> Result<CameraView, Box<dyn Error>> {
+    let pose = player_pose(tick, world, registry)?;
     Ok(camera_view(pose.eye, pose.target))
 }
 

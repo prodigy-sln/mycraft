@@ -35,6 +35,12 @@
 
 /// Rendering one tick of the replay offscreen, at the declared capture size.
 pub mod frames;
+/// Judging a rendered capture against a committed golden, shared by the two
+/// golden binaries so the mint path and the verify path cannot differ.
+pub mod goldens;
+/// An independent prediction of what the player's camera sees, marched through
+/// the world's own voxels.
+pub mod oracle;
 /// Assertions about a captured frame that come from nowhere near the renderer.
 pub mod probe;
 

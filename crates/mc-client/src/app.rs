@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use mc_render::camera::camera_view;
+use mc_render::camera::{camera_view, waiting_view};
 use mc_render::geometry::scene::SceneGeometry;
 use mc_render::gpu::{FrameError, RecordTarget, RendererError, TerrainRenderer};
 use mc_render::pass::{ColorFormat, TerrainPassConfig};
@@ -24,6 +24,8 @@ use mc_render::surface::{
     resize_action, select_surface_format, surface_error_action,
 };
 use mc_render::window::Ending;
+use mc_sim::player::InputState;
+use mc_sim::replay::simulation_for;
 use mc_sim::simulation::Simulation;
 use thiserror::Error;
 
@@ -61,7 +63,15 @@ pub struct App {
     surface: wgpu::Surface<'static>,
     configuration: wgpu::SurfaceConfiguration,
     renderer: TerrainRenderer,
-    simulation: Simulation,
+    /// The simulation, once there is a world to place the player in. `None`
+    /// while the preparation worker is still generating one — the spawn is
+    /// derived from the world, so no tick can be advanced before it lands.
+    simulation: Option<Simulation>,
+    /// What the player has asked for since the last tick. It outlives the
+    /// simulation being absent: keys held and pointer motion made while the
+    /// world is still generating are the player's input all the same, and the
+    /// first tick is what spends them.
+    input: InputState,
     /// The worker preparing the replay, until it is collected. `None` afterwards,
     /// which is also what says the collection already happened.
     preparation: Option<PreparationHandle>,
@@ -108,7 +118,8 @@ impl App {
             surface,
             configuration,
             renderer,
-            simulation: Simulation::new(),
+            simulation: None,
+            input: InputState::default(),
             preparation: Some(preparation),
             phase: ScenePhase::Preparing,
             nothing: empty_scene(),
@@ -163,8 +174,25 @@ impl App {
             .create_view(&wgpu::TextureViewDescriptor::default());
         self.draw(&view);
         self.gpu.queue.present(acquired);
-        self.simulation.advance();
+        if let Some(simulation) = self.simulation.as_mut() {
+            simulation.advance(self.input.take_intent());
+        }
         None
+    }
+
+    /// What the player has asked for, for the adapter to feed.
+    ///
+    /// The accumulator itself rather than three methods wrapping it: its whole
+    /// surface is `mc-sim`'s tested policy, and a pass-through here would be a
+    /// second place for the same decisions to be made slightly differently.
+    ///
+    /// It is drained where the tick is advanced and nowhere else, which is what
+    /// makes "the tick it feeds consumes it" true of the tick rather than of the
+    /// frame: a frame that draws nothing because the window is a sliver, or
+    /// because the world has not landed yet, leaves the pending motion where it
+    /// is.
+    pub const fn input(&mut self) -> &mut InputState {
+        &mut self.input
     }
 
     /// Records and submits one frame into `view`.
@@ -195,11 +223,17 @@ impl App {
 
     /// This frame's input: the tick and pose the simulation published, and
     /// whatever geometry there is to draw.
+    ///
+    /// Before the world lands there is no simulation to read, and nothing is
+    /// drawn either: the frame is the clear colour and the camera below is never
+    /// looked through.
     fn snapshot(&self) -> TerrainSnapshot {
-        let published = self.simulation.latest();
+        let published = self.simulation.as_ref().map(Simulation::latest);
         TerrainSnapshot {
-            tick: published.tick,
-            camera: camera_view(published.camera.eye, published.camera.target),
+            tick: published.as_ref().map_or(0, |published| published.tick),
+            camera: published.as_ref().map_or_else(waiting_view, |published| {
+                camera_view(published.camera.eye, published.camera.target)
+            }),
             scene: match &self.phase {
                 ScenePhase::Preparing => Arc::clone(&self.nothing),
                 ScenePhase::Ready(scene) => Arc::clone(scene),
@@ -239,7 +273,13 @@ impl App {
     }
 
     /// Takes the prepared scene when the worker has finished with it, uploads it,
-    /// and moves the frame path off the clear colour.
+    /// starts the simulation of the world it came with, and moves the frame path
+    /// off the clear colour.
+    ///
+    /// The simulation is built here and nowhere earlier because the player's
+    /// spawn is derived from the world, and the world arrives several frames
+    /// after the window opens. Ticking before then would drop the player through
+    /// a world that does not exist yet for the whole of the load.
     fn collect_preparation(&mut self) -> Result<(), PreparationError> {
         if !self
             .preparation
@@ -257,6 +297,7 @@ impl App {
             .upload_textures(&self.gpu.queue, &prepared.layers)?;
         let scene = Arc::new(prepared.scene);
         self.renderer.upload_scene(&self.gpu.queue, &scene)?;
+        self.simulation = Some(simulation_for(&prepared.world, &prepared.registry)?);
         self.phase = ScenePhase::Ready(scene);
         Ok(())
     }

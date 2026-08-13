@@ -23,7 +23,9 @@ use mc_render::geometry::scene::{SceneError, SceneGeometry};
 use mc_render::geometry::{GeometryError, SectionOrigin, build_section_geometry};
 use mc_render::gpu::RendererError;
 use mc_render::texture::TextureLayers;
-use mc_sim::replay::{PrepareError, ReplayWorld, SectionQuads, WorldGenError, mesh_all};
+use mc_sim::replay::{
+    PrepareError, ReplayWorld, SectionQuads, SpawnError, WorldGenError, mesh_all,
+};
 use mc_world::content::TomlFileDefinitionSource;
 use thiserror::Error;
 
@@ -31,16 +33,25 @@ use thiserror::Error;
 /// was started in.
 const CONTENT_ROOT: [&str; 2] = ["content", "base"];
 
-/// What one preparation of the replay produces: the packed scene, and the
-/// texture layers its blocks resolved to.
+/// What one preparation of the replay produces: the packed scene, the texture
+/// layers its blocks resolved to, and the world and registry both were built
+/// from.
 ///
 /// The layers are carried alongside rather than discarded because a scene records
 /// which array *layer* each corner draws from and never which key that layer came
 /// from, so uploading the array texture needs both halves.
+///
+/// The world and the registry are carried for a different reason: the player's
+/// spawn is derived from the world, so the simulation cannot exist until this
+/// does. Handing them back rather than generating a second world in the
+/// composition root is what keeps the world a frame is drawn of and the world a
+/// player walks on the same world.
 #[derive(Debug)]
 pub struct PreparedScene {
     pub scene: SceneGeometry,
     pub layers: TextureLayers,
+    pub world: ReplayWorld,
+    pub registry: BlockRegistry,
 }
 
 /// Why the replay could not be prepared.
@@ -70,6 +81,8 @@ pub enum PreparationError {
     Scene(#[from] SceneError),
     #[error("the prepared scene could not be given to the device")]
     Upload(#[from] RendererError),
+    #[error("the replay world could not be turned into a simulation to play in")]
+    Spawn(#[from] SpawnError),
     #[error("the thread preparing the replay ended without producing a scene or an error")]
     WorkerLost,
 }
@@ -157,6 +170,8 @@ pub fn prepare_scene(root: &Path) -> Result<PreparedScene, PreparationError> {
     Ok(PreparedScene {
         scene: SceneGeometry::assemble(geometry)?,
         layers,
+        world,
+        registry,
     })
 }
 
