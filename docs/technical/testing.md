@@ -1061,6 +1061,14 @@ hand-mutation as their primary evidence, and a second writer in the tree invalid
 rather than merely slowing it down. Worktree isolation for review agents is filed as an open issue
 rather than fixed here.
 
+**Isolation is the fix, and an instruction is not a substitute for it — the reason is about
+ordering, not about compliance.** A reviewer that is told mid-flight not to hand-mutate may already
+have mutated and reverted before the message arrives: an instruction cannot reach work that has
+already happened, so a perfectly obedient reviewer and a disobedient one produce the same tree. Any
+scheme that depends on reviewers being told in time is therefore unfalsifiable in exactly the way
+this document keeps warning about — it cannot be distinguished from one that works. Give each
+reviewer its own tree and the question stops being asked.
+
 **Text that was recently reviewed reads authoritative, and that is not the same as safe.** SPEC-006
 produced two verification failures worth reading as a pair — either alone reads as bad luck, together
 they are a property of how verification behaves here. First, a review nearly vanished:
