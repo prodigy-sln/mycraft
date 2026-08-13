@@ -37,7 +37,7 @@ identically to a small MVP — small means narrow scope, never lower standards.
 **Linear**: [MyCraft MVP 1: Playable Sandbox](https://linear.app/prodigy-solutions/project/mycraft-phase-1-foundation)
 **Goal**: A game that starts, renders a world, and lets you move and build in it.
 
-Decomposed into eight specs, in dependency order. Each moves the playable thing
+Decomposed into ten specs, in dependency order. Each moves the playable thing
 forward; none is a pure layer.
 
 | Priority | Feature | Issue | Status |
@@ -45,14 +45,28 @@ forward; none is a pure layer.
 | P0 | Headless frame-capture harness | PRO-849 | **Done** |
 | P0 | Chunk storage and block palette | PRO-850 | **Done** |
 | P0 | Binary greedy mesher | PRO-851 | **Done** |
-| P0 | wgpu terrain pipeline and windowed client — *you can see terrain* | PRO-852 | Todo |
-| P0 | Camera, player physics and collision — *you can walk around* | PRO-853 | Todo |
+| P0 | wgpu terrain pipeline and windowed client — *you can see terrain* | PRO-852 | **Done** |
+| P0 | Camera, player physics and collision — *you can walk around* | PRO-853 | **Done** |
+| P0 | Headless client-input harness — *prerequisite of PRO-854* | PRO-873 | Todo |
 | P0 | Raycast targeting, block break and place — *you can build* | PRO-854 | Todo |
 | P1 | World persistence — *quit and resume* | PRO-855 | Todo |
 | P1 | Minimal HUD: crosshair, held block, debug overlay | PRO-856 | Todo |
+| P2 | Ship the LICENSE texts the workspace declares | PRO-874 | Todo |
 
-Workspace skeleton and quality gate already exist on `main` (commits `f5780f3`,
-`a93d2da`), so the first spec is the capture harness alone.
+**PRO-873 goes before PRO-854, and the ordering is the point.** Every FR-5 scenario of
+PRO-853 is verified as policy and none as product behaviour: the winit `ApplicationHandler`
+in `crates/mc-client/src/events.rs` needs a real window and nothing constructs one. Two
+mutations proved it — submitting an empty intent every tick, and deleting the
+`accepts_pointer_motion` gate — each left the whole suite green. PRO-854 adds break and
+place to that same unreachable dispatch, so invariant 5 applies directly: verification
+precedes the thing it verifies. **Exit criterion: each of those two mutations turns at
+least one test red.**
+
+PRO-874 is small and unglamorous — `Cargo.toml` declares `MIT OR Apache-2.0` and the
+workspace carries neither text.
+
+The workspace skeleton and quality gate predate the first spec (commits `f5780f3`,
+`a93d2da`), which is why PRO-849 is the capture harness alone.
 
 Two invariants that MVP 1 could plausibly breach, resolved up front:
 
@@ -70,8 +84,8 @@ Two invariants that MVP 1 could plausibly breach, resolved up front:
 - **You can launch the client, walk around, break and place blocks, quit, relaunch, and your
   changes are still there**
 
-The frame-capture harness is first and non-negotiable: without it the agent building the renderer
-cannot see its own output.
+The frame-capture harness went first and was non-negotiable: without it the agent building the
+renderer could not have seen its own output. PRO-873 is the same argument applied to input.
 
 Everything is a placeholder — procedural textures, no audio, one block type family. That is
 correct for MVP 1. Do not gold-plate it.
@@ -101,6 +115,89 @@ is [PixVoxelAssets](https://github.com/tommyettinger/PixVoxelAssets) and
 Earliest use is **MVP 2**, where texture-by-key becomes a real feature; the voxel character and
 dungeon models suit **MVP 5**, and audio and GUI belong to **MVP 6**. MVP 1 stays on placeholders.
 
+### MVP 3 in more detail — content streaming and home hosting
+
+Still a sketch: this becomes binding only when MVP 3's own spec adopts it. What follows is
+the substance that must survive into that spec.
+
+**Content is edited server-side and streams to players — textures included, not just
+scripts.** A texture swapped on a running server reaches every connected client live.
+Nothing extra is built for it: the hash changes, clients miss, they fetch, they swap. It is
+fast because a texture is *data, not structure* — UVs are per-block-type, so no remeshing
+and no chunk rebuild, just one array layer overwritten before the next frame. Two things
+decide whether it feels instant: the server must downsample before streaming (1024 px
+source × 32 players is a download; at the array's layer size it is a few KB), and replacing
+a layer is cheap while *adding* one may force the array to be recreated and every bind
+group rebuilt.
+
+**A content-addressed client cache, keyed by hash rather than by name.** The client offers
+the hashes it holds and the server sends the remainder, which buys the property the whole
+scheme rests on: **"changed" and "missing" are the same case.** A changed texture is simply
+a different hash, therefore a miss — no version numbers, no invalidation protocol, no
+cache-busting, and so no second path to get wrong or forget to trigger. Base content ships
+with the client and is therefore already cached; a mod's assets take the identical path and
+merely miss the first time. Name-keying loses all of it.
+
+**No CDN at this stage, and the reason is the shape of the problem rather than its size.** A
+live swap is under a megabyte in total across every connected player, and QUIC's independent
+streams already cover the shape: bulk asset transfer does not head-of-line-block tick
+traffic as TCP would, and asset streams can be prioritised below gameplay. Latency here is a
+*prioritisation* question; a CDN answers a *volume* question — and for live edits a CDN is
+strictly slower, needing upload plus propagation first. The real CDN case is **cold joins
+against a large modpack**, a first-join cost only since nobody fetches twice, and that
+belongs to MVP 6.
+
+**Home hosting without opening a port.** A lobby/rendezvous service introduces two peers and
+performs NAT hole punching, so a player can host from home. The lobby is a **mode of
+`mc-server`**, but the constraint that decides its shape is that a rendezvous must be
+publicly reachable — which is exactly what a home host is not, since a machine behind NAT
+cannot introduce itself. Some instance therefore has to sit on a public address, and that
+makes the no-hosted-dependency rule structural rather than a promise: anyone can run their
+own lobby and point friends at it. Two constraints on the shape:
+
+- **The lobby role must be implementable from `mc-net` alone and must never instantiate a
+  world.** If running a signalling service drags `mc-sim` in, the deployment ships a game
+  simulation to introduce two sockets.
+- **Rendezvous and relay must be separately switchable**, because their costs differ by
+  orders of magnitude. Rendezvous is kilobytes per join and scales with joins; relay carries
+  a whole session and scales with players × minutes, at roughly 0.4 GB/hour for a four-player
+  session. Offering a cheap public rendezvous must not implicitly sign the operator up to
+  relay everyone's traffic.
+
+**Relay assignment is a control-path decision, not a data-path load balancer.** The lobby
+answers once at join — "use relay-3 at this address" — and both peers connect *directly* to
+it, so the lobby never sees a game packet. A balancer sitting in the traffic would have to
+carry the combined packet rate of every relay behind it, making it simultaneously the
+bottleneck and the single point of failure, and funnelling all the cheap horizontal scaling
+back through one box. What the assigner needs is small: a registry of relay hosts with
+heartbeats, capacity and health, plus a pick that **weighs latency to both peers** rather
+than picking least-loaded — for a game, an idle relay on the wrong continent beats a busy
+nearby one only on paper. The genuinely fiddly part is **a relay dying mid-session**: peers
+must notice, re-request an assignment and reconnect without the session ending. Expect the
+real work to be there, not in the choosing.
+
+**Two rules that bind:**
+
+1. **A self-hosted server must never require a CDN or any hosted service.** The server
+   serves its own content; hosted infrastructure is an optional accelerator in front of
+   that, never the only path.
+2. **LAN and direct connection must always work.** Port forwarding stays supported and hole
+   punching is additive. Otherwise the game dies when a service does, and offline LAN play
+   dies with it.
+
+Both are free to honour now and expensive to retrofit the moment something assumes a hosted
+URL exists.
+
+**Open, and not yet put to the user — do not assume a reading.** MVP 3's scope has two, and
+they differ by real scope:
+
+- *"Multiplayer works"* — direct connection and LAN, with NAT punching deferred to MVP 6
+  alongside the public-server work.
+- *"Play with friends without touching a router"* — punching lands in MVP 3, and the plan
+  changes to match.
+
+Unresolved.
+
 ---
 
 ## Completed
@@ -110,6 +207,8 @@ dungeon models suit **MVP 5**, and audio and GUI belong to **MVP 6**. MVP 1 stay
 | Headless frame-capture harness (PRO-849) | 2026-08-11 | `2026-08-11-frame-capture-harness` |
 | Chunk storage and block palette (PRO-850) | 2026-08-12 | `2026-08-11-chunk-storage-palette` |
 | Binary greedy mesher (PRO-851) | 2026-08-12 | `2026-08-12-greedy-mesher` |
+| wgpu terrain pipeline and windowed client (PRO-852) | 2026-08-12 | `2026-08-12-terrain-render` |
+| Camera, player physics and collision (PRO-853) | 2026-08-13 | `2026-08-12-player-movement` |
 
 ---
 
