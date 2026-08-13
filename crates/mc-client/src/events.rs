@@ -42,8 +42,8 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 
 use crate::app::App;
 use crate::gpu_startup::{Gpu, create_surface};
-use crate::session::{KeyKind, MouseButtonKind, PointerPlatform, Session};
-use crate::startup::{PreparationError, PreparedScene};
+use crate::session::{KeyKind, MouseButtonKind, PointerPlatform, Session, ending_after_saving};
+use crate::startup::{Launch, save_path};
 
 /// What the window is called, and how large it opens.
 ///
@@ -54,14 +54,15 @@ const TITLE: &str = "MyCraft";
 const INITIAL_WIDTH: u32 = 1280;
 const INITIAL_HEIGHT: u32 = 720;
 
-/// The worker preparing the replay, handed on to the app once one exists.
-type PreparationHandle = std::thread::JoinHandle<Result<PreparedScene, PreparationError>>;
-
 /// Runs the client until the window closes or something ends it.
 ///
 /// Returns the ending rather than exiting, so the one place that turns an ending
 /// into a status stays the one place.
-pub fn run(gpu: Gpu, preparation: PreparationHandle) -> Ending {
+///
+/// **The save is written on the way out of here**, once the loop has stopped and
+/// before the ending is reported: what a clean close does, and what a failed
+/// write makes of it, are decided in `session.rs` and only called from here.
+pub fn run(gpu: Gpu, launch: Launch) -> Ending {
     let event_loop = match EventLoop::new() {
         Ok(event_loop) => event_loop,
         Err(failure) => {
@@ -74,7 +75,7 @@ pub fn run(gpu: Gpu, preparation: PreparationHandle) -> Ending {
 
     let mut client = Client {
         gpu: Some(gpu),
-        preparation: Some(preparation),
+        launch: Some(launch),
         window: None,
         app: None,
         session: None,
@@ -83,14 +84,18 @@ pub fn run(gpu: Gpu, preparation: PreparationHandle) -> Ending {
     if let Err(failure) = event_loop.run_app(&mut client) {
         return failed(&format!("the event loop stopped: {failure}"));
     }
-    client.ending.unwrap_or(Ending::Closed)
+    ending_after_saving(
+        client.session.as_ref(),
+        client.ending.unwrap_or(Ending::Closed),
+        &save_path(),
+    )
 }
 
 /// The client as the windowing library sees it.
 struct Client {
     /// Taken when the window arrives and the app is built from it.
     gpu: Option<Gpu>,
-    preparation: Option<PreparationHandle>,
+    launch: Option<Launch>,
     window: Option<Arc<Window>>,
     app: Option<App>,
     /// Everything the client decides about input, once there is a window to ask
@@ -150,7 +155,7 @@ impl Client {
     /// Opens the window, makes a surface for it, and builds everything that draws
     /// into that surface.
     fn start(&mut self, event_loop: &ActiveEventLoop) -> Result<App, Ending> {
-        let (gpu, preparation) = self.taken()?;
+        let (gpu, launch) = self.taken()?;
         let window = Arc::new(
             event_loop
                 .create_window(window_attributes())
@@ -170,21 +175,22 @@ impl Client {
             window: Arc::clone(&window),
         })));
         self.window = Some(window);
-        App::new(gpu, surface, size, preparation)
+        App::new(gpu, surface, size, launch)
             .map_err(|failure| failed(&format!("the client could not be built: {failure}")))
     }
 
-    /// The device and the worker, each of which is handed on exactly once.
-    fn taken(&mut self) -> Result<(Gpu, PreparationHandle), Ending> {
+    /// The device and what the run was started with, each of which is handed on
+    /// exactly once.
+    fn taken(&mut self) -> Result<(Gpu, Launch), Ending> {
         let gpu = self
             .gpu
             .take()
             .ok_or_else(|| failed("the device was already handed to a window"))?;
-        let preparation = self
-            .preparation
+        let launch = self
+            .launch
             .take()
             .ok_or_else(|| failed("the replay was already handed to a window"))?;
-        Ok((gpu, preparation))
+        Ok((gpu, launch))
     }
 
     fn on_resize(&mut self, size: SurfaceSize) {

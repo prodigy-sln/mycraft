@@ -9,6 +9,7 @@
 
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
+use thiserror::Error;
 
 use crate::section::{Axis, Contents, LocalPos, SECTION_SIZE, Section, SectionError};
 
@@ -32,6 +33,17 @@ const SECTION_MASK: u32 = SECTION_SIZE - 1;
 /// The shift above only splits a height correctly while a section's size is the
 /// power of two it was derived from.
 const _: () = assert!(1 << SECTION_SHIFT == SECTION_SIZE);
+
+/// Why a column could not be assembled.
+///
+/// A type of its own rather than a variant on [`SectionError`], because it is
+/// not a section's refusal: every section handed over was fine, and what was
+/// wrong was how many of them there were.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ColumnError {
+    #[error("a column of {expected} sections cannot be assembled from {found}")]
+    WrongSectionCount { expected: usize, found: usize },
+}
 
 /// A voxel's position inside its own column.
 ///
@@ -97,6 +109,39 @@ impl ChunkColumn {
         })
     }
 
+    /// A column at `coordinate` stacking `sections`, bottom-up.
+    ///
+    /// The order is the caller's to hold and the length is what says the column
+    /// is complete, mirroring [`VoxelWorld::assembled`](crate::world::VoxelWorld::assembled)
+    /// one level up. A `Vec` that refuses rather than an array that cannot,
+    /// because the refusal has to be reachable by something a file can carry:
+    /// a save is written by another build, an older one, or a tool nobody here
+    /// has seen, and "sixteen sections" is a claim it makes rather than a fact
+    /// about it.
+    ///
+    /// This is also what keeps a load out of the registry-validating per-voxel
+    /// write path: a column arrives already built from imported sections.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ColumnError::WrongSectionCount`] unless there are exactly
+    /// [`SECTIONS_PER_COLUMN`] of them.
+    pub fn assembled(
+        coordinate: ColumnCoordinate,
+        sections: Vec<Section>,
+    ) -> Result<Self, ColumnError> {
+        let stacked = <[Section; SECTIONS_PER_COLUMN as usize]>::try_from(sections).map_err(
+            |given: Vec<Section>| ColumnError::WrongSectionCount {
+                expected: SECTIONS_PER_COLUMN as usize,
+                found: given.len(),
+            },
+        )?;
+        Ok(Self {
+            coordinate,
+            sections: stacked,
+        })
+    }
+
     /// Where this column sits in the world.
     pub fn coordinate(&self) -> ColumnCoordinate {
         self.coordinate
@@ -159,6 +204,20 @@ impl ChunkColumn {
     /// it again would be a second thing to keep in step.
     pub fn section(&self, index: usize) -> Option<&Section> {
         self.sections.get(index)
+    }
+
+    /// Every section this column stacks, bottom-up.
+    ///
+    /// The order is the contract, exactly as a world's column order is: whatever
+    /// writes a column down writes its sections in this order, and whatever
+    /// stacks one back reads them in it.
+    ///
+    /// Beside [`section`](Self::section) rather than in place of it, because a
+    /// caller walking every section should not have to ask for indices it would
+    /// then have to handle the absence of — a column has sixteen sections, and
+    /// this is where the type says so.
+    pub fn sections(&self) -> impl ExactSizeIterator<Item = &Section> {
+        self.sections.iter()
     }
 
     /// Which of a column's sections would own `height`.

@@ -15,6 +15,7 @@
 #![allow(dead_code)]
 
 pub mod chamber;
+pub mod launch;
 pub mod oracle;
 pub mod overlap;
 pub mod solidity;

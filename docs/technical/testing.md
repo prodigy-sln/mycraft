@@ -971,6 +971,45 @@ matches the error variant by name — graded outside the scenario↔mutation map
 uses, and recorded as a weaker guarantee than the rest of the table for exactly that reason, not netted
 out against it.
 
+### Persistence: a second entry point onto a tested path is untested until something asserts through it
+
+World persistence produced the same general lesson four times, at four different layers, and it is
+worth stating as its own rule rather than as four coincidences: **a property held at one layer, for
+one caller of a function, does not transfer to a second caller of that same function until a test
+reaches it through that second caller specifically.** Coverage reports that the code ran; only a
+mutation reports whether anything was checking, and in every one of these four cases something *was*
+running the line and *nothing* was checking it.
+
+| Surface | Held by nothing while | Closed by |
+|---|---|---|
+| `RegistryVerdict::refuses` ignoring its `accepting` argument | every scenario naming a changed block was independently refused by a missing name too, so a mutation dropping `Acceptance` entirely left the whole suite green | the one scenario where acceptance is the *only* thing standing between a save and a world |
+| `load_world` handing back a zeroed player | no test read `LoadedWorld.player` — every scenario about the player read it through a narrower function one layer down | a scenario reading the player's resumed position, yaw and pitch from a real launch, none of the three numbers zero and none matching the generated spawn either |
+| the launch ignoring `Acceptance` entirely | the wire from a parsed command-line flag through to the refusal was never asserted end to end, one layer further up | one scenario per direction — always-accept and always-refuse each caught by exactly one test, alone |
+| `mc_sim::persistence::save` writing a zeroed player, or an empty world | nothing exercised a save produced by an actual quit and read back by an actual resume, only saves built directly by test fixtures | a scenario for each half, each reddened by exactly the mutation matching it and nothing else |
+
+Each was found by deliberately mutating the shipped code and watching the existing suite stay green
+— not by reasoning about the call graph, which is the discipline `standards/global/testing.md` §2
+asks for and which the general rule above generalises: a function correct for its first caller can
+still be silently wrong for its second, and the only way to know is a test that goes through the
+second caller, not the first.
+
+### A verification no test can perform: `sync_all()`
+
+**Removing the `sync_all()` call between writing a save's sibling file and renaming it over the
+target reddens nothing, and no test in this codebase can make it redden.** What that flush buys is
+survival of one specific failure — the machine losing power, or the process being killed, between
+the write and the rename — and that failure is defined by the machine stopping. A test process that
+observes its own assertions afterward is, by construction, a process that did not stop; there is no
+vantage point inside a running test from which "the bytes reached the disk before the rename" and
+"the bytes were still only in a page cache when the rename happened" look different, because both
+look identical to everything that runs afterward in the same process on the same live machine.
+
+This is recorded here rather than left implicit so that a reviewer removing the call to simplify the
+write path, or a future change restructuring `crates/mc-world/src/persistence/write.rs`'s `filled`
+function, does not read a green gate as permission. The call is held by review alone, deliberately,
+and that is the correct place for it to be held — not a gap to be closed by inventing a scenario for
+a failure mode that only a machine which has actually stopped can distinguish.
+
 ### A falsifier list derived from call paths is a hypothesis, not a measurement
 
 Retiring the base game's empty block (`modding/blocks-items.md`) was the third feature to make the

@@ -12,6 +12,12 @@ mc-core = { workspace = true }
 # that this never reaches mc-core, because MVP 2 replaces the format wholesale.
 toml = { workspace = true }
 serde = { workspace = true }
+# The save format's encoder, confined to src/persistence/: `postcard::` is
+# nameable nowhere else, and every error it raises is translated at that module's
+# edge. A **major upgrade is a format-version decision**, not a routine bump —
+# it would change both the bytes a save is made of and every definition hash
+# stored inside one. See the note at the workspace dependency.
+postcard = { workspace = true }
 # Section storage is the first thing in this crate to refuse anything of its
 # own; until now every failure it reported belonged to mc-core.
 thiserror = { workspace = true }

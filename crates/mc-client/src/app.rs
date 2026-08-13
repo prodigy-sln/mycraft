@@ -24,14 +24,16 @@ use mc_render::surface::{
     resize_action, select_surface_format, surface_error_action,
 };
 use mc_render::window::Ending;
-use mc_sim::action::default_held_block;
-use mc_sim::replay::simulation_for;
+use mc_world::persistence::Acceptance;
 use thiserror::Error;
 
 use crate::gpu_startup::Gpu;
 use crate::remesh::{Remesher, Retained};
 use crate::session::Session;
-use crate::startup::{PreparationError, PreparedScene, collect, empty_scene};
+use crate::startup::{
+    Launch, PreparationError, PreparationHandle, collect, empty_scene, save_path,
+    simulation_to_play,
+};
 
 /// The label the frame's command encoder carries in a driver capture.
 const ENCODER_LABEL: &str = "mycraft frame";
@@ -82,10 +84,14 @@ pub struct App {
     /// dropped frame and an edit that could not be shown are different faults,
     /// and one recurring must not silence the other.
     reported_remesh: Option<String>,
+    /// What the player said about loading a save whose blocks have changed,
+    /// read off the command line before the window opened.
+    ///
+    /// Carried rather than asked for where it is spent, because the answer is
+    /// the player's and the frame path is not where a player is asked anything:
+    /// a UI later replaces where this value comes from and touches nothing else.
+    accepting: Acceptance,
 }
-
-/// The worker handle, named so the type above reads.
-type PreparationHandle = std::thread::JoinHandle<Result<PreparedScene, PreparationError>>;
 
 impl App {
     /// Configures `surface` for the window it came from and builds the terrain
@@ -99,7 +105,7 @@ impl App {
         gpu: Gpu,
         surface: wgpu::Surface<'static>,
         size: SurfaceSize,
-        preparation: PreparationHandle,
+        launch: Launch,
     ) -> Result<Self, SetupError> {
         let capabilities = surface.get_capabilities(&gpu.adapter);
         let format = chosen_format(&capabilities.formats)?;
@@ -117,13 +123,14 @@ impl App {
             surface,
             configuration,
             renderer,
-            preparation: Some(preparation),
+            preparation: Some(launch.preparation),
             phase: ScenePhase::Preparing,
             nothing: empty_scene(),
             size,
             remesher: None,
             reported: None,
             reported_remesh: None,
+            accepting: launch.accepting,
         })
     }
 
@@ -334,16 +341,17 @@ impl App {
             .upload_textures(&self.gpu.queue, &prepared.layers)?;
         let scene = Arc::new(prepared.scene);
         self.renderer.upload_scene(&self.gpu.queue, &scene)?;
-        // The held block is decided here rather than at the click, because this
-        // is where the registry the world was resolved against is in hand — and
-        // a content pack with no solid block in it fails the start rather than
-        // producing a client that can place nothing.
-        let holding =
-            default_held_block(&prepared.registry).ok_or(PreparationError::NothingToPlace)?;
-        session.attach_simulation(
-            simulation_for(&prepared.world, Arc::clone(&prepared.registry))?,
-            holding,
-        );
+        // Which world is played, and which block is held, are both decided
+        // where the registry the world was resolved against is in hand — and
+        // both are somebody else's answers: the save decides the first and the
+        // simulation's own policy decides the second.
+        let (simulation, holding) = simulation_to_play(
+            &prepared.world,
+            Arc::clone(&prepared.registry),
+            &save_path(),
+            self.accepting,
+        )?;
+        session.attach_simulation(simulation, holding);
         // The meshed sections, the layers and the registry are handed to the
         // worker rather than kept here: they are what a re-mesh works on, and a
         // copy on each side would be a second answer waiting to disagree.

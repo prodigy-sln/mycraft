@@ -417,7 +417,7 @@ This section records the shape that replaced it, and the seam it deliberately do
 
 **The block store lives in `mc-world`, addressed in world coordinates.** `mc_world::world::VoxelWorld`
 holds columns and exposes `block_at`, `set_block`, `column`, `columns`, `extent` — this is chunk
-storage's job by the crate map, and it is what PRO-855 will persist. Its index type, `WorldPos { x, y,
+storage's job by the crate map, and it is what a save writes and reads back. Its index type, `WorldPos { x, y,
 z }`, is **unsigned**: the one place a sign needs checking is the place that refuses it, at the
 `BlockPos → WorldPos` conversion, so the type itself carries the invariant rather than a runtime
 check scattered across every reader. `Extent` — previously declared in `mc-sim`, where the replay
@@ -583,6 +583,60 @@ true is a loud, named error rather than a wrong texture, and the general gap is 
 deliberately.** Preparation fails the whole run if it cannot build a scene at all; a remesh that cannot
 be applied mid-session should not take a running game down over one edit, so it is logged and the
 batch is discarded instead.
+
+## Saving and loading a world
+
+Persistence adds one crate-boundary shape to the map above: a new leaf module in `mc-world`, a thin
+policy layer in `mc-sim`, and wiring with no policy of its own in `mc-client` — the same
+inward-dependency direction every other seam in this document follows.
+
+**`mc_world::persistence` is a new module, and its public surface is the only place a save's byte
+layout is named.** `save_world`, `write_save`, `replace_atomically`, `load_world`, `requirements`
+and `stored_world_data` are its public functions; `SaveError` and `LoadError` are its public error
+types (`technical/world-format.md` has the on-disk format itself). `postcard::` is nameable only
+inside this module, and every one of its decode failures collapses to `LoadError::Malformed { path
+}` at this module's edge — nothing about *how* the encoder declined a file crosses the boundary.
+That confinement is a design decision with a measured payoff: when `bincode` was found permanently
+unmaintained and had to be replaced with `postcard` (`technical/decisions.md`, ADR-016), the swap
+touched four files and five call sites inside this one module and changed no test anywhere in the
+workspace, because nothing outside the module had ever named the encoder or its error types.
+
+**The save path reaches the world's blocks through `mc-sim`, not directly from `mc-client`.**
+`mc_sim::world::World` gains `pub(crate) fn blocks(&self) -> &VoxelWorld` — a shared borrow, so the
+crate's single private write path (`World::write`, see "The editable world" above) is untouched by
+it — and a new `mc_sim::persistence` module owns both `save(simulation, path)` and
+`simulation_at_launch(save, generated, registry, accepting)`. Deciding which world a launch plays,
+what a refusal does, and what happens on quit is policy, and `mc-sim` is where it lives: it is the
+crate the coverage gate actually measures (ADR-013), and a save is server state (invariant 4)
+regardless of which process happens to host the authoritative simulation in MVP 1. Putting that
+policy in `mc-client` instead — a crate ADR-013 excludes from coverage on the express ground that it
+"holds only wiring", with its own Rejected section warning that narrowing the exclusion is "a new
+record, not a quiet edit" — would have put a real decision in the one place nothing measures it.
+
+**The resume decision sits above `prepare_scene`, in the client, and never inside it.**
+`prepare_scene` is the public entry point the golden-frame, probe and determinism suites all shoot
+through — the same pipeline a player launches, not a copy of it. A "load the save if one exists"
+branch inside `prepare_scene` would let a save file sitting in a capture's working directory change
+what a golden frame shows, silently, for a reason that has nothing to do with the renderer. So
+`mc-client`'s `startup::simulation_to_play` calls `mc_sim::persistence::simulation_at_launch`
+*after* `prepare_scene` has already produced a generated world and a registry, and `prepare_scene`
+itself carries no save-aware branch of any kind — a scene it prepares is always built from the world
+the generator makes, whatever is sitting on disk beside it.
+
+**`mc-client` gains wiring and one ending translation, and no policy.** `startup::save_path()` names
+where the save lives (relative to the working directory, mirroring `CONTENT_ROOT`'s own convention,
+and deliberately not checked for existence — a missing save is the no-save case, not a failure);
+`startup::acceptance_from(args)` parses the one command-line flag MVP 1's human channel needs
+(`--load-changed-blocks`, `docs/user/gameplay.md`) and does nothing else. `Session::save` is a
+three-line forward to `mc_sim::persistence::save`. The one piece of client-side logic that is more
+than wiring is `ending_after_saving`, in `session.rs` and not in `mc-sim` because it returns
+`mc_render::window::Ending` and `mc-sim` may not name `mc-render` — it decides that only a run that
+ended by closing normally (`Ending::Closed`) saves at all, so that a device-lost or otherwise broken
+run can never overwrite a good save with a half-built one, and that a failed save on a clean close
+becomes a failed ending naming the path and the reason rather than a silent one. Nothing about
+*which* world to play, *whether* a changed-block save should load, or *how* a refusal is worded
+lives in `mc-client` — those answers all come from `mc-sim` and `mc-world`, unchanged by which crate
+happens to call them.
 
 ## The pure/GPU seam inside `mc-render`
 

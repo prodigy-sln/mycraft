@@ -7,6 +7,7 @@
 
 use std::process::ExitCode;
 
+use mc_client::startup::Launch;
 use mc_client::{events, gpu_startup, startup};
 
 use mc_render::window::{Ending, exit_code};
@@ -45,10 +46,16 @@ fn run() -> Ending {
             };
         }
     };
-    let preparation = startup::spawn_preparation(root);
+    // The command line is read here rather than where its answer is spent, so
+    // that the one place this process looks at its own arguments is the one
+    // place it is started from.
+    let launch = Launch {
+        preparation: startup::spawn_preparation(root),
+        accepting: startup::acceptance_from(std::env::args()),
+    };
 
     match gpu_startup::open() {
-        Ok(gpu) => events::run(gpu, preparation),
+        Ok(gpu) => events::run(gpu, launch),
         Err(ending) => ending,
     }
 }

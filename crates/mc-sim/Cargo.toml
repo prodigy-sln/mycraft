@@ -27,5 +27,10 @@ rayon = { workspace = true }
 arc-swap = { workspace = true }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+# A save is a real file, and the launch decision branches on whether one is
+# there. A mocked filesystem would assert nothing about the branch that matters.
+tempfile = { workspace = true }
+
 [lints]
 workspace = true

@@ -11,6 +11,8 @@
 //! export that silently reorganised a section would be doing work on a caller's
 //! behalf that the caller can see the cost of and this cannot.
 
+use std::collections::BTreeSet;
+
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 use thiserror::Error;
@@ -71,6 +73,75 @@ pub enum ImportError {
     PaletteIndexOutOfRange { index: u16, palette_len: usize },
     #[error("{found} voxels are not a section, which holds {expected}")]
     WrongVoxelCount { found: usize, expected: usize },
+}
+
+impl SectionData {
+    /// The same contents with every entry no index references dropped, surviving
+    /// entries keeping their relative order.
+    ///
+    /// Here rather than in whatever writes a description to a disk, because "the
+    /// minimal form of a description" is a property of the description — putting
+    /// it beside a file writer would put palette logic in the file writer.
+    ///
+    /// A description is compacted without a `&mut` where a section cannot be:
+    /// [`Section::compact`] reads the reference counts the write path maintained
+    /// and needs to own them, while an entry no *index* references is vacant by
+    /// inspection. That is what lets a world hand out shared borrows and still be
+    /// stored in its minimal form.
+    ///
+    /// Stable, matching [`Section::compact`]: compaction is a renumbering and
+    /// never a reshuffle. It is also what keeps a stored position inside the
+    /// width a compacted palette needs, for a section that was never compacted
+    /// before it was written down.
+    #[must_use]
+    pub fn compacted(&self) -> Self {
+        let surviving = self.referenced_entries();
+        Self {
+            palette: surviving
+                .iter()
+                .filter_map(|kept| self.palette.get(*kept))
+                .cloned()
+                .collect(),
+            indices: self
+                .indices
+                .iter()
+                .map(|index| Self::settled(*index, &surviving))
+                .collect(),
+        }
+    }
+
+    /// Which palette positions some index still names, ascending and each once.
+    ///
+    /// A position past the end of the palette is dropped here rather than
+    /// carried: it names no entry, so there is no entry for it to keep alive.
+    fn referenced_entries(&self) -> Vec<usize> {
+        let referenced: BTreeSet<usize> = self
+            .indices
+            .iter()
+            .map(|index| index.get() as usize)
+            .filter(|position| *position < self.palette.len())
+            .collect();
+        referenced.into_iter().collect()
+    }
+
+    /// Where `index` ends up once the vacant entries are gone.
+    ///
+    /// Found by search rather than by a relocation table, which is what keeps
+    /// this linear in a section's voxels rather than quadratic in its palette —
+    /// a compacted palette runs to 4096 entries and the search runs over an
+    /// ascending list.
+    ///
+    /// A position no surviving entry answers for is carried through unchanged.
+    /// It cannot arise, since an entry survives precisely because some index
+    /// names it, and rewriting it to something plausible would hide whatever
+    /// produced it.
+    fn settled(index: PaletteIndex, surviving: &[usize]) -> PaletteIndex {
+        surviving
+            .binary_search(&(index.get() as usize))
+            .ok()
+            .and_then(|position| u16::try_from(position).ok())
+            .map_or(index, PaletteIndex::new)
+    }
 }
 
 impl Section {

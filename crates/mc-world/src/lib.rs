@@ -1,4 +1,4 @@
-//! Voxel world: palette-compressed chunk storage, lighting, worldgen, and redb-backed persistence.
+//! Voxel world: palette-compressed chunk storage, lighting, worldgen, and save files.
 //!
 //! This crate is also where the engine is allowed to touch a disk. The block
 //! registry contract lives in `mc-core`, which performs no I/O; the reader that
@@ -8,5 +8,6 @@
 pub mod column;
 pub mod content;
 pub mod mesh;
+pub mod persistence;
 pub mod section;
 pub mod world;

@@ -1,9 +1,11 @@
 # Chunk Storage and the Block Palette
 
 How a chunk's voxels are held in memory, why a runtime block id may never
-leak into a saved or transmitted form, and what a section's storable
-identity actually is. This is the in-memory representation; turning it into
-bytes on disk is `mc-world`'s persistence work, not this.
+leak into a saved or transmitted form, what a section's storable identity
+actually is, and how that identity is turned into the bytes of a save file
+on disk. The wire format (network replication) is still out of scope for
+this document — `mc-proto` is a stub, and that work belongs to whichever
+spec first gives it a dependency graph.
 
 ## A cell holds a block, or nothing
 
@@ -317,8 +319,9 @@ are held by whatever caller owns them.
 
 Above a single column sits `mc_world::world::VoxelWorld`, which owns a footprint of columns and
 exposes `block_at`, `set_block`, `column`, `columns` and `extent` over them — this is the type break
-and place edits through (`docs/technical/architecture.md` §"The editable world"), and what PRO-855
-will persist. Its coordinate type, `WorldPos { x: u32, y: u32, z: u32 }`, is **unsigned** — the
+and place edits through (`docs/technical/architecture.md` §"The editable world"), and what a save
+file persists (see "Saving and loading" below). Its coordinate type, `WorldPos { x: u32, y: u32, z:
+u32 }`, is **unsigned** — the
 project's world footprint sits entirely in the positive octant, so the one place a sign needs
 checking is the conversion from a signed block position into a `WorldPos`, and that conversion is
 where a negative coordinate is refused. Nothing downstream of it needs to check again.
@@ -351,29 +354,279 @@ mc_world::section   Section, Contents, LocalPos, Axis, SectionError,
                        (defined in the private submodule section::export;
                         Contents likewise, from section::contents)
 mc_world::column     ChunkColumn, ColumnPos, ColumnCoordinate,
-                     SECTIONS_PER_COLUMN, COLUMN_HEIGHT
+                     SECTIONS_PER_COLUMN, COLUMN_HEIGHT, ColumnError
+mc_world::persistence  save_world, write_save, replace_atomically,
+                     load_world, LoadedWorld,
+                     requirements, SaveRequirements, RequiredBlock,
+                     saved_player, stored_world_data,
+                     resolve, Acceptance, RegistryVerdict,
+                     SavedPlayer, SaveNameId, DefinitionHash,
+                     SaveError, LoadError
 ```
 
 Every one of these is a module path, never a crate-root item — `Section`
 and friends live under `mc_world::section`, `ChunkColumn` and friends
-under `mc_world::column`.
+under `mc_world::column`, and the persistence surface under
+`mc_world::persistence`.
+
+## Saving and loading: the on-disk format
+
+A save is a fixed 30-byte preamble, read by hand, followed by two successive
+`postcard`-encoded values: a table of the block names the save needs, then
+the world itself.
+
+```text
+offset  field                 encoding
+     0  magic                 [u8; 8] = b"MYCRAFT\x1A"     read by hand
+     8  format version        u16 LE  = 1                   read by hand
+    10  player position       3 × f32 LE  (x, y, z)         read by hand
+    22  player yaw            f32 LE, radians               read by hand
+    26  player pitch          f32 LE, radians               read by hand
+    30  ─── stored world data begins ───
+    30  encoded table of names
+     …  encoded world
+        ─── end of file, exactly ───
+```
+
+Four things about this layout are decisions rather than incidental:
+
+- **The magic is eight bytes ending in `0x1A`** — the trick PNG uses: a save
+  mangled by a text-mode transfer fails the format check outright rather
+  than parsing as something else.
+- **Version 1 is numbered 1, not 0.** An all-zero buffer that somehow got
+  past the magic check would otherwise declare the version this build
+  *supports* rather than one it does not recognise; numbering the first
+  version 1 keeps "all zeroes" a refusal instead of an accident of the
+  numbering.
+- **The version is read before anything it governs, by hand, at a fixed
+  offset.** A version read *through* the encoder would depend on the
+  encoder being able to decode a file whose format this build does not
+  recognise — which defeats the point of having a version field at all.
+  Reading it by hand means a build that cannot read a format never reports
+  a complaint about bytes it was never entitled to interpret in the first
+  place. Fixed width at a fixed offset for the same reason: a
+  variable-width version would make reading the version of an unreadable
+  file itself version-dependent. It also keeps the player's place at a
+  fixed offset, which is what makes the stored world data below a clean
+  suffix of the file.
+- **The name table and the world are two top-level encoded values, not one
+  wrapping struct.** The encoder decodes one value at a time from a reader
+  and leaves it positioned exactly after that value, so asking a save what
+  it needs decodes the table and stops there — a caller never touches a
+  byte of chunk data to answer "what does this save require?" One wrapping
+  struct would decode the world too, and that property would not hold.
+
+### Writing a save
+
+**A save replaces its predecessor atomically.** The bytes are written to a
+sibling temporary file beside the target — same directory, therefore the
+same volume, therefore a rename between them is atomic — flushed to disk
+with `File::sync_all`, and only then moved into place with `fs::rename`. A
+write that stops partway leaves the sibling incomplete and the previous
+save byte-for-byte untouched; the sibling is never treated as a save that
+merely finished late. The temporary file has to be a *sibling*, never a
+system temp path: a rename across volumes becomes a copy-and-delete, which
+is not atomic, and that is the one platform-specific assumption the whole
+of atomic replacement rests on.
+
+The write path emits the world in its **compacted** form: every section is
+reduced to the palette entries at least one voxel still references before
+it is written. A save is therefore always the minimal encoding of what a
+world holds, never of its edit history — and it is also what keeps a
+section's per-voxel index inside `u16` in the save even for a world that
+was never compacted in memory.
+
+### Reading a save back
+
+A stored section becomes a `SectionData`, which `Section::import` turns
+into a `Section`, which `ChunkColumn::assembled` stacks into a column,
+which `VoxelWorld::assembled` puts back into a world. That route — rather
+than replaying the file's edits through the ordinary per-voxel write path —
+is what keeps a load from re-entering the registry-validating write path
+once per voxel, a million times over for a full world.
+
+### The save-table identifier's width, now decided
+
+The single highest-risk mistake persistence could make was sizing a
+save-wide name identifier against `PaletteIndex`'s `u16` — a width only
+sufficient for a *compacted section* (≤4096 entries), not for the distinct
+names across a whole save. That mistake is not made: a save's block-name
+table is addressed by `SaveNameId`, a `u32` newtype local to the
+persistence module, deliberately distinct from both `PaletteIndex` and
+`BlockId`. A section's own stored form still carries one `PaletteIndex` per
+voxel — the writer emits the compacted form, so that stays inside `u16` —
+and it is the *palette entries*, not the voxels, that carry a `SaveNameId`
+into the save's table.
+
+Two levels rather than one halves the per-section storage cost and keeps
+two failure modes distinct that a single `u32`-per-voxel scheme would
+collapse into one: a voxel naming a palette position its own section's
+palette does not have, refused by naming the world position it is at; and
+a palette entry naming a table position the save's table does not have,
+refused by naming the identifier and how many entries the table holds.
+
+### Security properties of a save read from disk
+
+A save file is attacker-controlled data read by the authoritative process,
+and the persistence module treats it exactly that way: every length, count
+and identifier decoded out of one is checked before it is trusted, and
+nothing is indexed on a number the file merely claims.
+
+**`postcard` bounds the bytes it reads, not the memory a value expands
+into, and closing that gap is this module's job, not the library's.** A
+length prefix in the file drives no allocation ahead of the elements that
+actually follow it — a `Vec` fills only as elements arrive — but a small
+file can still expand into a large in-memory structure:
+`size_of::<ColumnRecord>()` against a one-byte minimum encoding is a 24×
+amplifier, and `Vec` growth slack roughly doubles that worst case to ~48×.
+That figure is **measured** against a crafted input, not estimated. Two
+ceilings close the gap it leaves open:
+
+- **A 16 MiB precheck against the file's own length**, read from
+  `File::metadata` and checked before a single byte is decoded. At the
+  measured ~48× worst-case amplification, that bounds peak memory at
+  roughly 768 MiB on a maximally hostile file — four times the size of the
+  largest legitimate MVP 1 save (~4 MiB) and eight times a typical one
+  (~2 MiB). This is the only thing converting a bound on bytes *read* into
+  a bound on memory, so raising the constant means re-deriving the
+  amplification arithmetic against whatever the record shapes have become
+  by then, never just picking a bigger number.
+- **A 256-byte scratch buffer**, handed to the decoder for every
+  byte-shaped field it reads. The decoder refuses outright, allocating
+  nothing, when a declared length will not fit the buffer it is given.
+
+**The 256-byte bound is per field, not cumulative — and that is a property
+of the DTOs, not of the decoder, and a trap for whoever next changes
+them.** A save's name-table entries hold owned `String`s, and an owned
+`String` decodes through a path that reads into the scratch buffer
+*without advancing past it* — the same 256 bytes are reused for the next
+field. A borrowed `&str` decodes through a different path that *does*
+advance the buffer, consuming part of it permanently for the life of the
+read. Changing a DTO field from `String` to `&str` would silently turn a
+per-field ceiling on the longest single block name into a cumulative
+working-memory budget shared across every name in the table — with no
+compiler error and no failing test to say so, because nothing here asserts
+on which decode path a field takes, only that the result decodes.
+
+**The division of labour is exact, and it is why no test in this codebase
+asserts a `postcard` error variant or message.** The library's job is
+turning bytes into typed values, and it is treated as working: a
+widely-used decoder has had orders of magnitude more adversarial attention
+than one feature can produce, and testing how it classifies a corrupt
+input would be testing its release notes. Every refusal *this* module
+raises is over an already-decoded value — a name that is not a namespaced
+id, a count that does not match a footprint, a stored coordinate that is
+not finite — and every one of them names the value that was wrong. A
+`postcard` refusal crosses the boundary as `LoadError::Malformed { path }`
+and nothing else; which way the library declined the bytes is not part of
+the contract.
+
+**Allocation follows data all the way through the read**, which is a
+property to actively preserve rather than one that comes for free: a
+future convenience such as reading a whole save into memory before
+decoding it would throw this away silently, without changing a single
+test's pass/fail outcome, because nothing here is sized to catch it. The
+reader has to stay streaming for the property to keep holding.
+
+### The three-outcome load decision
+
+Resolving a save's name table against a registry produces exactly three
+outcomes, judged per block and reported all at once rather than one at a
+time:
+
+- **Missing** — the registry does not hold the name at all. A hard
+  refusal, unconditionally: nothing can go in the cell, which is not a
+  judgement a caller is in a position to override.
+- **Changed** — the registry holds the name, but its declared *behaviour*
+  (solidity, replaceability, breakability, what it breaks into) hashes
+  differently than the save recorded. Loadable, but only with the caller's
+  explicit acceptance — the data is fine, and whether it *should* be
+  loaded is a judgement about the world it belongs to.
+- **Unchanged, or changed only in declared *appearance*** (its texture) —
+  loads without asking. A texture edit cannot damage a world: the blocks
+  are the same blocks and only look different.
+
+Behaviour and appearance are hashed **separately**, into two independent
+64-bit values, and that split is deliberate rather than an optimisation: a
+single hash covering both would make a retextured mod indistinguishable
+from a rebalanced one, and the only safe response to that ambiguity would
+be to prompt on every texture edit — training a player to click through a
+prompt without reading it, which destroys the one thing the prompt is for.
+
+**The asymmetry behind refusing rather than substituting a placeholder for
+a missing block is about which failure is recoverable.** A refused load
+leaves the save file exactly as it was on disk; a player can restore the
+mod that defined the missing block and try again, at the cost of one
+restart. A placeholder — a stand-in that lets the load proceed and
+remembers the original name so it can be restored later — has no such
+recovery: the moment a player saves over a world whose absent blocks were
+silently substituted, the original names are gone, permanently, in the one
+file that held them. Refusing costs a restart; a placeholder can cost a
+world. No unknown-block placeholder is built, and that is not an
+unfinished edge of this feature — it is the decided boundary, for that
+reason (see "Known limitations, as built" below for the in-memory case
+this leaves alone). A save naming a missing block is refused with the
+complete list of what is missing, and that refusal is not something any
+caller acceptance can override.
+
+### A save's stored world data is a deterministic image of the world
+
+The block-name table is built once per save from the union of every
+distinct name the world's (compacted) sections hold, kept in a `BTreeMap`
+and written out in ascending lexicographic order — never in registration
+order, and never via a hash-ordered collection: `HashMap`/`HashSet` do not
+appear anywhere in the persistence module, because Rust's per-instance
+`RandomState` would make two saves of the same world differ by nothing but
+which hash seed one process happened to pick. One `SaveNameId` is then
+assigned to each name by its position in that ascending order, after the
+whole set is known — an identifier is a position in an order, and nothing
+is in order until the last name has arrived.
+
+The consequence: saving one world twice, against two registries that
+register the same blocks in different orders, or at different runtime
+ids, or built from definitions read from two different origins, produces
+byte-identical stored world data. What is compared for that identity is
+the save's **stored world data** — the bytes from the end of the preamble
+onward — never the whole file: a container carrying allocator or
+transaction state of its own would fail a whole-file comparison for
+reasons that have nothing to do with the world it holds, and the
+plain-file format described above is what makes the two coincide.
 
 ## Known limitations, as built
 
 These are current behaviour, not a roadmap.
 
-- **Importing a section that names an unregistered block is an error**
-  (`ImportError::UnknownBlock`). There are no unknown-block placeholders
-  yet, so a section produced under a mod set that has since removed a mod
-  does not round-trip through import. Persistence work owns adding
-  placeholders.
+- **Importing a section that names an unregistered block is still an
+  error** (`ImportError::UnknownBlock`), and there is still no
+  unknown-block placeholder — but this is now a decided boundary rather
+  than an outstanding gap. A save naming a block the registry does not
+  hold is refused before any section reaches `Section::import` at all
+  (see "Saving and loading" above): a load resolves the whole name table
+  first, and a missing name is a hard refusal regardless of any caller
+  acceptance. By the time a section is imported during a load, every name
+  it can reference has already been confirmed present — `Section::import`'s
+  own check exists for the general case (any caller building a section
+  from a `SectionData`, not only a load), and it is not what a hostile or
+  outdated save is actually refused by.
 
-  The check runs over the palette's `Contents::Holds` entries and skips
-  `Contents::Empty` — **the empty entry only, and that is the whole of the
-  exemption**. Requiring registration for it would make an empty cell need
-  a block registered in order to mean nothing; skipping the check for every
-  entry instead would let a description name a block that does not exist
-  and build a world quietly made of something else.
+  A placeholder that preserves an unresolved name was considered and
+  rejected: it would put a `BlockName` the registry does not know into a
+  loaded `Section`, which is exactly the precondition of the in-memory
+  failure described in the next entry — `is_solid_at` raising
+  `RegistryError::UnknownName` mid-tick, and the mesher failing the whole
+  section with `MeshError::UnresolvedBlock`. A refused load leaves the
+  save file untouched on disk and is recoverable by restoring the mod
+  that defined the missing block; a placeholder is the only version of
+  this that can destroy data, silently, the moment a player saves over a
+  world whose absent blocks were substituted. Refusing costs a restart; a
+  placeholder can cost a world — which is why this stays a refusal.
+
+  The check still runs over the palette's `Contents::Holds` entries and
+  still skips `Contents::Empty` — **the empty entry only, and that is the
+  whole of the exemption**. Requiring registration for it would make an
+  empty cell need a block registered in order to mean nothing; skipping
+  the check for every entry instead would let a description name a block
+  that does not exist and build a world quietly made of something else.
 - **A section holding a *block* the current registry has stopped
   registering fails every `is_solid_at` call on it.** After a live registry
   swap (arriving with the Luau scripting host), this failure is delivered
@@ -385,9 +638,13 @@ These are current behaviour, not a roadmap.
   way: a section holding a name the registry cannot resolve fails the
   **whole mesh** with `MeshError::UnresolvedBlock`, rather than failing per
   `is_solid_at` call, and it refuses outright rather than inventing a
-  placeholder policy of its own. The import-path placeholder work above
-  still needs to cover this **in-memory** case, not only the import path, or
-  the failure mode simply moves rather than disappearing.
+  placeholder policy of its own. This in-memory case remains unreachable
+  in today's product — the registry is built once at startup and never
+  swapped — and stays owned by whatever future work makes a live registry
+  swap reachable. A load-time refusal cannot pre-empt it: it is triggered
+  by a mod disappearing from an already-running server, not by loading a
+  save, and the entry above's decision not to build a placeholder applies
+  only to the load path, not to this one.
 - **"Not registered" is spelled two different ways on the public
   surface.** `Section::is_solid_at` propagates
   `SectionError::Registry(RegistryError::UnknownName)` for a name the

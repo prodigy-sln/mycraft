@@ -14,10 +14,11 @@
 //!
 //! So the two views are kept, and kept in step **structurally rather than by a
 //! calling convention**. This type owns the store, the collision view and the
-//! registry both were resolved against; none of the three is reachable from
-//! outside; and exactly one function writes anything. There is no second place
-//! an edit can be made, and therefore no second place the two can be made to
-//! disagree.
+//! registry both were resolved against; **nothing outside this module can write
+//! any of the three**, and the accessors that read them hand out shared borrows,
+//! which cannot; and exactly one function writes anything. There is no second
+//! place an edit can be made, and therefore no second place the two can be made
+//! to disagree.
 //!
 //! **The visibility is load-bearing.** `World::write` carries no `pub` at all,
 //! so it is visible in this module and its descendants and nowhere else — and
@@ -118,6 +119,20 @@ impl World {
     #[must_use]
     pub fn registry(&self) -> &BlockRegistry {
         &self.registry
+    }
+
+    /// The blocks this world is made of.
+    ///
+    /// **`pub(crate)` and not `pub`**, so nothing outside this crate can reach
+    /// them at all — which strengthens the property this module claims rather
+    /// than weakening it. The one caller is the save path, which is in this
+    /// crate because a save is server state and because which world a launch
+    /// plays is policy.
+    ///
+    /// A shared borrow, so it cannot be a second way to write either view.
+    #[must_use]
+    pub(crate) const fn blocks(&self) -> &VoxelWorld {
+        &self.blocks
     }
 
     /// How far the world reaches on each axis, in voxels.

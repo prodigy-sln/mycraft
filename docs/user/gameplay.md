@@ -37,8 +37,31 @@ system won't grant the tightest capture mode, the game falls back to a looser on
 rather than refusing to run. Escape always gives the cursor back so you can interact with other
 windows; clicking back in the game window always takes it again.
 
+## Saving and resuming
+
+Closing the game normally saves the world you were playing in and where you were standing in it.
+Starting the client again picks that world back up — the blocks you broke and placed are still
+broken and placed, and you stand where you left off, facing the way you were. Killing the process
+instead of closing it normally does not save: whatever you built or moved since the last clean close
+is lost, but the save from that last clean close is left exactly as it was, so a crash or a forced
+quit never puts something already saved at risk.
+
+The save is a single file, `saves/world.mcw`, relative to the directory you started the client in.
+There is one world and one save — no slots, no world names, no automatic backups — so if you want to
+keep a copy of a world before playing on, copy that file yourself.
+
+**If the save can't be read, the game refuses to start rather than quietly generating a new world in
+its place.** The refusal names the file and the reason. If the save was written under a mod set that
+has since changed, the refusal names every affected block and treats two cases differently: a block
+that's missing outright — a mod that defined it is gone — can't be resolved at all, and the game
+always refuses to start over it. A block the game still recognises by name but that behaves
+differently than it did when you saved (solidity, breakability, what it drops) is a call you get to
+make: pass `--load-changed-blocks` on the command line to load the world anyway, changed blocks and
+all, or leave it off and the game keeps refusing until you either restore the mod or decide to pass
+the flag. A block that only *looks* different — a retextured mod, with nothing about how it behaves
+changed — never triggers this at all; that world loads normally, without asking.
+
 ## What this does not cover yet
 
-This is walking, looking and jumping on a fixed, already-generated world. It does not include
-breaking or placing blocks, an inventory, other players, or anything that survives past the current
-session — those are separate, not-yet-built pieces of the game.
+This is walking, looking, jumping and saving on a fixed, already-generated world. It does not
+include an inventory or other players — those are separate, not-yet-built pieces of the game.

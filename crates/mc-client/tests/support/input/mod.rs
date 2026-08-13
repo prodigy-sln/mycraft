@@ -36,13 +36,15 @@ mod platform;
 mod world;
 
 use std::error::Error;
+use std::path::Path;
 use std::sync::Arc;
 
 use mc_client::events::{dispatch_device_event, dispatch_key, dispatch_window_event};
-use mc_client::session::{PointerAsk, Session};
-use mc_render::window::CaptureState;
+use mc_client::session::{PointerAsk, Session, ending_after_saving};
+use mc_core::id::BlockName;
+use mc_render::window::{CaptureState, Ending};
 use mc_sim::action::EditReport;
-use mc_sim::simulation::SimSnapshot;
+use mc_sim::simulation::{SimSnapshot, Simulation};
 use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
 use winit::keyboard::KeyCode;
 
@@ -88,6 +90,28 @@ impl InputHarness {
         let (simulation, holding) = world::ground_plane()?;
         self.session.attach_simulation(simulation, holding);
         Ok(())
+    }
+
+    /// Hands the session a world to play that the caller declared, and the block
+    /// a place request over it names.
+    ///
+    /// The same entry [`start_world`](Self::start_world) uses, with the
+    /// declaration supplied rather than taken from this harness's own floor: a
+    /// scenario about what survives a quit has to write a save against the
+    /// registry it will be read against, and that registry is the caller's to
+    /// build.
+    pub fn play(&mut self, simulation: Simulation, holding: BlockName) {
+        self.session.attach_simulation(simulation, holding);
+    }
+
+    /// What this run reports once whatever it was playing has been saved to
+    /// `save`.
+    ///
+    /// Forwarded, deciding nothing: whether an ending saves at all, and what a
+    /// failed write does to it, are the client's answers and are exactly what
+    /// the scenarios ask about.
+    pub fn quit(&self, ending: Ending, save: &Path) -> Ending {
+        ending_after_saving(Some(&self.session), ending, save)
     }
 
     /// A key going down.

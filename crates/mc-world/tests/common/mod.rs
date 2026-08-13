@@ -15,6 +15,10 @@
 // Each test binary links this whole module and uses a subset of it.
 #![allow(dead_code)]
 
+pub mod assembled;
+pub mod handbuilt;
+pub mod persistence;
+
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::ffi::OsStr;
@@ -123,9 +127,57 @@ pub fn directory_label(path: &Path) -> Result<&str, Box<dyn Error>> {
         .ok_or_else(|| format!("{} has no usable final component", path.display()).into())
 }
 
-/// The label every hand-built registry in this suite is attributed to. Nothing
-/// asserts it; it exists because a definition has to say where it came from.
-const FIXTURE_ORIGIN: &str = "a fixture registry";
+/// The label every hand-built registry in this suite is attributed to unless a
+/// fixture says otherwise.
+///
+/// Most suites never assert it — it exists because a definition has to say where
+/// it came from. It is public because a fixture that varies the origin needs the
+/// *other* registry to keep the ordinary one, so that the two differ in the
+/// origin and in nothing else.
+pub const FIXTURE_ORIGIN: &str = "a fixture registry";
+
+/// A registry holding exactly `blocks`, in the order given, each carrying the
+/// texture and solidity declared beside it, and every definition attributed to
+/// `origin`.
+///
+/// **Name, texture and origin vary independently here, and that independence is
+/// the whole reason this builder exists.** [`registry_declaring`] derives the
+/// texture from the name and fixes the origin, so it cannot express "the same
+/// block, retextured" or "the same definitions, read from somewhere else" — and
+/// those two are exactly what tells a declaration's appearance apart from its
+/// behaviour, and what proves a path-derived label is not part of either.
+///
+/// # Errors
+///
+/// Returns an error if a name or a texture is not a namespaced id, or if the
+/// registry refuses the batch — a name repeated in `blocks`, for instance.
+pub fn registry_from(
+    origin: &str,
+    blocks: &[(&str, &str, bool)],
+) -> Result<BlockRegistry, Box<dyn Error>> {
+    let mut declared = Vec::with_capacity(blocks.len());
+    for &(name, texture, is_solid) in blocks {
+        // Solidity and texture are the properties these fixtures declare per
+        // block. Breakability, replaceability and a residue are read by a break
+        // or a placement, which is not something this crate's suites drive, so
+        // each is left at what a declaration saying nothing about it means.
+        declared.push(Ok(BlockDefinition {
+            name: BlockName::parse(name)?,
+            texture: TextureKey::parse(texture)?,
+            is_solid,
+            replaceable: false,
+            breakable: true,
+            breaks_into: None,
+            origin: DefinitionOrigin::new(origin),
+        }));
+    }
+    let mut registry = BlockRegistry::new();
+    registry.apply(&InMemoryDefinitionSource::new(
+        DefinitionOrigin::new(origin),
+        declared,
+    ))?;
+    Ok(registry)
+}
 
 /// A registry holding exactly `names`, in the order given, each block solid and
 /// textured by its own name.
@@ -152,28 +204,11 @@ pub fn registry_of(names: &[&str]) -> Result<BlockRegistry, Box<dyn Error>> {
 /// Returns an error if a name is not a namespaced id, or if the registry refuses
 /// the batch — a name repeated in `blocks`, for instance.
 pub fn registry_declaring(blocks: &[(&str, bool)]) -> Result<BlockRegistry, Box<dyn Error>> {
-    let mut declared = Vec::with_capacity(blocks.len());
-    for &(name, is_solid) in blocks {
-        // Solidity is the property these fixtures exist to declare per block.
-        // Breakability, replaceability and a residue are read by a break or a
-        // placement, which is not something this crate's suites drive, so each
-        // is left at what a declaration saying nothing about it means.
-        declared.push(Ok(BlockDefinition {
-            name: BlockName::parse(name)?,
-            texture: TextureKey::parse(name)?,
-            is_solid,
-            replaceable: false,
-            breakable: true,
-            breaks_into: None,
-            origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
-        }));
-    }
-    let mut registry = BlockRegistry::new();
-    registry.apply(&InMemoryDefinitionSource::new(
-        DefinitionOrigin::new(FIXTURE_ORIGIN),
-        declared,
-    ))?;
-    Ok(registry)
+    let declared: Vec<(&str, &str, bool)> = blocks
+        .iter()
+        .map(|&(name, is_solid)| (name, name, is_solid))
+        .collect();
+    registry_from(FIXTURE_ORIGIN, &declared)
 }
 
 /// A registry holding `count` generated blocks, `fixture:block_0000` upwards.

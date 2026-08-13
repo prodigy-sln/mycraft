@@ -23,17 +23,19 @@
 //! side of the seam no test can reach.
 
 use std::fmt;
+use std::path::Path;
 use std::sync::Arc;
 
 use mc_core::id::BlockName;
 use mc_render::window::{
-    CaptureState, accepts_pointer_motion, capture_after_click, capture_after_escape,
+    CaptureState, Ending, accepts_pointer_motion, capture_after_click, capture_after_escape,
     first_capture_attempt, next_capture_attempt,
 };
 use mc_sim::action::{ActionIntent, EditReport, TickIntent};
 use mc_sim::player::{InputState, PlayerAction};
 use mc_sim::simulation::{SimSnapshot, Simulation};
 use mc_sim::world::RemeshWork;
+use mc_world::persistence::SaveError;
 
 /// What the platform can be asked to do with the pointer.
 ///
@@ -345,6 +347,23 @@ impl Session {
         self.simulation.as_ref().map(Simulation::latest)
     }
 
+    /// Writes what is being played to `save`, or nothing at all when there is
+    /// nothing being played.
+    ///
+    /// A run whose window never opened has no world to write, and writing an
+    /// invented one over a save the player already has would be the one failure
+    /// a quit must not have.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever writing the save refuses: a path that is a directory, a
+    /// component of it that is a file, or a write that failed.
+    pub fn save(&self, save: &Path) -> Result<(), SaveError> {
+        self.simulation.as_ref().map_or(Ok(()), |simulation| {
+            mc_sim::persistence::save(simulation, save)
+        })
+    }
+
     /// Holds the pointer as firmly as `wanted` asks and the platform allows.
     ///
     /// The refusals are the point: a platform refuses a grab mode it does not
@@ -367,6 +386,32 @@ impl Session {
         }
         self.pointer.show_cursor(!held);
         self.capture = attempt;
+    }
+}
+
+/// The ending a run reports once whatever was being played has been saved.
+///
+/// **Only a run that ended by closing normally saves.** A device-lost run is not
+/// a clean quit, and treating it as one would let a broken frame path overwrite
+/// a good world. A failed save on a clean close becomes a failed ending naming
+/// the path and the reason; a save failure never masks an ending that was
+/// already a failure.
+///
+/// It lives here rather than in the simulation because it answers in the
+/// window's own vocabulary, and the simulation may not name the renderer.
+#[must_use]
+pub fn ending_after_saving(session: Option<&Session>, ending: Ending, save: &Path) -> Ending {
+    if !matches!(ending, Ending::Closed) {
+        return ending;
+    }
+    match session.map_or(Ok(()), |playing| playing.save(save)) {
+        Ok(()) => ending,
+        Err(refused) => Ending::Failed {
+            report: format!(
+                "the world could not be saved to {path}: {refused}",
+                path = save.display()
+            ),
+        },
     }
 }
 

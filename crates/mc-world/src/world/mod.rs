@@ -320,7 +320,13 @@ impl VoxelWorld {
 
 /// Every column of a square footprint in the assembly order `(cz, cx)`
 /// ascending, as `(column_x, column_z)`.
-fn every_column(footprint_columns: u32) -> impl Iterator<Item = (u32, u32)> {
+///
+/// Reachable across the crate because a load assembles a world in this order
+/// too, and the two must not be able to disagree: a second copy of it that drifted
+/// would label every column with another column's coordinate while leaving the
+/// contents where they were — a world that reads back correctly cell by cell and
+/// hands the wrong section to anything asking by coordinate.
+pub(crate) fn every_column(footprint_columns: u32) -> impl Iterator<Item = (u32, u32)> {
     (0..footprint_columns)
         .flat_map(move |column_z| (0..footprint_columns).map(move |column_x| (column_x, column_z)))
 }

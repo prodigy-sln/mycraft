@@ -1,7 +1,7 @@
 # Architecture Decision Records
 
 Sources: `PLAN.md` (research, 2026-08-11); ADR-011 and ADR-012 consolidated from SPEC-002; ADR-013
-from SPEC-004.
+from SPEC-004; ADR-016 from SPEC-009.
 
 Each record states a decision that is **binding now**. Status `Accepted` means the decision governs
 all new work; where implementation has not yet landed, that is noted explicitly. Superseding a
@@ -566,3 +566,116 @@ scenarios their ability to fail if the rejected option were chosen instead, sinc
 already be provably one. A world-wide bitset sized at construction is also the one structure that
 MVP 3's chunk streaming cannot keep as-is; moving to a per-section bitset is a change confined inside
 `SolidVoxels` and is deferred until the world footprint stops being fixed.
+
+---
+
+## ADR-016 — A save is one `postcard`-encoded plain file, replaced atomically, not a `redb` database
+
+**Status**: Accepted · **Date**: 2026-08-13
+
+**Context.** A save has to hold a world's blocks and the player's place in it, written once at quit
+and read back once at launch — never incrementally, never per-chunk, never while the game is
+running. The file is also attacker-controlled input to the authoritative process: every length,
+count and identifier read out of it has to be checked before anything indexes on it. Two questions
+had to be settled together: what container the save lives in, and what turns its structure into
+bytes.
+
+**Decision.** A save is one plain file, written to a sibling temporary file, flushed with
+`File::sync_all`, and moved into place with `fs::rename` — never a `redb` database, and never an
+in-place overwrite. Its contents are encoded with `postcard` 1.1.3 over plain `serde` DTOs.
+
+**The encoder was chosen against four criteria, applied in this order, because each one is a hard
+requirement the criteria after it cannot outweigh:**
+
+1. **Streaming, one value at a time.** A save has to report the complete set of block names it
+   requires without reading any of its chunk data, which means the reader must be able to decode
+   the name table and stop — never load the whole file to answer a question about its first part.
+2. **Bounded allocation on untrusted input.** A length prefix in the file must never drive an
+   allocation before the bytes behind it have actually arrived.
+3. **`serde`-based, preferred but not required.** `serde` is already a dependency for the content
+   format, so a `serde`-based encoder costs one new crate rather than a second derive ecosystem.
+4. **Maintenance status, checked against the advisory database rather than against impressions.**
+
+`bitcode` and `rkyv` fail criterion 1 outright — both need the whole buffer in memory before
+anything is readable, which makes "report what a save needs without reading its chunk data"
+literally false under either. `wincode` passes criteria 1 and 2 — it has an explicit
+`PreallocationSizeLimit` that is, if anything, a more direct answer to criterion 2 than `postcard`'s
+own mechanisms — but fails criterion 3 (its `Serialize`/`Deserialize` are its own traits, not
+`serde`'s; adopting it means a second derive ecosystem) and answers criterion 4 worse than
+`postcard` for a format that defines bytes on disk: it is pre-1.0, with no wire-format stability
+commitment yet. `postcard` passes all four: it decodes one value from a `Read` and hands the reader
+back positioned after it; it bounds allocation structurally (below); it uses plain `serde` derives;
+and it is actively maintained, with a wire format frozen and specified independently of the crate,
+at 1.0.
+
+**`postcard`'s allocation story is structural, not a configured limit, and it differs from what it
+replaced in one respect that mattered enough to change a constant.** A declared length never drives
+an allocation ahead of the elements actually arriving — a `Vec` grows only as elements are read.
+Byte-shaped fields (block names) decode into a caller-supplied scratch buffer and are refused
+outright, allocating nothing, if the declared length will not fit. What this bounds is **bytes
+read**, not the memory those bytes expand into — measured at up to ~48× amplification for the
+save's own record shapes — so the file-length precheck that converts a read bound into a memory
+bound had to be re-derived rather than carried across unchanged (`technical/world-format.md` carries
+the arithmetic).
+
+**`postcard` was not the first choice. `bincode` 2.0.1 was, and it was removed after being found
+permanently unmaintained.** The first evaluation ranked candidates against criteria 1 through 3
+only — maintenance status was not among them, which is precisely the gap that let a discontinued
+crate be selected on its remaining merits. `cargo deny`'s advisories stage subsequently failed on
+RUSTSEC-2025-0141: `bincode`'s maintainers ceased development permanently, with no safe upgrade
+available. Removal beat suppression because the two were not equally costly: no save format had
+shipped yet and no world existed anywhere, so replacing the encoder was a same-day refactor rather
+than a migration, and a suppressed advisory would have left a dependency nobody could fix defining
+every byte this feature ever writes. Maintenance status was added to the criteria list above as a
+direct result — the criterion its absence had cost.
+
+**Departing from `redb` was re-argued from first principles rather than carried over, and two of
+its original three supporting arguments did not survive re-examination.** The first — that a
+hand-decoded byte format gives sharper diagnostics than a paged database can — was largely an
+artefact of a hand-written codec that was itself abandoned in favour of `postcard`; the diagnostics
+that survive are semantic checks over already-decoded values, and those are available under any
+container. The second — that avoiding a container avoids being the first thing hostile bytes meet —
+does not distinguish `redb` from any other library, since whichever encoder is chosen meets the
+bytes first regardless. What stands, and what the decision now rests on: every feature that
+distinguishes `redb` from a plain file — incremental writes, per-chunk access, transactions — serves
+an access pattern this feature does not have, since a save is read and written whole, once, at
+launch and at quit. And `redb` does not substitute for an encoder; a `redb` value is still a byte
+blob, so choosing `redb` means adopting `redb` *and* an encoder — two dependencies for an access
+pattern that needs neither's distinguishing feature.
+
+**Consequence for ADR-007.** ADR-007 records "Accounts live in the same `redb` file as the world"
+as a consequence of its own decision. Removing the world's `redb` file leaves that sentence with
+nothing to co-locate with. ADR-007's actual decision — `ed25519-dalek` keypairs, the public key as
+account id, signed challenge-response over QUIC, `argon2` as an opt-in secondary path, each server
+its own trust root — is untouched by this and is not re-argued here. What is superseded is that one
+consequence alone: accounts get their own store when they are built, which may still be `redb` — a
+transactional database is a reasonable shape for an account table, and nothing here argues
+otherwise. **ADR-007 itself is not edited; this paragraph is the record of the supersession.**
+
+**Consequences.**
+
+- The on-disk format is defined by reference to `postcard`'s own published wire specification
+  (frozen and versioned independently of the crate since 1.0), not by the behaviour of a particular
+  library release. A `postcard` major-version upgrade whose wire format differs is therefore a
+  **format-version decision** for the save format, to be treated with the same care as introducing a
+  second save-format version — never a routine dependency bump.
+- `postcard::` is nameable only inside `mc_world::persistence`, and every decode failure collapses
+  to one variant at that module's edge (`technical/architecture.md`). That confinement is what kept
+  the `bincode` removal to four files and five call sites and zero test changes, and it is expected
+  to do the same for whatever supply-chain event comes next — though a future swap after real saves
+  exist stops being a refactor and becomes a migration, since bytes already on disk would then
+  depend on the encoder being replaced.
+- Blast radius of the container choice, if `redb` is ever needed sooner than the access pattern
+  above implies: confined to `mc_world::persistence`'s implementation behind its public functions,
+  plus a format-version bump. Nothing in `mc-sim` or `mc-client` names a byte layout directly.
+
+**Rejected.** `bitcode`, `rkyv` — cannot stream a value at a time, which makes a load-time
+requirement false under either regardless of their other merits. `wincode` — not `serde`, and
+pre-1.0 while defining the bytes of a file meant to outlive its own crate version; deferred rather
+than ruled out permanently, revisited if it reaches 1.0 with a stability commitment before any save
+format has shipped. `redb` (or any transactional container) — solves nothing this access pattern
+needs and does not eliminate the need for an encoder; deferred to whichever spec introduces
+incremental, per-chunk or streamed persistence, which is the access pattern it is for. A
+hand-written codec — vetoed before this record settled: parsing untrusted bytes is a discipline a
+widely-used, adversarially-tested library has orders of magnitude more experience at than one
+feature's implementation can produce.
