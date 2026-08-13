@@ -50,8 +50,8 @@ forward; none is a pure layer.
 | P0 | Headless client-input harness — *prerequisite of PRO-854* | PRO-873 | **Done** |
 | P0 | Raycast targeting, block break and place — *you can build* | PRO-854 | **Done** |
 | P0 | A cell holds a block or nothing — *air is not a block* | PRO-876 | **Done** |
-| P1 | World persistence — *quit and resume* | PRO-855 | In Progress |
-| P1 | Minimal HUD: crosshair, held block, debug overlay — *the HUD is content* | PRO-856 | Todo |
+| P1 | World persistence — *quit and resume* | PRO-855 | **Done** |
+| P1 | Minimal HUD: crosshair, held block, debug overlay — *the HUD is content* | PRO-856 | In Progress |
 | P2 | Ship the LICENSE texts the workspace declares | PRO-874 | Todo |
 | P2 | Terrain texture sampling and palette separation | PRO-869 | Todo |
 
