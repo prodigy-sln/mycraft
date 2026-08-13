@@ -326,6 +326,19 @@ order, untouched.
 `MAX_QUADS = 1 << 18` — so an over-capacity scene cannot be constructed and
 nothing downstream re-checks.
 
+**Breaking blocks pushes toward that ceiling, not away from it.** Every break exposes new faces, so a
+heavily excavated world meshes to *more* quads than the world it started as — the opposite direction
+from what intuition suggests a "hole" would cost. Measured against the replay world's 262 144-quad
+capacity: a fully checkerboarded 16³ section costs 12 288 quads (every voxel isolated, nothing merges,
+2048 solid voxels × 6 faces), so capacity covers roughly 21 of the world's 256 sections in that worst
+state. A single break costs at most 18 quads in the pessimal case — up to 6 newly exposed 1×1 faces on
+neighbours, plus splitting up to six already-merged rectangles at up to 3 quads each — which puts the
+crossing point at roughly 15 000 to 45 000 pessimally-placed edits depending on pattern. No scripted
+replay reaches it (`docs/technical/testing.md` §"The 10 000-block exit criterion"), because a replay that
+never uploads to the GPU never asks `SceneGeometry::assemble` anything; a long, excavation-heavy play
+session is what would. `RendererError::SceneTooLarge` is the existing, loud failure that session would
+hit — sizing the buffers for it is a tracked gap, not a silent one.
+
 ### The packed vertex, and the section table
 
 A vertex is a **single `u64`, 8 bytes**, and each field is cut to the width its

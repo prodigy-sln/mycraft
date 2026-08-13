@@ -35,13 +35,15 @@ mod platform;
 /// The world a driven tick resolves the player's motion against.
 mod world;
 
+use std::error::Error;
 use std::sync::Arc;
 
 use mc_client::events::{dispatch_device_event, dispatch_key, dispatch_window_event};
 use mc_client::session::{PointerAsk, Session};
 use mc_render::window::CaptureState;
+use mc_sim::action::EditReport;
 use mc_sim::simulation::SimSnapshot;
-use winit::event::{DeviceEvent, WindowEvent};
+use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
 use winit::keyboard::KeyCode;
 
 use platform::{PointerLog, RecordingPlatform};
@@ -75,8 +77,17 @@ impl InputHarness {
     }
 
     /// Puts a player on the declared ground plane and hands it to the session.
-    pub fn start_world(&mut self) {
-        self.session.attach_simulation(world::ground_plane());
+    ///
+    /// # Errors
+    ///
+    /// Returns the refusal if the declared world does not build. Fallible
+    /// because the world is now declared block by block against a declared
+    /// registry rather than answered by a predicate, and a fixture that is wrong
+    /// about itself is worth hearing about rather than absorbing.
+    pub fn start_world(&mut self) -> Result<(), Box<dyn Error>> {
+        let (simulation, holding) = world::ground_plane()?;
+        self.session.attach_simulation(simulation, holding);
+        Ok(())
     }
 
     /// A key going down.
@@ -110,6 +121,38 @@ impl InputHarness {
         );
     }
 
+    /// A mouse button going down.
+    ///
+    /// A real `MouseInput` event handed to the whole window-event entry, so the
+    /// client's own translation of the library's button runs under test. Driving
+    /// the session directly would hand it a button already spelled in the
+    /// vocabulary the client decides in — which is the one thing on this path
+    /// the adapter is responsible for, and nothing would be left watching it.
+    ///
+    /// The device is the library's own placeholder: which device a click came
+    /// from is not something this client reads, and a real window would report
+    /// one this test has no way to predict.
+    pub fn click(&mut self, button: MouseButton) {
+        self.mouse(button, ElementState::Pressed);
+    }
+
+    /// The same button coming back up.
+    pub fn unclick(&mut self, button: MouseButton) {
+        self.mouse(button, ElementState::Released);
+    }
+
+    /// One mouse button transition, whichever way it goes.
+    fn mouse(&mut self, button: MouseButton, state: ElementState) {
+        let _ = dispatch_window_event(
+            &mut self.session,
+            &WindowEvent::MouseInput {
+                device_id: DeviceId::dummy(),
+                state,
+                button,
+            },
+        );
+    }
+
     /// The window telling the client it no longer has focus.
     ///
     /// A real `Focused(false)` handed to the whole window-event entry rather than
@@ -137,6 +180,30 @@ impl InputHarness {
     /// one rather than reading a repeat of the last.
     pub fn ticks(&mut self, ticks: u32) -> Vec<Arc<SimSnapshot>> {
         (0..ticks).filter_map(|_| self.tick()).collect()
+    }
+
+    /// One tick step, and what the action it carried did to the world.
+    ///
+    /// `None` is every tick that asked the world for nothing — which is a tick
+    /// with no world to advance, a tick no click preceded, and a click the
+    /// client declined to spend. Those three are told apart by what the caller
+    /// dispatched and by the platform log, not by this.
+    ///
+    /// The report is the client's own answer travelling back out, not something
+    /// this harness worked out: what a click became is exactly the question the
+    /// scenarios ask, so a harness that resolved it would answer itself.
+    pub fn edit(&mut self) -> Option<EditReport> {
+        self.session.tick()
+    }
+
+    /// What `ticks` tick steps report, in the order they reported it.
+    ///
+    /// A tick that asked for nothing contributes nothing, so the length is the
+    /// number of requests the run resolved and never the number of ticks — which
+    /// is what makes "one press is one action" a thing to count rather than a
+    /// thing to describe.
+    pub fn edits(&mut self, ticks: u32) -> Vec<EditReport> {
+        (0..ticks).filter_map(|_| self.edit()).collect()
     }
 
     /// The captures the platform was asked for, in order.

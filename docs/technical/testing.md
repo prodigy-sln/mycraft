@@ -744,7 +744,22 @@ at all: it is a fact about the compositor, not about the client's own dispatch. 
 become **three**, not one — narrowing further would drop either an unasserted behaviour or a fact no
 harness reaches, and neither stopped being true.
 
-Run `cargo run -p mc-client` from the checkout, then:
+**Run these at the physical machine. Never over remote desktop, and never through any session that
+virtualises the pointer** — RDP, VNC, Parsec, a VM console, a screen-sharing tool with input control.
+All three checks are about pointer *capture*, and a remote session sits between the compositor and
+the client precisely where the thing under test lives. It changes the answer in both directions: a
+correct build can fail these because the remote layer never delivered a relative motion, and a broken
+one can pass because the remote layer supplied a confinement the client never asked for.
+
+That matters more here than it would elsewhere, because these three are the **only** evidence pointer
+capture works at all. `winit::event::KeyEvent` is unconstructible outside `winit`, so nothing
+automated reaches them and no test would contradict a wrong result — a false failure recorded here
+has nothing standing against it, and would send someone changing working code. This is not
+hypothetical: runaway look was observed over RDP on a build that behaves correctly at the machine,
+filed as **PRO-882**. If the only access available is remote, record the check as *not run* rather
+than as failed.
+
+Run `cargo run -p mc-client` from the checkout at the machine itself, then:
 
 | # | Check | Observed |
 |---|-------|----------|
@@ -847,6 +862,119 @@ drain guard; phase 2 measured that claim false. Had the cut stood, the finished 
 scenario green, the gate green, validation passing — would have shipped with a mutation carrying
 **zero** falsifiers, at a site `docs/technical/architecture.md` §"The client input dispatch" names
 explicitly as a decision.
+
+### The break/place mutation table
+
+Raycast targeting, block break and place (PRO-854) is a second data point for the same discipline
+SPEC-006 established above, at a different site: the deliverable is the mutation table, not the
+scenario count. **15 named mutations, 21 biting spellings, every one measured dead** against the
+*finished* suite — `cargo nextest run --workspace --no-fail-fast`, with **467 tests confirmed executed
+on every single run**, which is what tells a mutant that failed to compile apart from one the suite
+actually killed. Every revert was by re-editing the line by hand, never `git checkout --`, with
+`git diff --exit-code` confirmed clean before the next spelling; the production tree finished the
+sweep byte-identical to where it started. No `*.proptest-regressions` files were written, because none
+of the sweep's failures came from a genuine regression.
+
+Three results did not bite, and are recorded beside their biting neighbours rather than dropped —
+because "did not bite" and "the scenario is vacuous" are otherwise indistinguishable (the same rule
+`standards/global/testing.md` §2 states for a non-biting mutation generally): a fold of both of
+`VoxelWorld`'s extent guards into one at the same site as mutation M, a plainer deletion of both extent
+guards at that site (derived from the call chain, deliberately *not* measured — mutating production
+code outside a real sweep buys nothing a reading of the code does not already show), and a mis-spelling
+of mutation F2 from the tick's already-limited state rather than its pre-tick one.
+
+**A mutation with a plural name has plural falsifier counts, confirmed a second time at a different
+site.** SPEC-006's mutation E (above) already established that a swap and a negation wearing one name
+are two different claims. Break/place adds a second shape of the same lesson: mutation L ("only the
+edited section is dirtied") has two spellings that are *not* the same mutation. Spelled narrowly — at
+the marking site itself, replacing the six-neighbour marking loop with marking only the edited section
+— it turns exactly one scenario red. Spelled by deleting the helper that supplies a section's meshing
+neighbours instead, it additionally strips the neighbours a section is meshed *against*, which is a
+**meshing defect, not a marking one**, and turns three tests red rather than one. A sweep that reported
+the wide spelling's three reds as mutation L's count would be reporting the spelling rather than the
+mutation — exactly the trap the plural-name rule exists to name.
+
+**A mutation whose falsifier would be a hang is not a falsifier.** The raycast's reach bound is a
+single site (`docs/technical/architecture.md` §"The editable world"): the traversal stops once the
+next voxel's entry distance exceeds the reach, with no second, independent distance check anywhere
+else. The mutation that would have removed the bound entirely ("the traversal's distance limit
+removed") was struck before it was ever spelled, because `Solidity` is total — it answers `false`
+everywhere outside the loaded world — so an unbounded traversal never terminates against a ray that
+meets nothing: its "falsifier" would be a hang, not a red assertion, which cannot be measured the way
+this discipline requires. The reach comparison's own deletion (a different mutation, at the same
+practical site) survived as a real, measurable spelling — but even it had to be designed around: the
+10 000-block exit criterion's rig (below) schedules its one deliberately-refused, out-of-reach
+operation as a **placement**, never a break. Spelled as a break, the reach-comparison deletion makes
+the far target's block disappear on round one; every later round then walks a ray toward a cell that
+is now empty, which never terminates against a total `Solidity` — measured at 116 seconds before being
+killed, rather than failing outright. A placement leaves the far block standing every round, so the
+same mutant terminates and reports red in the usual few seconds. A schedule that quietly used a break
+for that operation would trade a clean kill for a timeout, and a timeout is what an automated sweep
+records as inconclusive, not as a defect found.
+
+**Fixture geometry decides whether a scenario can grade anything, illustrated twice.** A one-press
+scenario aimed straight down at the fixture world's floor would find only the single cell under the
+player's feet and nothing beneath it — so a press that latched and re-fired every tick would still
+change exactly one block, and the scenario guarding against a latching press would report a kill it
+never made. The click-dispatch fixture's aim is derived to avoid exactly that: 280 raw counts of
+downward pointer motion, 0.616 rad, 35.29° below level, chosen so a latching press has somewhere
+further to go and its own control (the same aim clicked once per tick, which must change more than one
+block) can catch the difference at runtime rather than assume it. Separately, the edit-visibility
+scenarios pick their fixture section for the same reason: the world's landmark pillar is the one place
+in the replay where a whole section holds exactly one solid voxel, showing five faces that cannot
+merge with anything. A fixture surrounded by other solid blocks would leave most of an edit's faces
+already merged into a neighbour's quad, leaving a quad *count* blind to the very change the scenario
+exists to catch — a count cannot see shape, the same lesson the mesher and the scene contract both
+turn on. Both cases are the same principle from two directions: an assertion is only as strong as the
+geometry it is asked to distinguish, and that geometry is a constraint no assertion can enforce —
+it is held by the fixture's construction and by review.
+
+**When two independent refusal checks discard which one fired, no assertion about the outcome can
+grade either — mutation O's lesson, one layer lower.** Deleting the block-registration check earlier
+in this same feature (mutation O) left the store's own write refusing an unknown name anyway, so both
+worlds of that scenario's two-run comparison came back byte-identical and only the refusal's *name*
+differed — which is why every placement-refusal scenario asserts the refusal by name
+(`Refused(UnknownBlock { .. })`, never `Refused(Storage(..))`), not merely that nothing changed. The
+world's own bounds check repeats the same shape one level down, and this time the name is lost before
+any scenario can reach it at all: `World::block_at` ends in `.ok()`, which erases *which* `WorldError`
+fired, collapsing a section-array bound and a world-extent bound to the same `None`. An out-of-range
+index that **wraps** instead of refusing is caught by a scenario, because the wrap actually changes a
+different cell — but the plainer bypass, deleting the extent guards outright, is refused just as surely
+by a lower-level bound the `.ok()` has already discarded the identity of by the time any scenario-level
+assertion runs. No assertion about the *outcome* can tell that bypass apart from correct code, however
+the scenario is written. What catches it is a **unit test** that calls the write path directly and
+matches the error variant by name — graded outside the scenario↔mutation mapping the rest of the table
+uses, and recorded as a weaker guarantee than the rest of the table for exactly that reason, not netted
+out against it.
+
+### The 10 000-block exit criterion, and what makes it honest
+
+**MVP 1 exit criterion** — read as *this spec's* criterion, not as MVP 1 finished: a scripted replay
+drives at least 10 000 successful placements and at least 10 000 successful breaks through the same
+request, targeting and edit path a click uses, in one continuous run, and the resulting world is
+asserted against the world the schedule says it should produce. Four conditions are what keep that
+assertion from grading nothing:
+
+- **The expected world is derived by arithmetic before any `Simulation` exists**, folded from the
+  schedule itself rather than read back from a run — the same derived-oracle discipline as everywhere
+  else in this document, applied at world scale. The schedule's own operation counts are pinned
+  against the criterion **at compile time** — `const _: () = assert!(PLACES >= CRITERION);` and the
+  same for breaks — stating the criterion where it cannot drift away from the schedule that has to
+  meet it. A schedule edited down below 10 000 fails to build; it is not a shortfall a green run
+  could quietly absorb.
+- **Aim is computed from the simulation's own published eye, never from the state the test built the
+  fixture with**, so the raycast under test is what resolves a chosen cell into a hit, and the schedule
+  cannot silently script around it — the aim reuses the server's own state, never its targeting.
+- **The schedule deliberately contains operations that must be refused** — a target beyond the 5.0
+  block reach, a target whose definition names no block it breaks into, a placement into an occupied
+  cell — and `EditReport` is asserted to name the intended refusal for each, so "succeeded at
+  everything" and "did the correct thing" are answers a passing run can tell apart.
+- **The assertion is over block identities at coordinates across every one of the world's 65 536
+  cells, never over an operation count.** The comparison walks the whole extent — a one-column
+  footprint, 16 × 256 × 16 — not merely the cells the schedule meant to touch, so a cell changed
+  that no operation named is caught alongside a cell that failed to change. A count cannot see
+  shape: a rig that changed the wrong cells the right number of times satisfies a bare success
+  count and fails this one.
 
 ### An absent reviewer and a clean reviewer look identical
 

@@ -223,6 +223,19 @@ pub fn on_ground(feet: Vec3, world: &dyn Solidity) -> bool {
     overlaps(Aabb::around(feet).lowered(CONTACT_DEPTH), world)
 }
 
+/// Whether the player's own box stands in the voxel `at`.
+///
+/// Built from the same [`Aabb::around`] and [`voxels`] the collision resolution
+/// is, so [`HALF_WIDTH`], [`HEIGHT`] and the half-open `[v, v + 1)` rule are
+/// stated once and read here rather than restated. A placement asks this of the
+/// cell it would land in, and the box is 1.8 blocks tall — so it stands in **two**
+/// voxel rows, and an answer about the row the feet are in is an answer about
+/// half the player.
+#[must_use]
+pub(crate) fn occupies(feet: Vec3, at: BlockPos) -> bool {
+    voxels(Aabb::around(feet)).any(|voxel| voxel == at)
+}
+
 /// Whether any solid voxel lies inside `area`.
 fn overlaps(area: Aabb, world: &dyn Solidity) -> bool {
     voxels(area).any(|at| world.is_solid(at))

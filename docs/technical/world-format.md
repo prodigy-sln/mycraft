@@ -90,6 +90,19 @@ write**: a palette position past the widest tier (16 bits, 65536 entries)
 is rejected by the packed-index writer, never truncated. A rejected write
 is always the outcome — never a silently different block.
 
+**A repeatedly-edited section is bounded by the names it sees, not by the edit count.**
+`Palette::replace` finds an existing entry — including one whose refcount has
+fallen to zero — before appending a new one, so a palette grows only on the
+*first* write of a name it does not already hold. After *N* edits touching *K*
+distinct names, a section's palette length is bounded by `initial + K`,
+independent of *N*. A single voxel toggled back and forth between two blocks
+ten thousand times does not grow the palette past two entries beyond its
+starting length; ten thousand edits scattered across a handful of block
+types bound the palette by that handful, not by ten thousand. This is what
+keeps a section that a player edits over and over from growing an index tier
+under the weight of repetition alone — the index width still only widens when
+a genuinely new name is introduced, never merely because edits accumulated.
+
 ## Section format
 
 A section is `SECTION_SIZE`³ = 4096 voxels (`SECTION_SIZE = 16`, and
@@ -174,6 +187,21 @@ because half of any world sits at negative x or z, and there is
 deliberately no dimension concept: a column is identified by (x, z) alone.
 `ChunkColumn` does not own a map, streaming, or eviction policy; columns
 are held by whatever caller owns them.
+
+## The world: columns addressed by `WorldPos`
+
+Above a single column sits `mc_world::world::VoxelWorld`, which owns a footprint of columns and
+exposes `block_at`, `set_block`, `column`, `columns` and `extent` over them — this is the type break
+and place edits through (`docs/technical/architecture.md` §"The editable world"), and what PRO-855
+will persist. Its coordinate type, `WorldPos { x: u32, y: u32, z: u32 }`, is **unsigned** — the
+project's world footprint sits entirely in the positive octant, so the one place a sign needs
+checking is the conversion from a signed block position into a `WorldPos`, and that conversion is
+where a negative coordinate is refused. Nothing downstream of it needs to check again.
+
+`Extent { x, y, z }`, the type a caller uses to describe a world's footprint, lives here too — moved
+from `mc-sim`, which re-exports it from its old path so existing fixtures keep compiling. A
+`VoxelWorld` cannot hand back a type declared in a crate two levels further from `mc-core`, so the
+type followed the data it describes rather than staying where its first caller happened to be.
 
 ## Two conventions worth stating explicitly
 

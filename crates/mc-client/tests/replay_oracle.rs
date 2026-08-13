@@ -205,9 +205,15 @@ struct Judged {
 ///
 /// The world and the registry outlive the frames because the controls march a
 /// second time, from a camera the player never published.
+///
+/// The registry is a shared handle rather than a value of its own, because the
+/// simulation the preparation built holds it for the life of the run. The oracle
+/// below still reads it directly and re-resolves every name it finds, which is
+/// what keeps its judgement a separate lookup chain from the pre-resolved bitset
+/// the physics reads — sharing the registry is not sharing the resolution.
 struct Session {
     world: ReplayWorld,
-    registry: BlockRegistry,
+    registry: Arc<BlockRegistry>,
     frames: Vec<Judged>,
 }
 

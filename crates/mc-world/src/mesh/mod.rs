@@ -31,7 +31,7 @@ use thiserror::Error;
 use crate::section::{LocalPos, SectionError};
 
 pub use facing::Facing;
-pub use neighbours::Neighbours;
+pub use neighbours::{Neighbours, beside};
 pub use sweep::mesh_section;
 
 /// Where a quad starts inside its plane.

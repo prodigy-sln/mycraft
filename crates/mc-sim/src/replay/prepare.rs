@@ -20,7 +20,7 @@
 
 use mc_core::block::BlockRegistry;
 use mc_world::column::{ColumnCoordinate, SECTIONS_PER_COLUMN};
-use mc_world::mesh::{Facing, MeshError, Neighbours, Quad, mesh_section};
+use mc_world::mesh::{Facing, MeshError, Neighbours, Quad, beside, mesh_section};
 use mc_world::section::{SECTION_SIZE, Section};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use thiserror::Error;
@@ -84,12 +84,15 @@ pub fn mesh_all(
 /// does not stack simply produces no entry here, and a caller counting the
 /// results is what notices — an error variant for it would be an error nothing
 /// could raise.
-struct SectionWork<'a> {
-    column: ColumnCoordinate,
-    section_index: usize,
-    origin: [i32; 3],
-    section: &'a Section,
-    neighbours: Neighbours<'a>,
+/// Crate-visible because a re-mesh assembles the same five facts out of an owned
+/// batch instead of out of a world, and then wants the *same* meshing step —
+/// down to how a failure names where it happened.
+pub(crate) struct SectionWork<'a> {
+    pub(crate) column: ColumnCoordinate,
+    pub(crate) section_index: usize,
+    pub(crate) origin: [i32; 3],
+    pub(crate) section: &'a Section,
+    pub(crate) neighbours: Neighbours<'a>,
 }
 
 /// Every section of the world, in the declared assembly order.
@@ -117,65 +120,84 @@ fn section_work(
     // was found by, so a world that ever sits somewhere other than the origin
     // reports where its sections actually are.
     let coordinate = column.coordinate();
-    let size = SECTION_SIZE as i32;
     Some(SectionWork {
         column: coordinate,
         section_index,
-        origin: [
-            coordinate.x * size,
-            section_index as i32 * size,
-            coordinate.z * size,
-        ],
+        origin: section_origin(coordinate, section_index),
         section: column.section(section_index)?,
-        neighbours: around(world, column_x, column_z, section_index),
+        neighbours: around(
+            |at, index| section_held_by(world, at, index),
+            coordinate,
+            section_index,
+        ),
     })
 }
 
-/// The six sections around one, each supplied when the footprint has it.
+/// Where a section's near corner sits in the world, in blocks.
 ///
-/// Anything outside the footprint is left absent, so the world's outer shell and
-/// its floor show faces rather than being sealed against content that does not
-/// exist. Every interior boundary *is* supplied — a section meshed in isolation
-/// would emit six walls of faces buried inside the world, which the independent
-/// per-voxel walk reports as a disagreement of exactly that size.
-fn around(
-    world: &ReplayWorld,
-    column_x: u32,
-    column_z: u32,
-    section_index: usize,
-) -> Neighbours<'_> {
-    let mut neighbours = Neighbours::none();
-    let sideways = [
-        (Facing::NegX, column_x.checked_sub(1), Some(column_z)),
-        (Facing::PosX, Some(column_x + 1), Some(column_z)),
-        (Facing::NegZ, Some(column_x), column_z.checked_sub(1)),
-        (Facing::PosZ, Some(column_x), Some(column_z + 1)),
-    ];
-    for (facing, beside_x, beside_z) in sideways {
-        if let Some(section) = beside_x
-            .zip(beside_z)
-            .and_then(|(x, z)| world.column(x, z))
-            .and_then(|column| column.section(section_index))
-        {
-            neighbours = neighbours.with(facing, section);
-        }
-    }
+/// Stated once because a re-mesh needs the same answer for a section it was
+/// handed on its own, with no column in scope to read it off.
+pub(crate) const fn section_origin(column: ColumnCoordinate, section_index: usize) -> [i32; 3] {
+    let size = SECTION_SIZE as i32;
+    [
+        column.x * size,
+        section_index as i32 * size,
+        column.z * size,
+    ]
+}
 
-    let column = world.column(column_x, column_z);
-    let vertically = [
-        (Facing::NegY, section_index.checked_sub(1)),
-        (Facing::PosY, Some(section_index + 1)),
-    ];
-    for (facing, above_or_below) in vertically {
-        if let Some(section) = above_or_below.and_then(|index| column?.section(index)) {
+/// The six sections around one, each supplied when `section_at` has it.
+///
+/// Anything the source does not hold is left absent, so the world's outer shell
+/// and its floor show faces rather than being sealed against content that does
+/// not exist. Every interior boundary *is* supplied — a section meshed in
+/// isolation would emit six walls of faces buried inside the world, which the
+/// independent per-voxel walk reports as a disagreement of exactly that size.
+///
+/// **Keyed by where a section is and not by where it was found.** The lookup is
+/// a parameter because a re-mesh resolves the same six neighbours out of an
+/// owned batch rather than out of a world, and the arithmetic that names them is
+/// the part that must not be written twice.
+///
+/// Where each neighbour *is* comes from [`beside`], so a facing's own axis and
+/// sign decide both which column is beside this one and which section is above
+/// or below it. Writing them out here would be a second table of the same fact —
+/// and a re-mesh marking an edit's neighbours dirty asks that same question
+/// without a world in hand to answer it with.
+pub(crate) fn around<'a>(
+    section_at: impl Fn(ColumnCoordinate, usize) -> Option<&'a Section>,
+    column: ColumnCoordinate,
+    section_index: usize,
+) -> Neighbours<'a> {
+    let mut neighbours = Neighbours::none();
+    for facing in Facing::ALL {
+        if let Some(section) = beside(column, section_index, facing)
+            .and_then(|(column, index)| section_at(column, index))
+        {
             neighbours = neighbours.with(facing, section);
         }
     }
     neighbours
 }
 
+/// The section a world holds at a column coordinate, or nothing where it holds
+/// no such column.
+///
+/// The one place this crate reads a signed column coordinate back as the
+/// unsigned footprint index the replay's world is addressed by, and it refuses a
+/// negative rather than converting it.
+fn section_held_by(
+    world: &ReplayWorld,
+    column: ColumnCoordinate,
+    section_index: usize,
+) -> Option<&Section> {
+    let column_x = u32::try_from(column.x).ok()?;
+    let column_z = u32::try_from(column.z).ok()?;
+    world.column(column_x, column_z)?.section(section_index)
+}
+
 /// One section's quads, or the refusal naming where it sits.
-fn mesh_one(
+pub(crate) fn mesh_one(
     work: &SectionWork<'_>,
     registry: &BlockRegistry,
 ) -> Result<SectionQuads, PrepareError> {

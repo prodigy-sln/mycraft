@@ -68,12 +68,21 @@ fn a_section_that_cannot_be_meshed_fails_the_preparation_naming_its_column_and_i
 }
 
 /// A registry that knows one block, and it is not one the world holds.
+///
+/// It names no block it breaks into, because naming one would be naming a second
+/// block this registry does not know either — and the refusal under test is about
+/// the name the *world* holds, which has to be the only one missing. The other
+/// two fields a definition carries are left at what saying nothing about them
+/// means, for the same reason: nothing here breaks or places anything.
 fn foreign_registry() -> Result<BlockRegistry, Box<dyn Error>> {
     let origin = DefinitionOrigin::new(FIXTURE_ORIGIN);
     let definition = BlockDefinition {
         name: BlockName::parse(FOREIGN)?,
         texture: TextureKey::parse(FOREIGN)?,
         is_solid: true,
+        replaceable: false,
+        breakable: true,
+        breaks_into: None,
         origin: origin.clone(),
     };
     let mut registry = BlockRegistry::new();

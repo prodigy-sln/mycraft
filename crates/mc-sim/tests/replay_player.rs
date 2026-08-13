@@ -74,10 +74,15 @@ const TURN_TO_TICK: u32 = 90;
 const TURN_DEGREES: f32 = 30.0;
 
 /// The declared world, and a simulation of it with the player at its spawn.
+///
+/// The registry is shared rather than borrowed, because the simulation's world
+/// holds it for the life of the run: every edit resolves the name it writes
+/// against the same registry the world's solidity was resolved against, and
+/// there is no second registry for the two to disagree about.
 fn replay() -> Result<(ReplayWorld, Simulation), Box<dyn Error>> {
-    let registry = content_registry()?;
+    let registry = Arc::new(content_registry()?);
     let world = replay_world(&registry)?;
-    let simulation = simulation_for(&world, &registry)?;
+    let simulation = simulation_for(&world, Arc::clone(&registry))?;
     Ok((world, simulation))
 }
 

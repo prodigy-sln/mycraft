@@ -18,6 +18,7 @@ use mc_core::block::BlockRegistry;
 use mc_core::id::{BlockName, NamespacedIdError};
 use mc_world::column::{ChunkColumn, ColumnCoordinate, ColumnPos};
 use mc_world::section::{SECTION_SIZE, SectionError};
+use mc_world::world::{VoxelWorld, WorldError, WorldPos};
 use thiserror::Error;
 
 use super::height::heightmap;
@@ -69,12 +70,22 @@ fn named(text: &str) -> Result<BlockName, WorldGenError> {
 }
 
 /// The replay's world: a fixed footprint of columns, generated from a seed.
+///
+/// The blocks are held in a [`VoxelWorld`] and every query below delegates to
+/// it. What is left here is what is the *replay's* rather than any world's: the
+/// declared strata, the seed they are drawn from, and the heightmap the
+/// declaration is stated against.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplayWorld {
     /// Columns in the declared assembly order: `(cz, cx)` ascending.
-    columns: Vec<ChunkColumn>,
+    blocks: VoxelWorld,
     /// One surface height per block column, x fastest.
     heights: Vec<u32>,
+    /// The block an open column holds, kept so that a simulation editing a copy
+    /// of this world knows what emptying a cell means without naming a block
+    /// itself. It is the same name [`Strata::sky`] fills a column with, and this
+    /// file is the one place in the production tree allowed to spell it.
+    sky: BlockName,
 }
 
 impl ReplayWorld {
@@ -96,12 +107,37 @@ impl ReplayWorld {
             };
             columns.push(draw_column(&strata, registry, coordinate, &heights)?);
         }
-        Ok(Self { columns, heights })
+        Ok(Self {
+            blocks: VoxelWorld::assembled(FOOTPRINT_COLUMNS, columns)?,
+            heights,
+            sky: strata.sky,
+        })
+    }
+
+    /// The block this world's open columns are filled with.
+    ///
+    /// Handed out so that emptying a cell is a name the *world* supplies rather
+    /// than one the engine picks: what a break leaves behind where content names
+    /// no residue is whatever this world means by nothing being there.
+    #[must_use]
+    pub const fn sky(&self) -> &BlockName {
+        &self.sky
     }
 
     /// Every column, in the declared assembly order: `(cz, cx)` ascending.
     pub fn columns(&self) -> impl Iterator<Item = &ChunkColumn> {
-        self.columns.iter()
+        self.blocks.columns()
+    }
+
+    /// The blocks this world is made of.
+    ///
+    /// Handed out by reference so a simulation can take a copy to edit while the
+    /// world a frame is meshed from stays exactly as it was generated. A `&mut`
+    /// would make this the editable world, which it is deliberately not — the
+    /// replay is a fixture, and what edits it is the simulation's own copy.
+    #[must_use]
+    pub const fn blocks(&self) -> &VoxelWorld {
+        &self.blocks
     }
 
     /// The surface height of the block column at `(x, z)`, or nothing outside
@@ -114,30 +150,14 @@ impl ReplayWorld {
     /// The block held at a world position, or nothing outside the world.
     #[must_use]
     pub fn block_at(&self, x: u32, y: u32, z: u32) -> Option<&BlockName> {
-        let column = self.column(x >> SECTION_SHIFT, z >> SECTION_SHIFT)?;
-        column
-            .block_at(ColumnPos {
-                x: x & SECTION_MASK,
-                y,
-                z: z & SECTION_MASK,
-            })
-            .ok()
+        self.blocks.block_at(WorldPos { x, y, z }).ok()
     }
 
     /// The column at `(column_x, column_z)` in column coordinates.
     pub(super) fn column(&self, column_x: u32, column_z: u32) -> Option<&ChunkColumn> {
-        if column_x >= FOOTPRINT_COLUMNS || column_z >= FOOTPRINT_COLUMNS {
-            return None;
-        }
-        self.columns
-            .get((column_z * FOOTPRINT_COLUMNS + column_x) as usize)
+        self.blocks.column(column_x, column_z)
     }
 }
-
-/// How far a world coordinate is shifted to name the column holding it, and the
-/// mask that reads back the position inside that column.
-const SECTION_SHIFT: u32 = SECTION_SIZE.trailing_zeros();
-const SECTION_MASK: u32 = SECTION_SIZE - 1;
 
 /// Where a block column sits in the heightmap, or nothing outside the footprint.
 fn column_offset(x: u32, z: u32) -> Option<usize> {
@@ -291,4 +311,6 @@ pub enum WorldGenError {
     OutsideFootprint { x: u32, z: u32 },
     #[error(transparent)]
     Section(#[from] SectionError),
+    #[error(transparent)]
+    World(#[from] WorldError),
 }

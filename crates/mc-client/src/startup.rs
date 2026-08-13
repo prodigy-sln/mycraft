@@ -46,12 +46,24 @@ const CONTENT_ROOT: [&str; 2] = ["content", "base"];
 /// does. Handing them back rather than generating a second world in the
 /// composition root is what keeps the world a frame is drawn of and the world a
 /// player walks on the same world.
+///
+/// The registry is shared rather than handed over, because the simulation holds
+/// one for the whole run — every edit resolves the name it writes against the
+/// same registry the world was resolved against — and the caller keeps reading
+/// the same one.
+/// The meshed sections are carried for a third reason again: an edit re-meshes
+/// the sections it touched and puts them back where they were, so whatever
+/// re-meshes has to hold the list it is putting them back into. Nothing retained
+/// it before — [`prepare_scene`] computed it, packed it and dropped it — and a
+/// second whole-world mesh to recover it would be both slow and a second answer
+/// to a question the first one already answered.
 #[derive(Debug)]
 pub struct PreparedScene {
     pub scene: SceneGeometry,
     pub layers: TextureLayers,
+    pub meshed: Vec<SectionQuads>,
     pub world: ReplayWorld,
-    pub registry: BlockRegistry,
+    pub registry: Arc<BlockRegistry>,
 }
 
 /// Why the replay could not be prepared.
@@ -83,6 +95,11 @@ pub enum PreparationError {
     Upload(#[from] RendererError),
     #[error("the replay world could not be turned into a simulation to play in")]
     Spawn(#[from] SpawnError),
+    #[error(
+        "the content registers no solid block, so a player would have nothing to place; the \
+         block a client holds is the first solid one in registration order"
+    )]
+    NothingToPlace,
     #[error("the thread preparing the replay ended without producing a scene or an error")]
     WorkerLost,
 }
@@ -160,19 +177,46 @@ pub fn prepare_scene(root: &Path) -> Result<PreparedScene, PreparationError> {
     let meshed = mesh_all(&world, &registry)?;
     let layers = TextureLayers::resolve(&texture_keys(&meshed)?);
 
+    Ok(PreparedScene {
+        scene: scene_of(&meshed, &layers)?,
+        layers,
+        meshed,
+        world,
+        registry: Arc::new(registry),
+    })
+}
+
+/// Packs meshed sections into one scene the renderer can be handed.
+///
+/// **The half of the preparation an edit repeats**, which is why it is a
+/// function rather than four statements inside the sequence above: a re-mesh
+/// splices its sections back into the meshed list and then needs exactly this,
+/// and a second spelling of it would be a second answer to what the renderer is
+/// shown.
+///
+/// It touches no device, opens no window and spawns no thread, so what a scene
+/// is made of can be asserted with none of the three present.
+///
+/// **The layers are a parameter and are never re-resolved here.** They are
+/// assigned from the *initially meshed* quads' keys; resolving over every
+/// registered block instead would insert a key at position 0 and shift every
+/// layer index, which rewrites every committed golden frame.
+///
+/// # Errors
+///
+/// Returns [`PreparationError::Geometry`] when a section cannot be packed and
+/// [`PreparationError::Scene`] when the packed sections cannot be assembled.
+pub fn scene_of(
+    meshed: &[SectionQuads],
+    layers: &TextureLayers,
+) -> Result<SceneGeometry, PreparationError> {
     let geometry = meshed
         .iter()
         .map(|section| {
-            build_section_geometry(&section.quads, SectionOrigin::new(section.origin), &layers)
+            build_section_geometry(&section.quads, SectionOrigin::new(section.origin), layers)
         })
         .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(PreparedScene {
-        scene: SceneGeometry::assemble(geometry)?,
-        layers,
-        world,
-        registry,
-    })
+    Ok(SceneGeometry::assemble(geometry)?)
 }
 
 /// Every texture key the meshed world's quads reference.

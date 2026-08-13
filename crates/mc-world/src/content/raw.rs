@@ -20,6 +20,26 @@ pub(super) const NAME_FIELD: &str = "name";
 const TEXTURE_FIELD: &str = "texture";
 /// The key a declaration states its solidity in.
 const SOLID_FIELD: &str = "solid";
+/// The key a declaration states whether it may be built over in.
+const REPLACEABLE_FIELD: &str = "replaceable";
+/// The key a declaration states whether it can be broken at all in.
+const BREAKABLE_FIELD: &str = "breakable";
+/// The key a declaration names what it breaks into by.
+const BREAKS_INTO_FIELD: &str = "breaks_into";
+
+/// What a declaration means by saying nothing about being built over.
+///
+/// The conservative half: a block that does not say so cannot be built through,
+/// so a content author who forgets the key loses a placement rather than a
+/// block.
+const REPLACEABLE_BY_DEFAULT: bool = false;
+
+/// What a declaration means by saying nothing about being breakable.
+///
+/// Breakable is the ordinary case, and a sandbox whose blocks were
+/// indestructible until each said otherwise would be the wrong default to make
+/// content carry.
+const BREAKABLE_BY_DEFAULT: bool = true;
 
 /// A block declaration as read, before anything about it has been checked.
 ///
@@ -35,6 +55,18 @@ pub(super) struct RawBlockDefinition {
     name: Option<Value>,
     texture: Option<Value>,
     solid: Option<Value>,
+    /// Optional in a way the three above are not: absent is a meaningful state
+    /// — a block nothing may be built over — rather than a declaration somebody
+    /// forgot to write. The same is true of the two below, and all three still
+    /// have to be spelled here, because `deny_unknown_fields` would otherwise
+    /// refuse every file that declared one.
+    replaceable: Option<Value>,
+    /// Absent means breakable. The three fields are independent claims: a block
+    /// may be indestructible and still name a residue, and a breakable block
+    /// need not name one.
+    breakable: Option<Value>,
+    /// Absent means breaking this block leaves the cell empty.
+    breaks_into: Option<Value>,
 }
 
 impl RawBlockDefinition {
@@ -75,12 +107,29 @@ impl RawBlockDefinition {
         let name = required_text(self.name.as_ref(), NAME_FIELD)?;
         let texture = required_text(self.texture.as_ref(), TEXTURE_FIELD)?;
         let is_solid = required_boolean(self.solid.as_ref(), SOLID_FIELD)?;
+        let replaceable = optional_boolean(
+            self.replaceable.as_ref(),
+            REPLACEABLE_FIELD,
+            REPLACEABLE_BY_DEFAULT,
+        )?;
+        let breakable = optional_boolean(
+            self.breakable.as_ref(),
+            BREAKABLE_FIELD,
+            BREAKABLE_BY_DEFAULT,
+        )?;
+        let breaks_into = optional_text(self.breaks_into.as_ref(), BREAKS_INTO_FIELD)?;
         Ok(BlockDefinition {
             name: BlockName::parse(&name)
                 .map_err(|error| FieldFault::invalid(NAME_FIELD, &error))?,
             texture: TextureKey::parse(&texture)
                 .map_err(|error| FieldFault::invalid(TEXTURE_FIELD, &error))?,
             is_solid,
+            replaceable,
+            breakable,
+            breaks_into: breaks_into
+                .map(|declared| BlockName::parse(&declared))
+                .transpose()
+                .map_err(|error| FieldFault::invalid(BREAKS_INTO_FIELD, &error))?,
             origin: origin.clone(),
         })
     }
@@ -128,6 +177,46 @@ fn required_text(declared: Option<&Value>, field: &'static str) -> Result<String
         .as_str()
         .map(str::to_owned)
         .ok_or_else(|| FieldFault::wrong_kind(field, value, "a string"))
+}
+
+/// A field that need not be declared, but that has to be text where it is.
+///
+/// A field left out is `None` and a field written as something other than a
+/// string is still a fault: "the author did not declare this" and "the author
+/// declared it wrongly" are different mistakes, and collapsing the second into
+/// the first is how a typed `breaks_into = 3` becomes an indestructible block.
+fn optional_text(
+    declared: Option<&Value>,
+    field: &'static str,
+) -> Result<Option<String>, FieldFault> {
+    declared
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| FieldFault::wrong_kind(field, value, "a string"))
+        })
+        .transpose()
+}
+
+/// A boolean field that need not be declared, but that has to be a boolean where
+/// it is.
+///
+/// The default carries a meaning of its own, which is why it is a parameter and
+/// not a `false`: a block saying nothing about being breakable is breakable, and
+/// one saying nothing about being built over is not replaceable. A value of the
+/// wrong kind is still a fault — collapsing `breakable = "no"` into the default
+/// would silently ship a breakable block to an author who declared the opposite.
+fn optional_boolean(
+    declared: Option<&Value>,
+    field: &'static str,
+    absent: bool,
+) -> Result<bool, FieldFault> {
+    declared.map_or(Ok(absent), |value| {
+        value
+            .as_bool()
+            .ok_or_else(|| FieldFault::wrong_kind(field, value, "true or false"))
+    })
 }
 
 fn required_boolean(declared: Option<&Value>, field: &'static str) -> Result<bool, FieldFault> {

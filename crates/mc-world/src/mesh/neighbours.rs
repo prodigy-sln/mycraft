@@ -13,12 +13,39 @@
 //! reading that as "no neighbours at all" would put a seam under everything that
 //! has not arrived yet.
 
+use crate::column::ColumnCoordinate;
 use crate::section::Section;
 
 use super::Facing;
 
 /// How many sections surround one.
 const AROUND_A_SECTION: usize = Facing::ALL.len();
+
+/// Where the section beyond `facing` sits, as a column and an index into it.
+///
+/// **The one statement of that arithmetic.** A facing's own axis and sign decide
+/// both which column is beside this one and which section is above or below it,
+/// and everything that needs to name a neighbour — meshing a world, meshing a
+/// batch, marking an edit's neighbours dirty — needs the same answer. A second
+/// spelling of it is a second place a neighbour can be named wrongly, which
+/// produces a plausible mesh decided against the wrong section.
+///
+/// `None` where the arithmetic itself does not land anywhere: a column past the
+/// far end of the coordinate, or a section below the bottom of a column. Whether
+/// a world *holds* what this names is the caller's question, and a different one.
+#[must_use]
+pub fn beside(
+    column: ColumnCoordinate,
+    section_index: usize,
+    facing: Facing,
+) -> Option<(ColumnCoordinate, usize)> {
+    let [across, up, along] = facing.step();
+    let beside = ColumnCoordinate {
+        x: column.x.checked_add(across)?,
+        z: column.z.checked_add(along)?,
+    };
+    Some((beside, section_index.checked_add_signed(up as isize)?))
+}
 
 /// The sections beyond each of a section's six faces.
 #[derive(Debug, Clone, Copy)]

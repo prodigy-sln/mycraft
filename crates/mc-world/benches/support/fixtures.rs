@@ -211,11 +211,19 @@ fn fixture_registry() -> Result<BlockRegistry, Box<dyn Error>> {
 }
 
 /// One block, textured by its own name and carrying the solidity given for it.
+///
+/// Nothing it could declare about being broken or built over is stated: the
+/// budget these fixtures exist for is the mesher's, and a section is meshed from
+/// solidity and texture keys alone. Any of the three would be a field the
+/// measured work never reads.
 fn definition(name: &str, is_solid: bool) -> Result<BlockDefinition, NamespacedIdError> {
     Ok(BlockDefinition {
         name: BlockName::parse(name)?,
         texture: TextureKey::parse(name)?,
         is_solid,
+        replaceable: false,
+        breakable: true,
+        breaks_into: None,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
     })
 }

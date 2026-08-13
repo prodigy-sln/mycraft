@@ -104,10 +104,18 @@ impl BlockVolume for NamedSlab {
 pub fn registry_declaring(blocks: &[(&str, bool)]) -> Result<BlockRegistry, Box<dyn Error>> {
     let mut declared = Vec::with_capacity(blocks.len());
     for &(name, is_solid) in blocks {
+        // Solidity is the one property these declarations are about, and it is
+        // stated per block above. The scenarios this registry serves resolve
+        // solidity and never breakability, replaceability or a residue, so each
+        // of those is left at what a declaration saying nothing about it means;
+        // the fixtures that do break blocks declare their own registry.
         declared.push(Ok(BlockDefinition {
             name: BlockName::parse(name)?,
             texture: TextureKey::parse(name)?,
             is_solid,
+            replaceable: false,
+            breakable: true,
+            breaks_into: None,
             origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
         }));
     }

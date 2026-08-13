@@ -185,7 +185,7 @@ fn pointer_motion_dispatched_before_the_world_lands_turns_the_camera_at_its_firs
     let mut early = InputHarness::started();
     early.move_pointer(RAW_COUNTS, 0.0);
     let published_before_the_world = early.ticks(TICKS_BEFORE_THE_WORLD);
-    early.start_world();
+    early.start_world()?;
     let first = early
         .tick()
         .ok_or("a tick over a started world publishes a snapshot")?;
@@ -212,7 +212,7 @@ fn pointer_motion_dispatched_before_the_world_lands_turns_the_camera_at_its_firs
 #[test]
 fn a_refused_lock_is_followed_by_a_confined_pointer_the_motion_still_reaches() -> TestResult {
     let mut confined = InputHarness::granting(&CONFINES_ONLY);
-    confined.start_world();
+    confined.start_world()?;
     confined.move_pointer(RAW_COUNTS, 0.0);
     let turned = confined
         .tick()
@@ -249,7 +249,7 @@ fn camera_after_one_tick(
     mut harness: InputHarness,
     dispatched: impl FnOnce(&mut InputHarness),
 ) -> Result<CameraPose, Box<dyn Error>> {
-    harness.start_world();
+    harness.start_world()?;
     dispatched(&mut harness);
     let published = harness
         .tick()

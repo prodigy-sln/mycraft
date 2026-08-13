@@ -21,6 +21,8 @@
 
 mod support;
 
+use std::sync::Arc;
+
 use glam::Vec3;
 use mc_sim::replay::{SCRIPT_TICKS, TickIndex, scripted_intent, simulation_for};
 
@@ -48,9 +50,14 @@ fn inside_the_pillar() -> Vec3 {
 
 #[test]
 fn no_tick_of_the_declared_replay_leaves_the_player_inside_a_solid_voxel() -> TestResult {
-    let registry = content_registry()?;
+    // The simulation's world holds the registry for the life of the run, so it
+    // is shared rather than borrowed. The oracle below still reads its own copy
+    // of the handle and re-resolves every name it finds through it, which is the
+    // whole point of this test — one registry, but two lookup chains, so an
+    // adapter that resolved a name wrongly cannot make both sides wrong alike.
+    let registry = Arc::new(content_registry()?);
     let world = replay_world(&registry)?;
-    let mut simulation = simulation_for(&world, &registry)?;
+    let mut simulation = simulation_for(&world, Arc::clone(&registry))?;
     let mut standing = vec![simulation.latest().player.position];
     let mut buried = Vec::new();
 

@@ -30,6 +30,8 @@ pub mod app;
 pub mod events;
 /// Adapter facts, the startup verdict, and opening a device.
 pub mod gpu_startup;
+/// Turning an edit into a scene, off the tick thread and off the frame thread.
+pub mod remesh;
 /// The client's input dispatch, drivable with no window and no adapter.
 pub mod session;
 /// Turning shipped content into a scene the renderer can draw.

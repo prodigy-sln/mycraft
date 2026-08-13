@@ -3,17 +3,19 @@
 //!
 //! **The concurrent publish is no longer expressible, which is why the old test
 //! here is gone — but not because the signature fends off a race.** `advance`
-//! takes `&mut self` because a tick assigns `self.player`, a plain field sitting
-//! *beside* the `ArcSwap` rather than inside it, and an `&self` method cannot
-//! assign to it at all; the signature follows from where the state lives. The
-//! lost update it looks like it is guarding against is unreachable anyway:
-//! `Solidity` declares no `Sync` supertrait, so `Simulation` is `Send` but *not*
-//! `Sync` and no two threads can hold `&Simulation` at all. Either fact on its
-//! own sinks the old test, which held `&Simulation` on one thread while another
-//! published. "Publishing never waits on a reader" survives as a property of
-//! publication and stops being observable until a second thread reads a snapshot,
-//! which is a deferred decision rather than this feature's. `latest(&self)` is
-//! unchanged, so no reader is affected.
+//! takes `&mut self` because a tick assigns `self.player` and now edits the world
+//! it owns, both sitting *beside* the `ArcSwap` rather than inside it, and an
+//! `&self` method cannot assign to either. The old test held `&Simulation` on one
+//! thread while another published, and an exclusive borrow makes that shape
+//! unwritable whatever else is true of the type. It is worth being exact about
+//! what changed: the world used to be a trait object declaring no `Sync`
+//! supertrait, so `Simulation` was `Send` and not `Sync` and no two threads could
+//! hold `&Simulation` at all. The world is a concrete type now and every field of
+//! it is `Sync`, so that second reason is gone and the borrow is the whole of it.
+//! "Publishing never waits on a reader" survives as a property of publication and
+//! stops being observable until a second thread reads a snapshot, which is a
+//! deferred decision rather than this feature's. `latest(&self)` is unchanged, so
+//! no reader is affected.
 //!
 //! What remains is the other half of the same guarantee: holding a snapshot is
 //! only useful if nothing can rewrite it underneath the holder. It compares the
@@ -26,16 +28,26 @@
 //! *intent script*, not a period of the simulation: a windowed client runs for as
 //! long as its window is open, and a tick that restarted at 0 would republish an
 //! old tick number to everything downstream that reads one.
+//!
+//! **The world is declared block by block rather than by a predicate.** Nothing
+//! here is about the terrain — it is about what publication does with whatever
+//! the tick produced — but the simulation owns an editable world now, so a
+//! fixture answering "is this solid" is no longer something it can be built from.
+//! The declaration is the smallest one that holds the player up: one chunk column
+//! and one layer of floor, with the feet on its top face.
 
 mod support;
+
+use std::error::Error;
 
 use glam::Vec3;
 use mc_sim::player::{MovementIntent, PlayerState};
 use mc_sim::replay::SCRIPT_TICKS;
 use mc_sim::simulation::Simulation;
+use mc_sim::world::World;
 
-use support::solidity::Ground;
-use support::{TestResult, exactly, exactly_player};
+use support::chamber::{BlockChamber, at};
+use support::{AIR, STONE, TestResult, exactly, exactly_player};
 
 /// The tick the reader is holding while the next one is published.
 const HELD_TICK: u32 = 60;
@@ -48,18 +60,22 @@ const HELD_TICK: u32 = 60;
 /// restarts.
 const SUBMISSIONS: u32 = SCRIPT_TICKS + 5;
 
-/// The declared world these ticks run over: a floor, and a player standing on
-/// it. Nothing here is about the terrain — it is about what publication does
-/// with whatever the tick produced.
-const FLOOR: i32 = 40;
+/// How many chunk columns the declared world spans on each axis.
+const COLUMNS: u32 = 1;
+
+/// The layer the floor occupies, so its top face — and the feet — are at
+/// `FLOOR + 1`.
+const FLOOR: u32 = 40;
 
 /// Where the player stands. The two horizontal coordinates differ so that a
-/// snapshot rewritten from a transposed state is not equal by coincidence.
+/// snapshot rewritten from a transposed state is not equal by coincidence, and
+/// the vertical is the floor's top face, so the player is standing rather than
+/// falling.
 const FEET: Vec3 = Vec3::new(10.5, 41.0, 3.5);
 
 #[test]
 fn every_submitted_intent_publishes_the_tick_after_the_one_before_it() -> TestResult {
-    let mut simulation = Simulation::new(standing(), Box::new(Ground::Flat { surface: FLOOR }));
+    let mut simulation = Simulation::new(standing(), flat_floor()?);
     let mut published = vec![simulation.latest().tick];
 
     for _ in 0..SUBMISSIONS {
@@ -101,9 +117,9 @@ fn every_submitted_intent_publishes_the_tick_after_the_one_before_it() -> TestRe
 /// in its place.
 #[test]
 fn a_later_publish_leaves_the_snapshot_the_renderer_holds_unchanged() -> TestResult {
-    let mut simulation = advanced_to(HELD_TICK);
+    let mut simulation = advanced_to(HELD_TICK)?;
     let held = simulation.latest();
-    let independent = advanced_to(HELD_TICK);
+    let independent = advanced_to(HELD_TICK)?;
 
     simulation.advance(MovementIntent::default());
 
@@ -130,12 +146,20 @@ fn a_later_publish_leaves_the_snapshot_the_renderer_holds_unchanged() -> TestRes
 }
 
 /// A simulation that has been advanced `tick` times from its start.
-fn advanced_to(tick: u32) -> Simulation {
-    let mut simulation = Simulation::new(standing(), Box::new(Ground::Flat { surface: FLOOR }));
+fn advanced_to(tick: u32) -> Result<Simulation, Box<dyn Error>> {
+    let mut simulation = Simulation::new(standing(), flat_floor()?);
     for _ in 0..tick {
         simulation.advance(MovementIntent::default());
     }
-    simulation
+    Ok(simulation)
+}
+
+/// One chunk column of air over a single layer of floor, whose top face is where
+/// the feet stand.
+fn flat_floor() -> Result<World, Box<dyn Error>> {
+    BlockChamber::filled_with(COLUMNS, AIR)
+        .run(at(0, FLOOR, 0), at(16, FLOOR + 1, 16), STONE)
+        .build()
 }
 
 /// A player standing still on the declared floor.

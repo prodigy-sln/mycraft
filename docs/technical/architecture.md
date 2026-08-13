@@ -398,6 +398,162 @@ Three `pub` entries in `events.rs` — `dispatch_window_event`, `dispatch_device
 — are what both the window adapter and a test cross to reach `Session`. Break-and-place (PRO-854)
 adds a new event to this same dispatch; the seam it needs is already in place.
 
+## The editable world: break and place
+
+Raycast targeting and block break/place (PRO-854) gave the simulation its first `&mut` world.
+Before this feature, `Simulation` held `Box<dyn Solidity + Send>` over a `SolidVoxels` bitset
+resolved once at construction, and no world type in the workspace had a mutating method at all.
+This section records the shape that replaced it, and the seam it deliberately does not cross.
+
+**The block store lives in `mc-world`, addressed in world coordinates.** `mc_world::world::VoxelWorld`
+holds columns and exposes `block_at`, `set_block`, `column`, `columns`, `extent` — this is chunk
+storage's job by the crate map, and it is what PRO-855 will persist. Its index type, `WorldPos { x, y,
+z }`, is **unsigned**: the one place a sign needs checking is the place that refuses it, at the
+`BlockPos → WorldPos` conversion, so the type itself carries the invariant rather than a runtime
+check scattered across every reader. `Extent` — previously declared in `mc-sim`, where the replay
+world's fixtures used it — moved to `mc_world::world` for the same reason `WorldPos` lives there, with
+`mc-sim` re-exporting it from its old path so existing fixtures keep compiling.
+
+**`Simulation` holds a concrete `mc_sim::world::World`, not a trait object.** `World` wraps a
+`VoxelWorld`, a `SolidVoxels` bitset, a dirty-section set and an `Arc<BlockRegistry>` — and keeps all
+four private. Physics is unaffected: `advance_player` and the `collide` module still take `&dyn
+Solidity`, so the cheap `Chamber`/`Ground` collision fixtures are untouched and none of the exact-
+position collision scenarios changed. What changed is only what *feeds* solidity — a `World` now,
+where a bespoke test double used to stand in.
+
+**One private function writes both views, and nothing else may.**
+
+```rust
+// crates/mc-sim/src/world/mod.rs — no `pub`, visible in this module and its
+// descendants (mc_sim::world::action) and nowhere else in the crate.
+fn write(&mut self, at: WorldPos, block: &BlockName) -> Result<(), WorldError> {
+    let solid = self.registry.resolve(block)?.is_solid;   // resolved once, before either write
+    self.blocks.set_block(at, block, &self.registry)?;    // the store
+    self.solid.set(at, solid);                            // the collision view
+    self.mark_dirty(at);                                  // remesh bookkeeping, see below
+    Ok(())
+}
+```
+
+The block store and the collision bitset cannot fall out of step because there is exactly one
+function that can write either, and it writes both together or neither. `break_at` and `place_at` —
+the two domain operations — live in the same module as `write` and call it; the action-resolution
+code that calls *those* lives in a **child** module, `mc_sim::world::action`, specifically so it
+inherits visibility into its parent's private items rather than needing `write` widened to
+`pub(crate)`. Only the public vocabulary (`ActionIntent`, `TickIntent`, `Refusal`, `EditReport`,
+`targeted`, `REACH`, `default_held_block`) is re-exported as `mc_sim::action`.
+
+**A second option — deriving solidity from the store on every query, with no bitset at all — was
+considered and rejected, and the trade-off is worth recording rather than losing.** It would have made
+the store-and-collision-disagreement defect class **unspellable by construction**: with one source of
+truth there is no second view to disagree with, which is the kind of structural elimination this
+codebase generally prefers over a test. What rules it out is a specific committed test it would
+silently gut: the replay's overlap oracle re-derives whether the player's box overlaps a solid voxel
+by reading `ReplayWorld::block_at` and asking the registry directly, sharing no lookup chain with the
+physics' own resolved `SolidVoxels` — deliberately, so that an adapter bug in the resolved bitset
+cannot make both sides wrong the same way. Deriving solidity from the store on every query would make
+that oracle's lookup chain *identical* to the code path it exists to check, so it would pass forever
+regardless of what broke, and its own positive control (a box placed inside the world's landmark)
+would keep passing too. The chosen shape keeps the oracle's independence at the cost of a private
+invariant instead of a structural guarantee — recorded here because a future reviewer proposing the
+derived form should know what it would cost, not just what it would buy.
+
+**The raycast's reach bound is a single site.** `targeted(origin, direction, reach, world) -> Option<Hit>`
+walks voxels in ascending entry distance and stops as soon as the next voxel's entry distance exceeds
+`REACH` (5.0 blocks) — there is no second, separate `distance <= REACH` check anywhere else. This is
+not a style preference: `Solidity` is **total** (it answers `false` for every position outside the
+loaded world), so an unbounded traversal plus a separate distance check would never terminate for a
+ray that hits nothing — the traversal has no other reason to stop. A reach bound spelled as a second,
+independent comparison is therefore not just redundant, it is a latent hang waiting for the one ray
+that never meets a solid voxel. The traversal additionally reports the entry face, which is what a
+placement's target cell is computed from.
+
+**The production traversal is deliberately not the goldens' oracle.** `crates/mc-client/tests/support/oracle.rs`'s
+`March` is the independent DDA the golden frames are judged against; promoting it to production would
+collapse oracle and subject into one implementation, which is exactly the failure mode
+`docs/technical/testing.md`'s derived-oracle discipline exists to prevent. The two stay two separate
+implementations on purpose, and neither may import the other.
+
+**The action a client can request is an enum with no room for a position.** `ActionIntent { Break,
+Place { block: BlockName } }`, carried alongside movement in `TickIntent { movement: MovementIntent,
+action: Option<ActionIntent> }`. A break carrying a block name is unrepresentable, and neither variant
+declares a position, a coordinate, a cell or an absolute orientation — invariant 4 ("the server is
+authoritative") in structural form, the same shape `MovementIntent` already uses (ADR-014). A place
+request names *what* to place; it is never asked, and never able to say, *where*.
+
+**Ordering inside a tick: the action resolves after that tick's movement and look are applied.**
+`Simulation::advance` advances the player first, then resolves the action against the state the tick
+*ends* with — against the already-clamped, already ±89°-limited view, not the raw input deltas. A
+click's target is therefore always consistent with the camera pose the same tick publishes. `Session`
+holds `pending_action: Option<ActionIntent>`, set when a mouse press lands while the pointer is
+captured; a tick's own `take()` clears it whether or not a simulation was attached to consume it, so a
+click is spent by the tick it lands in — one press is one action, never a latch that keeps firing.
+
+**The refusal vocabulary, and where each is decided.** A resolved action returns `EditReport`, a value
+rather than an error — most call sites never inspect it, and it is deliberately not `#[must_use]`, but
+a scripted test rig can assert *why* a request was refused, not only *that* it was:
+
+| Refusal | Decided by |
+|---|---|
+| `NoTarget` | the raycast finds no solid voxel within reach — this also covers "something is there but too far away": the reach bound is one site, so a target beyond it and no target at all are indistinguishable without an unbounded search, and none is done |
+| `NoFace` | the eye is inside the targeted block, so there is no entry face to place against |
+| `Indestructible` | the targeted block's definition declares `breakable = false` |
+| `Occupied` | a placement's target cell holds a block content does not declare `replaceable` — read from content, never derived from solidity |
+| `InsidePlayer` | a placement's target cell overlaps the requesting player's own collision box |
+| `UnknownBlock { name }` | a placement names a block the registry does not hold |
+| `OutsideWorld { at }` | the target cell falls outside the world's storable range, in any direction — a negative coordinate and a past-the-edge one both collapse into this one variant rather than reporting separately, which keeps a fixture built for one edge from silently validating against the other |
+
+Two refusal variants were designed and then struck before shipping. `OutOfReach`, distinct from
+`NoTarget`, would have needed the unbounded traversal the reach-bound design above rules out — so
+"nothing is there" and "something is there but out of reach" are deliberately the same answer.
+`NotSolid`, refusing a placement whose *named* block was not itself solid, was struck because
+`replaceable` already forbids overwriting anything content has not opened — a client naming air still
+cannot delete stone, so the extra check bought no additional safety while costing `base:water` its own
+placeability.
+
+One collapse is worth flagging as a known, accepted gap rather than a silent one: the world's own
+bounds check discards *which* internal bound was crossed before it reaches `EditReport` — a target
+past the positive-octant edge and a target that fails a lower-level section-array bound both arrive as
+the same `OutsideWorld` refusal. Nothing in MVP 1 needs the distinction; a future consumer wanting a
+refusal to name which bound was crossed changes that one collapse point.
+
+## Making an edit visible: the remesh transport
+
+Editing the block store and editing what the renderer draws are two different problems, and
+break/place (PRO-854) keeps them on their existing sides of the simulation/renderer seam described
+above rather than opening a new one.
+
+**Marking is unconditional and generous.** `World::write` marks its own section **and all six
+face-adjacent sections** dirty on every write, with no "only if the voxel sits on a section boundary"
+test — the correct thing rather than the fast thing; an over-marked section costs an extra remesh, an
+under-marked one leaves a stale face on screen. A section the loaded footprint does not contain is
+silently skipped rather than reported — the edge of the world is not an error. The dirty set is a
+`BTreeSet` keyed by section, which bounds it at the number of sections the footprint holds however
+many edits accumulate between drains, and drains in a deterministic order.
+
+**The batch that crosses to the client is an owned, `Send` value, not a borrow.** `Simulation::take_remesh_work`
+returns a map of every section the batch needs — each dirty section plus its neighbours, cloned once —
+together with the list of keys to mesh. Nothing about it holds a reference into the session the
+simulation lives in; a `Section` is at most ~8 KB, and a typical batch is well under 100 KB. Meshing
+and splicing the result back into scene geometry are both pure functions living in `mc-sim`, run on a
+dedicated worker thread rather than the tick or the frame thread, so a remesh never competes with
+either. `splice` replaces sections **positionally**, matching each remeshed section against its
+existing slot by `(column, section index)` — it never appends and never sorts — which is exactly what
+keeps `mesh_all`'s section ordering, a golden-frame dependency, from moving under an edit.
+
+**Texture layer assignment is not re-resolved on a remesh, and that is a scoped, accepted gap rather
+than an oversight.** Layers are assigned once, from the initial mesh's own quad keys. Re-resolving
+against every *registered* block instead would shift every layer index the first mesh assigned —
+silently invalidating every committed golden. It holds for MVP 1 because everything placeable (dirt,
+grass, stone) is already among the initially-meshed keys; the failure mode if that ever stops being
+true is a loud, named error rather than a wrong texture, and the general gap is already recorded in
+`crates/mc-render/CLAUDE.md` against MVP 2, where script-defined blocks make it live.
+
+**A failed remesh batch is dropped and reported once — the opposite rule from scene preparation,
+deliberately.** Preparation fails the whole run if it cannot build a scene at all; a remesh that cannot
+be applied mid-session should not take a running game down over one edit, so it is logged and the
+batch is discarded instead.
+
 ## The pure/GPU seam inside `mc-render`
 
 `mc-render` has a default-on `gpu` Cargo feature. **`wgpu::` may be named

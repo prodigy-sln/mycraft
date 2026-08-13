@@ -35,7 +35,15 @@
 //! discriminate the order two axes are resolved in: anything symmetric about the
 //! diagonal gives the same answer whichever axis moved first.
 
+use std::error::Error;
+use std::sync::Arc;
+
+use mc_core::block::source::InMemoryDefinitionSource;
+use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::id::{BlockName, TextureKey};
 use mc_sim::player::{BlockPos, Solidity};
+use mc_sim::world::World;
+use mc_world::world::{VoxelWorld, WorldPos};
 
 /// How far a floor, a wall or a ceiling runs on the axes it is not about.
 ///
@@ -139,4 +147,291 @@ impl Solidity for Chamber {
     fn is_solid(&self, at: BlockPos) -> bool {
         self.0.iter().any(|slab| slab.holds(at))
     }
+}
+
+/// What the fixture registry's own three blocks are called.
+///
+/// **Why the fixtures register blocks of their own at all.** MVP 1's base game
+/// deliberately ships no indestructible block — that is a scope choice recorded
+/// in the spec, not a fact about how breakability happens to be encoded — so a
+/// scenario about a block that cannot be broken has to bring its own. Reaching
+/// for a shipped block instead would mean reaching for one that is not solid and
+/// therefore can never be *targeted*, and the scenario would go green because
+/// nothing was targeted rather than because breakability was respected.
+///
+/// [`CRUMBLING`] exists for the opposite reason. Breaking any shipped block
+/// empties its cell, so a break that emptied the cell unconditionally would
+/// satisfy "the block its own definition names" for all of them; this one names
+/// dirt, which nothing else in a fixture would produce.
+///
+/// [`UNBUILDABLE`] is the block where **`replaceable` and `!is_solid`
+/// disagree**, and it is the whole reason placement legality can be measured at
+/// all. Every block the base game ships has the two agreeing — air and water are
+/// non-solid and replaceable, dirt, grass and stone are solid and not — so
+/// against shipped content alone a placement check reading `!is_solid` and one
+/// reading `replaceable` answer identically at every cell, and the field ruling
+/// 62 added is decoration behind a green suite. This one is **not solid and not
+/// replaceable**: a player walks through it and a placement may not overwrite
+/// it. It is the cheapest of the two disagreeing shapes, and it is what makes a
+/// placement into it refused under the right reading and allowed under the wrong
+/// one.
+pub const UNBREAKABLE: &str = "fixture:unbreakable";
+pub const CRUMBLING: &str = "fixture:crumbling";
+pub const UNBUILDABLE: &str = "fixture:unbuildable";
+
+/// What the fixture registry's definitions are attributed to.
+const FIXTURE_ORIGIN: &str = "a break-and-place test's declared registry";
+
+/// One block a fixture registry declares.
+///
+/// A named struct rather than a tuple because five positional fields, three of
+/// them booleans, is a row a reader has to count their way across — and getting
+/// `replaceable` and `breakable` the wrong way round is a fixture that still
+/// builds and still passes.
+struct Declared {
+    name: &'static str,
+    is_solid: bool,
+    replaceable: bool,
+    breakable: bool,
+    breaks_into: Option<&'static str>,
+}
+
+/// One ordinary solid block: it stops a player, nothing may be built over it,
+/// it can be broken, and breaking it empties the cell.
+const fn solid(name: &'static str) -> Declared {
+    Declared {
+        name,
+        is_solid: true,
+        replaceable: false,
+        breakable: true,
+        breaks_into: None,
+    }
+}
+
+/// One block that stops nothing and that anything may be built over.
+const fn open(name: &'static str) -> Declared {
+    Declared {
+        name,
+        is_solid: false,
+        replaceable: true,
+        breakable: true,
+        breaks_into: None,
+    }
+}
+
+/// The five blocks content ships, spelled and declared as content declares them.
+///
+/// **The order is the file-name order `TomlFileDefinitionSource` reads them in,
+/// and that is load-bearing** — base content applies before the `fixture:`
+/// overlay, so ids are assigned in this order and the first solid block in it is
+/// the one a client would hold. The assertion that pins it lives in the test file
+/// that depends on it, because this list alone cannot say why the order matters.
+const BASE_CONTENT: [Declared; 5] = [
+    open("base:air"),
+    solid("base:dirt"),
+    solid("base:grass"),
+    solid("base:stone"),
+    open("base:water"),
+];
+
+/// The blocks the `fixture:` overlay adds over base content.
+const OVERLAY: [Declared; 3] = [
+    Declared {
+        name: UNBREAKABLE,
+        is_solid: true,
+        replaceable: false,
+        breakable: false,
+        breaks_into: None,
+    },
+    Declared {
+        name: CRUMBLING,
+        is_solid: true,
+        replaceable: false,
+        breakable: true,
+        breaks_into: Some("base:dirt"),
+    },
+    Declared {
+        name: UNBUILDABLE,
+        is_solid: false,
+        replaceable: false,
+        breakable: true,
+        breaks_into: None,
+    },
+];
+
+/// A registry holding what content ships, with a `fixture:` overlay over it.
+///
+/// **Base content applies first and the overlay second**, through two separate
+/// batches, exactly as the running game applies a content pack over the base
+/// game — so ids are assigned in that order and a repeated name would be
+/// refused, which is why the overlay uses a namespace of its own.
+///
+/// It never reads `content/base` from disk: a test binary's working directory is
+/// not the repository root.
+///
+/// # Errors
+///
+/// Returns the refusal if a name is not a namespaced id or the registry refuses
+/// a batch.
+pub fn fixture_registry() -> Result<Arc<BlockRegistry>, Box<dyn Error>> {
+    let mut registry = BlockRegistry::new();
+    for (label, batch) in [
+        ("base content", &BASE_CONTENT[..]),
+        ("overlay", &OVERLAY[..]),
+    ] {
+        registry.apply(&InMemoryDefinitionSource::new(
+            DefinitionOrigin::new(format!("{FIXTURE_ORIGIN}, {label}")),
+            declaring(batch, label)?,
+        ))?;
+    }
+    Ok(Arc::new(registry))
+}
+
+/// One batch of definitions, ready for the source to yield.
+fn declaring(
+    batch: &[Declared],
+    label: &str,
+) -> Result<
+    Vec<Result<BlockDefinition, mc_core::block::source::DefinitionSourceError>>,
+    Box<dyn Error>,
+> {
+    let origin = DefinitionOrigin::new(format!("{FIXTURE_ORIGIN}, {label}"));
+    let mut declared = Vec::with_capacity(batch.len());
+    for block in batch {
+        declared.push(Ok(BlockDefinition {
+            name: BlockName::parse(block.name)?,
+            texture: TextureKey::parse(block.name)?,
+            is_solid: block.is_solid,
+            replaceable: block.replaceable,
+            breakable: block.breakable,
+            breaks_into: block.breaks_into.map(BlockName::parse).transpose()?,
+            origin: origin.clone(),
+        }));
+    }
+    Ok(declared)
+}
+
+/// A world position, spelled short enough to sit in a `const`.
+#[must_use]
+pub const fn at(x: u32, y: u32, z: u32) -> WorldPos {
+    WorldPos { x, y, z }
+}
+
+/// A declared world of *named blocks*, in [`Chamber`]'s style: say what is
+/// there, never what is not.
+///
+/// The declaration is kept rather than the world it produces, so a test can
+/// build the same fixture twice — once to drive and once to compare against —
+/// and know the second is the first as declared and not a copy of a run.
+#[derive(Debug, Clone)]
+pub struct BlockChamber {
+    columns: u32,
+    fill: &'static str,
+    runs: Vec<Run>,
+}
+
+/// One declared run: the half-open box it covers, and the block written over it.
+type Run = (WorldPos, WorldPos, &'static str);
+
+impl BlockChamber {
+    /// A world of `columns` squared chunk columns, every voxel holding `fill`.
+    #[must_use]
+    pub fn filled_with(columns: u32, fill: &'static str) -> Self {
+        Self {
+            columns,
+            fill,
+            runs: Vec::new(),
+        }
+    }
+
+    /// The same world with `block` written over the half-open box from `low` up
+    /// to but not including `high`.
+    #[must_use]
+    pub fn run(mut self, low: WorldPos, high: WorldPos, block: &'static str) -> Self {
+        self.runs.push((low, high, block));
+        self
+    }
+
+    /// The same world with `block` written at one cell.
+    #[must_use]
+    pub fn cell(self, at: WorldPos, block: &'static str) -> Self {
+        let beyond = WorldPos {
+            x: at.x + 1,
+            y: at.y + 1,
+            z: at.z + 1,
+        };
+        self.run(at, beyond, block)
+    }
+
+    /// The world this declaration describes, over the fixture registry.
+    ///
+    /// **The fill is also what this world means by a cell holding nothing**, and
+    /// the two are the same declaration on purpose: a chamber is stated as what
+    /// is there over a background of what is not, so emptying a cell has to
+    /// return it to that background.
+    ///
+    /// # Errors
+    ///
+    /// Returns the refusal if the registry does not apply, a declared name is
+    /// not registered, or a run reaches outside the world.
+    pub fn build(&self) -> Result<World, Box<dyn Error>> {
+        let registry = fixture_registry()?;
+        let empty = BlockName::parse(self.fill)?;
+        let mut blocks = VoxelWorld::filled(self.columns, &empty, &registry)?;
+        for &run in &self.runs {
+            written(&mut blocks, run, &registry)?;
+        }
+        Ok(World::new(blocks, registry, empty)?)
+    }
+}
+
+/// Writes `block` over the half-open box from `low` to `high`.
+fn written(
+    blocks: &mut VoxelWorld,
+    run: Run,
+    registry: &BlockRegistry,
+) -> Result<(), Box<dyn Error>> {
+    let (low, high, block) = run;
+    let name = BlockName::parse(block)?;
+    for at in every_cell(low, high) {
+        blocks.set_block(at, &name, registry)?;
+    }
+    Ok(())
+}
+
+/// Every cell of the half-open box from `low` to `high`.
+fn every_cell(low: WorldPos, high: WorldPos) -> impl Iterator<Item = WorldPos> {
+    (low.y..high.y).flat_map(move |y| {
+        (low.z..high.z).flat_map(move |z| (low.x..high.x).map(move |x| WorldPos { x, y, z }))
+    })
+}
+
+/// Every cell at which two worlds hold different blocks: where, what the first
+/// holds, and what the second holds instead.
+///
+/// Both worlds are walked whole rather than at cells a caller nominates, so a
+/// scenario expecting one change fails on a second one it did not ask about —
+/// an edit that took the right cell *and* another is not a correct edit.
+#[must_use]
+pub fn differences(declared: &World, after: &World) -> Vec<(WorldPos, String, String)> {
+    declared
+        .extent()
+        .positions()
+        .filter_map(|at| difference_at(declared, after, at))
+        .collect()
+}
+
+/// What the two worlds disagree about at one cell, if they disagree at all.
+fn difference_at(
+    declared: &World,
+    after: &World,
+    at: WorldPos,
+) -> Option<(WorldPos, String, String)> {
+    let signed = BlockPos {
+        x: at.x as i32,
+        y: at.y as i32,
+        z: at.z as i32,
+    };
+    let (was, now) = (declared.block_at(signed)?, after.block_at(signed)?);
+    (was != now).then(|| (at, was.as_str().to_owned(), now.as_str().to_owned()))
 }

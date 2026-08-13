@@ -173,10 +173,17 @@ pub fn every_position() -> impl Iterator<Item = LocalPos> {
 pub fn registry_declaring(blocks: &[(&str, bool)]) -> Result<BlockRegistry, Box<dyn Error>> {
     let mut declared = Vec::with_capacity(blocks.len());
     for &(name, is_solid) in blocks {
+        // A mesh is decided by solidity and by the texture key, and by nothing
+        // else a definition carries — so every block declared for a meshing
+        // fixture leaves breakability, replaceability and residue at what a
+        // declaration saying nothing about them means.
         declared.push(Ok(BlockDefinition {
             name: BlockName::parse(name)?,
             texture: TextureKey::parse(name)?,
             is_solid,
+            replaceable: false,
+            breakable: true,
+            breaks_into: None,
             origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
         }));
     }

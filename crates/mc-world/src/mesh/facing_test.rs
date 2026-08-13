@@ -13,6 +13,13 @@
 //! everywhere else, so if the two ever disagree the neighbour handed to one
 //! facing is read for another, and nothing else would say so.
 //!
+//! The third is the step a facing takes from a voxel, which the world-coordinate
+//! edit path reads. It is asked to agree with the adjacency the second test
+//! already pins rather than against six offsets written out again: both are the
+//! same axis-and-sign pair, and a table restating them would be the third
+//! authored fact this module exists to not have — the one with a row nobody
+//! checked, where a sign inversion lives.
+//!
 //! The second is the derivation itself, probed for every facing at three places:
 //! in the middle of the section, on the boundary plane at the facing's own end,
 //! and on the boundary plane at the far end. Those three separate the mistakes
@@ -30,6 +37,14 @@ use crate::section::LocalPos;
 const fn at(x: u32, y: u32, z: u32) -> LocalPos {
     LocalPos { x, y, z }
 }
+
+/// A voxel far from every boundary, so a step off any of the six facings stays
+/// inside the section and the adjacency below answers `Inside` for all of them.
+///
+/// Its three coordinates differ from each other, so a step that moved the wrong
+/// axis lands somewhere this test reports rather than on the same number by
+/// coincidence.
+const INTERIOR: LocalPos = at(8, 4, 6);
 
 /// Every facing, probed at three voxels, and where the step off that facing
 /// lands from each of them.
@@ -91,5 +106,36 @@ fn each_facing_steps_to_its_own_neighbour_and_mirrors_across_its_own_boundary() 
          section only at the end it points at — arriving at the opposite end of the neighbour \
          there. Every row here is one of the six rows of the derived table, and a table with \
          one wrong row breaks the facing nobody happened to write a scenario about"
+    );
+}
+
+#[test]
+fn every_facings_step_lands_where_its_own_adjacency_says_it_does() {
+    let stepped: Vec<Option<LocalPos>> = Facing::ALL
+        .iter()
+        .map(|facing| {
+            let [across, up, along] = facing.step();
+            Some(LocalPos {
+                x: INTERIOR.x.checked_add_signed(across)?,
+                y: INTERIOR.y.checked_add_signed(up)?,
+                z: INTERIOR.z.checked_add_signed(along)?,
+            })
+        })
+        .collect();
+    let adjacent: Vec<Option<LocalPos>> = Facing::ALL
+        .iter()
+        .map(|facing| match facing.adjacent(INTERIOR) {
+            Adjacent::Inside(voxel) => Some(voxel),
+            Adjacent::Across(_) => None,
+        })
+        .collect();
+
+    assert_eq!(
+        stepped, adjacent,
+        "the offset a step carries and the voxel an adjacency lands on inside the section are \
+         one fact, not two: both are the axis and the sign the facing already carries. A step \
+         written out per facing is the table this module exists to not have — and the mistakes \
+         that hide in one are a sign inversion and an axis confusion, each of which leaves the \
+         other five facings looking entirely plausible"
     );
 }

@@ -20,6 +20,12 @@ pub use input::{InputState, PlayerAction};
 pub use look::Look;
 pub use physics::advance_player;
 
+/// Where the player's own box stands, for the one caller outside the physics
+/// that needs to know: a placement refuses a cell the player is standing in.
+///
+/// `pub(crate)` and not `pub`, because the box's dimensions stay this module's.
+pub(crate) use collide::occupies;
+
 /// How far above the feet the eyes sit, in blocks.
 pub const EYE_HEIGHT: f32 = 1.62;
 

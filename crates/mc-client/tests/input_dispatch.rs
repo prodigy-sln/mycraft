@@ -318,7 +318,7 @@ fn a_key_dispatched_before_the_world_lands_reaches_the_player_at_its_first_tick(
     let mut early = InputHarness::started();
     early.press(FORWARD);
     let published_before_the_world = early.ticks(TICKS_BEFORE_THE_WORLD);
-    early.start_world();
+    early.start_world()?;
     let first = early
         .tick()
         .ok_or("a tick over a started world publishes a snapshot")?;
@@ -351,16 +351,24 @@ fn a_key_dispatched_before_the_world_lands_reaches_the_player_at_its_first_tick(
 /// and a second parameter per sequence would end in a helper nobody can read.
 /// Dispatching nothing is the control every assertion here is read against: the
 /// same harness, the same world, the same number of ticks, and no input at all.
-fn over_the_ground(dispatched: impl FnOnce(&mut InputHarness)) -> InputHarness {
+///
+/// It is fallible because the world is declared block by block against a registry
+/// the harness builds, and either can refuse. Nothing about what the scenarios
+/// below claim depends on that — the refusal is reported here and never absorbed,
+/// so a fixture that failed to build cannot be mistaken for a player that did not
+/// move.
+fn over_the_ground(
+    dispatched: impl FnOnce(&mut InputHarness),
+) -> Result<InputHarness, Box<dyn Error>> {
     let mut harness = InputHarness::started();
-    harness.start_world();
+    harness.start_world()?;
     dispatched(&mut harness);
-    harness
+    Ok(harness)
 }
 
 /// Where one tick leaves the player.
 fn one_tick(dispatched: impl FnOnce(&mut InputHarness)) -> Result<Vec3, Box<dyn Error>> {
-    let published = over_the_ground(dispatched)
+    let published = over_the_ground(dispatched)?
         .tick()
         .ok_or("a tick over a started world publishes a snapshot")?;
     Ok(published.player.position)
@@ -369,7 +377,7 @@ fn one_tick(dispatched: impl FnOnce(&mut InputHarness)) -> Result<Vec3, Box<dyn 
 /// Where the player stands at each of [`HELD_TICKS`] ticks that follow
 /// `dispatched`.
 fn walked(dispatched: impl FnOnce(&mut InputHarness)) -> Result<Vec<Vec3>, Box<dyn Error>> {
-    let published = over_the_ground(dispatched).ticks(HELD_TICKS);
+    let published = over_the_ground(dispatched)?.ticks(HELD_TICKS);
     if published.len() != HELD_TICKS as usize {
         return Err(format!(
             "{HELD_TICKS} tick steps over a started world publish {HELD_TICKS} snapshots, not {}",

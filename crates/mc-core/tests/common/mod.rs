@@ -22,6 +22,11 @@ pub type TestResult = Result<(), Box<dyn std::error::Error>>;
 /// suites that do observe it build registries whose solidity is deliberately
 /// inverted, and cannot use this builder.
 ///
+/// It names no block it breaks into for the same reason and for one more: this
+/// suite is about registration — which name resolves to which definition, and what
+/// a duplicate does — and a residue is a thing a *break* reads. Naming one here
+/// would put a second block name in every fixture that nothing ever resolves.
+///
 /// # Errors
 ///
 /// Returns [`NamespacedIdError`] if `name` or `texture` is not a namespaced id.
@@ -34,6 +39,9 @@ pub fn definition(
         name: BlockName::parse(name)?,
         texture: TextureKey::parse(texture)?,
         is_solid: true,
+        replaceable: false,
+        breakable: true,
+        breaks_into: None,
         origin: DefinitionOrigin::new(origin),
     })
 }

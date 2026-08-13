@@ -25,12 +25,15 @@
 use std::fmt;
 use std::sync::Arc;
 
+use mc_core::id::BlockName;
 use mc_render::window::{
     CaptureState, accepts_pointer_motion, capture_after_click, capture_after_escape,
     first_capture_attempt, next_capture_attempt,
 };
+use mc_sim::action::{ActionIntent, EditReport, TickIntent};
 use mc_sim::player::{InputState, PlayerAction};
 use mc_sim::simulation::{SimSnapshot, Simulation};
+use mc_sim::world::RemeshWork;
 
 /// What the platform can be asked to do with the pointer.
 ///
@@ -78,6 +81,21 @@ pub enum KeyKind {
     Other,
 }
 
+/// One button of the mouse, in the vocabulary the session decides in.
+///
+/// The same shape as [`KeyKind`] and for the same reason: the catch-all absorbs
+/// every button the client cannot tell apart, so the window library growing
+/// buttons between versions changes nothing on this side of the seam.
+///
+/// Named `MouseButtonKind` rather than `MouseButton` because the window library
+/// has a `MouseButton` of its own and the adapter imports both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButtonKind {
+    Left,
+    Right,
+    Other,
+}
+
 /// What the player asked for by pressing `key`, if the binding table names it.
 ///
 /// The declared table — W forward, S back, A strafe-left, D strafe-right, Space
@@ -116,6 +134,35 @@ pub struct Session {
     /// while the preparation worker is still generating one — the spawn is
     /// derived from the world, so no tick can be advanced before it lands.
     simulation: Option<Simulation>,
+    /// The block a place request names, decided by the simulation's own policy
+    /// and handed over with the world it applies to.
+    ///
+    /// It arrives with the simulation because it is derived from the registry
+    /// that world was resolved against, and it is `None` for exactly as long as
+    /// the simulation is: a client with no world to place into holds nothing.
+    ///
+    /// **The only thing that reads it is [`Session::action_for`], and there is
+    /// still no accessor.** A place request names the block it wants, so the
+    /// name has to leave this type to reach the world — inside a request the
+    /// session itself builds, which is not the same as handing a caller a borrow
+    /// of what this owns. That distinction is the whole of what the module
+    /// header claims, and it is why this field grew a reader without growing a
+    /// getter.
+    holding: Option<BlockName>,
+    /// What the last press asked the world for, waiting for a tick to spend it.
+    ///
+    /// **One press is one action, and this field is where that is decided.** A
+    /// tick *takes* it rather than reading it, so the request a click made is
+    /// gone the moment it has been submitted once. Copying it out instead would
+    /// re-submit the same request on every tick the player held the button down,
+    /// which is auto-repeat nobody asked for and which the spec pins the
+    /// opposite of.
+    ///
+    /// It survives the world being absent for exactly one tick step, and no
+    /// longer: unlike a key the player is still holding, a click made at a
+    /// loading screen is not something they are still asking for when the world
+    /// appears.
+    pending_action: Option<ActionIntent>,
     pointer: Box<dyn PointerPlatform>,
 }
 
@@ -134,6 +181,8 @@ impl Session {
             input: InputState::default(),
             capture: CaptureState::Uncaptured,
             simulation: None,
+            holding: None,
+            pending_action: None,
             pointer,
         };
         session.hold(first_capture_attempt());
@@ -182,8 +231,45 @@ impl Session {
     /// already held. The re-ask is not redundant: nothing here tracks a capture
     /// the compositor silently dropped, so asking again is the only thing that
     /// recovers one.
-    pub fn on_mouse_pressed(&mut self) {
+    ///
+    /// **Whether the press also asks the world for something is read before the
+    /// ladder is walked**, and that ordering is the whole of it. A click made
+    /// while the cursor belongs to the desktop is the player reaching for their
+    /// own window; by the time this returns the client is holding the pointer
+    /// again, so a capture read afterwards would say the click was aimed at the
+    /// game — and every click that recaptured the cursor would dig a hole where
+    /// it happened to land.
+    ///
+    /// `accepts_pointer_motion` is reused rather than a second "may a click act"
+    /// policy: whether the pointer is the client's is one fact, and it is asked
+    /// in one place.
+    pub fn on_mouse_pressed(&mut self, button: MouseButtonKind) {
+        let was_the_clients = accepts_pointer_motion(self.capture);
         self.hold(capture_after_click(self.capture));
+        if was_the_clients {
+            self.pending_action = self.action_for(button);
+        }
+    }
+
+    /// What the player asked the world for by pressing `button`, if this client
+    /// asks anything of it.
+    ///
+    /// Left digs and right builds. The middle button and everything beyond it
+    /// ask for nothing — that arm exists because the adapter must translate
+    /// every button the library can report, and it is knowingly ungraded.
+    ///
+    /// A place names the block being placed, so a client holding nothing asks
+    /// for nothing: `holding` is `None` for exactly as long as there is no
+    /// world, and a request naming no block is not a request.
+    fn action_for(&self, button: MouseButtonKind) -> Option<ActionIntent> {
+        match button {
+            MouseButtonKind::Left => Some(ActionIntent::Break),
+            MouseButtonKind::Right => self
+                .holding
+                .clone()
+                .map(|block| ActionIntent::Place { block }),
+            MouseButtonKind::Other => None,
+        }
     }
 
     /// Drops every key the player was holding when the window went away.
@@ -191,21 +277,66 @@ impl Session {
         self.input.clear_held();
     }
 
-    /// The world landed and there is something to advance.
-    pub fn attach_simulation(&mut self, simulation: Simulation) {
+    /// The world landed and there is something to advance, with `holding` as the
+    /// block a place request over it will name.
+    ///
+    /// The two arrive together because the second is derived from the registry
+    /// the first was resolved against, and the client decides neither: which
+    /// block is held is a policy, and policies live in the simulation.
+    ///
+    /// **A click made before this arrives is dropped here.** A tick spends a
+    /// pending action whether or not it had a world, which already covers a
+    /// click made between two tick steps; what it does not cover is a click made
+    /// with no tick step between it and the world landing, and that press would
+    /// otherwise reach the first tick of the world it was never aimed at.
+    /// Clearing it here makes "a click at a loading screen changes nothing" true
+    /// under every order the two can arrive in rather than under the convenient
+    /// one.
+    pub fn attach_simulation(&mut self, simulation: Simulation, holding: BlockName) {
         self.simulation = Some(simulation);
+        self.holding = Some(holding);
+        self.pending_action = None;
     }
 
-    /// Advances one tick under everything accumulated since the last one.
+    /// Advances one tick under everything accumulated since the last one, and
+    /// reports what the action that tick carried did to the world.
     ///
     /// **Nothing is drained when there is no simulation.** A tick step taken
     /// before the world lands has nothing to advance, and the input made while
     /// it was still generating is the player's input all the same — the first
     /// tick after it lands is what spends it.
-    pub fn tick(&mut self) {
-        if let Some(simulation) = self.simulation.as_mut() {
-            simulation.advance(self.input.take_intent());
-        }
+    ///
+    /// `None` on almost every tick, because almost every tick asks for no
+    /// action at all. **It is an owned answer rather than a borrow**, so
+    /// reporting it costs this type none of the property its header is about: a
+    /// caller learns what one tick's request did to the world and is handed
+    /// nothing it could ask a second question of. Deliberately not `#[must_use]`
+    /// — the frame path advances the tick to move the player and ignores this,
+    /// exactly as it ignores `Simulation::advance`'s own answer.
+    ///
+    /// **The pending action is taken before the world is looked for, so a click
+    /// is spent by the tick it lands in whether or not there was anything to
+    /// advance.** This is the opposite of a held key, which survives until the
+    /// world arrives, and it is the difference between input the player is still
+    /// making and a request they made once.
+    pub fn tick(&mut self) -> Option<EditReport> {
+        let action = self.pending_action.take();
+        let simulation = self.simulation.as_mut()?;
+        simulation.advance(TickIntent {
+            movement: self.input.take_intent(),
+            action,
+        })
+    }
+
+    /// What has to be re-meshed for the edits made so far to be seen, or nothing
+    /// when there have been none since this was last asked.
+    ///
+    /// Forwarded rather than reached for, and it costs this type nothing that
+    /// its header claims: the batch is owned — sections copied out of the world,
+    /// not borrowed from it — so a caller learns what to re-mesh and is handed
+    /// nothing it could ask the simulation a second question through.
+    pub fn take_remesh_work(&mut self) -> Option<RemeshWork> {
+        self.simulation.as_mut()?.take_remesh_work()
     }
 
     /// Whatever the simulation published most recently, if there is one.
@@ -248,6 +379,7 @@ impl fmt::Debug for Session {
             .debug_struct("Session")
             .field("input", &self.input)
             .field("capture", &self.capture)
+            .field("pending_action", &self.pending_action)
             .field("simulation", &self.simulation)
             .finish_non_exhaustive()
     }

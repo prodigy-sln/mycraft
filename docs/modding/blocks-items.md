@@ -20,13 +20,17 @@ order.
 
 ## Fields
 
-A block declaration is a top-level TOML table with exactly three fields,
-all required:
+A block declaration is a top-level TOML table with three required fields
+and three optional ones:
 
 ```toml
-name = "base:stone"     # namespaced, required
-texture = "base:stone"  # namespaced texture key, required — never a path
-solid = true             # required boolean
+name = "base:stone"        # namespaced, required
+texture = "base:stone"     # namespaced texture key, required — never a path
+solid = true               # required boolean
+
+replaceable = false        # optional, absent means false
+breakable = true           # optional, absent means true
+breaks_into = "base:dirt"  # optional, absent means breaking empties the cell
 ```
 
 - **`name`** — the block's namespaced id, e.g. `base:stone`. This is what
@@ -37,12 +41,49 @@ solid = true             # required boolean
   a definition that named a file would be answering a question that
   belongs somewhere else.
 - **`solid`** — a plain boolean. See "Solidity is data", below.
+- **`replaceable`** — may a placement overwrite this block? Absent means
+  **not replaceable**, the conservative reading: a block that says nothing
+  about it cannot be built through, so a content author who forgets the
+  key loses a placement rather than silently losing a block.
+- **`breakable`** — can this block be broken at all? Absent means
+  **breakable**, the opposite default from `replaceable` and deliberately
+  so: a sandbox whose blocks were indestructible until each one said
+  otherwise would be the wrong default to make every content file carry.
+  `breakable = false` marks a block indestructible.
+- **`breaks_into`** — the namespaced id of the block a break leaves behind.
+  Absent means the cell **empties** rather than that the block is
+  indestructible — those are two different claims, so they are two
+  different fields. Air is the absence of a block, not a residue worth
+  naming, which is why a block that simply disappears when broken (the
+  common case) declares nothing here rather than every author writing
+  `breaks_into = "base:air"`. The named block is resolved when the break
+  happens, not when the definition is parsed, so `breaks_into` may
+  legitimately name a block that a later-loaded content root registers —
+  only the id's syntax is checked at load time.
 
 **Unknown fields are rejected.** A declaration carrying a field the loader
 does not recognise (a typo, most often) fails to load rather than being
 silently ignored. A silently-ignored typo is a debugging trap for whoever
 wrote the file, and rejecting it outright is what avoids that trap instead
 of hiding it.
+
+## Replaceability is not derived from solidity
+
+**Placement reads `replaceable` and never consults `solid`.** Solidity is a
+physics fact — does this block stop a player — and replaceability is a
+placement rule — may a placement overwrite this block. A mod can declare a
+non-solid block you cannot build through, and a solid block you can; the
+engine derives neither from the other, because doing so would put a game
+rule in code that content is supposed to own. `base:air` and `base:water`
+are both non-solid *and* replaceable, but that pairing is not assumed
+anywhere in the engine — each is its own declared fact, and a mod is free
+to ship a non-solid, non-replaceable block (an obstacle you can see through
+but not build over) or a solid, replaceable one.
+
+The engine does not check that a placed block itself is solid, or anything
+else about it beyond "is this name registered" — naming what to place is
+an intent, and the only door that needs locking is the one `replaceable`
+already locks on the *target* cell.
 
 ## The namespaced id rule
 
@@ -104,13 +145,19 @@ fact `stone.toml` states.
 
 `content/base/` ships exactly five block definitions:
 
-| File | `name` | `texture` | `solid` |
-|------|--------|-----------|---------|
-| `air.toml` | `base:air` | `base:air` | `false` |
-| `stone.toml` | `base:stone` | `base:stone` | `true` |
-| `dirt.toml` | `base:dirt` | `base:dirt` | `true` |
-| `grass.toml` | `base:grass` | `base:grass` | `true` |
-| `water.toml` | `base:water` | `base:water` | `false` |
+| File | `name` | `texture` | `solid` | `replaceable` | `breakable` | `breaks_into` |
+|------|--------|-----------|---------|---------------|-------------|---------------|
+| `air.toml` | `base:air` | `base:air` | `false` | `true` | *(absent)* | *(absent)* |
+| `stone.toml` | `base:stone` | `base:stone` | `true` | *(absent)* | *(absent)* | *(absent)* |
+| `dirt.toml` | `base:dirt` | `base:dirt` | `true` | *(absent)* | *(absent)* | *(absent)* |
+| `grass.toml` | `base:grass` | `base:grass` | `true` | *(absent)* | *(absent)* | *(absent)* |
+| `water.toml` | `base:water` | `base:water` | `false` | `true` | *(absent)* | *(absent)* |
+
+`base:air` and `base:water` are the only two base blocks declaring
+`replaceable = true` — they are what makes water placeable at all, since
+placement never falls back to checking solidity. No base block declares
+itself unbreakable or names a residue: breaking any of the five simply
+empties the cell.
 
 Every block currently has exactly one texture key — there is no per-face
 texture (a distinct top/side/bottom key, needed for a block like grass

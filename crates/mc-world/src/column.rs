@@ -49,7 +49,7 @@ pub struct ColumnPos {
 /// Signed on both axes, because half of any world sits at a negative x or z. A
 /// coordinate that could not carry -2 would not fail loudly; the column would
 /// quietly be a different column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ColumnCoordinate {
     pub x: i32,
     pub z: i32,
@@ -139,7 +139,12 @@ impl ChunkColumn {
     /// answers `None` when it has no such section, so the height bound is the
     /// column's own shape rather than a second constant that could drift out of
     /// step with it.
-    const fn owning_section(height: u32) -> usize {
+    ///
+    /// Public because a world asked which *section* holds a position has to
+    /// answer it too, and answering it there would be the same shift written
+    /// twice.
+    #[must_use]
+    pub const fn owning_section(height: u32) -> usize {
         (height >> SECTION_SHIFT) as usize
     }
 

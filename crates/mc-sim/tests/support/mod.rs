@@ -33,6 +33,7 @@ use mc_world::content::TomlFileDefinitionSource;
 pub type TestResult = Result<(), Box<dyn Error>>;
 
 /// The blocks the declaration names, spelled as content spells them.
+pub const AIR: &str = "base:air";
 pub const GRASS: &str = "base:grass";
 pub const DIRT: &str = "base:dirt";
 pub const STONE: &str = "base:stone";

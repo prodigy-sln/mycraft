@@ -1,3 +1,4 @@
 name = "base:air"
 texture = "base:air"
 solid = false
+replaceable = true

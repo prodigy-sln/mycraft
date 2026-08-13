@@ -11,6 +11,19 @@ pub mod camera;
 pub mod player;
 pub mod replay;
 pub mod simulation;
+pub mod world;
+
+/// The vocabulary a client fills in to ask for an edit, and what the server
+/// answers with.
+///
+/// A curated re-export and not the module itself: [`world::World`]'s write is
+/// private to its own module tree, and what belongs out here is the vocabulary,
+/// not the door.
+pub mod action {
+    pub use crate::world::action::{
+        ActionIntent, EditReport, Hit, REACH, Refusal, TickIntent, default_held_block, targeted,
+    };
+}
 
 /// The seed the replay world is generated from.
 ///

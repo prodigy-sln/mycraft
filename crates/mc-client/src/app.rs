@@ -24,10 +24,12 @@ use mc_render::surface::{
     resize_action, select_surface_format, surface_error_action,
 };
 use mc_render::window::Ending;
+use mc_sim::action::default_held_block;
 use mc_sim::replay::simulation_for;
 use thiserror::Error;
 
 use crate::gpu_startup::Gpu;
+use crate::remesh::{Remesher, Retained};
 use crate::session::Session;
 use crate::startup::{PreparationError, PreparedScene, collect, empty_scene};
 
@@ -70,9 +72,16 @@ pub struct App {
     /// `Preparing` so a frame's snapshot has the same shape in both phases.
     nothing: Arc<SceneGeometry>,
     size: SurfaceSize,
+    /// The worker that turns an edit into a scene, once there is a world to
+    /// edit. `None` until the preparation lands, exactly as the simulation is.
+    remesher: Option<Remesher>,
     /// The last frame error reported, so a fault that recurs every frame is
     /// stated once instead of filling the terminal.
     reported: Option<FrameError>,
+    /// The last re-mesh fault reported, for the same reason and separately: a
+    /// dropped frame and an edit that could not be shown are different faults,
+    /// and one recurring must not silence the other.
+    reported_remesh: Option<String>,
 }
 
 /// The worker handle, named so the type above reads.
@@ -112,7 +121,9 @@ impl App {
             phase: ScenePhase::Preparing,
             nothing: empty_scene(),
             size,
+            remesher: None,
             reported: None,
+            reported_remesh: None,
         })
     }
 
@@ -141,7 +152,54 @@ impl App {
                 report: failure.to_string(),
             });
         }
+        self.exchange_remesh(session);
         self.present(session)
+    }
+
+    /// Shows whatever the re-mesh worker has finished, and gives it whatever the
+    /// last tick left to do.
+    ///
+    /// **In that order, and only one batch at a time.** A worker that is still
+    /// busy is not asked, so the sections edited meanwhile stay in the world's
+    /// own dirty set and arrive together — a set keyed per section, so a player
+    /// digging through a slow batch accumulates sections rather than batches.
+    ///
+    /// This is the frame path's entire share of an edit: one upload of a scene
+    /// somebody else assembled.
+    fn exchange_remesh(&mut self, session: &mut Session) {
+        match self.remesher.as_mut().and_then(Remesher::collect) {
+            Some(Ok(scene)) => self.show(scene),
+            Some(Err(failure)) => self.report_remesh(&failure.to_string()),
+            None => {}
+        }
+        self.submit_remesh(session);
+    }
+
+    /// Hands the worker whatever the last tick left to re-mesh, if it is free to
+    /// take it.
+    ///
+    /// A busy worker is not asked at all, which is what leaves the edits made
+    /// meanwhile accumulating in the world rather than queued here.
+    fn submit_remesh(&mut self, session: &mut Session) {
+        let Some(remesher) = self.remesher.as_mut().filter(|remesher| remesher.is_free()) else {
+            return;
+        };
+        if let Some(work) = session.take_remesh_work() {
+            remesher.submit(work);
+        }
+    }
+
+    /// Gives a re-meshed scene to the device and draws from it thereafter.
+    ///
+    /// An upload that fails is reported and dropped, not fatal: the picture the
+    /// player already has is a stale world rather than no world, which is the
+    /// same trade the failed batch above makes.
+    fn show(&mut self, scene: Arc<SceneGeometry>) {
+        if let Err(failure) = self.renderer.upload_scene(&self.gpu.queue, &scene) {
+            self.report_remesh(&failure.to_string());
+            return;
+        }
+        self.phase = ScenePhase::Ready(scene);
     }
 
     /// Acquires a texture, draws into it and presents it — or does whatever the
@@ -276,7 +334,24 @@ impl App {
             .upload_textures(&self.gpu.queue, &prepared.layers)?;
         let scene = Arc::new(prepared.scene);
         self.renderer.upload_scene(&self.gpu.queue, &scene)?;
-        session.attach_simulation(simulation_for(&prepared.world, &prepared.registry)?);
+        // The held block is decided here rather than at the click, because this
+        // is where the registry the world was resolved against is in hand — and
+        // a content pack with no solid block in it fails the start rather than
+        // producing a client that can place nothing.
+        let holding =
+            default_held_block(&prepared.registry).ok_or(PreparationError::NothingToPlace)?;
+        session.attach_simulation(
+            simulation_for(&prepared.world, Arc::clone(&prepared.registry))?,
+            holding,
+        );
+        // The meshed sections, the layers and the registry are handed to the
+        // worker rather than kept here: they are what a re-mesh works on, and a
+        // copy on each side would be a second answer waiting to disagree.
+        self.remesher = Some(Remesher::spawn(Retained {
+            meshed: prepared.meshed,
+            layers: prepared.layers,
+            registry: prepared.registry,
+        }));
         self.phase = ScenePhase::Ready(scene);
         Ok(())
     }
@@ -295,6 +370,19 @@ impl App {
         if self.reported != Some(failure) {
             eprintln!("mycraft: a frame was dropped: {failure}");
             self.reported = Some(failure);
+        }
+    }
+
+    /// States an edit that could not be shown once, however many edits go on to
+    /// meet the same fault.
+    ///
+    /// **It never ends the run**, which is the opposite of what a failed
+    /// preparation does and deliberately so: preparation has no previous picture
+    /// to fall back on, and a re-mesh has the one it drew a moment ago.
+    fn report_remesh(&mut self, failure: &str) {
+        if self.reported_remesh.as_deref() != Some(failure) {
+            eprintln!("mycraft: an edit could not be shown: {failure}");
+            self.reported_remesh = Some(failure.to_owned());
         }
     }
 }

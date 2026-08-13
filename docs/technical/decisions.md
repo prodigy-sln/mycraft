@@ -523,3 +523,46 @@ it does not control, and every one of the four rejection scenarios (non-finite f
 non-finite look, over-deflected magnitude, over-length displacement) is a scenario that would not
 exist if the client were trusted. Nothing about this decision is specific to singleplayer — the
 clamp is exercised on every tick today, not added when a network arrives.
+
+---
+
+## ADR-015 — The editable world keeps a mirrored collision view, resolved through one private write path
+
+**Status**: Accepted · **Date**: 2026-08-13
+
+**Context.** Raycast targeting, block break and place (SPEC-007) gave the simulation its first
+editable world. Before it, `Simulation` held `Box<dyn Solidity + Send>` over a `SolidVoxels` bitset
+resolved once at construction; nothing in the workspace mutated a world after building it. Editing
+needs the block store and the collision view — used by the raycast and by player physics — to agree
+after every write, and something has to guarantee that.
+
+**Decision.** `mc_sim::world::World` owns the block store, a `SolidVoxels` bitset, the dirty-section
+set and the registry they were all resolved against, keeping all four private. Exactly one private
+function, `write`, can mutate either the store or the bitset, and it always writes both together:
+resolve the block's solidity once, write the store, write the bit, mark the section dirty. The two
+domain operations, `break_at` and `place_at`, live in the same module and call `write`; action
+resolution lives in a **child** module so it inherits access to `write` without widening its
+visibility. Physics keeps taking `&dyn Solidity`, unaffected.
+
+**Rejected — deriving solidity from the store on every query, with no bitset at all.** Genuinely
+attractive: it makes a store/collision-disagreement defect **unspellable by construction**, since a
+single source of truth has no second view to disagree with, which is the kind of structural
+elimination this codebase generally prefers over a test guarding the same property. What rules it out
+is a specific committed test it would silently destroy: the replay's overlap oracle judges the
+physics by re-deriving overlap from the world's own per-voxel accessor and the registry directly,
+sharing no lookup chain with the physics' own resolved bitset — deliberately, so an adapter bug in the
+bitset cannot make both sides wrong the same way. Deriving solidity from the store on every query
+would make that oracle's lookup chain *identical* to the code path it exists to check: it would pass
+forever regardless of what broke, silently, and even its own positive control (a box placed inside the
+world's landmark) would keep passing. The trade is a whole-run, adapter-independent invariant on one
+side against a whole defect *class* made unspellable on the other — decided in favour of keeping the
+oracle's independence, with a private invariant standing in for the structural guarantee the rejected
+option would have bought. A reviewer weighing whether to revisit this should read it as this trade,
+not as an oversight.
+
+**Consequences.** A store/collision disagreement (the deleted-write defect this design closes) is
+caught by fixture-scoped scenarios that walk a player through the affected cell — costing four such
+scenarios their ability to fail if the rejected option were chosen instead, since both views would
+already be provably one. A world-wide bitset sized at construction is also the one structure that
+MVP 3's chunk streaming cannot keep as-is; moving to a per-section bitset is a change confined inside
+`SolidVoxels` and is deferred until the world footprint stops being fixed.

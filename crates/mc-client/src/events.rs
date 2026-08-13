@@ -35,14 +35,14 @@ use std::sync::Arc;
 use mc_render::surface::SurfaceSize;
 use mc_render::window::{CaptureState, Ending, LoopAction, WindowEventKind, window_event_action};
 use winit::application::ApplicationHandler;
-use winit::event::{DeviceEvent, DeviceId, ElementState, WindowEvent};
+use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
 use crate::app::App;
 use crate::gpu_startup::{Gpu, create_surface};
-use crate::session::{KeyKind, PointerPlatform, Session};
+use crate::session::{KeyKind, MouseButtonKind, PointerPlatform, Session};
 use crate::startup::{PreparationError, PreparedScene};
 
 /// What the window is called, and how large it opens.
@@ -251,14 +251,16 @@ pub fn dispatch_window_event(session: &mut Session, event: &WindowEvent) -> Loop
         dispatch_key(session, code, key.state.is_pressed());
     }
     // A click is how the player takes the cursor back after Escape gave it
-    // away, and it is read here because which button was pressed cannot be
-    // spelled anywhere else. Which capture follows is the session's answer.
+    // away, and it is also how they ask the world for something. Both are the
+    // session's answers; what is decided here is only which of the library's
+    // buttons this is, because the library's spelling cannot travel further.
     if let WindowEvent::MouseInput {
         state: ElementState::Pressed,
+        button,
         ..
     } = event
     {
-        session.on_mouse_pressed();
+        session.on_mouse_pressed(mouse_button_kind_of(*button));
     }
     let action = window_event_action(&kind_of(event));
     if action == LoopAction::ClearInput {
@@ -310,6 +312,20 @@ const fn key_kind_of(key: KeyCode) -> KeyKind {
         KeyCode::Space => KeyKind::Space,
         KeyCode::Escape => KeyKind::Escape,
         _ => KeyKind::Other,
+    }
+}
+
+/// One mouse button, in the session's vocabulary.
+///
+/// The catch-all absorbs every button the client cannot tell apart, so a library
+/// upgrade that adds buttons changes nothing here. It is a translation and not a
+/// decision: that a middle button asks the world for nothing is the session's
+/// answer, and this arm only says which button arrived.
+const fn mouse_button_kind_of(button: MouseButton) -> MouseButtonKind {
+    match button {
+        MouseButton::Left => MouseButtonKind::Left,
+        MouseButton::Right => MouseButtonKind::Right,
+        _ => MouseButtonKind::Other,
     }
 }
 

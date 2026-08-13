@@ -26,60 +26,11 @@ use std::fmt;
 use mc_core::block::{BlockRegistry, RegistryError};
 use mc_core::id::BlockName;
 use mc_world::column::COLUMN_HEIGHT;
+use mc_world::world::{Extent, VoxelWorld, WorldPos};
 
 use crate::player::{BlockPos, Solidity};
 
 use super::world::{FOOTPRINT, ReplayWorld};
-
-/// How many voxels a volume spans on each axis, counted from the origin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Extent {
-    pub x: u32,
-    pub y: u32,
-    pub z: u32,
-}
-
-impl Extent {
-    /// How many voxels the extent holds.
-    const fn voxel_count(self) -> usize {
-        self.x as usize * self.y as usize * self.z as usize
-    }
-
-    /// Whether a position lies inside the extent.
-    const fn contains(self, at: Voxel) -> bool {
-        at.x < self.x && at.y < self.y && at.z < self.z
-    }
-
-    /// Where the voxel at a position sits in the bitset — x fastest, then z,
-    /// then y, which is the order [`Extent::positions`] walks them in.
-    ///
-    /// Meaningful only for a position the extent [`contains`](Extent::contains);
-    /// both callers below test that first, which is what keeps this arithmetic
-    /// rather than fallible.
-    const fn offset(self, at: Voxel) -> usize {
-        (at.y as usize * self.z as usize + at.z as usize) * self.x as usize + at.x as usize
-    }
-
-    /// Every position inside the extent, x fastest.
-    fn positions(self) -> impl Iterator<Item = Voxel> {
-        (0..self.y).flat_map(move |y| {
-            (0..self.z).flat_map(move |z| (0..self.x).map(move |x| Voxel { x, y, z }))
-        })
-    }
-}
-
-/// A position inside a volume, in the unsigned coordinates a volume is indexed
-/// by.
-///
-/// Distinct from [`BlockPos`] on purpose: that one is signed because the player
-/// is not confined to the world, and this one is what is left of it once the
-/// sign has been read and refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Voxel {
-    x: u32,
-    y: u32,
-    z: u32,
-}
 
 /// A finite volume of named voxels, which [`SolidVoxels`] resolves once.
 ///
@@ -109,6 +60,23 @@ impl BlockVolume for ReplayWorld {
         // The inherent query, named through the type so that a reader does not
         // have to know that an inherent method wins over a trait one.
         ReplayWorld::block_at(self, x, y, z)
+    }
+}
+
+/// A world of columns is a volume of named voxels, and answers as one.
+///
+/// Its own refusal is richer than this trait's — it says *which* edge a position
+/// was outside of — and that difference is deliberate: a resolve walks only
+/// positions the extent produced, so there is nothing here for a caller to act
+/// on, and the trait's `Option` is the same "nothing to stand on" the space
+/// above a world's terrain answers with.
+impl BlockVolume for VoxelWorld {
+    fn extent(&self) -> Extent {
+        VoxelWorld::extent(self)
+    }
+
+    fn block_at(&self, x: u32, y: u32, z: u32) -> Option<&BlockName> {
+        VoxelWorld::block_at(self, WorldPos { x, y, z }).ok()
     }
 }
 
@@ -143,15 +111,80 @@ impl SolidVoxels {
         registry: &BlockRegistry,
     ) -> Result<Self, RegistryError> {
         let extent = volume.extent();
-        let solid: Vec<bool> = extent
-            .positions()
-            .map(|at| blocks_the_player(volume, registry, at))
-            .collect::<Result<_, _>>()?;
+        let mut recent = LastResolved::nothing();
+        let mut solid = Vec::with_capacity(extent.voxel_count());
+        for at in extent.positions() {
+            solid.push(match volume.block_at(at.x, at.y, at.z) {
+                Some(name) => recent.answer_for(name, registry)?,
+                None => false,
+            });
+        }
         Ok(Self {
             extent,
             solid: Bitset::packing(&solid),
         })
     }
+
+    /// Records whether the voxel at `at` blocks the player.
+    ///
+    /// A position outside the volume has no bit to write and none is written:
+    /// the type's answer for it is `false` by construction and there is nothing
+    /// a caller could do with a refusal here that it has not already done at the
+    /// store, which refuses the same position first.
+    pub fn set(&mut self, at: WorldPos, solid: bool) {
+        if self.extent.contains(at) {
+            self.solid.set(self.extent.offset(at), solid);
+        }
+    }
+}
+
+/// The last name resolved, and what it resolved to.
+///
+/// **Run coherence, and it is worth the type.** A resolve walks a whole world —
+/// the smallest one is 16 × 256 × 16 = 65 536 voxels — and every voxel of it
+/// would otherwise cost one `HashMap<BlockName, BlockId>` hash. Worlds are
+/// coherent: a run of air, a run of stone. `BlockName` is `Arc`-backed and every
+/// clone of a name shares one allocation, so consecutive voxels of a run are the
+/// *same* allocation and can be answered without hashing anything.
+///
+/// It can only ever be conservative. Two distinct allocations holding the same
+/// text simply miss and are resolved the slow way, which is the answer they
+/// would have got anyway — so the resolution rule is still stated exactly once,
+/// at `registry.resolve`.
+struct LastResolved(Option<(BlockName, bool)>);
+
+impl LastResolved {
+    /// Nothing seen yet.
+    const fn nothing() -> Self {
+        Self(None)
+    }
+
+    /// Whether `name` is solid, reusing the previous answer where it is the
+    /// previous name.
+    fn answer_for(
+        &mut self,
+        name: &BlockName,
+        registry: &BlockRegistry,
+    ) -> Result<bool, RegistryError> {
+        if let Some((seen, answer)) = &self.0
+            && shares_an_allocation(seen, name)
+        {
+            return Ok(*answer);
+        }
+        let answer = registry.resolve(name)?.is_solid;
+        self.0 = Some((name.clone(), answer));
+        Ok(answer)
+    }
+}
+
+/// Whether two names are the same allocation and not merely the same text.
+///
+/// The address and the length rather than the fat pointer as a whole, because
+/// comparing wide pointers directly is the shape `ambiguous_wide_pointer_comparisons`
+/// is about.
+fn shares_an_allocation(one: &BlockName, other: &BlockName) -> bool {
+    let (left, right) = (one.as_str(), other.as_str());
+    std::ptr::eq(left.as_ptr(), right.as_ptr()) && left.len() == right.len()
 }
 
 impl Solidity for SolidVoxels {
@@ -175,18 +208,6 @@ impl fmt::Debug for SolidVoxels {
     }
 }
 
-/// Whether the volume holds a block at `at` that the registry calls solid.
-fn blocks_the_player(
-    volume: &dyn BlockVolume,
-    registry: &BlockRegistry,
-    at: Voxel,
-) -> Result<bool, RegistryError> {
-    match volume.block_at(at.x, at.y, at.z) {
-        Some(name) => Ok(registry.resolve(name)?.is_solid),
-        None => Ok(false),
-    }
-}
-
 /// A signed position as the unsigned one a volume is indexed by, or nothing if
 /// any coordinate is negative.
 ///
@@ -196,8 +217,8 @@ fn blocks_the_player(
 /// and wrapping it for the far edge of the footprint, and both would stand a
 /// player on terrain that is not beneath it while every existing test stayed
 /// green.
-fn inside_the_positive_octant(at: BlockPos) -> Option<Voxel> {
-    Some(Voxel {
+fn inside_the_positive_octant(at: BlockPos) -> Option<WorldPos> {
+    Some(WorldPos {
         x: at.x.try_into().ok()?,
         y: at.y.try_into().ok()?,
         z: at.z.try_into().ok()?,
@@ -246,6 +267,28 @@ impl Bitset {
         self.words
             .get(offset >> WORD_SHIFT)
             .is_some_and(|word| word & carried != 0)
+    }
+
+    /// Marks or unmarks the voxel at `offset`.
+    ///
+    /// An offset past the end writes nothing, for the same reason one past the
+    /// end reads as unmarked: the length is the flags' length by construction,
+    /// so there is no position a caller can reach that the bitset was built
+    /// without, and the bound that makes this unreachable is the extent's.
+    fn set(&mut self, offset: usize, holds: bool) {
+        if let Some(word) = self.words.get_mut(offset >> WORD_SHIFT) {
+            *word = with_bit(*word, offset & WORD_MASK, holds);
+        }
+    }
+}
+
+/// `word` with the flag at `bit` reading `holds`.
+const fn with_bit(word: u64, bit: usize, holds: bool) -> u64 {
+    let carried: u64 = 1 << bit;
+    if holds {
+        word | carried
+    } else {
+        word & !carried
     }
 }
 

@@ -13,14 +13,16 @@
 //! because three blocks up and one block above the surface are both declared
 //! here.
 
+use std::sync::Arc;
+
 use glam::Vec3;
 use mc_core::block::{BlockRegistry, RegistryError};
 use thiserror::Error;
 
 use crate::player::PlayerState;
 use crate::simulation::Simulation;
+use crate::world::World;
 
-use super::solid::SolidVoxels;
 use super::world::ReplayWorld;
 
 /// Why the player could not be placed in a world.
@@ -82,6 +84,12 @@ pub fn spawn(world: &ReplayWorld) -> Result<PlayerState, SpawnError> {
 
 /// The simulation of `world`, with the player at the spawn `world` implies.
 ///
+/// **The blocks are cloned rather than taken.** A few hundred kilobytes once, at
+/// startup, against the alternative of consuming the `ReplayWorld` — which would
+/// reorder the golden suites, since they mesh the world and build a simulation
+/// from the same value. The world a frame is drawn of stays exactly as it was
+/// generated; what a player edits is the simulation's own copy.
+///
 /// # Errors
 ///
 /// Returns [`SpawnError::Solidity`] when the world holds a block `registry` does
@@ -89,8 +97,10 @@ pub fn spawn(world: &ReplayWorld) -> Result<PlayerState, SpawnError> {
 /// the declared spawn column.
 pub fn simulation_for(
     world: &ReplayWorld,
-    registry: &BlockRegistry,
+    registry: Arc<BlockRegistry>,
 ) -> Result<Simulation, SpawnError> {
-    let voxels = SolidVoxels::resolve(world, registry)?;
-    Ok(Simulation::new(spawn(world)?, Box::new(voxels)))
+    Ok(Simulation::new(
+        spawn(world)?,
+        World::new(world.blocks().clone(), registry, world.sky().clone())?,
+    ))
 }

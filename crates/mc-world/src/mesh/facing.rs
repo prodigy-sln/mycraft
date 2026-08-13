@@ -80,6 +80,27 @@ impl Facing {
         self.axis_and_sign().1
     }
 
+    /// The offset one step off this facing carries, in x, y, z order.
+    ///
+    /// What `adjacent` does to a voxel inside a section, said in world
+    /// coordinates instead — where there is no boundary to leave, so the step is
+    /// only ever an offset. Derived from the same axis-and-sign pair
+    /// as everything else here rather than written out per facing, because a
+    /// table with six rows is a table with a row nobody checked.
+    ///
+    /// Returned as an array for callers to destructure (`let [dx, dy, dz] = …`)
+    /// rather than index: `clippy::indexing_slicing` is denied workspace-wide.
+    #[must_use]
+    pub const fn step(self) -> [i32; 3] {
+        let (axis, positive) = self.axis_and_sign();
+        let distance = if positive { 1 } else { -1 };
+        match axis {
+            Axis::X => [distance, 0, 0],
+            Axis::Y => [0, distance, 0],
+            Axis::Z => [0, 0, distance],
+        }
+    }
+
     /// The two axes a face of this facing lies in, the primary one first.
     ///
     /// The two axes that are not this facing's own, in x < y < z order. A

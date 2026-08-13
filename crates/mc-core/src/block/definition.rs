@@ -34,7 +34,38 @@ impl DefinitionOrigin {
 pub struct BlockDefinition {
     pub name: BlockName,
     pub texture: TextureKey,
+    /// Whether this block stops a player who walks into it.
+    ///
+    /// A fact about physics and nothing else. Whether a *new* block may be built
+    /// over this one is [`replaceable`](Self::replaceable), which is a separate
+    /// declaration on purpose: the two coincide across the blocks the base game
+    /// happens to ship, and deriving either from the other would put that
+    /// accident in the engine where content could not override it.
     pub is_solid: bool,
+    /// Whether a placement may overwrite this block.
+    ///
+    /// Content's word, read by the placement rule and by nothing else. Absent in
+    /// a declaration means `false` — the conservative half, so that a block
+    /// which says nothing cannot be built through.
+    pub replaceable: bool,
+    /// Whether this block can be broken at all.
+    ///
+    /// Absent in a declaration means `true`: breakable is the ordinary case and
+    /// a block that says nothing is an ordinary block. `false` is what makes a
+    /// block indestructible, and any block may declare it — including one that
+    /// also names a residue, which is then simply never reached.
+    pub breakable: bool,
+    /// What the cell holds once this block is broken, or nothing where breaking
+    /// it leaves the cell empty.
+    ///
+    /// `None` is the common case and says the cell becomes empty, because the
+    /// absence of a block is not a residue worth naming. Indestructibility is
+    /// [`breakable`](Self::breakable) and never this field's silence. It is a
+    /// [`BlockName`] rather than a [`BlockId`] because ids belong to a registry
+    /// and definitions arrive in batches: a block may legitimately name a
+    /// residue that a later batch registers, so the name is resolved where a
+    /// break reads it and not where it is declared.
+    pub breaks_into: Option<BlockName>,
     pub origin: DefinitionOrigin,
 }
 

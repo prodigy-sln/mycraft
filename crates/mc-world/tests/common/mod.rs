@@ -131,10 +131,17 @@ pub fn registry_of(names: &[&str]) -> Result<BlockRegistry, Box<dyn Error>> {
 pub fn registry_declaring(blocks: &[(&str, bool)]) -> Result<BlockRegistry, Box<dyn Error>> {
     let mut declared = Vec::with_capacity(blocks.len());
     for &(name, is_solid) in blocks {
+        // Solidity is the property these fixtures exist to declare per block.
+        // Breakability, replaceability and a residue are read by a break or a
+        // placement, which is not something this crate's suites drive, so each
+        // is left at what a declaration saying nothing about it means.
         declared.push(Ok(BlockDefinition {
             name: BlockName::parse(name)?,
             texture: TextureKey::parse(name)?,
             is_solid,
+            replaceable: false,
+            breakable: true,
+            breaks_into: None,
             origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
         }));
     }

@@ -17,6 +17,7 @@
 
 pub mod contract;
 pub mod height;
+pub mod patch;
 pub mod prepare;
 pub mod script;
 pub mod solid;
@@ -24,8 +25,13 @@ pub mod spawn;
 pub mod world;
 
 pub use crate::camera::CameraPose;
+/// `Extent` lives in `mc-world` now, because that is where the world it
+/// describes lives and mc-world may not depend on mc-sim. It is re-exported from
+/// the path it was declared at so its committed consumers keep compiling.
+pub use mc_world::world::Extent;
+pub use patch::{SpliceError, remesh, splice};
 pub use prepare::{PrepareError, SectionQuads, mesh_all};
 pub use script::{SCRIPT_TICKS, TickError, TickIndex, scripted_intent};
-pub use solid::{BlockVolume, Extent, SolidVoxels};
+pub use solid::{BlockVolume, SolidVoxels};
 pub use spawn::{SpawnError, simulation_for, spawn};
 pub use world::{ReplayWorld, WorldGenError};

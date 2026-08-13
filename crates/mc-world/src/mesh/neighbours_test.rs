@@ -62,10 +62,17 @@ const ANY_VOXEL: LocalPos = LocalPos { x: 0, y: 0, z: 0 };
 fn registry_of_the_six() -> Result<BlockRegistry, Box<dyn Error>> {
     let mut declared = Vec::with_capacity(AROUND.len());
     for name in AROUND {
+        // All six are solid, and nothing else they could declare is stated:
+        // what these guards are about is which section was consulted for which
+        // facing, and nothing along that path reads a definition beyond its
+        // solidity.
         declared.push(Ok(BlockDefinition {
             name: BlockName::parse(name)?,
             texture: TextureKey::parse(name)?,
             is_solid: true,
+            replaceable: false,
+            breakable: true,
+            breaks_into: None,
             origin: DefinitionOrigin::new(GUARD_ORIGIN),
         }));
     }
