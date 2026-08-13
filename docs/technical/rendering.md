@@ -337,7 +337,7 @@ crossing point at roughly 15 000 to 45 000 pessimally-placed edits depending on 
 replay reaches it (`docs/technical/testing.md` §"The 10 000-block exit criterion"), because a replay that
 never uploads to the GPU never asks `SceneGeometry::assemble` anything; a long, excavation-heavy play
 session is what would. `RendererError::SceneTooLarge` is the existing, loud failure that session would
-hit — sizing the buffers for it is a tracked gap, not a silent one.
+hit — sizing the buffers for it is tracked as **PRO-883**, not left as a silent gap.
 
 ### The packed vertex, and the section table
 
