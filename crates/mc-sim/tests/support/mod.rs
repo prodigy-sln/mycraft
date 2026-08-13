@@ -28,12 +28,36 @@ use mc_core::id::BlockName;
 use mc_sim::player::PlayerState;
 use mc_sim::replay::{CameraPose, ReplayWorld};
 use mc_world::content::TomlFileDefinitionSource;
+use mc_world::section::Contents;
 
 /// The error type every replay test propagates with `?`.
 pub type TestResult = Result<(), Box<dyn Error>>;
 
+/// What a cell holding nothing is called wherever this suite compares contents
+/// as text.
+///
+/// **It is not a block name and cannot become one**: every namespaced name
+/// carries a colon, so an expectation of an empty cell and one of a named block
+/// can sit in the same list without either being able to impersonate the other.
+pub const NOTHING: &str = "nothing";
+
+/// What `contents` holds, as text: the block's own name, or [`NOTHING`].
+///
+/// Two arms rather than a fallback, because "this cell holds nothing" and "this
+/// cell holds a block" are different facts and a default would let one arrive
+/// under the other's name.
+#[must_use]
+pub fn described(contents: Contents<&BlockName>) -> String {
+    match contents {
+        Contents::Empty => NOTHING.to_owned(),
+        Contents::Holds(name) => name.as_str().to_owned(),
+    }
+}
+
 /// The blocks the declaration names, spelled as content spells them.
-pub const AIR: &str = "base:air";
+///
+/// Four names and no fifth for the space above the ground: the declaration puts
+/// nothing there, and nothing has no name to spell.
 pub const GRASS: &str = "base:grass";
 pub const DIRT: &str = "base:dirt";
 pub const STONE: &str = "base:stone";
@@ -153,15 +177,22 @@ pub fn surface_height(world: &ReplayWorld, x: u32, z: u32) -> Result<u32, Box<dy
     })
 }
 
-/// The block the world holds at a world position.
+/// What the world holds at a world position: the block's own name, or
+/// [`NOTHING`] where the cell holds none.
+///
+/// **A position the world does not reach is a third answer and is an error**,
+/// never one of the first two — a world answering "outside" everywhere would
+/// otherwise satisfy every assertion written about its contents by having none
+/// of them.
 ///
 /// # Errors
 ///
-/// Returns an error if the world holds no voxel there.
-pub fn block_at(world: &ReplayWorld, x: u32, y: u32, z: u32) -> Result<&BlockName, Box<dyn Error>> {
-    world
+/// Returns an error if the world reaches no cell there.
+pub fn block_at(world: &ReplayWorld, x: u32, y: u32, z: u32) -> Result<String, Box<dyn Error>> {
+    let held = world
         .block_at(x, y, z)
-        .ok_or_else(|| format!("the replay world holds no voxel at ({x}, {y}, {z})").into())
+        .ok_or_else(|| format!("the replay world reaches no cell at ({x}, {y}, {z})"))?;
+    Ok(described(held))
 }
 
 /// The whole surface heightmap, one entry per column, in [`every_column`] order.

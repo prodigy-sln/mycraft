@@ -14,6 +14,11 @@
 //! what lets `/// BlockName::parse("base:stone")` say the most natural thing.
 //! Tests under `tests/` are not scanned at all — which is why this one may say
 //! the names out loud.
+//!
+//! It scans for two lists. A name the base game *ships* must not be in the
+//! engine; a name the base game has *retired* must not be anywhere, and that
+//! second list exists because leaving `SHIPPED_NAMES` is otherwise how a name
+//! stops being watched.
 
 mod common;
 
@@ -26,19 +31,29 @@ use common::{TestResult, repository_root};
 use tempfile::TempDir;
 
 /// The blocks this repository ships as content.
-const SHIPPED_NAMES: [&str; 5] = [
-    "base:air",
-    "base:stone",
-    "base:dirt",
-    "base:grass",
-    "base:water",
-];
+const SHIPPED_NAMES: [&str; 4] = ["base:stone", "base:dirt", "base:grass", "base:water"];
+
+/// The block names the base game has retired.
+///
+/// A name that leaves [`SHIPPED_NAMES`] stops being watched, which is the one
+/// way the invariant above quietly loosens: `base:air` was removed from the
+/// content set precisely because a cell may now hold nothing, and after that
+/// removal nothing mechanical stood between the engine and writing the name
+/// again. An entry here never leaves.
+const RETIRED_NAMES: [&str; 1] = ["base:air"];
 
 /// What a scan of one directory tree found.
 #[derive(Debug, Default)]
 struct Scan {
     files_read: usize,
     hits: Vec<String>,
+    /// Every place a [`RETIRED_NAMES`] entry appears, kept apart from `hits`.
+    ///
+    /// Two lists rather than one, so that the absence check and its control each
+    /// assert on the retired result alone. A single list would let a control
+    /// naming a retired block pass on a shipped-name match, which is the reading
+    /// the control exists to rule out.
+    retired: Vec<String>,
     /// Every production file the exemption filter caused to be skipped.
     ///
     /// Recorded at the filter rather than read off [`EXEMPT_FILES`], and that is
@@ -121,7 +136,11 @@ fn production_text(source: &str) -> String {
 }
 
 /// Reads every production Rust source under `root` and reports each place a
-/// shipped block name appears in one's production text.
+/// shipped or retired block name appears in one's production text.
+///
+/// One walk answering both lists, on purpose: a second scan would be a second
+/// set of filters to keep in step, and the exemption and the test-file skip must
+/// mean the same thing for both lists or the pins on them stop covering either.
 fn scan_for_shipped_names(root: &Path) -> Result<Scan, Box<dyn Error>> {
     let mut scan = Scan::default();
     scan_directory(root, &mut scan)?;
@@ -158,6 +177,12 @@ fn scan_file(path: &Path, scan: &mut Scan) -> Result<(), Box<dyn Error>> {
     for name in SHIPPED_NAMES {
         if text.contains(name) {
             scan.hits.push(format!("{} names `{name}`", path.display()));
+        }
+    }
+    for name in RETIRED_NAMES {
+        if text.contains(name) {
+            scan.retired
+                .push(format!("{} names `{name}`", path.display()));
         }
     }
     Ok(())
@@ -226,6 +251,68 @@ fn the_scan_reports_a_source_that_does_name_a_block_the_base_game_ships() -> Tes
     assert!(
         !scanned.hits.is_empty(),
         "a source that does name a shipped block must be reported, or this scan proves nothing"
+    );
+    Ok(())
+}
+
+/// The same invariant read backwards, and the reason retiring a name is not the
+/// same as keeping watch on it. `base:air` left `SHIPPED_NAMES` the day the base
+/// game stopped declaring it, and a name in neither list is a name nothing at all
+/// would notice returning to production Rust.
+///
+/// Three limitations are inherited from the scan rather than lifted here, and
+/// each is deliberate: the exemption applies to retired names too, doc comments
+/// are stripped before matching, and `tests/` is not read at all — which is what
+/// lets `block_semantics.rs` declare a *solid* block named `base:air` on purpose
+/// without contradicting this.
+///
+/// This asserts an absence, so it would go green forever the day the scan stopped
+/// working. The test below it is its control.
+#[test]
+fn no_production_rust_source_names_a_block_the_base_game_has_retired() -> TestResult {
+    let mut scanned = Scan::default();
+    for directory in source_directories()? {
+        let found = scan_for_shipped_names(&directory)?;
+        scanned.files_read += found.files_read;
+        scanned.retired.extend(found.retired);
+    }
+
+    assert!(
+        scanned.files_read > 0,
+        "the scan read no Rust source at all, so the check below would be vacuous"
+    );
+    assert!(
+        scanned.retired.is_empty(),
+        "a name the base game has retired means nothing to the engine and nothing to content, \
+         so it belongs in no production source: {:?}",
+        scanned.retired
+    );
+    Ok(())
+}
+
+/// The control for the check above, and what a scan whose retired-name match
+/// never fires looks like: nothing reported, forever, including on the day the
+/// retired name comes back.
+///
+/// The fixture names a retired block and **no shipped one**, which is the whole
+/// separation the second hit list buys. A `retired` list quietly fed by the
+/// shipped-name matcher finds nothing in this file; a control that also named a
+/// shipped block would be green either way and prove nothing about the retired
+/// match. That constraint is held by the fixture — no assertion can enforce it —
+/// so it is stated here, and the assertion below deliberately says nothing at all
+/// about the shipped-name result.
+#[test]
+fn the_scan_reports_a_source_that_does_name_a_block_the_base_game_has_retired() -> TestResult {
+    let (_directory, scanned) = scan_of(&[("sky.rs", "const SKY: &str = \"base:air\";\n")])?;
+
+    assert!(
+        scanned
+            .retired
+            .iter()
+            .any(|hit| hit.contains("sky.rs") && hit.contains("base:air")),
+        "a source that does name a retired block must be reported, and reported by file and by \
+         name, or the check above proves nothing: {:?}",
+        scanned.retired
     );
     Ok(())
 }

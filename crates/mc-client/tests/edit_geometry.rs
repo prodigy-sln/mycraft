@@ -102,6 +102,7 @@ use mc_sim::player::{BlockPos, MovementIntent, PlayerState};
 use mc_sim::replay::{SectionQuads, remesh, splice};
 use mc_sim::simulation::Simulation;
 use mc_sim::world::World;
+use mc_world::section::Contents;
 
 use support::TestResult;
 
@@ -294,7 +295,6 @@ impl Handed {
         let world = World::new(
             prepared.world.blocks().clone(),
             Arc::clone(&prepared.registry),
-            prepared.world.sky().clone(),
         )?;
         Ok(Self {
             simulation: Simulation::new(looking_down_from(feet), world),
@@ -339,10 +339,20 @@ impl Handed {
     /// faces into that one's along the plane they share, which is precisely the
     /// arithmetic these counts are derived under.
     fn builds_with(&self, standing_on: BlockPos) -> Result<BlockName, Box<dyn Error>> {
-        let standing = self
-            .block_at(standing_on)
-            .ok_or("the fixture's world holds no block where the placement stands")?
-            .clone();
+        // Three answers and three arms. The fixture is standing on something, so
+        // both of the other two are the fixture being wrong about itself — and
+        // they are wrong in different ways, which a single refusal would hide.
+        let standing = match self.block_at(standing_on) {
+            None => {
+                return Err(
+                    "the fixture's world reaches no cell where the placement stands".into(),
+                );
+            }
+            Some(Contents::Empty) => {
+                return Err("the fixture's world holds nothing where the placement stands".into());
+            }
+            Some(Contents::Holds(name)) => name.clone(),
+        };
         self.a_visible_solid_block_other_than(&standing).ok_or_else(|| {
             "the prepared world shows no solid block besides the one built on, so nothing can be \
              placed that a scene has a texture layer for"
@@ -350,8 +360,8 @@ impl Handed {
         })
     }
 
-    /// The block held at `cell`, as the simulation's own world reads it.
-    fn block_at(&self, cell: BlockPos) -> Option<&BlockName> {
+    /// What `cell` holds, as the simulation's own world reads it.
+    fn block_at(&self, cell: BlockPos) -> Option<Contents<&BlockName>> {
         self.simulation.world().block_at(cell)
     }
 

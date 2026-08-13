@@ -47,7 +47,7 @@ use mc_sim::simulation::Simulation;
 use mc_world::world::WorldPos;
 
 use support::chamber::{BlockChamber, at, differences};
-use support::{AIR, DIRT, STONE, TestResult};
+use support::{DIRT, NOTHING, STONE, TestResult};
 
 /// How many chunk columns the fixture world spans on each axis.
 ///
@@ -105,7 +105,7 @@ fn a_break_takes_the_nearer_of_two_blocks_standing_in_line_and_leaves_the_farthe
 
     assert_eq!(
         differences(&declared, broken.world()),
-        broke(NEAR, STONE, AIR),
+        broke(NEAR, STONE, NOTHING),
         "the ray meets the block two blocks from the eye before the one at four, so exactly one \
          cell of the fixture is allowed to have moved and it is that one. The far cell has to \
          still hold the block it was declared with, and the two carry different names on \
@@ -128,7 +128,7 @@ fn a_break_with_no_solid_block_along_the_look_direction_leaves_every_declared_ce
             differences(&declared, refusing.world()),
             differences(&declared, accepting.world())
         ),
-        (nothing(), broke(NEAR, STONE, AIR)),
+        (nothing(), broke(NEAR, STONE, NOTHING)),
         "facing away from the two blocks there is nothing solid anywhere along the ray, so every \
          cell of the fixture has to still hold the block it was declared with. The second half \
          is what stops that being satisfied by a simulation that edits nothing whatever: the \
@@ -151,7 +151,7 @@ fn a_break_against_a_block_first_met_beyond_five_blocks_from_the_eye_changes_not
             differences(&declared, refusing.world()),
             differences(&declared, accepting.world())
         ),
-        (nothing(), broke(AT_THE_LIMIT, STONE, AIR)),
+        (nothing(), broke(AT_THE_LIMIT, STONE, NOTHING)),
         "the block's near face is met at 5.05 blocks from the eye, which is past the reach, so \
          nothing changes. One tenth of a block nearer it is met at 4.95 and the same request \
          goes through — the pair is what makes this the *boundary* rather than an implementation \
@@ -169,7 +169,7 @@ fn a_break_against_a_block_first_met_just_inside_five_blocks_leaves_what_it_brea
 
     assert_eq!(
         differences(&declared, broken.world()),
-        broke(AT_THE_LIMIT, STONE, AIR),
+        broke(AT_THE_LIMIT, STONE, NOTHING),
         "4.95 blocks from the eye is inside the reach, so the cell ends holding the block its \
          own definition names it breaks into. This is the only assertion in the suite that a \
          reach measured from the feet can fail: on this horizontal ray a feet-measured distance \
@@ -193,17 +193,13 @@ fn one_block_at_the_limit() -> BlockChamber {
     floored().cell(AT_THE_LIMIT, STONE)
 }
 
-/// Air everywhere, with one layer of floor for the player to stand on.
+/// Nothing anywhere, with one layer of floor for the player to stand on.
 ///
 /// The floor is a single layer rather than everything beneath it: the player
 /// never leaves its top face, and a ray held level at the eye's height never
 /// descends to it.
 fn floored() -> BlockChamber {
-    BlockChamber::filled_with(COLUMNS, AIR).run(
-        at(0, FLOOR_LAYER, 0),
-        at(16, FLOOR_LAYER + 1, 16),
-        STONE,
-    )
+    BlockChamber::empty(COLUMNS).run(at(0, FLOOR_LAYER, 0), at(16, FLOOR_LAYER + 1, 16), STONE)
 }
 
 /// A player standing still on the floor at `feet`, facing along `yaw` with a

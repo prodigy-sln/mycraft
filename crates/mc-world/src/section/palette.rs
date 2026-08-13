@@ -13,58 +13,71 @@
 
 use mc_core::id::BlockName;
 
-/// One block a section holds, and how many of its voxels hold it.
+use super::Contents;
+
+/// One thing a section's voxels hold — a block, or nothing — and how many of
+/// them hold it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PaletteEntry {
-    name: BlockName,
+    contents: Contents,
     voxels_holding: usize,
 }
 
-/// The blocks one section holds, in the order they were first written into it.
+/// What one section's voxels hold, in the order it was first written into them.
+///
+/// Emptiness is an entry here and not a state beside the palette: a cell holding
+/// nothing occupies a palette position exactly as a cell holding a block does,
+/// which is what leaves the packed indices, the index widths, the reference
+/// counts and compaction with nothing to know about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Palette {
     entries: Vec<PaletteEntry>,
 }
 
 impl Palette {
-    /// A palette whose single entry `name` is held by `voxels` voxels.
-    pub(super) fn filled_with(name: &BlockName, voxels: usize) -> Self {
+    /// A palette whose single entry `contents` is held by `voxels` voxels.
+    ///
+    /// One constructor and not two. A section holding nothing everywhere and a
+    /// section holding one block everywhere are the same shape with a different
+    /// entry at position 0, and a second constructor would be a second place the
+    /// initial reference count could be wrong.
+    pub(super) fn filled_with(contents: Contents, voxels: usize) -> Self {
         Self {
             entries: vec![PaletteEntry {
-                name: name.clone(),
+                contents,
                 voxels_holding: voxels,
             }],
         }
     }
 
-    /// A palette holding the blocks `counted` names, in the order it names them,
-    /// each held by the number of voxels beside it.
+    /// A palette holding what `counted` names, in the order it names them, each
+    /// held by the number of voxels beside it.
     ///
     /// The counts come from the voxels they describe rather than from a previous
     /// palette, because a description arriving from outside is the only thing
     /// that knows them — and an entry no voxel names is still kept, since only
     /// compaction removes an entry.
-    pub(super) fn rebuilt(counted: impl Iterator<Item = (BlockName, usize)>) -> Self {
+    pub(super) fn rebuilt(counted: impl Iterator<Item = (Contents, usize)>) -> Self {
         Self {
             entries: counted
-                .map(|(name, voxels_holding)| PaletteEntry {
-                    name,
+                .map(|(contents, voxels_holding)| PaletteEntry {
+                    contents,
                     voxels_holding,
                 })
                 .collect(),
         }
     }
 
-    /// One voxel that held the entry at `vacated` now holds `name`, and this is
-    /// the position `name` occupies.
+    /// One voxel that held the entry at `vacated` now holds `contents`, and this
+    /// is the position `contents` occupies.
     ///
     /// The new reference is taken before the old one is given back, and the
     /// order is the whole of it: a voxel overwritten with the block it already
     /// holds would otherwise leave its entry momentarily at zero references —
     /// indistinguishable from an entry nothing holds, and so reclaimable by
     /// anything that looks in between.
-    pub(super) fn replace(&mut self, vacated: usize, name: &BlockName) -> usize {
-        let position = self.take_reference(name);
+    pub(super) fn replace(&mut self, vacated: usize, contents: Contents<&BlockName>) -> usize {
+        let position = self.take_reference(contents);
         self.release(vacated);
         position
     }
@@ -109,9 +122,18 @@ impl Palette {
             .collect();
     }
 
-    /// The block at `position`, or `None` if the palette is shorter than that.
-    pub(super) fn name_at(&self, position: usize) -> Option<&BlockName> {
-        self.entries.get(position).map(|entry| &entry.name)
+    /// What the entry at `position` holds, or `None` if the palette is shorter
+    /// than that.
+    ///
+    /// **The `Option` says the position exists and nothing else.** Whether the
+    /// voxels at that position hold a block is the [`Contents`] inside it. The
+    /// two questions are one wrapper apart on purpose: a `None` here is a
+    /// section whose own indices no longer name its own palette, which is a
+    /// corruption, and an empty cell is an ordinary answer.
+    pub(super) fn contents_at(&self, position: usize) -> Option<Contents<&BlockName>> {
+        self.entries
+            .get(position)
+            .map(|entry| entry.contents.as_ref())
     }
 
     /// How many entries the palette holds, referenced or not.
@@ -120,19 +142,19 @@ impl Palette {
     }
 
     /// Every entry, in insertion order.
-    pub(super) fn iter(&self) -> impl ExactSizeIterator<Item = &BlockName> {
-        self.entries.iter().map(|entry| &entry.name)
+    pub(super) fn iter(&self) -> impl ExactSizeIterator<Item = Contents<&BlockName>> {
+        self.entries.iter().map(|entry| entry.contents.as_ref())
     }
 
-    /// Records one more voxel holding `name`, adding it if the palette does not
-    /// hold it yet, and reports where it sits.
+    /// Records one more voxel holding `contents`, adding an entry if the palette
+    /// does not hold it yet, and reports where it sits.
     ///
     /// Finding before appending is what keeps a section a player edits over and
     /// over from growing a palette entry per edit.
-    fn take_reference(&mut self, name: &BlockName) -> usize {
-        let held = match self.position_of(name) {
+    fn take_reference(&mut self, contents: Contents<&BlockName>) -> usize {
+        let held = match self.position_of(contents) {
             Some(held) => held,
-            None => self.append(name),
+            None => self.append(contents),
         };
         if let Some(entry) = self.entries.get_mut(held) {
             entry.voxels_holding += 1;
@@ -140,12 +162,12 @@ impl Palette {
         held
     }
 
-    /// Puts `name` at the end of the palette, held by nothing yet, and reports
-    /// where it landed.
-    fn append(&mut self, name: &BlockName) -> usize {
+    /// Puts `contents` at the end of the palette, held by nothing yet, and
+    /// reports where it landed.
+    fn append(&mut self, contents: Contents<&BlockName>) -> usize {
         let position = self.entries.len();
         self.entries.push(PaletteEntry {
-            name: name.clone(),
+            contents: contents.cloned(),
             voxels_holding: 0,
         });
         position
@@ -163,17 +185,20 @@ impl Palette {
         }
     }
 
-    /// Where `name` sits, if the palette holds it.
+    /// Where `contents` sits, if the palette holds it.
     ///
     /// A linear scan. A palette is a handful of entries in every section a real
-    /// world produces, and a map keyed by name would cost more than it saved
-    /// until that stops being true.
+    /// world produces, and a map keyed by what it holds would cost more than it
+    /// saved until that stops being true.
     ///
     /// An entry nothing holds is still found, because it is still an entry: a
     /// block written back into a section it briefly left belongs at the position
-    /// it already had, not at a second one.
-    fn position_of(&self, name: &BlockName) -> Option<usize> {
-        self.entries.iter().position(|entry| entry.name == *name)
+    /// it already had, not at a second one. That is true of emptiness as well —
+    /// a cell emptied, refilled and emptied again keeps one empty entry.
+    fn position_of(&self, contents: Contents<&BlockName>) -> Option<usize> {
+        self.entries
+            .iter()
+            .position(|entry| entry.contents.as_ref() == contents)
     }
 }
 

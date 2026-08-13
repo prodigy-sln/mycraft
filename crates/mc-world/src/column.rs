@@ -10,7 +10,7 @@
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 
-use crate::section::{Axis, LocalPos, SECTION_SIZE, Section, SectionError};
+use crate::section::{Axis, Contents, LocalPos, SECTION_SIZE, Section, SectionError};
 
 /// How many sections a column stacks.
 pub const SECTIONS_PER_COLUMN: u32 = 16;
@@ -67,6 +67,18 @@ pub struct ChunkColumn {
 }
 
 impl ChunkColumn {
+    /// A column at `coordinate` holding nothing at all.
+    ///
+    /// Takes no registry and cannot fail, for the reason
+    /// [`Section::empty`] does not: nothing is not a block.
+    #[must_use]
+    pub fn empty(coordinate: ColumnCoordinate) -> Self {
+        Self {
+            coordinate,
+            sections: std::array::from_fn(|_| Section::empty()),
+        }
+    }
+
     /// A column at `coordinate` every one of whose voxels holds `fill`.
     ///
     /// # Errors
@@ -90,17 +102,33 @@ impl ChunkColumn {
         self.coordinate
     }
 
-    /// The block held at `pos`.
+    /// What the cell at `pos` holds — a block, or nothing.
+    ///
+    /// The `Result` says the position is one this column has; what it holds is
+    /// the [`Contents`] inside it.
     ///
     /// # Errors
     ///
     /// Returns [`SectionError::OutOfBounds`] if `pos` is above the top of a
     /// column, or outside the one section's width a column spans.
-    pub fn block_at(&self, pos: ColumnPos) -> Result<&BlockName, SectionError> {
+    pub fn block_at(&self, pos: ColumnPos) -> Result<Contents<&BlockName>, SectionError> {
         self.sections
             .get(Self::owning_section(pos.y))
             .ok_or_else(|| Self::above_the_top(pos.y))?
             .block_at(Self::inside_that_section(pos))
+    }
+
+    /// Empties the cell at `pos`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SectionError::OutOfBounds`] if `pos` is above the top of a
+    /// column, or outside the one section's width a column spans.
+    pub fn empty_at(&mut self, pos: ColumnPos) -> Result<(), SectionError> {
+        self.sections
+            .get_mut(Self::owning_section(pos.y))
+            .ok_or_else(|| Self::above_the_top(pos.y))?
+            .empty_at(Self::inside_that_section(pos))
     }
 
     /// Writes `block` at `pos`.

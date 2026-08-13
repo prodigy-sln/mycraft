@@ -42,7 +42,7 @@ use mc_sim::simulation::Simulation;
 use mc_world::world::WorldPos;
 
 use support::chamber::{BlockChamber, at};
-use support::{AIR, STONE, TestResult};
+use support::{STONE, TestResult};
 
 /// How many chunk columns the fixture world spans on each axis.
 const COLUMNS: u32 = 1;
@@ -105,11 +105,8 @@ fn a_player_walks_through_the_cell_in_its_path_while_no_block_has_been_placed_th
 
 /// A floor, one tick of `action`, then a walk along +x.
 fn walked_after(action: Option<ActionIntent>) -> Result<Simulation, Box<dyn Error>> {
-    let chamber = BlockChamber::filled_with(COLUMNS, AIR).run(
-        at(0, FLOOR_LAYER, 0),
-        at(16, FLOOR_LAYER + 1, 16),
-        STONE,
-    );
+    let chamber =
+        BlockChamber::empty(COLUMNS).run(at(0, FLOOR_LAYER, 0), at(16, FLOOR_LAYER + 1, 16), STONE);
     let mut simulation = Simulation::new(aiming_at_the_floor(), chamber.build()?);
 
     simulation.advance(TickIntent {

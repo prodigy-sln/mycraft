@@ -24,8 +24,11 @@ use mc_world::content::TomlFileDefinitionSource;
 use tempfile::TempDir;
 
 /// The blocks this repository ships, with the solidity each declares.
-const SHIPPED_BLOCKS: [(&str, bool); 5] = [
-    ("base:air", false),
+///
+/// Four, and none of them means empty space. A cell of the world holds one of
+/// these or it holds nothing at all, and nothing is not a block a content author
+/// declares, textures or reasons about.
+const SHIPPED_BLOCKS: [(&str, bool); 4] = [
     ("base:stone", true),
     ("base:dirt", true),
     ("base:grass", true),
@@ -96,35 +99,34 @@ fn a_content_root_registers_exactly_the_blocks_it_declares() -> TestResult {
 }
 
 #[test]
-fn the_content_this_repository_ships_registers_exactly_its_five_blocks() -> TestResult {
+fn the_content_this_repository_ships_registers_the_blocks_it_declares_and_no_other() -> TestResult {
     let registry = registry_from_root(&shipped_content_root()?)?;
 
-    let expected: BTreeSet<String> = SHIPPED_BLOCKS
-        .into_iter()
-        .map(|(name, _)| String::from(name))
-        .collect();
+    let mut registered = BTreeSet::new();
+    for name in registered_names(&registry)? {
+        let is_solid = registry.resolve(&BlockName::parse(&name)?)?.is_solid;
+        registered.insert((name, is_solid));
+    }
+
     assert_eq!(
-        registered_names(&registry)?,
-        expected,
-        "the shipped content root declares these blocks and no others"
+        registered,
+        declared_blocks(),
+        "the shipped content root is the sole origin of what a registry holds, and every block \
+         in it is one a content author declared, textured and gave a solidity to. The set is \
+         walked *out of the registry* rather than looked up name by name, so a block the root \
+         declares and this list does not is a difference here rather than something nothing \
+         reads; and each solidity is read back through the registry, so a block whose file says \
+         one thing and whose registration says another is a difference too"
     );
     Ok(())
 }
 
-#[test]
-fn the_content_this_repository_ships_reports_the_solidity_each_block_declares() -> TestResult {
-    let registry = registry_from_root(&shipped_content_root()?)?;
-
-    let mut observed = Vec::new();
-    for (name, _) in SHIPPED_BLOCKS {
-        observed.push((name, registry.resolve(&BlockName::parse(name)?)?.is_solid));
-    }
-    assert_eq!(
-        observed,
-        SHIPPED_BLOCKS.to_vec(),
-        "solidity is read from what each block declares, never inferred from its name"
-    );
-    Ok(())
+/// The blocks this repository ships, as a set of name and solidity.
+fn declared_blocks() -> BTreeSet<(String, bool)> {
+    SHIPPED_BLOCKS
+        .into_iter()
+        .map(|(name, is_solid)| (String::from(name), is_solid))
+        .collect()
 }
 
 #[test]

@@ -25,7 +25,7 @@ use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
 use mc_core::id::{BlockName, TextureKey};
 use mc_world::mesh::{Facing, Neighbours, Quad, SectionMesh};
-use mc_world::section::{LocalPos, PaletteIndex, SECTION_SIZE, Section, SectionData};
+use mc_world::section::{Contents, LocalPos, PaletteIndex, SECTION_SIZE, Section, SectionData};
 
 /// The error type every meshing test propagates with `?`.
 pub type TestResult = Result<(), Box<dyn Error>>;
@@ -46,6 +46,22 @@ pub const BETA: &str = "example:beta";
 /// What the registries built here attribute their definitions to. Nothing
 /// asserts it; a definition has to say where it came from.
 const FIXTURE_ORIGIN: &str = "a meshing test's registry";
+
+/// What a cell holding nothing is called wherever this suite compares palette
+/// entries as text.
+///
+/// Not a block name and never able to become one: every namespaced name carries
+/// a colon.
+pub const NOTHING: &str = "nothing";
+
+/// What `contents` holds, as text: the block's own name, or [`NOTHING`].
+#[must_use]
+pub fn named(contents: Contents<&BlockName>) -> &str {
+    match contents {
+        Contents::Empty => NOTHING,
+        Contents::Holds(name) => name.as_str(),
+    }
+}
 
 /// What [`some_quads`] says when it is handed a mesh holding nothing.
 const EMPTY_MESH: &str = "this section holds solid voxels with nothing solid beside them, so its \
@@ -217,7 +233,7 @@ pub fn section_holding(
 ) -> Result<Section, Box<dyn Error>> {
     let mut names = Vec::with_capacity(palette.len());
     for name in palette {
-        names.push(BlockName::parse(name)?);
+        names.push(Contents::Holds(BlockName::parse(name)?));
     }
     let described = SectionData {
         palette: names,

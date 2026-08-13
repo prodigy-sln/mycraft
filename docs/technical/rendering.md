@@ -70,6 +70,31 @@ with the same voxels — however they got written, compacted, or reordered by
 a registry swap — mesh identically every time; this is why that trust is
 warranted structurally rather than by convention.
 
+### An empty cell is answered before the registry
+
+A cell holds a block or nothing (`technical/world-format.md`), and a
+palette entry holding nothing resolves to **non-solid without the registry
+being consulted at all**. That is one arm in one place, and it covers both
+the meshed section and every supplied neighbour — which is what keeps "an
+empty cell shows no face" a single rule rather than two that could drift
+apart at a chunk boundary, where the difference would show as a seam only
+under a specific neighbour supply.
+
+Two consequences worth stating, because both are load-bearing:
+
+- **A section holding nothing anywhere meshes into a mesh carrying no
+  quads, even against a registry holding no block at all.** Emptiness is
+  not an unresolved block, so it earns no `UnresolvedBlock` refusal.
+- **Nothing about the sweep changes.** Emptiness reaches it as a non-solid
+  cell, and a non-solid cell already emitted no face. `visible_face`, the
+  merge predicate, the loop nesting and the emission order are untouched by
+  it — which is the reason retiring the base game's former empty block
+  moved no pixel of any committed golden frame.
+
+Keys are per distinct **contents**, so two palette entries both holding
+nothing deduplicate to one key exactly as two entries naming the same block
+already do.
+
 ### The neighbour supply model
 
 `Neighbours<'a>` is opaque over `[Option<&'a Section>; 6]`, built by
@@ -167,6 +192,15 @@ silent and indistinguishable from a correct mesh at the call site. A failed
 mesh is not a breach of the "a bad mod never takes down the server"
 invariant — nothing panics, and a caller running meshing on a worker simply
 keeps its previous mesh.
+
+`MeshError::EmptyBlockFace { key }` is a fourth variant and an **internal
+invariant**, not anything a caller did: emptiness resolves to non-solid and
+a face is emitted only where the voxel is solid, so no quad can name the
+empty entry. It exists because a `Quad` names a block and nothing is not a
+block — there is no honest quad to build for one, and dropping it silently
+would remove geometry nobody asked to remove. Like `CorruptMeshIndex`
+below, it is a `None` that needs somewhere to go rather than a condition
+any input can produce.
 
 **What a caller does with that error depends on the lifecycle stage, and the
 two rules are different.** The non-cascade rule above carries its own

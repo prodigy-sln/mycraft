@@ -23,7 +23,7 @@ mod common;
 use std::error::Error;
 use std::fmt::Debug;
 
-use common::{TestResult, at, registry_of};
+use common::{TestResult, at, described, registry_of};
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 use mc_world::column::{
@@ -79,7 +79,7 @@ fn block_in_section(
              without it the assertion below asserts nothing"
         )
     })?;
-    Ok(section.block_at(pos)?.as_str().to_owned())
+    Ok(described(section.block_at(pos)?))
 }
 
 /// The axis, value and limit an out-of-bounds refusal names.
@@ -98,8 +98,8 @@ fn a_filled_column_holds_its_fill_block_at_its_lowest_and_highest_positions() ->
     let (column, _registry) = air_filled_column()?;
 
     let held = (
-        column.block_at(in_column(0, 0, 0))?.as_str().to_owned(),
-        column.block_at(in_column(15, 255, 15))?.as_str().to_owned(),
+        described(column.block_at(in_column(0, 0, 0))?),
+        described(column.block_at(in_column(15, 255, 15))?),
     );
 
     assert_eq!(
@@ -142,11 +142,7 @@ fn a_write_lands_in_the_section_that_owns_its_height_and_at_the_right_height_ins
         in_column(4, 33, 9),
     ]
     .into_iter()
-    .map(|position| {
-        column
-            .block_at(position)
-            .map(|block| block.as_str().to_owned())
-    })
+    .map(|position| column.block_at(position).map(described))
     .collect::<Result<Vec<String>, SectionError>>()?;
 
     assert_eq!(

@@ -18,7 +18,7 @@ mod common;
 use std::error::Error;
 
 use common::{
-    TestResult, all_positions, at, blocks_at_every_position, generated_block, nth_position,
+    TestResult, all_positions, at, contents_at_every_position, generated_block, nth_position,
     registry_of_size,
 };
 use mc_core::block::BlockRegistry;
@@ -181,11 +181,11 @@ fn widening_the_index_leaves_every_untargeted_voxel_holding_what_it_held() -> Te
     let registry = registry_of_size(3)?;
     let mut section = section_holding(2, &registry)?;
     let width_before = section.index_width_bits();
-    let held_before = blocks_at_every_position(&section)?;
+    let held_before = contents_at_every_position(&section)?;
 
     section.set_block(TARGET, &generated_block(2)?, &registry)?;
 
-    let held_after = blocks_at_every_position(&section)?;
+    let held_after = contents_at_every_position(&section)?;
     let mut disagreement = None;
     for ((position, before), after) in all_positions().zip(&held_before).zip(&held_after) {
         if position != TARGET && before != after {

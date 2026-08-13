@@ -22,7 +22,9 @@
 //! So the placement lands at (9, 11, 8), the cell directly above the block the
 //! ray met. The two cells a wrong step would take are declared as something else
 //! on purpose: (9, 10, 8) holds the target itself, and (9, 9, 8) is floor. Three
-//! cells, three different names, one of them air.
+//! cells, three different answers, and the one a placement is meant for holds
+//! nothing at all — which is why it accepts the block: because it is empty, not
+//! because content declared it overwritable.
 //!
 //! # A block that is not solid is placeable, and that is a rule with a history
 //!
@@ -39,14 +41,15 @@ use std::error::Error;
 
 use glam::Vec3;
 use mc_core::id::BlockName;
-use mc_sim::action::{ActionIntent, TickIntent};
+use mc_sim::action::{ActionIntent, EditReport, TickIntent};
 use mc_sim::player::{BlockPos, MovementIntent, PlayerState};
 use mc_sim::simulation::Simulation;
 use mc_sim::world::World;
+use mc_world::section::Contents;
 use mc_world::world::WorldPos;
 
 use support::chamber::{BlockChamber, at, differences};
-use support::{AIR, DIRT, STONE, TestResult, WATER};
+use support::{DIRT, NOTHING, STONE, TestResult, WATER, described};
 
 /// How many chunk columns the fixture world spans on each axis.
 const COLUMNS: u32 = 1;
@@ -95,7 +98,7 @@ fn a_place_against_a_blocks_upward_face_leaves_the_requested_block_in_the_cell_a
             held_at(placed.world(), TARGET)?
         ),
         (
-            vec![(ABOVE_THE_TARGET, AIR.to_owned(), DIRT.to_owned())],
+            vec![(ABOVE_THE_TARGET, NOTHING.to_owned(), DIRT.to_owned())],
             STONE.to_owned()
         ),
         "the ray comes in through the target's upward face, so the requested block belongs in the \
@@ -116,7 +119,7 @@ fn a_place_naming_a_block_that_is_not_solid_leaves_it_in_the_replaceable_cell_ab
 
     assert_eq!(
         differences(&declared, placed.world()),
-        vec![(ABOVE_THE_TARGET, AIR.to_owned(), WATER.to_owned())],
+        vec![(ABOVE_THE_TARGET, NOTHING.to_owned(), WATER.to_owned())],
         "the server checks that a named block is registered and nothing more, so a block that \
          stops nobody is as placeable as one that stops everybody. A refusal here would be the \
          struck non-solid rule back again — the one that cost water its placeability while \
@@ -126,18 +129,51 @@ fn a_place_naming_a_block_that_is_not_solid_leaves_it_in_the_replaceable_cell_ab
     Ok(())
 }
 
+#[test]
+fn a_place_into_a_cell_holding_nothing_reports_it_as_replacing_nothing() -> TestResult {
+    let chamber = one_block_on_the_floor();
+    let mut simulation = Simulation::new(aiming_down(), chamber.build()?);
+
+    let report = simulation.advance(TickIntent {
+        movement: MovementIntent::default(),
+        action: Some(ActionIntent::Place {
+            block: BlockName::parse(DIRT)?,
+        }),
+    });
+
+    assert_eq!(
+        report,
+        Some(EditReport::Changed {
+            cell: voxel(ABOVE_THE_TARGET),
+            from: Contents::Empty,
+            to: Contents::Holds(BlockName::parse(DIRT)?),
+        }),
+        "the cell the block lands in held nothing, so the report has nothing to name as what \
+         was replaced. A report naming some block there describes a placement that overwrote \
+         something — which is a refusal's business and not a change's — and the cell-by-cell \
+         comparison in the first test cannot see it, because the cell ends holding dirt either \
+         way"
+    );
+    Ok(())
+}
+
 /// A floor, and one solid block standing on it in the eye's line of sight.
 fn one_block_on_the_floor() -> BlockChamber {
     floored().cell(TARGET, STONE)
 }
 
-/// Air everywhere, with one layer of floor for the player to stand on.
+/// Nothing anywhere, with one layer of floor for the player to stand on.
 fn floored() -> BlockChamber {
-    BlockChamber::filled_with(COLUMNS, AIR).run(
-        at(0, FLOOR_LAYER, 0),
-        at(16, FLOOR_LAYER + 1, 16),
-        STONE,
-    )
+    BlockChamber::empty(COLUMNS).run(at(0, FLOOR_LAYER, 0), at(16, FLOOR_LAYER + 1, 16), STONE)
+}
+
+/// A world position as the signed cell a report names it by.
+const fn voxel(cell: WorldPos) -> BlockPos {
+    BlockPos {
+        x: cell.x as i32,
+        y: cell.y as i32,
+        z: cell.z as i32,
+    }
 }
 
 /// A player standing still on the floor, looking down at the target.
@@ -168,16 +204,14 @@ fn after_a_place(chamber: &BlockChamber, block: &str) -> Result<Simulation, Box<
     Ok(simulation)
 }
 
-/// What one cell of a world holds, by name.
+/// What one cell of a world holds: a block by name, or [`NOTHING`].
+///
+/// A cell the world does not reach at all is an error rather than either of
+/// those — the fixture declares every cell it asks about, so a world answering
+/// "outside" here is the fixture being wrong about itself.
 fn held_at(world: &World, cell: WorldPos) -> Result<String, Box<dyn Error>> {
-    let signed = BlockPos {
-        x: i32::try_from(cell.x)?,
-        y: i32::try_from(cell.y)?,
-        z: i32::try_from(cell.z)?,
-    };
-    Ok(world
-        .block_at(signed)
-        .ok_or_else(|| format!("the world holds no voxel at {cell:?}"))?
-        .as_str()
-        .to_owned())
+    let held = world
+        .block_at(voxel(cell))
+        .ok_or_else(|| format!("the world reaches no cell at {cell:?}"))?;
+    Ok(described(held))
 }

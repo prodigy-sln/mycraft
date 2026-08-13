@@ -29,6 +29,7 @@ use mc_core::id::BlockName;
 use mc_sim::replay::ReplayWorld;
 use mc_world::column::COLUMN_HEIGHT;
 use mc_world::mesh::Facing;
+use mc_world::section::Contents;
 
 use super::FOOTPRINT;
 
@@ -146,8 +147,15 @@ impl Scan<'_> {
     /// Adds one unit of area for every visible side of `voxel`, which is none at
     /// all unless the voxel itself is solid.
     fn add_visible_sides_of(&self, voxel: Voxel, into: &mut FaceArea) -> Result<(), RegistryError> {
-        let Some(name) = self.world.block_at(voxel.x, voxel.y, voxel.z) else {
-            return Ok(());
+        // Three answers, three arms, and never two of them folded together. "The
+        // world does not reach here" and "this cell holds nothing" both end in no
+        // face, which is exactly what would make writing them as one invisible in
+        // the output — and this scan is the independent judge of a world whose own
+        // reader gained the same distinction in the same change.
+        let name = match self.world.block_at(voxel.x, voxel.y, voxel.z) {
+            None => return Ok(()),
+            Some(Contents::Empty) => return Ok(()),
+            Some(Contents::Holds(name)) => name,
         };
         if !self.registry.resolve(name)?.is_solid {
             return Ok(());
@@ -192,11 +200,19 @@ impl Scan<'_> {
     }
 
     /// Whether the voxel at `voxel` is solid, reading a position the world has
-    /// no answer for as not solid.
+    /// no answer for, and a cell holding nothing, as not solid.
+    ///
+    /// **Read back from the world and the registry, and from nothing the
+    /// simulation computed.** The empty arm is the one this scan and the
+    /// simulation's own resolution both gained at once, and an oracle that
+    /// reached it by consulting a collision bitset — or by calling the same
+    /// resolution the bitset was built from — would be the two of them agreeing
+    /// with each other rather than one judging the other.
     fn is_solid_at(&self, voxel: Voxel) -> Result<bool, RegistryError> {
         match self.world.block_at(voxel.x, voxel.y, voxel.z) {
             None => Ok(false),
-            Some(name) => Ok(self.registry.resolve(name)?.is_solid),
+            Some(Contents::Empty) => Ok(false),
+            Some(Contents::Holds(name)) => Ok(self.registry.resolve(name)?.is_solid),
         }
     }
 }

@@ -5,6 +5,61 @@ leak into a saved or transmitted form, and what a section's storable
 identity actually is. This is the in-memory representation; turning it into
 bytes on disk is `mc-world`'s persistence work, not this.
 
+## A cell holds a block, or nothing
+
+There is no block meaning "empty". A voxel cell either holds one registered
+block or holds nothing at all, and nothing names nothing — the engine
+carries no content-declared entity whose only job is to stand for absence.
+
+What a cell holds is a named two-variant type, `mc_world::section::Contents`:
+
+```rust
+pub enum Contents<N = BlockName> {
+    Empty,       // the cell holds nothing: not a block, not a name
+    Holds(N),    // the cell holds this block
+}
+```
+
+It is generic over the name the way `Option` is generic over its payload:
+storage holds `Contents<BlockName>`, every accessor hands out
+`Contents<&BlockName>`, and `as_ref` / `cloned` are the one step between
+them — one type in two forms rather than two types that can drift. The
+default type parameter does not participate in inference: a bare `Contents`
+means the owned form in a *type* position only, and an unconstrained
+`Contents::Empty` in an expression position is `type annotations needed`.
+
+**Emptiness is never spelled as a bare `Option`, and that is the whole
+point of the type.** Every `Option` on this read path already means
+something else, and each of those meanings is a different question:
+
+| Accessor | Returns | What the outer wrapper means |
+|---|---|---|
+| `Palette::contents_at(position)` | `Option<Contents<&BlockName>>` | this palette position exists |
+| `Section::block_at(pos)` | `Result<Contents<&BlockName>, SectionError>` | the position is in bounds and the section is not corrupt |
+| `ChunkColumn::block_at(pos)` | `Result<Contents<&BlockName>, SectionError>` | as above, plus below the column top |
+| `VoxelWorld::block_at(at)` | `Result<Contents<&BlockName>, WorldError>` | the position is inside the world |
+| `Section::palette()` | `impl ExactSizeIterator<Item = Contents<&BlockName>>` | — |
+
+The rule is one sentence: **the outer wrapper keeps the meaning it already
+had, and `Contents` is what it wraps.** Folding emptiness into that outer
+wrapper instead would make "there is no such cell" and "this cell holds
+nothing" the same answer, which is how a corrupt section, or a position
+past the edge of the world, gets read as ordinary empty space. Reading a
+cell is therefore spelled arm by arm — `None`, `Some(Contents::Empty)` and
+`Some(Contents::Holds(name))` are three arms and never two — at every call
+site where both wrappers survive.
+
+`Section::block_at` is the one place the split is made, and it gains no
+emptiness error to make it with: a position no section has is
+`Err(SectionError::OutOfBounds { axis, .. })` naming the axis, and a cell
+holding nothing is `Ok(Contents::Empty)`. No path may produce one where the
+other belongs.
+
+**`Palette::name_at` was renamed to `contents_at`; `Section::block_at` was
+not.** `name_at` promised a name and `Contents::Empty` has none — a direct
+contradiction. `block_at` asks which block is at a position, and "nothing"
+is a legitimate answer to that question rather than a contradiction of it.
+
 ## Block identity: names, not runtime ids
 
 A registered block gets two identities that must never be confused:
@@ -23,18 +78,40 @@ on-wire identity. A section's storable identity is:
 
 ```rust
 pub struct SectionData {
-    pub palette: Vec<BlockName>,
+    /// What the section holds, in the order its own palette holds it.
+    pub palette: Vec<Contents>,
+    /// One palette position per voxel, x fastest, then y, then z.
     pub indices: Vec<PaletteIndex>,
 }
 ```
 
-a palette of namespaced names in the section's own palette order, plus one
-`PaletteIndex` per voxel naming that voxel's position into it. `export`
-does not normalize or sort the palette, and does not implicitly compact —
-the exported order is exactly the section's own, vacant entries included.
-A caller wanting the minimal form compacts first, which is why compaction
-is a public operation rather than something export does on a caller's
-behalf.
+a palette of `Contents` — each entry either a namespaced name or nothing —
+in the section's own palette order, plus one `PaletteIndex` per voxel
+naming that voxel's position into it. `export` does not normalize or sort
+the palette, and does not implicitly compact — the exported order is
+exactly the section's own, vacant entries included. A caller wanting the
+minimal form compacts first, which is why compaction is a public operation
+rather than something export does on a caller's behalf.
+
+**One list, not a list of names beside a note of which position is the
+empty one.** Emptiness *is* a position in the palette, so export is a copy
+and import is a copy. The two alternatives were considered and rejected for
+reasons that outlive this shape: `palette: Vec<BlockName>` plus
+`empty: Option<PaletteIndex>` is a second source of truth — the index can
+be out of range, can duplicate, and can disagree with the palette's length,
+and every reader consults two fields to answer one question;
+`palette: Vec<Option<BlockName>>` is the bare `Option` this crate bans, at
+the one place a stored format would make it permanent.
+
+**At most one entry is `Contents::Empty` when a section produced the
+description.** A description carrying two is nonetheless accepted, exactly
+as one naming a block twice already is — both deduplicate downstream by
+what they hold, and a refusal here would be a rule the write path cannot
+produce and no reader needs.
+
+`SectionData` carries no `serde` derive today. The shape is chosen so that
+adding one is a derive rather than a redesign; it makes no claim about what
+any particular encoding will emit.
 
 This is what makes a section survive a change of registration order
 **structurally**, not by a translation pass: the section stores no
@@ -54,6 +131,42 @@ downstream of it ever sees the id again.
 A registry hot swap (MVP 2) is therefore a no-op for already-loaded world
 data, and no migration pass is needed: nothing in a loaded section depends
 on the registration order that produced it.
+
+## Emptiness needs no registry, at any level
+
+Building something empty takes no registry and has no failure path, all the
+way up the containment chain:
+
+```rust
+Section::empty()                    -> Section        // infallible
+ChunkColumn::empty(coordinate)      -> ChunkColumn    // infallible
+VoxelWorld::empty(footprint_columns) -> VoxelWorld    // infallible
+```
+
+There is no block for a registry to know about, so there is nothing an
+unknown-block failure could be about. Building an empty world cannot fail
+for a reason that has nothing to do with emptiness — which is the property
+this shape exists to deliver, and the reason none of these signatures
+carries a `Result` or a `&BlockRegistry`.
+
+Emptying is the same story: `Section::empty_at`, `ChunkColumn::empty_at`
+and `VoxelWorld::empty_at` take no registry, and their only refusal is a
+position the container does not have. That refusal is the *same* bounds
+check the name-taking mutator beside each of them makes, made in the same
+place, so a bounds check lost there is lost for both rather than for one.
+
+Solidity follows: `Section::is_solid_at` answers `false` for
+`Contents::Empty` **before** the registry is reached. Widening that arm to
+cover every cell would answer "not solid" for a block the registry has
+never heard of; narrowing it to consult the registry first would make an
+empty cell need a block registered in order to mean nothing. A cell holding
+a block still resolves through the registry and still fails if that block
+is not registered.
+
+Inside a section there is exactly one write path. Writing a block and
+emptying a cell differ only in the `Contents` they resolve, so the
+reference counting, the palette growth and the index widening are stated
+once — an empty cell is not a special case of any of them.
 
 ## The palette-length bound, corrected
 
@@ -109,10 +222,13 @@ A section is `SECTION_SIZE`³ = 4096 voxels (`SECTION_SIZE = 16`, and
 `VOXELS_PER_SECTION` is derived from it, never written as a separate
 literal). Each section holds:
 
-- A **palette**: an insertion-ordered list of `(BlockName, refcount)`
-  entries. `refcount` is the number of voxels currently holding that
-  entry; an entry with a zero refcount is a vacated entry, kept until
-  compaction.
+- A **palette**: an insertion-ordered list of `(Contents, refcount)`
+  entries — each entry either a block's name or nothing. `refcount` is the
+  number of voxels currently holding that entry; an entry with a zero
+  refcount is a vacated entry, kept until compaction. Emptiness is an entry
+  here and not a state beside the palette, which is what leaves the packed
+  indices, the index widths, the reference counting and compaction with
+  nothing at all to know about it.
 - A **packed index buffer**: one palette position per voxel, bit-packed
   into a `Vec<u8>` at the narrowest width the palette's length currently
   requires.
@@ -128,12 +244,21 @@ Index width is chosen from six tiers, ordered narrowest first:
 | W8   | 8  | 256 entries   | 4096 bytes |
 | W16  | 16 | 65536 entries | 8192 bytes |
 
-A section holding exactly one distinct block (the common case — a chunk of
-solid stone, or of air) spends nothing at all on its index buffer: the
+A section holding exactly one thing (the common case — a chunk of solid
+stone, or an empty one) spends nothing at all on its index buffer: the
 homogeneous, 0-bit tier owns no buffer. Every tier either divides 8 or is a
 multiple of 8, so **a packed index never straddles a byte boundary** — the
 implementation has no general straddle-handling code because the case
 cannot occur.
+
+**An empty section and a one-block section are stored identically.** A
+fresh section is palette `[Contents::Empty]` at position 0, every voxel
+index 0, index width `W0` and therefore zero bytes of index storage —
+byte-for-byte the shape `Section::filled` produces with a name at position
+0 instead. Nothing about the storage distinguishes the two, which is what
+makes an empty section free rather than merely cheap, and what makes the
+whole of emptiness a question about which entry sits at a palette position
+rather than a question about the section.
 
 `Section::index_storage_bytes()` reports the backing buffer's **real
 length** (`buffer.len()`), never a figure recomputed from the width. This
@@ -220,10 +345,11 @@ and are easy to get wrong by analogy with the wrong end:
 ## Module layout
 
 ```
-mc_world::section   Section, LocalPos, Axis, SectionError,
+mc_world::section   Section, Contents, LocalPos, Axis, SectionError,
                      SECTION_SIZE, VOXELS_PER_SECTION
                      — plus re-exports SectionData, PaletteIndex, ImportError
-                       (defined in the private submodule section::export)
+                       (defined in the private submodule section::export;
+                        Contents likewise, from section::contents)
 mc_world::column     ChunkColumn, ColumnPos, ColumnCoordinate,
                      SECTIONS_PER_COLUMN, COLUMN_HEIGHT
 ```
@@ -241,15 +367,24 @@ These are current behaviour, not a roadmap.
   yet, so a section produced under a mod set that has since removed a mod
   does not round-trip through import. Persistence work owns adding
   placeholders.
-- **A section holding a name the current registry has stopped registering
-  fails every `is_solid_at` call on it.** After a live registry swap
-  (arriving with the Luau scripting host), this failure is delivered
+
+  The check runs over the palette's `Contents::Holds` entries and skips
+  `Contents::Empty` — **the empty entry only, and that is the whole of the
+  exemption**. Requiring registration for it would make an empty cell need
+  a block registered in order to mean nothing; skipping the check for every
+  entry instead would let a description name a block that does not exist
+  and build a world quietly made of something else.
+- **A section holding a *block* the current registry has stopped
+  registering fails every `is_solid_at` call on it.** After a live registry
+  swap (arriving with the Luau scripting host), this failure is delivered
   mid-tick to whichever systems call `is_solid_at` — typically physics, one
-  of the systems least able to react gracefully. The mesher (`rendering.md`)
-  is the other system this would have hit; it now fails a different,
-  sharper way: a section holding a name the registry cannot resolve fails
-  the **whole mesh** with `MeshError::UnresolvedBlock`, rather than failing
-  per `is_solid_at` call, and it refuses outright rather than inventing a
+  of the systems least able to react gracefully. An *empty* cell is not
+  affected: it answers not-solid before the registry is consulted, so no
+  registry change can make an empty cell fail. The mesher (`rendering.md`)
+  is the other system this would have hit; it fails a different, sharper
+  way: a section holding a name the registry cannot resolve fails the
+  **whole mesh** with `MeshError::UnresolvedBlock`, rather than failing per
+  `is_solid_at` call, and it refuses outright rather than inventing a
   placeholder policy of its own. The import-path placeholder work above
   still needs to cover this **in-memory** case, not only the import path, or
   the failure mode simply moves rather than disappearing.
@@ -259,7 +394,9 @@ These are current behaviour, not a roadmap.
   supplied registry does not hold; the name-taking mutators
   (`set_block`, `filled`) report the same condition as
   `SectionError::UnknownBlock`. Both are reachable, neither is tested
-  against the other, and the inconsistency is unresolved.
+  against the other, and the inconsistency is unresolved. The
+  emptiness-taking operations (`empty`, `empty_at`) are outside this
+  entirely — they have no unregistered-block failure to spell either way.
 - **Palette lookup is a linear scan over its entries.** Acceptable while
   a section's palette stays small (a handful of entries in any world a
   real workload produces); worth revisiting if a mesher benchmark shows it

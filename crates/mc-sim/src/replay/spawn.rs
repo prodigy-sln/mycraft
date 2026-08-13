@@ -101,6 +101,6 @@ pub fn simulation_for(
 ) -> Result<Simulation, SpawnError> {
     Ok(Simulation::new(
         spawn(world)?,
-        World::new(world.blocks().clone(), registry, world.sky().clone())?,
+        World::new(world.blocks().clone(), registry)?,
     ))
 }

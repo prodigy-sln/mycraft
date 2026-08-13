@@ -24,11 +24,34 @@ use std::path::{Path, PathBuf};
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockId, BlockRegistry, DefinitionOrigin};
 use mc_core::id::{BlockName, NamespacedIdError, TextureKey};
-use mc_world::section::{LocalPos, SECTION_SIZE, Section};
+use mc_world::section::{Contents, LocalPos, SECTION_SIZE, Section};
 use tempfile::TempDir;
 
 /// The error type every test in this suite propagates with `?`.
 pub type TestResult = Result<(), Box<dyn Error>>;
+
+/// What a cell holding nothing is called wherever this suite compares contents
+/// as text.
+///
+/// **It is not a block name and cannot become one.** Every namespaced name
+/// carries a colon, so no registry can ever hand back something that reads like
+/// this — which is what lets an expectation about an empty cell and one about a
+/// named block sit side by side in the same list without either being able to
+/// impersonate the other.
+pub const NOTHING: &str = "nothing";
+
+/// What `contents` holds, as text: the block's own name, or [`NOTHING`].
+///
+/// Written as two arms rather than as a default, because the two answers are
+/// different facts about a cell and a fallback would let one arrive under the
+/// other's name.
+#[must_use]
+pub fn described(contents: Contents<&BlockName>) -> String {
+    match contents {
+        Contents::Empty => NOTHING.to_owned(),
+        Contents::Holds(name) => name.as_str().to_owned(),
+    }
+}
 
 /// The repository's own root, located upwards from the crate this test binary
 /// was built for.
@@ -218,16 +241,17 @@ pub fn all_positions() -> impl Iterator<Item = LocalPos> {
     })
 }
 
-/// What every position in `section` holds, in [`all_positions`] order.
+/// What every position in `section` holds, in [`all_positions`] order — a block
+/// by name, or [`NOTHING`] where the cell holds none.
 ///
 /// # Errors
 ///
 /// Returns an error if any position a section is supposed to have cannot be
 /// read.
-pub fn blocks_at_every_position(section: &Section) -> Result<Vec<String>, Box<dyn Error>> {
+pub fn contents_at_every_position(section: &Section) -> Result<Vec<String>, Box<dyn Error>> {
     let mut held = Vec::new();
     for position in all_positions() {
-        held.push(section.block_at(position)?.as_str().to_owned());
+        held.push(described(section.block_at(position)?));
     }
     Ok(held)
 }

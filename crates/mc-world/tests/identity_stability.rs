@@ -17,15 +17,26 @@
 //! Import refuses rather than guesses. A name nothing is registered under and a
 //! palette position past the end of the palette are both cases where an
 //! arbitrary substitution would look like success and corrupt a world quietly.
+//!
+//! **A cell holding nothing is carried in the description as a palette entry
+//! naming nothing**, so it survives a round trip the same way a block does. The
+//! one thing that entry is not is a name: nothing is registered for it, nothing
+//! could be, and an import that demanded one would refuse every section with a
+//! hole in it.
 
 mod common;
 
 use std::error::Error;
 
-use common::{TestResult, at, blocks_at_every_position, generated_block_name, registry_of};
+use common::{
+    NOTHING, TestResult, at, contents_at_every_position, described, generated_block_name,
+    registry_of,
+};
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
-use mc_world::section::{ImportError, PaletteIndex, Section, SectionData, VOXELS_PER_SECTION};
+use mc_world::section::{
+    Contents, ImportError, PaletteIndex, Section, SectionData, VOXELS_PER_SECTION,
+};
 
 const AIR: &str = "base:air";
 const STONE: &str = "base:stone";
@@ -48,11 +59,18 @@ const POSITION_PAST_THE_END: u16 = 3;
 /// One voxel fewer than a section has.
 const A_VOXEL_SHORT: usize = VOXELS_PER_SECTION - 1;
 
-/// The blocks a section's palette holds, in the order it holds them.
+/// What a section's palette holds, in the order it holds them — a block by name,
+/// and [`NOTHING`] for the entry that names none.
 fn palette_names(section: &Section) -> Vec<String> {
-    section
-        .palette()
-        .map(|name| name.as_str().to_owned())
+    section.palette().map(described).collect()
+}
+
+/// What a description's palette holds, in the order it names them.
+fn described_palette(exported: &SectionData) -> Vec<String> {
+    exported
+        .palette
+        .iter()
+        .map(|contents| described(contents.as_ref()))
         .collect()
 }
 
@@ -91,7 +109,7 @@ fn a_mixed_section() -> Result<(Vec<String>, SectionData), Box<dyn Error>> {
     let mut section = Section::filled(&BlockName::parse(GRASS)?, &registry)?;
     section.set_block(at(0, 0, 0), &BlockName::parse(AIR)?, &registry)?;
     section.set_block(at(15, 15, 15), &BlockName::parse(STONE)?, &registry)?;
-    Ok((blocks_at_every_position(&section)?, section.export()?))
+    Ok((contents_at_every_position(&section)?, section.export()?))
 }
 
 /// The refusal an import produced, or an explanation of why asserting on it
@@ -116,11 +134,7 @@ fn exporting_a_section_names_its_blocks_in_the_order_its_palette_holds_them() ->
 
     let exported = section.export()?;
 
-    let names: Vec<String> = exported
-        .palette
-        .iter()
-        .map(|name| name.as_str().to_owned())
-        .collect();
+    let names = described_palette(&exported);
     assert_eq!(
         names,
         vec![STONE.to_owned(), AIR.to_owned()],
@@ -139,7 +153,7 @@ fn a_section_reimported_where_the_blocks_were_registered_in_another_order_holds_
 
     let reimported = Section::import(&exported, &registry_of(&REORDERED_ORDER)?)?;
 
-    let held = blocks_at_every_position(&reimported)?;
+    let held = contents_at_every_position(&reimported)?;
     assert_eq!(
         (
             held == original,
@@ -183,7 +197,7 @@ fn a_section_reimported_where_further_blocks_were_registered_first_holds_the_sam
 
     let reimported = Section::import(&exported, &grown_registry()?)?;
 
-    let held = blocks_at_every_position(&reimported)?;
+    let held = contents_at_every_position(&reimported)?;
     assert_eq!(
         (
             held == original,
@@ -221,6 +235,55 @@ fn the_grown_registry_gives_air_a_different_runtime_id_from_the_original() -> Te
 }
 
 #[test]
+fn a_section_holding_both_empty_cells_and_blocks_comes_back_holding_the_same_contents() -> TestResult
+{
+    let registry = registry_of(&[STONE, GRASS])?;
+    let mut section = Section::empty();
+    section.set_block(at(0, 0, 0), &BlockName::parse(STONE)?, &registry)?;
+    section.set_block(at(15, 15, 15), &BlockName::parse(GRASS)?, &registry)?;
+    let original = contents_at_every_position(&section)?;
+
+    let reimported = Section::import(&section.export()?, &registry)?;
+
+    let held = contents_at_every_position(&reimported)?;
+    assert_eq!(
+        (
+            held == original,
+            held.len(),
+            count_of(&held, NOTHING),
+            count_of(&held, STONE),
+            count_of(&held, GRASS),
+        ),
+        (true, 4096, 4094, 1, 1),
+        "emptiness is a palette entry like any other, so a description carries it and an \
+         import reads it back. A description that dropped the entry naming no block would \
+         leave 4094 voxels pointing at a position the palette no longer has, and the two \
+         named blocks would come back at the wrong ones"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_description_of_a_section_holding_empty_cells_imports_with_no_block_registered_for_them()
+-> TestResult {
+    let registry = registry_of(&[STONE])?;
+    let mut section = Section::empty();
+    section.set_block(at(0, 0, 0), &BlockName::parse(STONE)?, &registry)?;
+
+    let reimported = Section::import(&section.export()?, &registry)?;
+
+    assert_eq!(
+        (palette_names(&reimported), registry.registered_count()),
+        (vec![NOTHING.to_owned(), STONE.to_owned()], 1),
+        "the registry holds exactly one block, and the description holds two entries — the \
+         second of which names nothing. Import checks that every entry naming a block is \
+         registered and asks nothing at all about the one that names none, because there is \
+         no name to ask about: no registry could ever hold one"
+    );
+    Ok(())
+}
+
+#[test]
 fn importing_a_section_naming_a_block_the_registry_does_not_hold_is_refused_naming_it() -> TestResult
 {
     let exported =
@@ -246,18 +309,18 @@ fn importing_a_section_naming_a_block_the_registry_does_not_hold_is_refused_nami
 fn importing_voxel_data_naming_a_palette_position_that_is_not_there_is_refused_naming_it()
 -> TestResult {
     let palette = vec![
-        BlockName::parse(STONE)?,
-        BlockName::parse(GRASS)?,
-        BlockName::parse(AIR)?,
+        Contents::Holds(BlockName::parse(STONE)?),
+        Contents::Holds(BlockName::parse(GRASS)?),
+        Contents::Holds(BlockName::parse(AIR)?),
     ];
     let mut indices = voxels_naming(0, VOXELS_PER_SECTION);
     *indices
         .last_mut()
         .ok_or("a section's worth of voxels has a last one")? =
         PaletteIndex::new(POSITION_PAST_THE_END);
-    let described = SectionData { palette, indices };
+    let exported = SectionData { palette, indices };
 
-    let refused = refusal(Section::import(&described, &registry_of(&ORIGINAL_ORDER)?))?;
+    let refused = refusal(Section::import(&exported, &registry_of(&ORIGINAL_ORDER)?))?;
 
     let ImportError::PaletteIndexOutOfRange { index, palette_len } = &refused else {
         return Err(format!("expected a palette-position refusal, got {refused:?}").into());
@@ -280,12 +343,12 @@ fn importing_voxel_data_naming_a_palette_position_that_is_not_there_is_refused_n
 #[test]
 fn importing_voxel_data_that_is_not_a_whole_sections_worth_is_refused_naming_how_many_it_found()
 -> TestResult {
-    let described = SectionData {
-        palette: vec![BlockName::parse(STONE)?],
+    let exported = SectionData {
+        palette: vec![Contents::Holds(BlockName::parse(STONE)?)],
         indices: voxels_naming(0, A_VOXEL_SHORT),
     };
 
-    let refused = refusal(Section::import(&described, &registry_of(&ORIGINAL_ORDER)?))?;
+    let refused = refusal(Section::import(&exported, &registry_of(&ORIGINAL_ORDER)?))?;
 
     let ImportError::WrongVoxelCount { found, expected } = &refused else {
         return Err(format!("expected a voxel-count refusal, got {refused:?}").into());

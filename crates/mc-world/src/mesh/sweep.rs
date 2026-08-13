@@ -24,7 +24,7 @@
 
 use mc_core::block::BlockRegistry;
 
-use crate::section::{LocalPos, SECTION_SIZE, Section, VOXELS_PER_SECTION};
+use crate::section::{Contents, LocalPos, SECTION_SIZE, Section, VOXELS_PER_SECTION};
 
 use super::facing::Adjacent;
 use super::plane::{CELLS as PLANE_CELLS, cell_of, position_in_plane};
@@ -238,7 +238,15 @@ impl<'a> Plane<'a> {
     /// One merged rectangle, named by the block every voxel under it holds.
     fn quad(&self, origin: PlanePos, extent: PlaneExtent, key: Key) -> Result<Quad, MeshError> {
         let resolved = &self.surroundings.resolved;
-        let block = present(resolved.name(key), key as usize, resolved.distinct_blocks())?;
+        let contents = present(
+            resolved.contents(key),
+            key as usize,
+            resolved.distinct_blocks(),
+        )?;
+        let block = match contents {
+            Contents::Empty => return Err(MeshError::EmptyBlockFace { key: key as usize }),
+            Contents::Holds(block) => block,
+        };
         Ok(Quad {
             facing: self.facing,
             plane: self.plane,

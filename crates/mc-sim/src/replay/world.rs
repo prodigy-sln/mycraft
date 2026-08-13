@@ -17,7 +17,7 @@
 use mc_core::block::BlockRegistry;
 use mc_core::id::{BlockName, NamespacedIdError};
 use mc_world::column::{ChunkColumn, ColumnCoordinate, ColumnPos};
-use mc_world::section::{SECTION_SIZE, SectionError};
+use mc_world::section::{Contents, SECTION_SIZE, SectionError};
 use mc_world::world::{VoxelWorld, WorldError, WorldPos};
 use thiserror::Error;
 
@@ -40,12 +40,14 @@ const LANDMARK_COLUMN: (u32, u32) = (12, 12);
 const LANDMARK_TOP: u32 = 64;
 
 /// Which content-defined block the scene places in each of its roles.
+///
+/// There is no role for the space above the ground. The scene places nothing
+/// there, and nothing is not a block the scene could name.
 struct Strata {
     surface: BlockName,
     subsurface: BlockName,
     depths: BlockName,
     sea: BlockName,
-    sky: BlockName,
 }
 
 impl Strata {
@@ -56,7 +58,6 @@ impl Strata {
             subsurface: named("base:dirt")?,
             depths: named("base:stone")?,
             sea: named("base:water")?,
-            sky: named("base:air")?,
         })
     }
 }
@@ -81,11 +82,6 @@ pub struct ReplayWorld {
     blocks: VoxelWorld,
     /// One surface height per block column, x fastest.
     heights: Vec<u32>,
-    /// The block an open column holds, kept so that a simulation editing a copy
-    /// of this world knows what emptying a cell means without naming a block
-    /// itself. It is the same name [`Strata::sky`] fills a column with, and this
-    /// file is the one place in the production tree allowed to spell it.
-    sky: BlockName,
 }
 
 impl ReplayWorld {
@@ -110,18 +106,7 @@ impl ReplayWorld {
         Ok(Self {
             blocks: VoxelWorld::assembled(FOOTPRINT_COLUMNS, columns)?,
             heights,
-            sky: strata.sky,
         })
-    }
-
-    /// The block this world's open columns are filled with.
-    ///
-    /// Handed out so that emptying a cell is a name the *world* supplies rather
-    /// than one the engine picks: what a break leaves behind where content names
-    /// no residue is whatever this world means by nothing being there.
-    #[must_use]
-    pub const fn sky(&self) -> &BlockName {
-        &self.sky
     }
 
     /// Every column, in the declared assembly order: `(cz, cx)` ascending.
@@ -149,7 +134,7 @@ impl ReplayWorld {
 
     /// The block held at a world position, or nothing outside the world.
     #[must_use]
-    pub fn block_at(&self, x: u32, y: u32, z: u32) -> Option<&BlockName> {
+    pub fn block_at(&self, x: u32, y: u32, z: u32) -> Option<Contents<&BlockName>> {
         self.blocks.block_at(WorldPos { x, y, z }).ok()
     }
 
@@ -176,14 +161,14 @@ fn every_position() -> impl Iterator<Item = (u32, u32)> {
     (0..SECTION_SIZE).flat_map(|local_z| (0..SECTION_SIZE).map(move |local_x| (local_x, local_z)))
 }
 
-/// One column, filled with sky and then written down to the world floor.
+/// One column, empty to begin with and then written up from the world floor.
 fn draw_column(
     strata: &Strata,
     registry: &BlockRegistry,
     coordinate: ColumnCoordinate,
     heights: &[u32],
 ) -> Result<ChunkColumn, WorldGenError> {
-    let mut pen = Pen::over(strata, registry, coordinate)?;
+    let mut pen = Pen::over(strata, registry, coordinate);
     for local in every_position() {
         let (x, z) = world_position(coordinate, local);
         let surface = surface_of(heights, x, z)?;
@@ -221,17 +206,18 @@ struct Pen<'a> {
 }
 
 impl<'a> Pen<'a> {
-    /// A pen over a fresh column of nothing but sky.
-    fn over(
-        strata: &'a Strata,
-        registry: &'a BlockRegistry,
-        coordinate: ColumnCoordinate,
-    ) -> Result<Self, WorldGenError> {
-        Ok(Self {
+    /// A pen over a fresh column holding nothing at all.
+    ///
+    /// Infallible, and that is the point: a column of nothing names no block, so
+    /// there is no registry to consult and nothing for an unknown block to
+    /// refuse. The registry the pen keeps is for the strata it writes into that
+    /// emptiness, which do name blocks.
+    fn over(strata: &'a Strata, registry: &'a BlockRegistry, coordinate: ColumnCoordinate) -> Self {
+        Self {
             strata,
             registry,
-            column: ChunkColumn::filled(coordinate, &strata.sky, registry)?,
-        })
+            column: ChunkColumn::empty(coordinate),
+        }
     }
 
     /// The column that was drawn.
@@ -255,9 +241,10 @@ impl<'a> Pen<'a> {
     }
 
     /// Grass at the surface, dirt under it, stone to the floor, and water above
-    /// the surface where the surface is under the sea. Where the surface stands
-    /// above the sea that last range is empty and the column is left open to the
-    /// sky.
+    /// the surface where the surface is under the sea. Everything above that is
+    /// left exactly as the fresh column came: holding nothing. Where the surface
+    /// stands above the sea the water range is empty of iterations and the
+    /// column is open from its grass upwards.
     fn draw_strata(&mut self, local: (u32, u32), surface: u32) -> Result<(), WorldGenError> {
         // The strata reference is copied out of `self` first: it outlives this
         // call, so reading a name from it does not hold a borrow of the pen the

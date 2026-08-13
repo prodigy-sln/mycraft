@@ -1,10 +1,18 @@
-//! A section: 16x16x16 voxels, each holding one registered block.
+//! A section: 16x16x16 voxels, each holding one registered block or nothing.
 //!
 //! A section stores names and positions into its own palette, and nothing that
 //! belongs to a registry. Reading a voxel therefore takes no registry at all,
 //! which is why reading one "against the wrong registry" is not a mistake this
 //! type can be asked to make.
+//!
+//! **Emptiness is a palette entry naming nothing, and not a state beside the
+//! palette.** A fresh section is empty: one entry at position 0, every voxel
+//! index 0, no index storage — byte-for-byte the shape a filled section has with
+//! a different entry at position 0. Nothing about the packing, the widths, the
+//! reference counting or compaction knows the difference, which is what makes
+//! constructing an empty section infallible and free of a registry.
 
+mod contents;
 mod export;
 mod packed;
 mod palette;
@@ -15,6 +23,7 @@ use mc_core::block::{BlockId, BlockRegistry, RegistryError};
 use mc_core::id::BlockName;
 use thiserror::Error;
 
+pub use contents::Contents;
 pub use export::{ImportError, PaletteIndex, SectionData};
 use packed::PackedIndices;
 use palette::Palette;
@@ -86,7 +95,7 @@ pub enum SectionError {
     CorruptPaletteIndex { index: u16, palette_len: usize },
 }
 
-/// 4096 voxels, each holding one of the blocks in this section's palette.
+/// 4096 voxels, each holding one of the entries in this section's palette.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Section {
     palette: Palette,
@@ -94,6 +103,21 @@ pub struct Section {
 }
 
 impl Section {
+    /// A section holding nothing at all.
+    ///
+    /// Takes no registry and cannot fail: nothing is not a block, so there is
+    /// nothing here for a registry to know about. Palette `[Contents::Empty]` at
+    /// position 0, every voxel index 0, zero bytes of index storage — which is
+    /// byte-for-byte the shape [`filled`](Self::filled) produces, with a
+    /// different entry at position 0.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self {
+            palette: Palette::filled_with(Contents::Empty, VOXELS_PER_SECTION),
+            indices: PackedIndices::new(),
+        }
+    }
+
     /// A section every one of whose voxels holds `fill`.
     ///
     /// # Errors
@@ -105,25 +129,31 @@ impl Section {
         // The fill takes palette position 0 and every voxel index starts there,
         // so filling is the state a section is already in.
         Ok(Self {
-            palette: Palette::filled_with(fill, VOXELS_PER_SECTION),
+            palette: Palette::filled_with(Contents::Holds(fill.clone()), VOXELS_PER_SECTION),
             indices: PackedIndices::new(),
         })
     }
 
-    /// The block held at `pos`.
+    /// What the cell at `pos` holds — a block, or nothing.
     ///
     /// Takes no registry: the palette holds names, so there is no id here that
     /// some other registry could read differently.
+    ///
+    /// **"There is no such cell" and "this cell holds nothing" are different
+    /// answers, and this is the one place that split is made.** A position no
+    /// section has is [`SectionError::OutOfBounds`] naming the axis; a cell
+    /// holding nothing is `Ok(Contents::Empty)`. No path here may produce one
+    /// where the other belongs.
     ///
     /// # Errors
     ///
     /// Returns [`SectionError::OutOfBounds`] if `pos` is not a position in a
     /// section.
-    pub fn block_at(&self, pos: LocalPos) -> Result<&BlockName, SectionError> {
+    pub fn block_at(&self, pos: LocalPos) -> Result<Contents<&BlockName>, SectionError> {
         let voxel = Self::voxel_index(pos)?;
         let position = self.indices.get(voxel).ok_or_else(|| self.corrupt(voxel))?;
         self.palette
-            .name_at(position)
+            .contents_at(position)
             .ok_or_else(|| self.corrupt(position))
     }
 
@@ -148,7 +178,16 @@ impl Section {
         pos: LocalPos,
         registry: &BlockRegistry,
     ) -> Result<bool, SectionError> {
-        Ok(registry.resolve(self.block_at(pos)?)?.is_solid)
+        match self.block_at(pos)? {
+            // Short-circuited *before* the registry, and this is the whole of
+            // it: nothing is not a block, so there is nothing to look up and no
+            // unregistered-block failure to earn. Widening this arm to cover
+            // every cell would answer "not solid" for a block the registry has
+            // never heard of, and narrowing it to consult the registry first
+            // would make an empty cell need a block registered to mean nothing.
+            Contents::Empty => Ok(false),
+            Contents::Holds(name) => Ok(registry.resolve(name)?.is_solid),
+        }
     }
 
     /// Writes `block` at `pos`.
@@ -166,9 +205,23 @@ impl Section {
     ) -> Result<(), SectionError> {
         let voxel = Self::voxel_index(pos)?;
         Self::require_registered(block, registry)?;
-        let vacated = self.indices.get(voxel).ok_or_else(|| self.corrupt(voxel))?;
-        let position = self.palette.replace(vacated, block);
-        self.store(voxel, position)
+        self.write(voxel, Contents::Holds(block))
+    }
+
+    /// Empties the cell at `pos`.
+    ///
+    /// Takes no registry and has no unknown-block failure: nothing is not a
+    /// block. The one way this refuses is a position no section has, which is
+    /// the same check [`set_block`](Self::set_block) makes and made in the same
+    /// place — so a bounds check lost here is lost for both.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SectionError::OutOfBounds`] if `pos` is not a position in a
+    /// section. There is no other way for this to fail.
+    pub fn empty_at(&mut self, pos: LocalPos) -> Result<(), SectionError> {
+        let voxel = Self::voxel_index(pos)?;
+        self.write(voxel, Contents::Empty)
     }
 
     /// Gives back the palette entries no voxel holds any more, and the index
@@ -220,7 +273,7 @@ impl Section {
     }
 
     /// Every palette entry, in insertion order.
-    pub fn palette(&self) -> impl ExactSizeIterator<Item = &BlockName> {
+    pub fn palette(&self) -> impl ExactSizeIterator<Item = Contents<&BlockName>> {
         self.palette.iter()
     }
 
@@ -310,6 +363,19 @@ impl Section {
         (0..palette_len)
             .map(|position| surviving.iter().position(|kept| *kept == position))
             .collect()
+    }
+
+    /// Puts `contents` in the voxel at `voxel`, moving its reference off
+    /// whatever it held.
+    ///
+    /// **The one write path, and both mutators reach it.** Writing a block and
+    /// emptying a cell differ only in the [`Contents`] they resolve, so the
+    /// reference counting, the palette growth and the index widening are stated
+    /// once — an empty cell is not a special case of anything here.
+    fn write(&mut self, voxel: usize, contents: Contents<&BlockName>) -> Result<(), SectionError> {
+        let vacated = self.indices.get(voxel).ok_or_else(|| self.corrupt(voxel))?;
+        let position = self.palette.replace(vacated, contents);
+        self.store(voxel, position)
     }
 
     /// Widens the indices if the palette has outgrown the current tier, then

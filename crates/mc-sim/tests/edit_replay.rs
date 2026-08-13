@@ -81,7 +81,7 @@ use schedule::{
     section, spawn, voxel,
 };
 use support::chamber::{BlockChamber, UNBREAKABLE, UNBUILDABLE, differences};
-use support::{AIR, STONE, TestResult};
+use support::{NOTHING, STONE, TestResult, described};
 
 #[test]
 fn the_replay_leaves_every_cell_holding_the_block_the_schedule_derives_for_it() -> TestResult {
@@ -120,7 +120,7 @@ fn every_operation_the_schedule_requires_refused_is_refused_by_name_and_changes_
                 (BEHIND_THE_UNBUILDABLE, STONE.to_owned()),
                 (INDESTRUCTIBLE, UNBREAKABLE.to_owned()),
                 (UNBUILDABLE_CELL, UNBUILDABLE.to_owned()),
-                (SHORT_OF_THE_REACH, AIR.to_owned()),
+                (SHORT_OF_THE_REACH, NOTHING.to_owned()),
                 (BEYOND_THE_REACH, STONE.to_owned()),
             ]
         ),
@@ -280,8 +280,8 @@ fn held_at_the_refusals(run: &Run) -> Result<Vec<(WorldPos, String)>, Box<dyn Er
             .simulation
             .world()
             .block_at(voxel(cell))
-            .ok_or("the world holds no block at a cell the schedule aimed at")?;
-        Ok((cell, held.as_str().to_owned()))
+            .ok_or("the world reaches no cell the schedule aimed at")?;
+        Ok((cell, described(held)))
     })
     .collect()
 }

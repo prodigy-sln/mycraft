@@ -27,6 +27,7 @@
 use glam::Vec3;
 use mc_core::block::{BlockRegistry, RegistryError};
 use mc_sim::replay::ReplayWorld;
+use mc_world::section::Contents;
 
 /// How far the player's box reaches from its feet centre on each horizontal
 /// axis, in blocks. The specification's declared 0.6-block width, halved.
@@ -97,8 +98,15 @@ fn solid_at(
     let (Ok(x), Ok(y), Ok(z)) = (u32::try_from(x), u32::try_from(y), u32::try_from(z)) else {
         return Ok(None);
     };
-    let Some(name) = world.block_at(x, y, z) else {
-        return Ok(None);
+    // Three answers and three arms. Two of them mean "nothing to be inside of"
+    // and are still written separately: a cell the world does not reach and a
+    // cell holding nothing are different facts, and this judge is the only
+    // unscoped invariant the simulation has — a fold here would let the same
+    // conflation the subject is being judged for pass unremarked.
+    let name = match world.block_at(x, y, z) {
+        None => return Ok(None),
+        Some(Contents::Empty) => return Ok(None),
+        Some(Contents::Holds(name)) => name,
     };
     Ok(registry.resolve(name)?.is_solid.then(|| Overlap {
         voxel,

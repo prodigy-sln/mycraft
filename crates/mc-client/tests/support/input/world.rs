@@ -103,7 +103,7 @@ pub fn ground_plane() -> Result<(Simulation, BlockName), Box<dyn Error>> {
                 pitch: 0.0,
                 on_ground: true,
             },
-            World::new(blocks, registry, open)?,
+            World::new(blocks, registry)?,
         ),
         holding,
     ))

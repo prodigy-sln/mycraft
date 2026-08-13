@@ -24,23 +24,22 @@
 //! them. The fixture's breakable block names *dirt*, which nothing else in the
 //! fixture would produce.
 //!
-//! # Emptiness is the world's word, and the fixture is built so that shows
+//! # A break leaves *nothing*, and the fixture is built so that shows
 //!
-//! What a cell holds when it holds nothing is a fact about the world that was
-//! built, not one Rust may pick — the engine may name no block at all
-//! (`crates/mc-world/tests/no_hardcoded_block_names.rs`). The emptying scenario's
-//! world is therefore filled with **water** rather than air, so that an
-//! implementation naming air outright, or falling back to the first block the
-//! registry registered, leaves the wrong block and is caught. Against an
-//! air-filled fixture all three of those agree, and the assertion would be
-//! reporting a coincidence.
+//! A cell that holds nothing holds no block at all — not air, not the world's
+//! background, not whatever the registry happened to number first. The emptying
+//! scenario's world is therefore declared with a **water** background rather
+//! than with no background, so that an implementation writing the world's own
+//! fill back into the cell leaves water there and is caught. Against a chamber
+//! that is empty everywhere, "emptied" and "returned to the background" are the
+//! same answer and the assertion would be reporting a coincidence.
 //!
 //! # The registration order is a fixture constraint, and it is asserted
 //!
-//! "The first registered block" is id 0, and it is only the base air block while
-//! base content applies before the `fixture:` overlay. A registry built from the
+//! "The first registered block" is id 0, and which block that is depends on base
+//! content applying before the `fixture:` overlay. A registry built from the
 //! overlay alone would number one of the fixture's own blocks 0, and the
-//! water-filled scenario above would stop discriminating the fallback it exists
+//! water-backed scenario above would stop discriminating the fallback it exists
 //! to discriminate. The last test here is what stops that being silent.
 
 mod support;
@@ -50,13 +49,14 @@ use std::error::Error;
 use glam::Vec3;
 use mc_core::block::BlockId;
 use mc_core::id::BlockName;
-use mc_sim::action::{ActionIntent, TickIntent};
-use mc_sim::player::{MovementIntent, PlayerState};
+use mc_sim::action::{ActionIntent, EditReport, TickIntent};
+use mc_sim::player::{BlockPos, MovementIntent, PlayerState};
 use mc_sim::simulation::Simulation;
+use mc_world::section::Contents;
 use mc_world::world::WorldPos;
 
 use support::chamber::{BlockChamber, CRUMBLING, UNBREAKABLE, at, differences, fixture_registry};
-use support::{AIR, DIRT, STONE, TestResult, WATER};
+use support::{DIRT, NOTHING, STONE, TestResult, WATER};
 
 /// How many chunk columns the fixture world spans on each axis.
 const COLUMNS: u32 = 1;
@@ -154,19 +154,46 @@ fn a_break_against_a_block_whose_definition_names_no_residue_empties_its_cell() 
 
     assert_eq!(
         differences(&declared, broken.world()),
-        vec![(EMPTIED, STONE.to_owned(), WATER.to_owned())],
+        vec![(EMPTIED, STONE.to_owned(), NOTHING.to_owned())],
         "naming no residue means the cell is emptied, not that the block cannot be broken — and \
          reading it the second way would make every block the base game ships indestructible, \
-         since none of them names one. What a cell holds when it holds nothing is the world's \
-         own word, which is why this fixture is filled with water: an implementation naming air \
-         outright, or falling back to the first block the registry registered, leaves air here \
-         and is caught, where against an air-filled world all three would have agreed"
+         since none of them names one. The cell ends holding no block at all, which is why this \
+         fixture is declared over a water background: an implementation writing the world's own \
+         fill back into the cell leaves water here and is caught, where over a background of \
+         nothing the two answers would have been the same"
     );
     Ok(())
 }
 
 #[test]
-fn the_fixture_registry_numbers_the_base_air_block_first_and_the_unbreakable_block_after_it()
+fn a_break_against_a_block_whose_definition_names_no_residue_reports_the_cell_holding_nothing()
+-> TestResult {
+    let chamber = one_ordinary_block_over_water();
+    let mut simulation = Simulation::new(standing(FACING_IT), chamber.build()?);
+
+    let report = simulation.advance(TickIntent {
+        movement: MovementIntent::default(),
+        action: Some(ActionIntent::Break),
+    });
+
+    assert_eq!(
+        report,
+        Some(EditReport::Changed {
+            cell: voxel(EMPTIED),
+            from: Contents::Holds(BlockName::parse(STONE)?),
+            to: Contents::Empty,
+        }),
+        "the report says what the cell now holds, and what it now holds is nothing — not the \
+         block that was broken, and not the block the world was declared over. A report that \
+         named the broken block as what is now there describes a break that changed nothing, \
+         which is a different operation entirely, and the cell-by-cell comparison above cannot \
+         see the difference because it never reads a report"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_fixture_registry_numbers_a_block_of_base_content_first_and_the_unbreakable_block_after_it()
 -> TestResult {
     let registry = fixture_registry()?;
     let first_registered = registry.definition(BlockId::from_raw(0))?;
@@ -177,7 +204,7 @@ fn the_fixture_registry_numbers_the_base_air_block_first_and_the_unbreakable_blo
             first_registered.name.as_str(),
             indestructible == BlockId::from_raw(0)
         ),
-        (AIR, false),
+        (DIRT, false),
         "the `fixture:` overlay applies over base content, never instead of it, and that ordering \
          is what a residue falling back to the first registered block would land on. It is what \
          makes the water-filled scenario above able to discriminate that fallback at all: built \
@@ -213,19 +240,29 @@ fn one_ordinary_block_over_water() -> BlockChamber {
     filled_with(WATER).cell(EMPTIED, STONE)
 }
 
-/// Air everywhere, with one layer of floor for the player to stand on.
+/// Nothing anywhere, with one layer of floor for the player to stand on.
 fn floored() -> BlockChamber {
-    filled_with(AIR)
+    with_a_floor(BlockChamber::empty(COLUMNS))
 }
 
-/// One layer of floor for the player to stand on, and `background` everywhere
-/// else — which is also what this world means by a cell holding nothing.
+/// One layer of floor for the player to stand on, and `background` in every
+/// other cell.
 fn filled_with(background: &'static str) -> BlockChamber {
-    BlockChamber::filled_with(COLUMNS, background).run(
-        at(0, FLOOR_LAYER, 0),
-        at(16, FLOOR_LAYER + 1, 16),
-        STONE,
-    )
+    with_a_floor(BlockChamber::filled_with(COLUMNS, background))
+}
+
+/// The same chamber with one layer of stone for the player to stand on.
+fn with_a_floor(chamber: BlockChamber) -> BlockChamber {
+    chamber.run(at(0, FLOOR_LAYER, 0), at(16, FLOOR_LAYER + 1, 16), STONE)
+}
+
+/// A world position as the signed cell a report names it by.
+const fn voxel(cell: WorldPos) -> BlockPos {
+    BlockPos {
+        x: cell.x as i32,
+        y: cell.y as i32,
+        z: cell.z as i32,
+    }
 }
 
 /// A player standing still on the floor at `feet`, looking level along +x.

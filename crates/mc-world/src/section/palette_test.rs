@@ -17,7 +17,7 @@
 use mc_core::id::{BlockName, NamespacedIdError};
 
 use super::Palette;
-use crate::section::VOXELS_PER_SECTION;
+use crate::section::{Contents, VOXELS_PER_SECTION};
 
 /// Parsing the fixture names is the only fallible step in any guard here.
 type GuardResult = Result<(), NamespacedIdError>;
@@ -30,7 +30,7 @@ const FURTHER: &str = "fixture:further";
 /// held by every voxel there is.
 fn filled() -> Result<Palette, NamespacedIdError> {
     Ok(Palette::filled_with(
-        &BlockName::parse(FILL)?,
+        Contents::Holds(BlockName::parse(FILL)?),
         VOXELS_PER_SECTION,
     ))
 }
@@ -39,7 +39,7 @@ fn filled() -> Result<Palette, NamespacedIdError> {
 fn a_write_takes_a_reference_from_the_block_it_replaced() -> GuardResult {
     let mut palette = filled()?;
 
-    let written = palette.replace(0, &BlockName::parse(WRITTEN)?);
+    let written = palette.replace(0, Contents::Holds(&BlockName::parse(WRITTEN)?));
 
     assert_eq!(
         (written, palette.refcount(0), palette.refcount(written)),
@@ -53,9 +53,9 @@ fn a_write_takes_a_reference_from_the_block_it_replaced() -> GuardResult {
 #[test]
 fn overwriting_the_last_voxel_holding_a_block_leaves_its_entry_unreferenced() -> GuardResult {
     let mut palette = filled()?;
-    let written = palette.replace(0, &BlockName::parse(WRITTEN)?);
+    let written = palette.replace(0, Contents::Holds(&BlockName::parse(WRITTEN)?));
 
-    let further = palette.replace(written, &BlockName::parse(FURTHER)?);
+    let further = palette.replace(written, Contents::Holds(&BlockName::parse(FURTHER)?));
 
     assert_eq!(
         (
@@ -76,9 +76,9 @@ fn overwriting_the_last_voxel_holding_a_block_leaves_its_entry_unreferenced() ->
 fn overwriting_a_voxel_with_the_block_it_already_holds_keeps_its_entry_referenced() -> GuardResult {
     let mut palette = filled()?;
     let written = BlockName::parse(WRITTEN)?;
-    let entry = palette.replace(0, &written);
+    let entry = palette.replace(0, Contents::Holds(&written));
 
-    let again = palette.replace(entry, &written);
+    let again = palette.replace(entry, Contents::Holds(&written));
 
     assert_eq!(
         (again, palette.refcount(entry), palette.len()),

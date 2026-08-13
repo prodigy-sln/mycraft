@@ -47,7 +47,7 @@ use mc_sim::simulation::Simulation;
 use mc_sim::world::World;
 
 use support::chamber::{BlockChamber, at};
-use support::{AIR, STONE, TestResult, exactly, exactly_player};
+use support::{STONE, TestResult, exactly, exactly_player};
 
 /// The tick the reader is holding while the next one is published.
 const HELD_TICK: u32 = 60;
@@ -154,10 +154,10 @@ fn advanced_to(tick: u32) -> Result<Simulation, Box<dyn Error>> {
     Ok(simulation)
 }
 
-/// One chunk column of air over a single layer of floor, whose top face is where
-/// the feet stand.
+/// One chunk column holding nothing over a single layer of floor, whose top face
+/// is where the feet stand.
 fn flat_floor() -> Result<World, Box<dyn Error>> {
-    BlockChamber::filled_with(COLUMNS, AIR)
+    BlockChamber::empty(COLUMNS)
         .run(at(0, FLOOR, 0), at(16, FLOOR + 1, 16), STONE)
         .build()
 }

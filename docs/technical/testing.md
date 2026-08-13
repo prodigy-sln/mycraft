@@ -40,6 +40,18 @@ the whole workspace already passed the day it went in — so it never needed a g
 failure here is always something introduced rather than something inherited. Verified to bite by
 planting an unresolved link (rustdoc exits 101) and reverting by hand.
 
+### Never read the gate's result through a pipe
+
+`sdd-gate.ps1 | tail` reports **`tail`'s** exit status, not the gate's. A shell pipeline's status is
+its last command's, so a red gate piped into anything that succeeds is indistinguishable from a green
+one — and the transcript shows a status line that says so. This has produced a gate reported green
+that had in fact failed, with the underlying failure (a test binary vanishing between compilation and
+`--list`, from two coverage runs sharing one target directory) invisible until the run was repeated.
+
+Redirect the output to a file, capture the exit code directly from the invocation, and read the file
+afterwards. The same caution applies to any wrapper that summarises a command's output: the summary
+is not the status, and only the status is the gate.
+
 ### The gate is not safe to run from two contexts at once
 
 Two concurrent invocations contend over `target/llvm-cov-target` and fail in ways that look like
@@ -472,6 +484,18 @@ The mechanism is only half of it. A changed golden must be justified in the comm
 an unexplained golden update is a review stop (`validation-calibration.md`). `MYCRAFT_UPDATE_GOLDENS`
 makes minting a golden a deliberate act rather than an accident — it cannot make it a *justified*
 one.
+
+**The announcement is currently lost in `mc-client`'s two golden suites, and that is a live gap.**
+`crates/mc-client/tests/support/frames.rs` builds the skip notice and then discards it, returning
+`None` for the device; both suites then early-return `Ok(())`, so under `MYCRAFT_ALLOW_NO_GPU` a run
+that rendered not one pixel reports **PASS** rather than a skip — indistinguishable in the summary
+from a run that rendered and matched, which is the exact failure this document is otherwise about.
+It has not bitten yet, because failure is failure **by default**: a missing adapter is a hard error
+unless the opt-in is deliberately set, and nothing in the repository or the gate sets it. That makes
+this a trap laid for the first environment without a rendering device — CI on a headless runner, a
+contributor's container — rather than a defect showing today, and it is tracked for repair before
+any such environment runs these suites. Note while reading the table above that presence rather than
+value enables the opt-in, so `MYCRAFT_ALLOW_NO_GPU=0` walks into it too.
 
 #### Reporting and provenance
 
@@ -947,6 +971,45 @@ matches the error variant by name — graded outside the scenario↔mutation map
 uses, and recorded as a weaker guarantee than the rest of the table for exactly that reason, not netted
 out against it.
 
+### A falsifier list derived from call paths is a hypothesis, not a measurement
+
+Retiring the base game's empty block (`modding/blocks-items.md`) was the third feature to make the
+mutation table its deliverable, and it produced a failure mode the first two did not: **falsifier
+lists that were written from reading the call paths and turned out to name scenarios the mutation
+cannot structurally reach.** Three of them, the same defect three times, each caught only by running
+the mutation and watching what actually went red.
+
+- A mutation of the *replay generator* was credited with falsifying a scenario whose test builds its
+  own section inside `mc-world` and meshes it directly. That test never runs the generator, so no
+  mutation of the generator can turn it red — however plainly the two appear to be about the same
+  behaviour.
+- A mutation making the section write a no-op was credited with two scenarios it cannot reach: one
+  asserts only the edit report, whose `to` field is derived from the block's definition and never
+  re-read from the store, so a write that did not happen cannot change it; the other reads the
+  collision bitset, which the write path sets whether or not the store write took effect — so the
+  mutation makes store and bitset disagree in the one direction that scenario cannot see.
+- A row reading "at minimum, every scenario that reads a cell" gave its own sweep no completion
+  condition: it could be reported as killed by whatever happened to run, never as *killed*. Its
+  falsifier set was rebuilt by following the site's actual consumers — five of them, four able to
+  falsify — and the fifth was recorded as **unable to**, which is a property of the code rather than
+  a gap in the tests.
+
+Two rules fall out. **Bound a falsifier list by the site's consumers**, enumerated from the code, and
+treat a consumer that cannot falsify as a finding to record rather than a scenario to add. And when a
+mutation is spelled against a *specific value*, check that the value can bite: refilling empty space
+with a **non-solid** block emits no quad and leaves every rendering scenario green, so the same
+mutation spelled against a solid block is the one that grades four scenarios instead of two. A single
+row claiming both spellings would claim four falsifiers and deliver two.
+
+**Mutual controls are demonstrated, not asserted.** Two scenarios of that feature — every cell above
+the surface holds nothing, every cell at or below it holds a block — are each other's control, and
+that was *shown*: refilling the sky turns the first red while the second stays green, and deleting
+the ground fill turns the second red while the first stays green, because an entirely empty world
+satisfies the first vacuously. The second was reported by the test author as unable to be red, which
+was true of the RED against the unchanged tree and false of the mutation table. A scenario green on
+first compile is not ungraded; it is graded somewhere other than its own RED, and the table is where
+that is written down.
+
 ### The 10 000-block exit criterion, and what makes it honest
 
 **MVP 1 exit criterion** — read as *this spec's* criterion, not as MVP 1 finished: a scripted replay
@@ -1017,3 +1080,27 @@ assertions rather than at compile time — but `FR-3.1-S3`'s own claim ("a free 
 nothing") is *true* under a no-op and would have passed on its own. What went red was its control —
 the same control §"The headless client-input harness" above describes, without which a no-op adapter
 would have satisfied the scenario it exists to catch.
+
+### A review manifest built from the diff omits exactly the riskiest files
+
+The set of files a reviewer is handed is usually derived from `git diff --name-only main...HEAD`.
+That set reconciles perfectly against the change and is still the wrong set, because a review's
+subject is the union of the diff and the files the task breakdown and the scenario↔test map name —
+and the difference between the two is precisely the tests that are **carried**: pre-existing,
+deliberately unmodified, and claimed to verify new behaviour while running unchanged.
+
+That claim is the one most worth checking and the least visible. A file absent from a diff is
+exactly a file whose test may have quietly stopped discriminating, so a diff-derived manifest drops
+the highest-risk cases while appearing complete. It happened on a 61-file change: three carried test
+files were omitted, and the two reviewers responded differently in a way worth keeping. One returned
+"gap — I cannot see these files" rather than guessing. The other returned **PASS on all three
+without ever opening them** — a verdict carrying no evidence, and from the outside indistinguishable
+from a real one. Same lesson as the section above, one level up: the absence was in the *input* to
+the review rather than in its output.
+
+Two working rules follow. Build the manifest as the union, not the diff. And when files are added
+after a review has run, re-decide them in a **supplementary** pass rather than a second pass — a
+second pass accepts only new findings of Major or higher, which would give never-reviewed files a
+weaker review than the ones already read. A supplementary result is added to the first, and the
+combination is marginally weaker than one review over the whole set, since no single reviewer held
+all of it. Say so rather than presenting the two as equivalent.

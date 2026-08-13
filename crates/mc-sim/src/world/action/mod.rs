@@ -16,6 +16,7 @@ mod trace;
 use glam::Vec3;
 use mc_core::block::{BlockId, BlockRegistry, RegistryError};
 use mc_core::id::BlockName;
+use mc_world::section::Contents;
 use mc_world::world::WorldError;
 
 use crate::player::{BlockPos, MovementIntent, PlayerState, eye_pose, occupies};
@@ -68,8 +69,12 @@ impl From<MovementIntent> for TickIntent {
 pub enum EditReport {
     Changed {
         cell: BlockPos,
-        from: BlockName,
-        to: BlockName,
+        /// What the cell held before, which is nothing where a placement landed
+        /// in an empty cell.
+        from: Contents,
+        /// What the cell holds now, which is nothing where a break declared no
+        /// residue.
+        to: Contents,
     },
     Refused(Refusal),
 }
@@ -156,16 +161,25 @@ pub(crate) fn resolve(
 /// **Breakability and residue are two independent claims, and reading one off
 /// the other is the mistake this shape exists to prevent.** Whether a block can
 /// be broken is what content declares in `breakable`; what the cell then holds
-/// is what it declares in `breaks_into`, and naming none means the cell is
-/// emptied rather than that the block is indestructible. Emptying it writes the
-/// world's own [`empty`](World::empty) block — a name that arrives with the
-/// world rather than one Rust picks, which it may not.
+/// is what it declares in `breaks_into`, and naming none means the cell is left
+/// **empty** rather than that the block is indestructible. Nothing is not a
+/// block, so there is no name for the engine to pick here and none is picked.
 fn broken(cell: BlockPos, world: &mut World) -> EditReport {
     let Some(at) = inside_the_world(cell) else {
         return EditReport::Refused(Refusal::OutsideWorld { at: cell });
     };
-    let Some(broken) = world.block_at(cell).cloned() else {
-        return EditReport::Refused(Refusal::NoTarget);
+    // Three arms and never two. `let Some(Contents::Holds(..)) = .. else` would
+    // answer "there is no such cell" and "this cell holds nothing" with one
+    // refusal, and both readings reach the same outcome here — which is what
+    // would make the collapse invisible in the report.
+    let broken = match world.block_at(cell) {
+        None => return EditReport::Refused(Refusal::NoTarget),
+        // The walk stops only at a solid cell and an empty cell is not solid, so
+        // nothing reaches this. It keeps its own arm so that a break that ever
+        // did reach an empty cell refuses rather than being read as a cell the
+        // world does not have.
+        Some(Contents::Empty) => return EditReport::Refused(Refusal::NoTarget),
+        Some(Contents::Holds(name)) => name.clone(),
     };
     let declared = match world.registry().resolve(&broken) {
         Ok(definition) => (definition.breakable, definition.breaks_into.clone()),
@@ -175,11 +189,14 @@ fn broken(cell: BlockPos, world: &mut World) -> EditReport {
     if !breakable {
         return EditReport::Refused(Refusal::Indestructible);
     }
-    let residue = named.unwrap_or_else(|| world.empty().clone());
-    match world.break_at(at, &residue) {
+    // `breaks_into` absent means the cell is left empty; present names the block
+    // left behind. No fallback, because there is no name for the engine to fall
+    // back to and picking one would be a game rule content could not override.
+    let residue = named.map_or(Contents::Empty, Contents::Holds);
+    match world.break_at(at, residue.as_ref()) {
         Ok(()) => EditReport::Changed {
             cell,
-            from: broken,
+            from: Contents::Holds(broken),
             to: residue,
         },
         Err(refused) => EditReport::Refused(Refusal::Storage(refused)),
@@ -210,18 +227,24 @@ fn placed(hit: &Hit, block: &BlockName, player: &PlayerState, world: &mut World)
     if occupies(player.position, cell) {
         return EditReport::Refused(Refusal::InsidePlayer);
     }
-    // Both ways out of the world in one pattern: a negative cell has no unsigned
-    // position to be stored at, and a cell past the far edge has one the world
-    // holds no block for. FR-4.2-S6 asserts the one thing, so it answers with
+    // Both ways out of the world under one name: a negative cell has no unsigned
+    // position to be stored at, and a cell past the far edge is one the world
+    // does not reach. That is one thing a caller asked about, so it answers with
     // one name — and a fixture built at either edge measures the same rule.
-    let (Some(at), Some(replaced)) = (inside_the_world(cell), world.block_at(cell).cloned()) else {
+    let Some(at) = inside_the_world(cell) else {
         return EditReport::Refused(Refusal::OutsideWorld { at: cell });
+    };
+    // An empty cell keeps its own arm: it is a cell the world reaches that holds
+    // nothing, and it is what a placement replaces *nothing* over.
+    let replaced = match world.block_at(cell) {
+        None => return EditReport::Refused(Refusal::OutsideWorld { at: cell }),
+        Some(contents) => contents.cloned(),
     };
     match world.place_at(at, block) {
         Ok(()) => EditReport::Changed {
             cell,
             from: replaced,
-            to: block.clone(),
+            to: Contents::Holds(block.clone()),
         },
         Err(refused) => EditReport::Refused(outside_or_storage(cell, refused)),
     }
@@ -235,18 +258,26 @@ fn placed(hit: &Hit, block: &BlockName, player: &PlayerState, world: &mut World)
 /// accident, so `!is_solid` here would be a game rule in the engine that content
 /// cannot override.
 ///
-/// **A cell the world holds no block for is not an occupied cell.** It is a cell
-/// outside the world, and the refusal it earns is the range one two steps below
-/// — calling it occupied would report a cell past the edge under the name of a
-/// content rule.
+/// **A cell the world holds no block for is not an occupied cell**, and there
+/// are now two of those rather than one. It is either a cell outside the world —
+/// whose refusal is the range one two steps below, since calling it occupied
+/// would report a cell past the edge under the name of a content rule — or a
+/// cell inside the world that holds nothing. Both permit, and they are written
+/// as separate arms because they are separate facts: reading one as the other is
+/// how a position past the edge becomes ordinary empty space.
+///
+/// **An empty cell is overwritable because it is empty**, not because content
+/// said so. `replaceable` applies to real blocks only and content can no longer
+/// declare otherwise, which is correct: nothing is not content.
 fn overwritable(cell: BlockPos, world: &World) -> Result<(), Refusal> {
-    let Some(held) = world.block_at(cell) else {
-        return Ok(());
-    };
-    match world.registry().resolve(held) {
-        Ok(definition) if definition.replaceable => Ok(()),
-        Ok(_) => Err(Refusal::Occupied),
-        Err(refused) => Err(Refusal::Storage(refused.into())),
+    match world.block_at(cell) {
+        None => Ok(()),
+        Some(Contents::Empty) => Ok(()),
+        Some(Contents::Holds(held)) => match world.registry().resolve(held) {
+            Ok(definition) if definition.replaceable => Ok(()),
+            Ok(_) => Err(Refusal::Occupied),
+            Err(refused) => Err(Refusal::Storage(refused.into())),
+        },
     }
 }
 

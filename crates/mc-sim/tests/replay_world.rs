@@ -161,8 +161,8 @@ fn the_landmark_column_stands_in_stone_from_its_surface_to_the_declared_top() ->
 
     for y in surface..=LANDMARK_TOP {
         let held = block_at(&world, x, y, z)?;
-        if held.as_str() != STONE {
-            faults.push(format!("y = {y} holds `{}`", held.as_str()));
+        if held != STONE {
+            faults.push(format!("y = {y} holds `{held}`"));
         }
     }
     let clearance = landmark_clearance(&world)?;
@@ -286,11 +286,8 @@ fn strata_faults(world: &ReplayWorld, x: u32, z: u32) -> Result<Vec<String>, Box
     let mut faults = Vec::new();
     for (y, block) in expected {
         let held = block_at(world, x, y, z)?;
-        if held.as_str() != block {
-            faults.push(format!(
-                "({x}, {y}, {z}) holds `{held}`, not `{block}`",
-                held = held.as_str()
-            ));
+        if held != block {
+            faults.push(format!("({x}, {y}, {z}) holds `{held}`, not `{block}`"));
         }
     }
     Ok(faults)
@@ -322,7 +319,7 @@ fn any_column_holds_water(world: &ReplayWorld) -> Result<bool, Box<dyn Error>> {
 fn column_holds_water(world: &ReplayWorld, x: u32, z: u32) -> Result<bool, Box<dyn Error>> {
     let surface = surface_height(world, x, z)?;
     for y in surface..=SEA_LEVEL {
-        if block_at(world, x, y, z)?.as_str() == WATER {
+        if block_at(world, x, y, z)? == WATER {
             return Ok(true);
         }
     }

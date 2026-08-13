@@ -27,10 +27,15 @@ use mc_core::id::{BlockName, TextureKey};
 
 use super::Neighbours;
 use crate::mesh::Facing;
-use crate::section::{LocalPos, Section};
+use crate::section::{Contents, LocalPos, Section};
 
 /// The error type these guards propagate with `?`.
 type GuardResult = Result<(), Box<dyn Error>>;
+
+/// What a cell holding nothing reads as here. Every section around is filled
+/// with a block, so this is an answer no assertion below expects — which is
+/// exactly why it is spelled rather than folded into one of the six names.
+const NOTHING: &str = "nothing";
 
 /// A block per facing, so the six sections around are told apart by what they
 /// hold rather than by being different objects.
@@ -99,7 +104,10 @@ fn block_beyond(neighbours: &Neighbours<'_>, facing: Facing) -> Result<String, B
     let beyond = neighbours.at(facing).ok_or_else(|| {
         format!("a section was supplied for {facing}, so one has to come back for it")
     })?;
-    Ok(beyond.block_at(ANY_VOXEL)?.as_str().to_owned())
+    Ok(match beyond.block_at(ANY_VOXEL)? {
+        Contents::Empty => NOTHING.to_owned(),
+        Contents::Holds(name) => name.as_str().to_owned(),
+    })
 }
 
 #[test]

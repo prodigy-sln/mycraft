@@ -12,12 +12,25 @@
 //! tests is passed by an engine that reads the property and failed by an engine
 //! that recognises the name — and the third one is failed by an engine that
 //! recognises runtime id 0 instead, which is the same shortcut wearing a number.
+//!
+//! **`base:air` is now a name neither the engine nor the base game knows at
+//! all**, and that strengthens the thesis rather than dating it. A cell holds a
+//! block or it holds nothing, nothing is not a block, and no content set here
+//! ships one under that name — so the name buys precisely nothing, and a
+//! registry is free to hand it whatever definition it likes. This one hands it
+//! solidity, which is the least air-like thing a block can be.
+//!
+//! **A reader meeting this file beside the rule that no production source names
+//! a retired block will read the two as opposed. They are not.** That scan reads
+//! production sources under `src/` and never `tests/`, so a fixture is free to
+//! say a name out loud — which is the only way a fixture about solidity can say
+//! which name carries which definition at all.
 
 mod common;
 
 use std::error::Error;
 
-use common::{TestResult, all_positions, at, registry_declaring};
+use common::{TestResult, all_positions, at, described, registry_declaring};
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 use mc_world::section::Section;
@@ -82,10 +95,7 @@ fn a_section_filled_with_the_first_registered_block_holds_only_it_and_reports_it
         }
     }
 
-    let palette: Vec<String> = section
-        .palette()
-        .map(|name| name.as_str().to_owned())
-        .collect();
+    let palette: Vec<String> = section.palette().map(described).collect();
     assert_eq!(
         (palette, solid),
         (vec![STONE.to_owned()], 4096),

@@ -33,10 +33,10 @@ use std::error::Error;
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 use mc_world::mesh::{Facing, MeshError, Neighbours, SectionMesh, mesh_section};
-use mc_world::section::{LocalPos, Section};
+use mc_world::section::{Contents, LocalPos, Section};
 use mesh_common::{
-    SOLID, TestResult, VOID, all_around, at, registry_declaring, section_holding, sections_around,
-    solid_section, some_quads,
+    SOLID, TestResult, VOID, all_around, at, named, registry_declaring, section_holding,
+    sections_around, solid_section, some_quads,
 };
 
 /// A block held by two voxels of the meshed section and registered by only one
@@ -154,7 +154,7 @@ fn a_neighbour_beyond(facing: Facing, registry: &BlockRegistry) -> Result<Sectio
 /// and naming the lowest failing voxel are the same answer, and the assertion
 /// cannot tell them apart.
 fn require_palette_order(section: &Section, expected: &[&str]) -> Result<(), Box<dyn Error>> {
-    let held: Vec<&str> = section.palette().map(BlockName::as_str).collect();
+    let held: Vec<&str> = section.palette().map(named).collect();
     if held == expected {
         return Ok(());
     }
@@ -176,8 +176,12 @@ fn require_unheld_and_unregistered(
     let parsed = BlockName::parse(name)?;
     let mut compacted = section.clone();
     compacted.compact();
-    let still_held = compacted.palette().any(|kept| *kept == parsed);
-    let carried = section.palette().any(|entry| *entry == parsed);
+    let still_held = compacted
+        .palette()
+        .any(|kept| kept == Contents::Holds(&parsed));
+    let carried = section
+        .palette()
+        .any(|entry| entry == Contents::Holds(&parsed));
     if carried && !still_held && registry.id_of(&parsed).is_err() {
         return Ok(());
     }

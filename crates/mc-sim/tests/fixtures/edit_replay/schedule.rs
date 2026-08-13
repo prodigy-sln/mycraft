@@ -66,8 +66,10 @@ use mc_sim::world::SectionKey;
 use mc_world::column::{ColumnCoordinate, SECTIONS_PER_COLUMN};
 use mc_world::world::WorldPos;
 
+use mc_world::section::Contents;
+
 use crate::support::chamber::{BlockChamber, CRUMBLING, UNBREAKABLE, UNBUILDABLE, at};
-use crate::support::{AIR, DIRT, STONE};
+use crate::support::{DIRT, NOTHING, STONE};
 
 /// How many successful operations of each kind the criterion asks for.
 const CRITERION: usize = 10_000;
@@ -145,8 +147,8 @@ pub const SECTIONS_IN_THE_FOOTPRINT: usize = (COLUMNS * COLUMNS * SECTIONS_PER_C
 /// agreeing with themselves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Held {
-    /// Spelled `base:air` because that is this chamber's fill, and emptying a
-    /// cell returns it to the world's own fill.
+    /// The cell holds no block at all. Not the chamber's background, not a
+    /// block that stands in for absence — nothing.
     Empty,
     Stone,
     Crumbling,
@@ -154,13 +156,21 @@ enum Held {
 }
 
 impl Held {
-    /// The name content spells this block with.
-    const fn name(self) -> &'static str {
+    /// What this cell holds: the name content spells the block with, or nothing.
+    const fn contents(self) -> Contents<&'static str> {
         match self {
-            Self::Empty => AIR,
-            Self::Stone => STONE,
-            Self::Crumbling => CRUMBLING,
-            Self::Dirt => DIRT,
+            Self::Empty => Contents::Empty,
+            Self::Stone => Contents::Holds(STONE),
+            Self::Crumbling => Contents::Holds(CRUMBLING),
+            Self::Dirt => Contents::Holds(DIRT),
+        }
+    }
+
+    /// What this cell holds, as text — a block by name, or [`NOTHING`].
+    const fn described(self) -> &'static str {
+        match self.contents() {
+            Contents::Empty => NOTHING,
+            Contents::Holds(name) => name,
         }
     }
 
@@ -200,7 +210,7 @@ const FINISHES: [Finish; 3] = [Finish::Built, Finish::Crumbled, Finish::Holed];
 #[derive(Debug, Clone, Copy)]
 enum Asked {
     Break,
-    Place(&'static str),
+    Place(Contents<&'static str>),
 }
 
 /// The answer the schedule derives for one operation.
@@ -208,8 +218,8 @@ enum Asked {
 enum Answer {
     Changed {
         cell: WorldPos,
-        from: &'static str,
-        to: &'static str,
+        from: Contents<&'static str>,
+        to: Contents<&'static str>,
     },
     Refused(Refusal),
 }
@@ -237,7 +247,15 @@ impl Step {
     pub fn intent(&self) -> Result<ActionIntent, Box<dyn Error>> {
         Ok(match self.asked {
             Asked::Break => ActionIntent::Break,
-            Asked::Place(block) => ActionIntent::Place {
+            // A placement names a block, and nothing is not a block. Nothing in
+            // this file schedules one, and a schedule that ever did would be
+            // asking for an operation the request type cannot express — so it is
+            // reported here rather than quietly dropped, which would shorten the
+            // run below the criterion with every count still agreeing.
+            Asked::Place(Contents::Empty) => {
+                return Err("a placement names a block; this schedule places nothing".into());
+            }
+            Asked::Place(Contents::Holds(block)) => ActionIntent::Place {
                 block: BlockName::parse(block)?,
             },
         })
@@ -252,8 +270,8 @@ impl Step {
         Ok(Some(match &self.answer {
             Answer::Changed { cell, from, to } => EditReport::Changed {
                 cell: voxel(*cell),
-                from: BlockName::parse(from)?,
-                to: BlockName::parse(to)?,
+                from: parsed(*from)?,
+                to: parsed(*to)?,
             },
             Answer::Refused(refusal) => EditReport::Refused(refusal.clone()),
         }))
@@ -292,11 +310,11 @@ impl Working {
     fn places(&mut self, steps: &mut Vec<Step>, block: Held) {
         steps.push(Step {
             aim: self.wall,
-            asked: Asked::Place(block.name()),
+            asked: Asked::Place(block.contents()),
             answer: Answer::Changed {
                 cell: self.facing,
-                from: self.facing_holds.name(),
-                to: block.name(),
+                from: self.facing_holds.contents(),
+                to: block.contents(),
             },
         });
         self.facing_holds = block;
@@ -318,8 +336,8 @@ impl Working {
             asked: Asked::Break,
             answer: Answer::Changed {
                 cell,
-                from: held.name(),
-                to: held.residue().name(),
+                from: held.contents(),
+                to: held.residue().contents(),
             },
         });
         *held = held.residue();
@@ -399,7 +417,13 @@ impl Schedule {
                 ]
             })
             .filter(|(_, declared, now)| declared != now)
-            .map(|(cell, declared, now)| (cell, declared.name().to_owned(), now.name().to_owned()))
+            .map(|(cell, declared, now)| {
+                (
+                    cell,
+                    declared.described().to_owned(),
+                    now.described().to_owned(),
+                )
+            })
             .collect();
         // `support::chamber::differences` walks `Extent::positions()`, which is
         // y, then z, then x, and yields its rows in that order — so this sorts
@@ -418,17 +442,13 @@ impl Schedule {
     }
 }
 
-/// The declared world: the fill, one layer of floor to stand on, the nine wall
-/// cells the working columns are aimed at, and the three cells the refused
-/// operations need. The fill is also what this world means by a cell holding
-/// nothing.
+/// The declared world: nothing anywhere, one layer of floor to stand on, the
+/// nine wall cells the working columns are aimed at, and the three cells the
+/// refused operations need.
 #[must_use]
 pub fn chamber() -> BlockChamber {
-    let floored = BlockChamber::filled_with(COLUMNS, AIR).run(
-        at(0, FLOOR_LAYER, 0),
-        at(16, FLOOR_LAYER + 1, 16),
-        STONE,
-    );
+    let floored =
+        BlockChamber::empty(COLUMNS).run(at(0, FLOOR_LAYER, 0), at(16, FLOOR_LAYER + 1, 16), STONE);
     working_columns()
         .iter()
         .fold(floored, |chamber, column| chamber.cell(column.wall, STONE))
@@ -457,6 +477,18 @@ pub const fn section(index: usize) -> SectionKey {
         column: ColumnCoordinate { x: 0, z: 0 },
         index,
     }
+}
+
+/// A declared cell's contents as a report carries them.
+///
+/// # Errors
+///
+/// Returns the refusal if the name it carries is not a namespaced id.
+fn parsed(contents: Contents<&'static str>) -> Result<Contents<BlockName>, Box<dyn Error>> {
+    Ok(match contents {
+        Contents::Empty => Contents::Empty,
+        Contents::Holds(name) => Contents::Holds(BlockName::parse(name)?),
+    })
 }
 
 /// A world position as the signed voxel a report names it by.
@@ -490,11 +522,15 @@ fn working_columns() -> Vec<Working> {
 /// The operations that must be refused, in the order they close a round.
 fn refusals() -> [Step; REFUSALS_PER_ROUND] {
     [
-        refused(BEYOND_THE_REACH, Asked::Place(STONE), Refusal::NoTarget),
+        refused(
+            BEYOND_THE_REACH,
+            Asked::Place(Contents::Holds(STONE)),
+            Refusal::NoTarget,
+        ),
         refused(INDESTRUCTIBLE, Asked::Break, Refusal::Indestructible),
         refused(
             BEHIND_THE_UNBUILDABLE,
-            Asked::Place(STONE),
+            Asked::Place(Contents::Holds(STONE)),
             Refusal::Occupied,
         ),
     ]

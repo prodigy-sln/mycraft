@@ -16,7 +16,7 @@ use mc_core::id::BlockName;
 use thiserror::Error;
 
 use super::palette::Palette;
-use super::{PackedIndices, Section, SectionError, VOXELS_PER_SECTION};
+use super::{Contents, PackedIndices, Section, SectionError, VOXELS_PER_SECTION};
 
 /// Where a voxel's block sits in the palette that came with it.
 ///
@@ -47,8 +47,17 @@ impl PaletteIndex {
 /// have to be rewritten the day that business changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SectionData {
-    /// The blocks the section holds, in the order its own palette holds them.
-    pub palette: Vec<BlockName>,
+    /// What the section holds, in the order its own palette holds it.
+    ///
+    /// One list and not a list of names beside a separate note of which position
+    /// is the empty one: emptiness *is* a position in the palette, so a second
+    /// field saying which could disagree with this one, and every reader would
+    /// consult two fields to answer one question.
+    ///
+    /// At most one entry is [`Contents::Empty`] when a section produced this. A
+    /// description carrying two is accepted, exactly as one naming a block twice
+    /// already is — both deduplicate downstream by what they hold.
+    pub palette: Vec<Contents>,
     /// One palette position per voxel, x fastest, then y, then z.
     pub indices: Vec<PaletteIndex>,
 }
@@ -77,7 +86,7 @@ impl Section {
             indices.push(self.exported_index(voxel)?);
         }
         Ok(SectionData {
-            palette: self.palette.iter().cloned().collect(),
+            palette: self.palette.iter().map(Contents::cloned).collect(),
             indices,
         })
     }
@@ -133,11 +142,21 @@ impl Section {
     }
 
     /// Refuses a palette naming a block `registry` does not hold.
+    ///
+    /// **The empty entry is skipped and it is the only thing skipped.** There is
+    /// no name in it for a registry to know, so requiring one would make an
+    /// empty cell need a block registered to mean nothing — while skipping the
+    /// check for every entry would let a description name a block that does not
+    /// exist and build a world quietly made of something else.
     fn require_all_registered(
-        palette: &[BlockName],
+        palette: &[Contents],
         registry: &BlockRegistry,
     ) -> Result<(), ImportError> {
-        match palette.iter().find(|name| registry.id_of(name).is_err()) {
+        let unregistered = palette.iter().find_map(|entry| match entry {
+            Contents::Empty => None,
+            Contents::Holds(name) => registry.id_of(name).is_err().then_some(name),
+        });
+        match unregistered {
             Some(name) => Err(ImportError::UnknownBlock { name: name.clone() }),
             None => Ok(()),
         }

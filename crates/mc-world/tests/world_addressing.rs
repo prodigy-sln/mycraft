@@ -18,7 +18,7 @@ mod common;
 
 use std::error::Error;
 
-use common::{TestResult, registry_declaring};
+use common::{TestResult, described, registry_declaring};
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 use mc_world::world::{Extent, VoxelWorld, WorldError, WorldPos};
@@ -46,8 +46,8 @@ fn a_write_past_any_edge_is_refused_and_never_wraps_into_the_world() -> TestResu
     let refused = refusals(&mut world, &past_an_edge, &registry)?;
 
     assert_eq!(
-        (refused, world.block_at(WOULD_WRAP_ONTO)?.as_str()),
-        (past_an_edge.map(Some).to_vec(), FILL),
+        (refused, described(world.block_at(WOULD_WRAP_ONTO)?)),
+        (past_an_edge.map(Some).to_vec(), FILL.to_owned()),
         "one step past each of the three far edges is outside the world on that axis, and each \
          has to come back refused naming the position it was asked about. The cell at the origin \
          is where all three of them land if the index is masked into range instead — an edit \

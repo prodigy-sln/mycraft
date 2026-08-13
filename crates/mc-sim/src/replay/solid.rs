@@ -26,6 +26,7 @@ use std::fmt;
 use mc_core::block::{BlockRegistry, RegistryError};
 use mc_core::id::BlockName;
 use mc_world::column::COLUMN_HEIGHT;
+use mc_world::section::Contents;
 use mc_world::world::{Extent, VoxelWorld, WorldPos};
 
 use crate::player::{BlockPos, Solidity};
@@ -43,8 +44,12 @@ pub trait BlockVolume {
     /// How far the volume reaches on each axis.
     fn extent(&self) -> Extent;
 
-    /// The block held at a position, or nothing where the volume holds none.
-    fn block_at(&self, x: u32, y: u32, z: u32) -> Option<&BlockName>;
+    /// What the cell at a position holds, or `None` where the volume does not
+    /// reach it.
+    ///
+    /// **The `Option` says the volume reaches this position and nothing else.**
+    /// A cell it reaches that holds nothing is `Some(Contents::Empty)`.
+    fn block_at(&self, x: u32, y: u32, z: u32) -> Option<Contents<&BlockName>>;
 }
 
 impl BlockVolume for ReplayWorld {
@@ -56,7 +61,7 @@ impl BlockVolume for ReplayWorld {
         }
     }
 
-    fn block_at(&self, x: u32, y: u32, z: u32) -> Option<&BlockName> {
+    fn block_at(&self, x: u32, y: u32, z: u32) -> Option<Contents<&BlockName>> {
         // The inherent query, named through the type so that a reader does not
         // have to know that an inherent method wins over a trait one.
         ReplayWorld::block_at(self, x, y, z)
@@ -75,7 +80,7 @@ impl BlockVolume for VoxelWorld {
         VoxelWorld::extent(self)
     }
 
-    fn block_at(&self, x: u32, y: u32, z: u32) -> Option<&BlockName> {
+    fn block_at(&self, x: u32, y: u32, z: u32) -> Option<Contents<&BlockName>> {
         VoxelWorld::block_at(self, WorldPos { x, y, z }).ok()
     }
 }
@@ -94,10 +99,14 @@ pub struct SolidVoxels {
 impl SolidVoxels {
     /// Resolves every voxel of `volume` through `registry`.
     ///
-    /// A position the volume holds no block at contributes nothing: an absent
-    /// block is the absence of anything to stand on, which is the same answer
-    /// the space above a world's terrain gives. That is a value the volume
-    /// returns and not a failure it reports — the one fallible step here is
+    /// A cell holding nothing contributes nothing, and so does a position the
+    /// volume does not reach. **They are two facts and get two arms**, even
+    /// though both answer `false`: an empty cell is the absence of anything to
+    /// stand on, and a position outside the volume is a position the walk never
+    /// produces. Collapsing them would make one edit break both, and a defect in
+    /// the extent would arrive looking like a defect about emptiness.
+    ///
+    /// Neither is a failure the volume reports — the one fallible step here is
     /// resolving a name, and it is propagated.
     ///
     /// # Errors
@@ -115,7 +124,10 @@ impl SolidVoxels {
         let mut solid = Vec::with_capacity(extent.voxel_count());
         for at in extent.positions() {
             solid.push(match volume.block_at(at.x, at.y, at.z) {
-                Some(name) => recent.answer_for(name, registry)?,
+                Some(Contents::Holds(name)) => recent.answer_for(name, registry)?,
+                // Nothing to stand on.
+                Some(Contents::Empty) => false,
+                // Outside the volume, which the walk never produces.
                 None => false,
             });
         }

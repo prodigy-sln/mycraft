@@ -51,15 +51,15 @@ breaks_into = "base:dirt"  # optional, absent means breaking empties the cell
   otherwise would be the wrong default to make every content file carry.
   `breakable = false` marks a block indestructible.
 - **`breaks_into`** — the namespaced id of the block a break leaves behind.
-  Absent means the cell **empties** rather than that the block is
+  Absent means the cell is left **empty** rather than that the block is
   indestructible — those are two different claims, so they are two
-  different fields. Air is the absence of a block, not a residue worth
-  naming, which is why a block that simply disappears when broken (the
-  common case) declares nothing here rather than every author writing
-  `breaks_into = "base:air"`. The named block is resolved when the break
-  happens, not when the definition is parsed, so `breaks_into` may
-  legitimately name a block that a later-loaded content root registers —
-  only the id's syntax is checked at load time.
+  different fields. There is no block to name for the empty case: a cell
+  holds a block or holds nothing (see "There is no empty block", below), so
+  a block that simply disappears when broken — the common case — declares
+  nothing here, and the engine picks no name on its behalf. The named block
+  is resolved when the break happens, not when the definition is parsed, so
+  `breaks_into` may legitimately name a block that a later-loaded content
+  root registers — only the id's syntax is checked at load time.
 
 **Unknown fields are rejected.** A declaration carrying a field the loader
 does not recognise (a typo, most often) fails to load rather than being
@@ -74,11 +74,16 @@ physics fact — does this block stop a player — and replaceability is a
 placement rule — may a placement overwrite this block. A mod can declare a
 non-solid block you cannot build through, and a solid block you can; the
 engine derives neither from the other, because doing so would put a game
-rule in code that content is supposed to own. `base:air` and `base:water`
-are both non-solid *and* replaceable, but that pairing is not assumed
-anywhere in the engine — each is its own declared fact, and a mod is free
-to ship a non-solid, non-replaceable block (an obstacle you can see through
-but not build over) or a solid, replaceable one.
+rule in code that content is supposed to own. `base:water` is both
+non-solid *and* replaceable, but that pairing is not assumed anywhere in
+the engine — each is its own declared fact, and a mod is free to ship a
+non-solid, non-replaceable block (an obstacle you can see through but not
+build over) or a solid, replaceable one.
+
+**`replaceable` governs real blocks only.** An empty cell accepts a
+placement because it is empty, not because content said so, and no
+declaration can make an empty cell refuse one. That is not a gap: nothing
+is not content, so there is nothing there for a content rule to be about.
 
 The engine does not check that a placed block itself is solid, or anything
 else about it beyond "is this name registered" — naming what to place is
@@ -130,34 +135,57 @@ Two boundary cases worth knowing:
   are a failure to list the `blocks/` directory, and are reported
   identically.
 
+## There is no empty block
+
+**A cell holds a block or holds nothing, and nothing names nothing.** The
+base game declares no block meaning "empty", the engine knows no such
+block, and there is no name a content author has to avoid, reserve, or
+texture in order to describe empty space. Empty space is the absence of a
+declaration, not a declaration of absence.
+
+Three consequences for a content author:
+
+- You declare only blocks that exist. There is nothing to write for the
+  space between them.
+- A break with no `breaks_into` leaves the cell empty. It does not leave
+  behind some other block that stands for emptiness.
+- A name that *sounds* like empty space is an ordinary name. If your mod
+  declares a block called `base:air`, `mod:void` or `mod:nothing`, it gets
+  exactly the treatment every other block gets, including whatever solidity
+  it declares — see below.
+
 ## Solidity is data, not inference
 
 Solidity is a **registered property** of a block, declared explicitly in
 its file. Nothing about it is inferred from a block's name or its runtime
-id — no name and no runtime id is special-cased anywhere in the engine,
-**including `base:air`**. An engine that treated any particular name or id
-as implicitly non-solid would be writing a game rule into Rust that the
-base game's own mod-equivalent status forbids: `base:air`'s non-solidity
-is a fact `air.toml` states, exactly the way `base:stone`'s solidity is a
-fact `stone.toml` states.
+id — no name and no runtime id is special-cased anywhere in the engine.
+An engine that treated any particular name or id as implicitly non-solid
+would be writing a game rule into Rust that the base game's own
+mod-equivalent status forbids: `base:stone`'s solidity is a fact
+`stone.toml` states, and a mod's block is solid or not for exactly the same
+reason and by exactly the same mechanism.
 
-## The base game's five blocks
+The test of that claim is a name the engine could plausibly have been
+tempted to recognise. Declare a block named `base:air` as `solid = true`
+and cells holding it are reported solid; declare one named `base:stone` as
+`solid = false` and cells holding it are reported non-solid. Both hold, and
+the engine's indifference to the name is asserted rather than assumed.
 
-`content/base/` ships exactly five block definitions:
+## The base game's four blocks
+
+`content/base/` ships exactly four block definitions:
 
 | File | `name` | `texture` | `solid` | `replaceable` | `breakable` | `breaks_into` |
 |------|--------|-----------|---------|---------------|-------------|---------------|
-| `air.toml` | `base:air` | `base:air` | `false` | `true` | *(absent)* | *(absent)* |
 | `stone.toml` | `base:stone` | `base:stone` | `true` | *(absent)* | *(absent)* | *(absent)* |
 | `dirt.toml` | `base:dirt` | `base:dirt` | `true` | *(absent)* | *(absent)* | *(absent)* |
 | `grass.toml` | `base:grass` | `base:grass` | `true` | *(absent)* | *(absent)* | *(absent)* |
 | `water.toml` | `base:water` | `base:water` | `false` | `true` | *(absent)* | *(absent)* |
 
-`base:air` and `base:water` are the only two base blocks declaring
-`replaceable = true` — they are what makes water placeable at all, since
-placement never falls back to checking solidity. No base block declares
-itself unbreakable or names a residue: breaking any of the five simply
-empties the cell.
+`base:water` is the only base block declaring `replaceable = true` — it is
+what makes water placeable at all, since placement never falls back to
+checking solidity. No base block declares itself unbreakable or names a
+residue: breaking any of the four leaves the cell empty.
 
 Every block currently has exactly one texture key — there is no per-face
 texture (a distinct top/side/bottom key, needed for a block like grass

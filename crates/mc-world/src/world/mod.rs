@@ -25,7 +25,7 @@ use mc_core::id::BlockName;
 use thiserror::Error;
 
 use crate::column::{COLUMN_HEIGHT, ChunkColumn, ColumnCoordinate, ColumnPos};
-use crate::section::{SECTION_SIZE, Section, SectionError};
+use crate::section::{Contents, SECTION_SIZE, Section, SectionError};
 
 /// How far a world coordinate is shifted to name the column holding it, and the
 /// mask that reads back the position inside that column.
@@ -108,6 +108,27 @@ pub struct VoxelWorld {
 }
 
 impl VoxelWorld {
+    /// A world of `footprint_columns` squared columns, holding nothing at all.
+    ///
+    /// Takes no registry and cannot fail, for the reason [`ChunkColumn::empty`]
+    /// does not: nothing is not a block, so building an empty world cannot fail
+    /// for a reason that has nothing to do with emptiness.
+    #[must_use]
+    pub fn empty(footprint_columns: u32) -> Self {
+        let columns = every_column(footprint_columns)
+            .map(|(column_x, column_z)| {
+                ChunkColumn::empty(ColumnCoordinate {
+                    x: column_x as i32,
+                    z: column_z as i32,
+                })
+            })
+            .collect();
+        Self {
+            columns,
+            footprint_columns,
+        }
+    }
+
     /// A world of `footprint_columns` squared columns, every voxel holding
     /// `fill`.
     ///
@@ -172,15 +193,37 @@ impl VoxelWorld {
         }
     }
 
-    /// The block held at `at`.
+    /// What the cell at `at` holds — a block, or nothing.
+    ///
+    /// The `Result` says the position is inside this world; what it holds is the
+    /// [`Contents`] inside it. A cell past the edge and a cell holding nothing
+    /// are different answers and stay different all the way down.
     ///
     /// # Errors
     ///
     /// Returns [`WorldError::OutsideWorld`] if `at` is outside this world, and
     /// [`WorldError::Section`] if the column refuses the position it is asked
     /// for.
-    pub fn block_at(&self, at: WorldPos) -> Result<&BlockName, WorldError> {
+    pub fn block_at(&self, at: WorldPos) -> Result<Contents<&BlockName>, WorldError> {
         Ok(self.column_holding(at)?.block_at(inside_that_column(at))?)
+    }
+
+    /// Empties the cell at `at`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorldError::OutsideWorld`] if `at` is outside this world, and
+    /// [`WorldError::Section`] if the column refuses the position.
+    pub fn empty_at(&mut self, at: WorldPos) -> Result<(), WorldError> {
+        if !self.extent().contains(at) {
+            return Err(WorldError::OutsideWorld { at });
+        }
+        let index = self.column_index(at);
+        self.columns
+            .get_mut(index)
+            .ok_or(WorldError::OutsideWorld { at })?
+            .empty_at(inside_that_column(at))?;
+        Ok(())
     }
 
     /// Writes `block` at `at`.

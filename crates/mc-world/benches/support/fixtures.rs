@@ -32,7 +32,7 @@ use std::error::Error;
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
 use mc_core::id::{BlockName, NamespacedIdError, TextureKey};
-use mc_world::section::{LocalPos, PaletteIndex, SECTION_SIZE, Section, SectionData};
+use mc_world::section::{Contents, LocalPos, PaletteIndex, SECTION_SIZE, Section, SectionData};
 
 /// How many columns a section's footprint has.
 pub const TERRAIN_COLUMNS: usize = (SECTION_SIZE * SECTION_SIZE) as usize;
@@ -184,8 +184,8 @@ fn built_from(is_solid: impl Fn(LocalPos) -> bool) -> Result<Fixture, Box<dyn Er
     let registry = fixture_registry()?;
     let described = SectionData {
         palette: vec![
-            BlockName::parse(NON_SOLID_BLOCK)?,
-            BlockName::parse(SOLID_BLOCK)?,
+            Contents::Holds(BlockName::parse(NON_SOLID_BLOCK)?),
+            Contents::Holds(BlockName::parse(SOLID_BLOCK)?),
         ],
         indices: every_position()
             .map(|voxel| PaletteIndex::new(u16::from(is_solid(voxel))))

@@ -57,7 +57,7 @@ use mc_world::column::COLUMN_HEIGHT;
 use mc_world::world::WorldPos;
 
 use support::chamber::{BlockChamber, UNBUILDABLE, at, differences};
-use support::{AIR, DIRT, STONE, TestResult};
+use support::{DIRT, NOTHING, STONE, TestResult};
 
 /// Every cell at which a run differs from the fixture as declared.
 type Changes = Vec<(WorldPos, String, String)>;
@@ -129,7 +129,7 @@ fn a_place_naming_a_block_the_registry_does_not_know_changes_nothing() -> TestRe
                 name: BlockName::parse(UNREGISTERED)?
             })),
             nothing(),
-            placed(ABOVE_THE_TARGET, AIR, DIRT)
+            placed(ABOVE_THE_TARGET, NOTHING, DIRT)
         ),
         "the same request over the same fixture, differing only in the name it carries: one the \
          registry knows and one it does not. The refusal has to arrive **by name**, because the \
@@ -153,7 +153,7 @@ fn a_place_into_a_cell_holding_a_block_that_is_not_solid_and_not_replaceable_cha
         (
             Some(EditReport::Refused(Refusal::Occupied)),
             nothing(),
-            placed(ABOVE_THE_TARGET, AIR, DIRT)
+            placed(ABOVE_THE_TARGET, NOTHING, DIRT)
         ),
         "the cell the placement lands in holds a block that stops nobody and that content does \
          not declare replaceable, and the two runs differ in that one declared cell and in \
@@ -179,7 +179,7 @@ fn a_place_that_would_land_outside_the_worlds_storable_range_changes_nothing() -
                 at: PAST_THE_CEILING
             })),
             nothing(),
-            placed(AT_THE_CEILING, AIR, DIRT)
+            placed(AT_THE_CEILING, NOTHING, DIRT)
         ),
         "the cell this placement would land in is the layer above the last one the world can \
          store, so no cell of the world may hold anything other than what it was declared with. \
@@ -193,18 +193,18 @@ fn a_place_that_would_land_outside_the_worlds_storable_range_changes_nothing() -
 
 /// A floor, and one solid block standing on it in the eye's line of sight.
 fn one_block_on_the_floor() -> BlockChamber {
-    BlockChamber::filled_with(COLUMNS, AIR)
+    BlockChamber::empty(COLUMNS)
         .run(at(0, FLOOR_LAYER, 0), at(16, FLOOR_LAYER + 1, 16), STONE)
         .cell(TARGET, STONE)
 }
 
-/// Air everywhere, with one solid block at `cell` and no floor at all.
+/// Nothing anywhere, with one solid block at `cell` and no floor at all.
 ///
 /// The ceiling runs need no floor: the player is above the world for the one
 /// tick they last, and a tick of gravity moves the eye by 0.00833 of a block —
 /// which the arithmetic in this file's header already carries.
 fn one_block_at(cell: WorldPos) -> BlockChamber {
-    BlockChamber::filled_with(COLUMNS, AIR).cell(cell, STONE)
+    BlockChamber::empty(COLUMNS).cell(cell, STONE)
 }
 
 /// A player standing on the floor, looking down at the target.

@@ -17,9 +17,12 @@ mod common;
 
 use std::error::Error;
 
-use common::{TestResult, all_positions, at, blocks_at_every_position, nth_position, registry_of};
+use common::{
+    NOTHING, TestResult, all_positions, at, contents_at_every_position, described, nth_position,
+    registry_of,
+};
 use mc_core::id::BlockName;
-use mc_world::section::Section;
+use mc_world::section::{LocalPos, Section};
 
 const STONE: &str = "base:stone";
 const GRASS: &str = "base:grass";
@@ -28,12 +31,13 @@ const DIRT: &str = "base:dirt";
 /// How many voxels the vacated-entry fixture writes and then writes back.
 const REVISITED: u32 = 10;
 
-/// The blocks a section's palette holds, in the order it holds them.
+/// The one cell the emptying scenarios write to and empty again.
+const A_WRITTEN_CELL: LocalPos = at(3, 4, 5);
+
+/// What a section's palette holds, in the order it holds them — a block by name,
+/// and [`NOTHING`] for the entry that names none.
 fn palette_names(section: &Section) -> Vec<String> {
-    section
-        .palette()
-        .map(|name| name.as_str().to_owned())
-        .collect()
+    section.palette().map(described).collect()
 }
 
 /// How many of the blocks in `held` are `block`.
@@ -97,7 +101,7 @@ fn a_reclaimed_entry_leaves_every_voxel_holding_the_block_it_already_held() -> T
 
     section.compact();
 
-    let held = blocks_at_every_position(&section)?;
+    let held = contents_at_every_position(&section)?;
     assert_eq!(
         (held.len(), count_of(&held, STONE)),
         (4096, 4096),
@@ -113,11 +117,11 @@ fn compacting_renumbers_the_entries_that_survive_and_every_voxel_with_them() -> 
 
     section.compact();
 
-    let held = blocks_at_every_position(&section)?;
+    let held = contents_at_every_position(&section)?;
     assert_eq!(
         (
             palette_names(&section),
-            section.block_at(at(0, 0, 0))?.as_str().to_owned(),
+            described(section.block_at(at(0, 0, 0))?),
             count_of(&held, GRASS),
             count_of(&held, STONE),
         ),
@@ -145,7 +149,7 @@ fn compacting_a_section_with_nothing_to_reclaim_changes_nothing() -> TestResult 
     }
     section.set_block(nth_position(REVISITED), &BlockName::parse(DIRT)?, &registry)?;
     let before = (
-        blocks_at_every_position(&section)?,
+        contents_at_every_position(&section)?,
         section.palette().len(),
         section.index_width_bits(),
     );
@@ -153,7 +157,7 @@ fn compacting_a_section_with_nothing_to_reclaim_changes_nothing() -> TestResult 
     section.compact();
 
     let after = (
-        blocks_at_every_position(&section)?,
+        contents_at_every_position(&section)?,
         section.palette().len(),
         section.index_width_bits(),
     );
@@ -167,6 +171,50 @@ fn compacting_a_section_with_nothing_to_reclaim_changes_nothing() -> TestResult 
         "stone, grass and dirt are each held by at least one voxel, so there is nothing \
          to give back: compaction never narrows away an entry something still refers to, \
          and never re-packs the indices it did not have to"
+    );
+    Ok(())
+}
+
+#[test]
+fn compacting_after_every_cell_holding_a_block_was_emptied_stops_offering_that_block() -> TestResult
+{
+    let registry = registry_of(&[STONE, GRASS, DIRT])?;
+    let mut section = Section::empty();
+    section.set_block(A_WRITTEN_CELL, &BlockName::parse(STONE)?, &registry)?;
+    section.empty_at(A_WRITTEN_CELL)?;
+
+    section.compact();
+
+    assert_eq!(
+        palette_names(&section),
+        vec![NOTHING.to_owned()],
+        "the one cell that held stone holds nothing again, so stone is referred to by nothing \
+         and compaction is what gives its entry back. The entry that survives is the one that \
+         names no block at all, which is an ordinary entry to compaction — it counts references \
+         and has no opinion about what sits at a position"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_section_whose_every_cell_was_emptied_still_holds_nothing_everywhere_after_compaction()
+-> TestResult {
+    let registry = registry_of(&[STONE, GRASS, DIRT])?;
+    let mut section = Section::filled(&BlockName::parse(STONE)?, &registry)?;
+    for position in all_positions() {
+        section.empty_at(position)?;
+    }
+
+    section.compact();
+
+    let held = contents_at_every_position(&section)?;
+    assert_eq!(
+        (held.len(), count_of(&held, NOTHING)),
+        (4096, 4096),
+        "the fill was the first palette entry and nothing refers to it now, so the entry that \
+         names no block moves down to position 0 and every voxel index has to be rewritten to \
+         follow it. Narrowing the palette without renumbering leaves 4096 voxels naming a \
+         position that is no longer there"
     );
     Ok(())
 }
@@ -192,7 +240,7 @@ fn a_section_whose_fill_was_wholly_replaced_still_reads_back_after_narrowing_to_
 
     section.compact();
 
-    let held = blocks_at_every_position(&section)?;
+    let held = contents_at_every_position(&section)?;
     assert_eq!(
         (
             palette_names(&section),

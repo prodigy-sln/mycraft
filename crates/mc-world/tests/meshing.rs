@@ -184,6 +184,42 @@ fn a_section_holding_no_solid_voxel_meshes_to_nothing_without_refusing() -> Test
 }
 
 #[test]
+fn a_section_holding_nothing_anywhere_meshes_into_a_mesh_carrying_no_quads() -> TestResult {
+    let registry = plain_registry()?;
+    let section = Section::empty();
+
+    let mesh = mesh_section(&section, &Neighbours::none(), &registry)?;
+
+    assert_eq!(
+        mesh.quads().len(),
+        0,
+        "nothing shows a face: there is no block here to be the near side of anything, and \
+         with no neighbour supplied there is nothing beyond the boundary either. The mesh has \
+         to come back empty rather than absent — a section a caller is handed no answer for is \
+         a section that cannot be spliced back where it came from when it is edited"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_section_holding_nothing_anywhere_meshes_with_no_block_registered_at_all() -> TestResult {
+    let registry = BlockRegistry::new();
+    let section = Section::empty();
+
+    let mesh = mesh_section(&section, &Neighbours::none(), &registry)?;
+
+    assert_eq!(
+        mesh.quads().len(),
+        0,
+        "this registry knows no block, and the section names none — so there is nothing here \
+         for the mesher to fail to resolve. Resolving the entry that names nothing through the \
+         registry anyway refuses this section as unresolved, which would make the commonest \
+         section in a world an error every caller has to handle"
+    );
+    Ok(())
+}
+
+#[test]
 fn a_voxel_whose_block_was_registered_non_solid_shows_no_face() -> TestResult {
     let registry = registry_declaring(&[(VOID, false), (WATER, false)])?;
     let section = section_holding(

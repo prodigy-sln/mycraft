@@ -43,7 +43,7 @@ use mc_sim::simulation::Simulation;
 use mc_world::world::WorldPos;
 
 use support::chamber::{BlockChamber, at, differences};
-use support::{AIR, DIRT, STONE, TestResult};
+use support::{DIRT, NOTHING, STONE, TestResult};
 
 /// How many chunk columns the fixture world spans on each axis.
 const COLUMNS: u32 = 1;
@@ -98,7 +98,7 @@ fn a_break_in_the_same_tick_as_a_pitch_delta_reads_the_view_the_limit_left() -> 
         vec![(
             REACHED_BY_THE_LIMITED_VIEW,
             STONE.to_owned(),
-            AIR.to_owned()
+            NOTHING.to_owned()
         )],
         "80° plus 20° is 100°, and the view is limited to 89° before the ray reads it. The two \
          views reach different declared blocks — the limited one stays in the column it started \
@@ -124,7 +124,7 @@ fn a_break_in_the_same_tick_as_a_yaw_delta_reaches_what_the_turn_brought_into_vi
 
     assert_eq!(
         differences(&chamber.build()?, simulation.world()),
-        vec![(AROUND_THE_CORNER, STONE.to_owned(), AIR.to_owned())],
+        vec![(AROUND_THE_CORNER, STONE.to_owned(), NOTHING.to_owned())],
         "the tick turns the view a quarter turn, from a direction the fixture declares nothing \
          along onto a block three blocks away, and breaks in the same tick — so the ray has to \
          be cast from the orientation the tick ends with. Cast from the one it started with it \
@@ -148,13 +148,9 @@ fn one_block_around_the_corner() -> BlockChamber {
     floored().cell(AROUND_THE_CORNER, STONE)
 }
 
-/// Air everywhere, with one layer of floor for the player to stand on.
+/// Nothing anywhere, with one layer of floor for the player to stand on.
 fn floored() -> BlockChamber {
-    BlockChamber::filled_with(COLUMNS, AIR).run(
-        at(0, FLOOR_LAYER, 0),
-        at(16, FLOOR_LAYER + 1, 16),
-        STONE,
-    )
+    BlockChamber::empty(COLUMNS).run(at(0, FLOOR_LAYER, 0), at(16, FLOOR_LAYER + 1, 16), STONE)
 }
 
 /// A player standing on the floor with its view already 80° above level.

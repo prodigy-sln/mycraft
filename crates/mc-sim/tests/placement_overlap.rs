@@ -49,7 +49,7 @@ use mc_sim::simulation::Simulation;
 use mc_world::world::WorldPos;
 
 use support::chamber::{BlockChamber, at, differences};
-use support::{AIR, DIRT, STONE, TestResult};
+use support::{DIRT, NOTHING, STONE, TestResult};
 
 /// Every cell at which a run differs from the fixture as declared.
 type Changes = Vec<(WorldPos, String, String)>;
@@ -101,7 +101,7 @@ fn a_place_that_would_land_in_the_cell_holding_the_players_feet_changes_nothing(
         (
             Some(EditReport::Refused(Refusal::InsidePlayer)),
             nothing(),
-            placed(AGAINST_THE_FEET, AIR, DIRT)
+            placed(AGAINST_THE_FEET, NOTHING, DIRT)
         ),
         "the block this ray meets stands directly beside the feet, so the cell against the face \
          it comes in through is the cell the feet are standing in and nothing may be built there. \
@@ -126,7 +126,7 @@ fn a_place_that_would_land_in_the_cell_holding_the_players_head_changes_nothing(
         (
             Some(EditReport::Refused(Refusal::InsidePlayer)),
             nothing(),
-            placed(AGAINST_THE_HEAD, AIR, DIRT)
+            placed(AGAINST_THE_HEAD, NOTHING, DIRT)
         ),
         "the player's box is 1.8 blocks tall, so it stands in two voxel rows and this ray's \
          placement lands in the upper one. An overlap test that asked only about the row the feet \
@@ -144,7 +144,7 @@ fn a_place_that_would_land_in_the_cell_holding_the_players_head_changes_nothing(
 /// column — and short enough that the descending ray leaves it behind rather
 /// than landing on it.
 fn a_floor_two_cells_wide() -> BlockChamber {
-    BlockChamber::filled_with(COLUMNS, AIR).run(
+    BlockChamber::empty(COLUMNS).run(
         at(0, FLOOR_LAYER, 0),
         at(THE_FLOORS_FAR_CELL.x + 1, FLOOR_LAYER + 1, 1),
         STONE,

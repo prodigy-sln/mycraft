@@ -148,4 +148,13 @@ pub enum MeshError {
     /// a storage bug.
     #[error("index {index} is not one of the {length} the mesher's own array holds")]
     CorruptMeshIndex { index: usize, length: usize },
+    /// A face was emitted for a voxel holding nothing.
+    ///
+    /// An internal invariant, not anything a caller did: emptiness resolves to
+    /// non-solid and a face is emitted only where the voxel is solid, so no quad
+    /// can name the empty entry. There is no honest quad for one — a quad names
+    /// a block and nothing is not a block — and dropping it silently would
+    /// remove geometry nobody asked to remove.
+    #[error("mesh key {key} names a cell holding nothing, which shows no face")]
+    EmptyBlockFace { key: usize },
 }

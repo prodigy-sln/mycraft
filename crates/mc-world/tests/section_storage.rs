@@ -10,6 +10,13 @@
 //! The refusals matter as much as the reads. A section that wrapped x = 16 to
 //! x = 0 would corrupt a neighbouring voxel silently, and a section that panicked
 //! would take a 32-player tick loop down with it.
+//!
+//! **A cell holds a block or it holds nothing, and those are two of the answers
+//! here; "there is no such cell" is a third and is never one of the first two.**
+//! An out-of-bounds coordinate is refused by the axis it was on, and a cell that
+//! holds nothing answers that it does — so a section that reported a coordinate
+//! past its own edge as ordinary empty space would be dressing a storage fault as
+//! a hole in the world.
 
 mod common;
 
@@ -18,8 +25,8 @@ use std::error::Error;
 use std::fmt::Debug;
 
 use common::{
-    TestResult, all_positions, at, blocks_at_every_position, generated_block, registry_of,
-    registry_of_size,
+    NOTHING, TestResult, all_positions, at, contents_at_every_position, described, generated_block,
+    registry_of, registry_of_size,
 };
 use mc_core::block::{BlockId, BlockRegistry, RegistryError};
 use mc_core::id::BlockName;
@@ -29,6 +36,26 @@ use proptest::prelude::*;
 const AIR: &str = "base:air";
 const STONE: &str = "base:stone";
 const GRASS: &str = "base:grass";
+
+/// The position a coordinate one past the x bound folds onto if the fold is not
+/// refused first: (16, 0, 0) and (0, 1, 0) share a linear index.
+const COLLIDES_WITH_PAST_X: LocalPos = at(0, 1, 0);
+
+/// The position a coordinate one past the y bound folds onto: (0, 16, 0) and
+/// (0, 0, 1) share a linear index.
+const COLLIDES_WITH_PAST_Y: LocalPos = at(0, 0, 1);
+
+/// The one cell the filling and emptying scenarios write to. Nothing about it is
+/// special beyond having all three coordinates different, so an accessor that
+/// transposed two of them lands somewhere else.
+const A_WRITTEN_CELL: LocalPos = at(3, 4, 5);
+
+/// How many of the entries in `held` are `expected`.
+fn count_of(held: &[String], expected: &str) -> usize {
+    held.iter()
+        .filter(|entry| entry.as_str() == expected)
+        .count()
+}
 
 /// A section filled with stone, and the registry its blocks come from.
 fn stone_filled_section() -> Result<(Section, BlockRegistry), Box<dyn Error>> {
@@ -64,9 +91,9 @@ fn out_of_bounds<T: Debug>(
 fn a_filled_section_holds_its_fill_block_at_every_position() -> TestResult {
     let (section, _registry) = stone_filled_section()?;
 
-    let held = blocks_at_every_position(&section)?;
+    let held = contents_at_every_position(&section)?;
 
-    let filled = held.iter().filter(|block| block.as_str() == STONE).count();
+    let filled = count_of(&held, STONE);
     assert_eq!(
         (held.len(), filled),
         (4096, 4096),
@@ -83,13 +110,13 @@ fn two_written_blocks_replace_exactly_their_own_positions() -> TestResult {
     section.set_block(at(0, 0, 0), &grass, &registry)?;
     section.set_block(at(15, 15, 15), &grass, &registry)?;
 
-    let held = blocks_at_every_position(&section)?;
+    let held = contents_at_every_position(&section)?;
     let written: Vec<LocalPos> = all_positions()
         .zip(&held)
         .filter(|(_, block)| block.as_str() == GRASS)
         .map(|(position, _)| position)
         .collect();
-    let untouched = held.iter().filter(|block| block.as_str() == STONE).count();
+    let untouched = count_of(&held, STONE);
     assert_eq!(
         (written, untouched),
         (vec![at(0, 0, 0), at(15, 15, 15)], 4094),
@@ -149,6 +176,130 @@ fn a_read_past_the_z_bound_is_refused_naming_that_axis() -> TestResult {
 }
 
 #[test]
+fn a_section_created_empty_holds_nothing_at_every_position() -> TestResult {
+    let section = Section::empty();
+
+    let held = contents_at_every_position(&section)?;
+
+    assert_eq!(
+        (held.len(), count_of(&held, NOTHING)),
+        (4096, 4096),
+        "a section that was never filled with anything holds nothing at all of its 4096 \
+         cells — nothing being an answer the section gives rather than a block somebody had \
+         to remember to put there"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_section_is_created_empty_against_a_registry_holding_no_block_while_a_filled_one_is_refused()
+-> TestResult {
+    let registry = BlockRegistry::new();
+    let section = Section::empty();
+
+    let held = contents_at_every_position(&section)?;
+    let refused = refusal(Section::filled(&BlockName::parse(STONE)?, &registry))?;
+
+    let SectionError::UnknownBlock { name } = &refused else {
+        return Err(format!("expected an unknown-block refusal, got {refused:?}").into());
+    };
+    assert_eq!(
+        (held.len(), count_of(&held, NOTHING), name.as_str()),
+        (4096, 4096, STONE),
+        "creating an empty section takes no registry and has no way to fail, because nothing \
+         is not a block and there is nothing for a registry to know about it. Filling one with \
+         a *name* still has to be checked, and this registry knows no name at all — so the two \
+         halves are the same registry answering the two questions differently"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_read_past_the_x_bound_of_an_empty_section_is_refused_naming_that_axis() -> TestResult {
+    let registry = registry_of(&[STONE, GRASS])?;
+    let mut section = Section::empty();
+    // The cell (16, 0, 0) folds onto holds a block, so neither "nothing is
+    // there" nor "a block is there" is the answer to the question asked.
+    section.set_block(COLLIDES_WITH_PAST_X, &BlockName::parse(STONE)?, &registry)?;
+
+    let refused = out_of_bounds(section.block_at(at(16, 0, 0)))?;
+
+    assert_eq!(
+        refused,
+        (Axis::X, 16, 16),
+        "x = 16 is not a position in a 16-wide section, and a section that answered `nothing \
+         is here` for it would be reporting a coordinate past its own edge as ordinary empty \
+         space — the one confusion this whole storage shape exists to make impossible. The \
+         voxel its index collides with holds stone, so neither honest-looking answer is \
+         available by coincidence"
+    );
+    Ok(())
+}
+
+#[test]
+fn emptying_a_cell_past_the_y_bound_is_refused_naming_that_axis_and_leaves_the_colliding_cell()
+-> TestResult {
+    let registry = registry_of(&[STONE, GRASS])?;
+    let mut section = Section::empty();
+    section.set_block(COLLIDES_WITH_PAST_Y, &BlockName::parse(GRASS)?, &registry)?;
+
+    let refused = out_of_bounds(section.empty_at(at(0, 16, 0)))?;
+
+    assert_eq!(
+        (refused, described(section.block_at(COLLIDES_WITH_PAST_Y)?)),
+        ((Axis::Y, 16, 16), GRASS.to_owned()),
+        "(0, 16, 0) and (0, 0, 1) fold to the same linear index, so emptying without checking \
+         every coordinate first empties the wrong cell instead of refusing. The second half is \
+         what says so: the cell the index collides with still holds the block it was written \
+         with, which a fold-then-empty leaves holding nothing"
+    );
+    Ok(())
+}
+
+#[test]
+fn writing_one_block_into_an_empty_section_leaves_its_other_4095_cells_holding_nothing()
+-> TestResult {
+    let registry = registry_of(&[STONE, GRASS])?;
+    let mut section = Section::empty();
+
+    section.set_block(A_WRITTEN_CELL, &BlockName::parse(STONE)?, &registry)?;
+
+    let held = contents_at_every_position(&section)?;
+    let written: Vec<LocalPos> = all_positions()
+        .zip(&held)
+        .filter(|(_, entry)| entry.as_str() == STONE)
+        .map(|(position, _)| position)
+        .collect();
+    assert_eq!(
+        (written, count_of(&held, NOTHING), held.len()),
+        (vec![A_WRITTEN_CELL], 4095, 4096),
+        "all 4096 cells are read back and not merely the written one: a fixture that looked \
+         only at the cell it wrote cannot tell a write that landed there from one that landed \
+         everywhere, and both answer correctly at that cell"
+    );
+    Ok(())
+}
+
+#[test]
+fn emptying_the_only_cell_of_a_section_holding_a_block_leaves_it_holding_nothing() -> TestResult {
+    let registry = registry_of(&[STONE, GRASS])?;
+    let mut section = Section::empty();
+    section.set_block(A_WRITTEN_CELL, &BlockName::parse(STONE)?, &registry)?;
+
+    section.empty_at(A_WRITTEN_CELL)?;
+
+    let held = contents_at_every_position(&section)?;
+    assert_eq!(
+        (held.len(), count_of(&held, NOTHING)),
+        (4096, 4096),
+        "the one cell that held a block holds none afterwards, which puts the section back \
+         where it started. An emptying that quietly did nothing leaves that cell holding stone \
+         and 4095 rather than 4096 cells empty"
+    );
+    Ok(())
+}
+
+#[test]
 fn a_write_carrying_a_runtime_id_the_registry_never_assigned_is_refused_naming_it() -> TestResult {
     const UNASSIGNED: u32 = 7;
     const REGISTERED: usize = 5;
@@ -193,6 +344,39 @@ fn a_write_naming_a_block_the_registry_does_not_hold_is_refused_naming_it() -> T
         UNREGISTERED,
         "a name no registry entry matches is refused naming it, rather than being \
          stored and becoming someone else's problem"
+    );
+    Ok(())
+}
+
+/// Guard, and it is not one of the specification's scenarios. The claim that a
+/// section holding nothing and a section holding one block are the *same bytes*
+/// of storage is what the argument that no rendered frame moves ultimately rests
+/// on, and every scenario that reaches it does so three layers downstream —
+/// through a mesher, a scene and a captured image — which is far too far away to
+/// attribute a failure to. This asks it directly, of public API that already
+/// exists.
+///
+/// Nothing here is a snapshot: a palette holding one entry needs no bits at all
+/// to tell its voxels apart, zero bits over 4096 voxels is zero bytes, and the
+/// only palette position either section can name is 0. Each figure is arithmetic
+/// over the construction rather than a number read off a run.
+#[test]
+fn a_section_holding_nothing_and_one_holding_a_block_are_stored_the_same_way() -> TestResult {
+    let (filled, _registry) = stone_filled_section()?;
+    let empty = Section::empty();
+
+    let widths = (empty.index_width_bits(), filled.index_width_bits());
+    let bytes = (empty.index_storage_bytes(), filled.index_storage_bytes());
+    let indices = empty.export()?.indices == filled.export()?.indices;
+
+    assert_eq!(
+        (widths, bytes, indices),
+        ((0, 0), (0, 0), true),
+        "one palette entry needs no index bits, no index bits need no bytes, and every voxel \
+         of both sections names palette position 0 — so the two differ in what sits at that \
+         position and in nothing else that is stored. If this ever parts, a moved golden frame \
+         is the world's storage rather than the mesher's reading of it, and that attribution is \
+         the whole reason this guard is here rather than left to the frame comparison"
     );
     Ok(())
 }
@@ -245,7 +429,7 @@ fn first_disagreement(writes: &[(LocalPos, u32)]) -> Result<Option<String>, Box<
         );
     }
     for position in all_positions() {
-        let held = section.block_at(position)?.as_str();
+        let held = described(section.block_at(position)?);
         let expected = last_written
             .get(&(position.x, position.y, position.z))
             .map_or(fill.as_str(), String::as_str);

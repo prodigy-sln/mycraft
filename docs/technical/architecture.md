@@ -269,6 +269,16 @@ implements it, and a test fixture can too. This keeps solidity a bounds test and
 failure mode to swallow, and keeps the physics untied to the replay fixture a real chunk store
 replaces.
 
+`BlockVolume::block_at` returns `Option<Contents<&BlockName>>`, and the two negative answers stay
+separate all the way down: the `Option` says the volume reaches this position, and the `Contents`
+says whether anything is in it (`technical/world-format.md`). `SolidVoxels::resolve` then answers
+`false` for both — a position the volume does not reach and a cell holding nothing are both
+not-solid — and this is the one place in the codebase where the two readings genuinely **coincide in
+outcome**. That is worth naming rather than leaving implicit: no assertion on the resolved bitset,
+and no independent overlap oracle, can tell a defect that confuses them apart from correct code
+here. Everywhere else the split is observable; on this path it is held by the arms being written
+separately and by review.
+
 **The simulation cannot exist before the world does.**
 `mc_sim::replay::simulation_for(world: &ReplayWorld, registry: &BlockRegistry) ->
 Result<Simulation, SpawnError>` resolves `SolidVoxels`, derives the spawn and constructs the
@@ -416,7 +426,9 @@ world's fixtures used it — moved to `mc_world::world` for the same reason `Wor
 
 **`Simulation` holds a concrete `mc_sim::world::World`, not a trait object.** `World` wraps a
 `VoxelWorld`, a `SolidVoxels` bitset, a dirty-section set and an `Arc<BlockRegistry>` — and keeps all
-four private. Physics is unaffected: `advance_player` and the `collide` module still take `&dyn
+four private. It carries **no** name for empty space: `World::new(VoxelWorld, Arc<BlockRegistry>)`
+takes two parameters and there is no accessor handing one out, because a cell holds a block or
+nothing and nothing has no name to hand out (`technical/world-format.md`). Physics is unaffected: `advance_player` and the `collide` module still take `&dyn
 Solidity`, so the cheap `Chamber`/`Ground` collision fixtures are untouched and none of the exact-
 position collision scenarios changed. What changed is only what *feeds* solidity — a `World` now,
 where a bespoke test double used to stand in.
@@ -491,14 +503,21 @@ click is spent by the tick it lands in — one press is one action, never a latc
 
 **The refusal vocabulary, and where each is decided.** A resolved action returns `EditReport`, a value
 rather than an error — most call sites never inspect it, and it is deliberately not `#[must_use]`, but
-a scripted test rig can assert *why* a request was refused, not only *that* it was:
+a scripted test rig can assert *why* a request was refused, not only *that* it was.
+
+`EditReport::Changed { cell, from: Contents, to: Contents }` — both ends carry `Contents`, because
+both ends can be nothing: a break declaring no `breaks_into` leaves the cell empty, and a placement
+into an empty cell replaces nothing. Neither is reported as a named block, so a report cannot claim a
+block was removed where none was, or that one was left behind where the cell was emptied. The
+residue is `named.map_or(Contents::Empty, Contents::Holds)` with **no fallback** — there is no name
+for the engine to fall back to, and picking one would be a game rule content could not override.
 
 | Refusal | Decided by |
 |---|---|
 | `NoTarget` | the raycast finds no solid voxel within reach — this also covers "something is there but too far away": the reach bound is one site, so a target beyond it and no target at all are indistinguishable without an unbounded search, and none is done |
 | `NoFace` | the eye is inside the targeted block, so there is no entry face to place against |
 | `Indestructible` | the targeted block's definition declares `breakable = false` |
-| `Occupied` | a placement's target cell holds a block content does not declare `replaceable` — read from content, never derived from solidity |
+| `Occupied` | a placement's target cell holds a block content does not declare `replaceable` — read from content, never derived from solidity. An **empty** cell is never occupied: it permits the placement because it is empty, not because content said so, and `replaceable` cannot speak for it |
 | `InsidePlayer` | a placement's target cell overlaps the requesting player's own collision box |
 | `UnknownBlock { name }` | a placement names a block the registry does not hold |
 | `OutsideWorld { at }` | the target cell falls outside the world's storable range, in any direction — a negative coordinate and a past-the-edge one both collapse into this one variant rather than reporting separately, which keeps a fixture built for one edge from silently validating against the other |
@@ -507,9 +526,20 @@ Two refusal variants were designed and then struck before shipping. `OutOfReach`
 `NoTarget`, would have needed the unbounded traversal the reach-bound design above rules out — so
 "nothing is there" and "something is there but out of reach" are deliberately the same answer.
 `NotSolid`, refusing a placement whose *named* block was not itself solid, was struck because
-`replaceable` already forbids overwriting anything content has not opened — a client naming air still
-cannot delete stone, so the extra check bought no additional safety while costing `base:water` its own
-placeability.
+`replaceable` already forbids overwriting anything content has not opened — a client naming a
+non-solid block still cannot delete stone, so the extra check bought no additional safety while
+costing `base:water` its own placeability.
+
+**Three arms and never two, wherever both wrappers survive.** `broken`, `placed` and `overwritable`
+each read the world through `Option<Contents<&BlockName>>`, and each writes `None`,
+`Some(Contents::Empty)` and `Some(Contents::Holds(..))` as separate arms — a `let
+Some(Contents::Holds(..)) = .. else` would answer "there is no such cell" and "this cell holds
+nothing" with one refusal. Both readings reach the same permitting or refusing outcome at every one
+of those sites today, which is precisely what would make the collapse invisible: the arms are
+separate because the facts are separate, not because the outcomes differ. `broken`'s empty arm is
+unreachable in practice — the raycast stops only at a solid cell — and it is written out anyway, so
+that a break which ever did reach an empty cell refuses rather than being read as a cell the world
+does not have.
 
 One collapse is worth flagging as a known, accepted gap rather than a silent one: the world's own
 bounds check discards *which* internal bound was crossed before it reaches `EditReport` — a target
@@ -613,18 +643,40 @@ structure, not by convention:
   directly — exactly the regression this structure exists to prevent.
 - **No Rust source outside test code contains a `base:`-namespaced block
   name literal.** A source scan reads every `crates/*/src/**/*.rs` file
-  except the sibling `*_test.rs` unit files, and fails if any of the five
+  except the sibling `*_test.rs` unit files, and fails if any of the four
   shipped block names appears in a file's *production text* — the file
   minus its doc comments, since a doc example is a doc test that does
   live in a production file (`technical/testing.md`). This scan also
   carries a positive control: pointed at a fixture directory containing
-  one of the five names, it must report a hit, or a broken path glob or
+  one of the four names, it must report a hit, or a broken path glob or
   matcher could pass by never actually looking at anything. It carries
   two further controls for the filters themselves — a name in a sibling
   `*_test.rs` is skipped while one in the module beside it is still
   found, and a name in a doc example is not reported — because a filter
   that skipped too much would leave the first control green while
   scanning nothing.
+- **The same scan carries a second list, of names the base game has
+  *retired*.** A name that leaves the shipped list stops being watched,
+  which is the one way the invariant above quietly loosens: the base
+  game's former empty block was removed the day a cell could hold nothing
+  (`modding/blocks-items.md`), and after that removal nothing mechanical
+  stood between the engine and writing the name again. An entry on the
+  retired list never leaves it. It is one walk answering both lists, so
+  the exemption and the test-file skip mean the same thing for both, and
+  the two results are kept in separate collections so the absence check
+  and its control each assert on the retired result alone — a single list
+  would let a control naming a retired block pass on a shipped-name match,
+  which is the reading the control exists to rule out.
+
+  **It buys less than "the name cannot come back", and the difference is
+  worth knowing.** The scan's one exemption applies to retired names too,
+  so the name may still reappear in that single exempt file; doc comments
+  are stripped before matching, so it may reappear in any doc comment
+  anywhere; and test sources are not scanned at all, which is what lets a
+  test declare a *solid* block under that very name to prove the engine
+  recognises no name at all. What it does buy is the rest of the
+  production tree, where the name has no business being and where nothing
+  else would notice its return.
 - **`mc-render` and `mc-sim` do not resolve each other, in any dependency
   kind.** The walk follows dev-dependency edges too, because those are
   edges in the resolved graph like any other. This is why `mc-render`'s

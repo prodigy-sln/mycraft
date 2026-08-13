@@ -110,7 +110,13 @@ const UNFAMILIAR_BLOCK: &str = "mod:cloud";
 
 /// What fills the space above either slab: the same in both, so the only
 /// difference between the two scenarios is the definition under test.
-const EMPTY_BLOCK: &str = "base:air";
+///
+/// A block this test's own registry declares and nothing else knows.
+/// [`NamedSlab`] says what is *there* at every cell it reaches, so the space
+/// over the slab holds a declared non-solid block rather than nothing at all —
+/// and the name is the fixture's own, because the base game ships no block whose
+/// job is to mean empty space.
+const OPEN_BLOCK: &str = "fixture:open";
 
 /// The column a walk out of the world starts in, and the row it walks along.
 ///
@@ -253,8 +259,8 @@ fn declared_world() -> Result<(ReplayWorld, SolidVoxels), Box<dyn Error>> {
 /// A slab of `filling` under open space, resolved through a registry declaring
 /// that block's solidity and nothing else about it.
 fn slab_of(filling: &str, is_solid: bool) -> Result<SolidVoxels, Box<dyn Error>> {
-    let slab = NamedSlab::new(SLAB_EXTENT, SLAB_TOP, filling, EMPTY_BLOCK)?;
-    let registry = registry_declaring(&[(filling, is_solid), (EMPTY_BLOCK, false)])?;
+    let slab = NamedSlab::new(SLAB_EXTENT, SLAB_TOP, filling, OPEN_BLOCK)?;
+    let registry = registry_declaring(&[(filling, is_solid), (OPEN_BLOCK, false)])?;
     Ok(SolidVoxels::resolve(&slab, &registry)?)
 }
 
@@ -286,7 +292,7 @@ fn a_submerged_column(world: &ReplayWorld) -> Result<Option<Submerged>, Box<dyn 
         if x == z || surface >= SEA_LEVEL || surface_height(world, z, x)? == surface {
             continue;
         }
-        if block_at(world, x, surface + 1, z)?.as_str() == WATER {
+        if block_at(world, x, surface + 1, z)? == WATER {
             return Ok(Some(Submerged { x, z, surface }));
         }
     }

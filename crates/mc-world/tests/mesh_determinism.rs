@@ -26,7 +26,9 @@ use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 use mc_world::mesh::{Neighbours, mesh_section};
 use mc_world::section::Section;
-use mesh_common::{ALPHA, BETA, SOLID, TestResult, VOID, at, registry_declaring, some_quads};
+use mesh_common::{
+    ALPHA, BETA, SOLID, TestResult, VOID, at, named, registry_declaring, some_quads,
+};
 
 /// Three further blocks, written into one voxel in turn and each displaced by the
 /// next, so that the palette of the section that took the long way round is
@@ -80,8 +82,9 @@ fn written_over_once(registry: &BlockRegistry) -> Result<Section, Box<dyn Error>
 fn first_solid_entry(section: &Section) -> Option<String> {
     section
         .palette()
-        .find(|name| name.as_str() != VOID)
-        .map(|name| name.as_str().to_owned())
+        .map(named)
+        .find(|entry| *entry != VOID)
+        .map(str::to_owned)
 }
 
 /// Refuses a pair of sections whose storage a mesher could read without the

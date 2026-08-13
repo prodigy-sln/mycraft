@@ -31,7 +31,7 @@
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 
-use crate::section::{Section, SectionError, VOXELS_PER_SECTION};
+use crate::section::{Contents, Section, SectionError, VOXELS_PER_SECTION};
 
 use super::plane;
 use super::{Facing, MeshError, Neighbours};
@@ -46,11 +46,12 @@ const BOUNDARIES: usize = Facing::ALL.len();
 /// key of this width can always name one.
 pub(super) type Key = u16;
 
-/// Every voxel's block and solidity, keyed by contents rather than by storage.
+/// Every voxel's contents and solidity, keyed by those contents rather than by
+/// storage.
 #[derive(Debug)]
 pub(super) struct Resolved {
     keys: [Key; VOXELS_PER_SECTION],
-    blocks: Vec<(BlockName, bool)>,
+    blocks: Vec<(Contents, bool)>,
 }
 
 impl Resolved {
@@ -59,17 +60,22 @@ impl Resolved {
         self.keys.get(index).copied()
     }
 
-    /// Whether the block `key` names was registered solid.
+    /// Whether what `key` names was registered solid.
     pub(super) fn is_solid(&self, key: Key) -> Option<bool> {
         self.blocks.get(key as usize).map(|(_, solid)| *solid)
     }
 
-    /// What the block `key` names is called.
-    pub(super) fn name(&self, key: Key) -> Option<&BlockName> {
-        self.blocks.get(key as usize).map(|(name, _)| name)
+    /// What `key` names — a block, or nothing.
+    ///
+    /// The `Option` says this section holds such a key and nothing else;
+    /// whether that key is a block is the [`Contents`] inside it.
+    pub(super) fn contents(&self, key: Key) -> Option<Contents<&BlockName>> {
+        self.blocks
+            .get(key as usize)
+            .map(|(contents, _)| contents.as_ref())
     }
 
-    /// How many distinct blocks the section holds.
+    /// How many distinct things the section holds.
     pub(super) fn distinct_blocks(&self) -> usize {
         self.blocks.len()
     }
@@ -213,12 +219,12 @@ impl Refusal {
 struct Resolver<'a> {
     /// Every palette entry, including the ones nothing holds, so that a position
     /// here is the position a packed index names.
-    entries: Vec<&'a BlockName>,
+    entries: Vec<Contents<&'a BlockName>>,
     registry: &'a BlockRegistry,
     /// The key each palette position has been mapped to, once a voxel reached
     /// it.
     mapped: Vec<Option<Key>>,
-    blocks: Vec<(BlockName, bool)>,
+    blocks: Vec<(Contents, bool)>,
     /// Whose section this is, which is all that separates the two refusals a
     /// block nothing registers can earn.
     refusal: Refusal,
@@ -227,7 +233,7 @@ struct Resolver<'a> {
 impl<'a> Resolver<'a> {
     /// A resolver that has looked at nothing yet.
     fn of(section: &'a Section, registry: &'a BlockRegistry, refusal: Refusal) -> Self {
-        let entries: Vec<&BlockName> = section.palette().collect();
+        let entries: Vec<Contents<&BlockName>> = section.palette().collect();
         let mapped = vec![None; entries.len()];
         Self {
             entries,
@@ -270,43 +276,54 @@ impl<'a> Resolver<'a> {
 
     /// The key for a palette entry no voxel had reached until now.
     ///
-    /// A block already in the list keeps the key it has, whichever entry named
-    /// it first — that is what makes the key mean the block and not the slot.
+    /// Contents already in the list keep the key they have, whichever entry held
+    /// them first — that is what makes the key mean the contents and not the
+    /// slot.
     fn first_encounter(&mut self, position: usize, index: usize) -> Result<Key, MeshError> {
-        let Some(name) = self.entries.get(position).copied() else {
+        let Some(contents) = self.entries.get(position).copied() else {
             return Err(no_such_entry(position, self.entries.len()));
         };
-        if let Some(already) = self.key_of(name) {
+        if let Some(already) = self.key_of(contents) {
             return Ok(already);
         }
-        let solid = self.solidity_of(name, index)?;
-        // One key per distinct block a section holds, and a section holds 4096
+        let solid = self.solidity_of(contents, index)?;
+        // One key per distinct thing a section holds, and a section holds 4096
         // voxels, so this counts no further than 4096.
         let key = self.blocks.len() as Key;
-        self.blocks.push((name.clone(), solid));
+        self.blocks.push((contents.cloned(), solid));
         Ok(key)
     }
 
-    /// The key `name` already has, if some earlier voxel reached it.
+    /// The key `contents` already has, if some earlier voxel reached it.
     ///
-    /// A linear scan over the distinct blocks one section holds, which is a
+    /// A linear scan over the distinct things one section holds, which is a
     /// handful in any world this produces — and bounded by that handful rather
     /// than by the voxel count, whatever a section turns out to contain.
-    fn key_of(&self, name: &BlockName) -> Option<Key> {
-        let found = self.blocks.iter().position(|(held, _)| held == name)?;
+    fn key_of(&self, contents: Contents<&BlockName>) -> Option<Key> {
+        let found = self
+            .blocks
+            .iter()
+            .position(|(held, _)| held.as_ref() == contents)?;
         Key::try_from(found).ok()
     }
 
-    /// Whether `name` was registered solid, refusing the whole mesh if the
-    /// registry does not register it at all.
+    /// Whether `contents` was registered solid, refusing the whole mesh if the
+    /// registry does not register the block at all.
     ///
     /// The registry's own refusal is not carried through: it names the block and
     /// nothing else, while a caller looking for the problem needs the voxel, and
     /// this is the only place that still knows which voxel asked.
-    fn solidity_of(&self, name: &BlockName, index: usize) -> Result<bool, MeshError> {
-        match self.registry.resolve(name) {
-            Ok(definition) => Ok(definition.is_solid),
-            Err(_) => Err(self.refusal.about(name, index)),
+    fn solidity_of(&self, contents: Contents<&BlockName>, index: usize) -> Result<bool, MeshError> {
+        match contents {
+            // Answered before the registry is reached, and this one arm covers
+            // both the meshed section and every supplied neighbour — which is
+            // what keeps "an empty cell shows no face" one rule rather than two
+            // that could drift apart at a chunk boundary.
+            Contents::Empty => Ok(false),
+            Contents::Holds(name) => match self.registry.resolve(name) {
+                Ok(definition) => Ok(definition.is_solid),
+                Err(_) => Err(self.refusal.about(name, index)),
+            },
         }
     }
 }

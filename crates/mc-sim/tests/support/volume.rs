@@ -32,6 +32,7 @@ use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::replay::{BlockVolume, Extent};
+use mc_world::section::Contents;
 
 /// What every registry declared here is attributed to. Nothing asserts it; a
 /// definition has to say where it came from.
@@ -78,14 +79,21 @@ impl BlockVolume for NamedSlab {
         self.extent
     }
 
-    fn block_at(&self, x: u32, y: u32, z: u32) -> Option<&BlockName> {
+    /// **A declared volume says what is there, so its answer comes from the
+    /// declaration and from nowhere else.** Every cell inside this volume holds
+    /// one of the two blocks it was declared with — that is what makes it a
+    /// *slab* — so `Contents::Empty` is not an answer it can give, and the
+    /// outer `None` keeps the one meaning it has always had: this position is
+    /// outside the volume. Deriving either answer from anything the simulation
+    /// resolved would make this fixture agree with whatever it was handed.
+    fn block_at(&self, x: u32, y: u32, z: u32) -> Option<Contents<&BlockName>> {
         let inside = x < self.extent.x && y < self.extent.y && z < self.extent.z;
         let held = if y <= self.top {
             &self.filling
         } else {
             &self.above
         };
-        inside.then_some(held)
+        inside.then_some(Contents::Holds(held))
     }
 }
 

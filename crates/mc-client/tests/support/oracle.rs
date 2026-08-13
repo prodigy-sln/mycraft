@@ -56,6 +56,7 @@ use mc_render::surface::SurfaceSize;
 use mc_sim::camera::CameraPose;
 use mc_sim::replay::ReplayWorld;
 use mc_testkit::frame::Rgba8Image;
+use mc_world::section::Contents;
 
 use super::probe::{DIFFERENT_COLOR, distance, pixel_color};
 
@@ -117,9 +118,17 @@ impl Voxels<'_> {
         ) else {
             return Ok(false);
         };
+        // Three answers, three arms, and never two of them folded together. A
+        // position the world does not reach and a cell holding nothing both mean
+        // nothing to stop a ray — which is what would make writing them as one
+        // arm invisible in the output. This judge re-reads the world and the
+        // registry and consults nothing the simulation resolved, so an empty
+        // answer reached here is reached independently of the one the subject
+        // reached.
         match self.world.block_at(x, y, z) {
             None => Ok(false),
-            Some(name) => Ok(self.registry.resolve(name)?.is_solid),
+            Some(Contents::Empty) => Ok(false),
+            Some(Contents::Holds(name)) => Ok(self.registry.resolve(name)?.is_solid),
         }
     }
 }

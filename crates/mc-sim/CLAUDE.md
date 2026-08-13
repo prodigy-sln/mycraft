@@ -25,8 +25,9 @@ everything authoritative. `mc-render` reads what it publishes and never the othe
 
 ## The scripted scene names blocks in Rust
 
-`src/replay/world.rs` names `base:grass`, `base:dirt`, `base:stone`, `base:water` and `base:air`. It
-is the **only** file listed in `EXEMPT_FILES` in `crates/mc-world/tests/no_hardcoded_block_names.rs`.
+`src/replay/world.rs` names `base:grass`, `base:dirt`, `base:stone` and `base:water` — every block
+the scene places, and no fifth one for the space above them, because it places nothing there. It is
+the **only** file listed in `EXEMPT_FILES` in `crates/mc-world/tests/no_hardcoded_block_names.rs`.
 
 **This does not weaken invariant 1**, which forbids hardcoded block *definitions*. `world.rs` names
 blocks to *place* them; texture and solidity still come only from `content/base/blocks/*.toml` via

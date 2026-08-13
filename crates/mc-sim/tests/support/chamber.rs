@@ -43,7 +43,10 @@ use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::player::{BlockPos, Solidity};
 use mc_sim::world::World;
+use mc_world::section::Contents;
 use mc_world::world::{VoxelWorld, WorldPos};
+
+use super::described;
 
 /// How far a floor, a wall or a ceiling runs on the axes it is not about.
 ///
@@ -219,15 +222,20 @@ const fn open(name: &'static str) -> Declared {
     }
 }
 
-/// The five blocks content ships, spelled and declared as content declares them.
+/// The four blocks content ships, spelled and declared as content declares them.
 ///
 /// **The order is the file-name order `TomlFileDefinitionSource` reads them in,
 /// and that is load-bearing** — base content applies before the `fixture:`
-/// overlay, so ids are assigned in this order and the first solid block in it is
-/// the one a client would hold. The assertion that pins it lives in the test file
-/// that depends on it, because this list alone cannot say why the order matters.
-const BASE_CONTENT: [Declared; 5] = [
-    open("base:air"),
+/// overlay, so ids are assigned in this order. The assertion that pins it lives
+/// in the test file that depends on it, because this list alone cannot say why
+/// the order matters.
+///
+/// **Every block here stops a player except water.** Content declares no block
+/// meaning empty space, so the first name in this list is also the first solid
+/// one — which is why a scenario about a rule that reads *solidity* out of a
+/// registration order has to declare a registry whose first block is not solid
+/// rather than reach for this one.
+const BASE_CONTENT: [Declared; 4] = [
     solid("base:dirt"),
     solid("base:grass"),
     solid("base:stone"),
@@ -326,7 +334,15 @@ pub const fn at(x: u32, y: u32, z: u32) -> WorldPos {
 #[derive(Debug, Clone)]
 pub struct BlockChamber {
     columns: u32,
-    fill: &'static str,
+    /// What every cell holds before any run is written over it: a named block,
+    /// or nothing at all.
+    ///
+    /// **Both are real declarations and neither is the other's default.** A
+    /// chamber whose background is *nothing* is the ordinary case, and one whose
+    /// background is a named non-solid block is what a scenario reaches for when
+    /// it needs to tell "this cell was emptied" apart from "this cell was filled
+    /// with whatever the world calls its background".
+    fill: Contents<&'static str>,
     runs: Vec<Run>,
 }
 
@@ -334,12 +350,26 @@ pub struct BlockChamber {
 type Run = (WorldPos, WorldPos, &'static str);
 
 impl BlockChamber {
+    /// A world of `columns` squared chunk columns, every cell of which holds
+    /// nothing.
+    ///
+    /// Takes no registry and cannot fail: nothing is not a block, so there is
+    /// nothing here for a registry to know about.
+    #[must_use]
+    pub fn empty(columns: u32) -> Self {
+        Self {
+            columns,
+            fill: Contents::Empty,
+            runs: Vec::new(),
+        }
+    }
+
     /// A world of `columns` squared chunk columns, every voxel holding `fill`.
     #[must_use]
     pub fn filled_with(columns: u32, fill: &'static str) -> Self {
         Self {
             columns,
-            fill,
+            fill: Contents::Holds(fill),
             runs: Vec::new(),
         }
     }
@@ -365,10 +395,13 @@ impl BlockChamber {
 
     /// The world this declaration describes, over the fixture registry.
     ///
-    /// **The fill is also what this world means by a cell holding nothing**, and
-    /// the two are the same declaration on purpose: a chamber is stated as what
-    /// is there over a background of what is not, so emptying a cell has to
-    /// return it to that background.
+    /// **A chamber declared empty is built empty rather than built out of some
+    /// block that stands in for emptiness.** Breaking a block in it leaves the
+    /// cell holding nothing, which is what the world itself now says rather than
+    /// a name the fixture had to choose; a chamber declared with a named
+    /// background still gets that block everywhere, and a break in *it* still
+    /// leaves nothing — which is the difference that makes a named background
+    /// worth declaring.
     ///
     /// # Errors
     ///
@@ -376,12 +409,16 @@ impl BlockChamber {
     /// not registered, or a run reaches outside the world.
     pub fn build(&self) -> Result<World, Box<dyn Error>> {
         let registry = fixture_registry()?;
-        let empty = BlockName::parse(self.fill)?;
-        let mut blocks = VoxelWorld::filled(self.columns, &empty, &registry)?;
+        let mut blocks = match self.fill {
+            Contents::Empty => VoxelWorld::empty(self.columns),
+            Contents::Holds(name) => {
+                VoxelWorld::filled(self.columns, &BlockName::parse(name)?, &registry)?
+            }
+        };
         for &run in &self.runs {
             written(&mut blocks, run, &registry)?;
         }
-        Ok(World::new(blocks, registry, empty)?)
+        Ok(World::new(blocks, registry)?)
     }
 }
 
@@ -406,8 +443,9 @@ fn every_cell(low: WorldPos, high: WorldPos) -> impl Iterator<Item = WorldPos> {
     })
 }
 
-/// Every cell at which two worlds hold different blocks: where, what the first
-/// holds, and what the second holds instead.
+/// Every cell at which two worlds hold different contents: where, what the first
+/// holds, and what the second holds instead — a block by name, or
+/// [`super::NOTHING`] where the cell holds none.
 ///
 /// Both worlds are walked whole rather than at cells a caller nominates, so a
 /// scenario expecting one change fails on a second one it did not ask about —
@@ -433,5 +471,5 @@ fn difference_at(
         z: at.z as i32,
     };
     let (was, now) = (declared.block_at(signed)?, after.block_at(signed)?);
-    (was != now).then(|| (at, was.as_str().to_owned(), now.as_str().to_owned()))
+    (was != now).then(|| (at, described(was), described(now)))
 }
