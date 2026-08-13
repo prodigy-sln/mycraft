@@ -47,11 +47,13 @@ forward; none is a pure layer.
 | P0 | Binary greedy mesher | PRO-851 | **Done** |
 | P0 | wgpu terrain pipeline and windowed client — *you can see terrain* | PRO-852 | **Done** |
 | P0 | Camera, player physics and collision — *you can walk around* | PRO-853 | **Done** |
-| P0 | Headless client-input harness — *prerequisite of PRO-854* | PRO-873 | Todo |
-| P0 | Raycast targeting, block break and place — *you can build* | PRO-854 | Todo |
-| P1 | World persistence — *quit and resume* | PRO-855 | Todo |
-| P1 | Minimal HUD: crosshair, held block, debug overlay | PRO-856 | Todo |
+| P0 | Headless client-input harness — *prerequisite of PRO-854* | PRO-873 | **Done** |
+| P0 | Raycast targeting, block break and place — *you can build* | PRO-854 | **Done** |
+| P0 | A cell holds a block or nothing — *air is not a block* | PRO-876 | **Done** |
+| P1 | World persistence — *quit and resume* | PRO-855 | In Progress |
+| P1 | Minimal HUD: crosshair, held block, debug overlay — *the HUD is content* | PRO-856 | Todo |
 | P2 | Ship the LICENSE texts the workspace declares | PRO-874 | Todo |
+| P2 | Terrain texture sampling and palette separation | PRO-869 | Todo |
 
 **PRO-873 goes before PRO-854, and the ordering is the point.** Every FR-5 scenario of
 PRO-853 is verified as policy and none as product behaviour: the winit `ApplicationHandler`
@@ -72,7 +74,12 @@ Two invariants that MVP 1 could plausibly breach, resolved up front:
 
 - **No Luau host until MVP 2, yet invariant 1 still binds.** Blocks are registered
   at runtime from a data file under `content/base/` — never `enum Block` in Rust.
-  MVP 2 swaps the loader, not the registry.
+  MVP 2 swaps the loader, not the registry. **The HUD is content on the same
+  terms**: the crosshair and held-block indicator are declared under
+  `content/base/`, so a mod owns them and there are no HUD definitions in Rust.
+  The debug overlay is the deliberate exception and stays engine-owned — it
+  inspects the engine, including when content is broken, so a mod must not be
+  able to disable the instrument used to diagnose that mod.
 - **Singleplayer, yet invariant 4 still binds.** `mc-sim` is authoritative in-process;
   the client submits intents. Otherwise MVP 3 is a rewrite, not a transport swap.
 
