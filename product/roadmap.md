@@ -51,7 +51,7 @@ forward; none is a pure layer.
 | P0 | Raycast targeting, block break and place — *you can build* | PRO-854 | **Done** |
 | P0 | A cell holds a block or nothing — *air is not a block* | PRO-876 | **Done** |
 | P1 | World persistence — *quit and resume* | PRO-855 | **Done** |
-| P1 | Minimal HUD: crosshair, held block, debug overlay — *the HUD is content* | PRO-856 | In Progress |
+| P1 | Minimal HUD: crosshair, held block, debug overlay — *the HUD is content* | PRO-856 | **Done** |
 | P2 | Ship the LICENSE texts the workspace declares | PRO-874 | Todo |
 | P2 | Terrain texture sampling and palette separation | PRO-869 | Todo |
 
@@ -216,6 +216,11 @@ Unresolved.
 | Binary greedy mesher (PRO-851) | 2026-08-12 | `2026-08-12-greedy-mesher` |
 | wgpu terrain pipeline and windowed client (PRO-852) | 2026-08-12 | `2026-08-12-terrain-render` |
 | Camera, player physics and collision (PRO-853) | 2026-08-13 | `2026-08-12-player-movement` |
+| Headless client-input harness (PRO-873) | 2026-08-13 | `2026-08-13-client-input-harness` |
+| Raycast targeting, block break and place (PRO-854) | 2026-08-13 | `2026-08-13-break-place` |
+| A cell holds a block or nothing (PRO-876) | 2026-08-13 | `2026-08-13-empty-cells` |
+| World persistence (PRO-855) | 2026-08-14 | `2026-08-13-world-persistence` |
+| Minimal HUD — crosshair, held block, debug overlay (PRO-856) | 2026-08-14 | `2026-08-14-minimal-hud` |
 
 ---
 
