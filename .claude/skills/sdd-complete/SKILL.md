@@ -40,6 +40,7 @@ The disposal mode comes from CLAUDE.md Prospect settings:
    lists only files that exist.
 4. Append one line to `specs/REGISTRY.md`:
    `[folder] · [date] · [rigor] · [topic tags] · [one-line summary] · [branch]`
+   Keep the one-line summary short and concise.
 5. Commit: `docs: consolidate [feature] into living docs`.
 6. Dispose of the spec folder **on the feature branch, before merging**:
    - **delete mode**: `git rm -r specs/active/[folder]`, commit
