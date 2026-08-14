@@ -1,0 +1,10 @@
+# The upright of the crosshair the base game ships.
+#
+# Its horizontal half, and the reason there are two files, is
+# `crosshair-horizontal.toml` beside this one.
+name = "base:crosshair-vertical"
+anchor = "center"
+size = [1, 9]
+draw = "fill"
+color = "#FFFFFFFF"
+outline = "#000000FF"

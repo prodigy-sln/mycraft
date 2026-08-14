@@ -11,6 +11,8 @@ pub mod camera;
 pub mod capture;
 pub mod color;
 pub mod geometry;
+pub mod hud;
+pub mod overlay;
 pub mod pass;
 pub mod snapshot;
 pub mod surface;

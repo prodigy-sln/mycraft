@@ -26,6 +26,9 @@
 
 /// The frame path: acquire, record, present, advance one tick.
 pub mod app;
+/// Which key asks for what. Private, and re-exported through [`session`]:
+/// nothing outside this crate may ask the table what a key means.
+mod bindings;
 /// The window and the event loop, and the only module that may name `winit`.
 pub mod events;
 /// Adapter facts, the startup verdict, and opening a device.
@@ -36,3 +39,5 @@ pub mod remesh;
 pub mod session;
 /// Turning shipped content into a scene the renderer can draw.
 pub mod startup;
+/// Configuring a surface for the window it came from, and why one cannot be.
+pub mod surface_setup;

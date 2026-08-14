@@ -1,9 +1,24 @@
-//! The frame path: acquire a texture from the surface, record the terrain pass
-//! into it, present it, advance one tick.
+//! The frame path: acquire a texture from the surface, record one frame into it,
+//! present it, advance one tick.
 //!
-//! **One tick per rendered frame, never elapsed time.** No wall clock is read
-//! anywhere in this client, which is what makes the replay the same run on a
-//! machine that draws it at 300 frames a second and on one that manages 30.
+//! **One frame is one call.** The world, the HUD content declared over it, and
+//! the debug overlay over that, are ordered by the renderer and not here — so a
+//! frame test that composes through that same call is exercising the path the
+//! window takes, rather than a second one built to resemble it.
+//!
+//! **One tick per rendered frame, never elapsed time**, which is what makes the
+//! replay the same run on a machine that draws it at 300 frames a second and on
+//! one that manages 30.
+//!
+//! **The one wall clock this client reads is the debug overlay's, and it is read
+//! nowhere else.** That is a narrower claim than the one this file used to make,
+//! and the narrowing is deliberate rather than a concession: an overlay reporting
+//! a frame rate has to read a clock, so the property worth having is not that no
+//! clock exists but that no clock reaches the tick, the snapshot or the capture
+//! path. Nothing above spends it, nothing derives an intent from it, and the
+//! reading it produces travels one way — into a readout that is painted and
+//! discarded. A confinement scan holds that mechanically, with the adapter's own
+//! file as its only exemption.
 //!
 //! Every decision below is somebody else's. Whether a size is drawable, whether a
 //! failed acquire is recovered from or fatal, which surface format is configured
@@ -14,50 +29,32 @@
 
 use std::sync::Arc;
 
+use mc_core::hud::HudLayout;
+use mc_core::id::TextureKey;
 use mc_render::camera::{camera_view, waiting_view};
 use mc_render::geometry::scene::SceneGeometry;
-use mc_render::gpu::{FrameError, RecordTarget, RendererError, TerrainRenderer};
-use mc_render::pass::{ColorFormat, TerrainPassConfig};
+use mc_render::gpu::{FrameError, FrameRenderer, FrameSnapshot, RecordTarget};
+use mc_render::hud::{HudFrame, held_swatch};
+use mc_render::overlay::clock::SystemOverlayClock;
+use mc_render::pass::TerrainPassConfig;
 use mc_render::snapshot::{ScenePhase, TerrainSnapshot};
 use mc_render::surface::{
-    FormatError, FrameAction, ResizeAction, SurfaceErrorKind, SurfaceFormatFacts, SurfaceSize,
-    resize_action, select_surface_format, surface_error_action,
+    FrameAction, ResizeAction, SurfaceErrorKind, SurfaceSize, resize_action, surface_error_action,
 };
 use mc_render::window::Ending;
 use mc_world::persistence::Acceptance;
-use thiserror::Error;
 
 use crate::gpu_startup::Gpu;
 use crate::remesh::{Remesher, Retained};
 use crate::session::Session;
 use crate::startup::{
-    Launch, PreparationError, PreparationHandle, collect, empty_scene, save_path,
+    Launch, PreparationError, PreparationHandle, collect, empty_hud, empty_scene, save_path,
     simulation_to_play,
 };
+use crate::surface_setup::{SetupError, chosen_format, color_format, configuration_for};
 
 /// The label the frame's command encoder carries in a driver capture.
 const ENCODER_LABEL: &str = "mycraft frame";
-
-/// Why the client could not be built around the window it was given.
-#[derive(Debug, Error)]
-pub enum SetupError {
-    #[error("the surface offers no format this client can present through")]
-    Format(#[from] FormatError),
-    #[error(
-        "the surface's first sRGB format is `{name}`, which this renderer has no pass \
-         configuration for"
-    )]
-    UnsupportedFormat { name: String },
-    #[error("the surface reported no default configuration for this adapter")]
-    NoDefaultConfiguration,
-    #[error(
-        "the surface's format list no longer holds the format at index {index} that was chosen \
-         from it"
-    )]
-    FormatVanished { index: usize },
-    #[error("the terrain pass could not be built")]
-    Renderer(#[from] RendererError),
-}
 
 /// The window's contents, and everything needed to keep drawing them.
 #[derive(Debug)]
@@ -65,7 +62,7 @@ pub struct App {
     gpu: Gpu,
     surface: wgpu::Surface<'static>,
     configuration: wgpu::SurfaceConfiguration,
-    renderer: TerrainRenderer,
+    renderer: FrameRenderer,
     /// The worker preparing the replay, until it is collected. `None` afterwards,
     /// which is also what says the collection already happened.
     preparation: Option<PreparationHandle>,
@@ -73,6 +70,24 @@ pub struct App {
     /// A scene holding nothing, handed to the renderer while `phase` is
     /// `Preparing` so a frame's snapshot has the same shape in both phases.
     nothing: Arc<SceneGeometry>,
+    /// The elements content declared, composed over every frame.
+    ///
+    /// It declares nothing until the preparation lands, for the same reason
+    /// `nothing` above exists: the declarations are read from the content root
+    /// on the worker, so before it lands there is no content to draw a HUD
+    /// from. It is not an `Option`, because "there is no layout yet" and "the
+    /// layout declares no element" are the same picture and a second spelling
+    /// of it would be a second thing to keep in step.
+    hud: Arc<HudLayout>,
+    /// The one wall clock this client reads, measured from the moment the window
+    /// opened.
+    ///
+    /// **Owned here rather than by the session**, which is what keeps a session
+    /// drivable with no clock at all: every scenario about what a key does or
+    /// where a replay ends runs one and never names a clock, so none of them waits
+    /// on a scheduler or depends on how fast the machine ran them. Reading it is
+    /// the frame path's business, and the frame path is here.
+    overlay_clock: SystemOverlayClock,
     size: SurfaceSize,
     /// The worker that turns an edit into a scene, once there is a world to
     /// edit. `None` until the preparation lands, exactly as the simulation is.
@@ -84,6 +99,10 @@ pub struct App {
     /// dropped frame and an edit that could not be shown are different faults,
     /// and one recurring must not silence the other.
     reported_remesh: Option<String>,
+    /// The last held block that drew no indicator, for the same reason again. It
+    /// recurs every frame for as long as that block is held, which is the whole
+    /// run.
+    reported_swatch: Option<String>,
     /// What the player said about loading a save whose blocks have changed,
     /// read off the command line before the window opened.
     ///
@@ -94,8 +113,8 @@ pub struct App {
 }
 
 impl App {
-    /// Configures `surface` for the window it came from and builds the terrain
-    /// pass that draws into it.
+    /// Configures `surface` for the window it came from and builds the frame
+    /// path that draws into it.
     ///
     /// # Errors
     ///
@@ -112,7 +131,7 @@ impl App {
         let configuration = configuration_for(&surface, &gpu, size, format)?;
         surface.configure(&gpu.device, &configuration);
 
-        let renderer = TerrainRenderer::new(
+        let renderer = FrameRenderer::new(
             &gpu.device,
             &gpu.queue,
             &TerrainPassConfig::windowed(color_format(format)?),
@@ -126,10 +145,13 @@ impl App {
             preparation: Some(launch.preparation),
             phase: ScenePhase::Preparing,
             nothing: empty_scene(),
+            hud: empty_hud()?,
+            overlay_clock: SystemOverlayClock::started_now(),
             size,
             remesher: None,
             reported: None,
             reported_remesh: None,
+            reported_swatch: None,
             accepting: launch.accepting,
         })
     }
@@ -225,6 +247,12 @@ impl App {
         let view = acquired
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        // Here rather than in `redraw`, because this is the first point at which a
+        // frame is certainly being drawn: every skip, reconfigure and fatal path
+        // above has already returned. A frame time accumulated for frames nobody
+        // drew would be the one reading on this overlay that is not about frames.
+        // Before the draw, so the readout it asks for is this frame's.
+        session.record_frame_time(&self.overlay_clock);
         self.draw(&view, session);
         self.gpu.queue.present(acquired);
         session.tick();
@@ -232,6 +260,14 @@ impl App {
     }
 
     /// Records and submits one frame into `view`.
+    ///
+    /// **One call, and the whole frame is behind it.** The world, the HUD
+    /// content declared and — later — the debug overlay are ordered by the
+    /// renderer rather than here, so a frame test composing through that same
+    /// call is exercising what the product does. A client that recorded the
+    /// passes itself would give the HUD a second entry point, and every scenario
+    /// about the composition would stay green while the window drew a world with
+    /// nothing over it.
     ///
     /// A frame that cannot be recorded is reported and dropped rather than ending
     /// the run: a dropped frame is recoverable and a crash is not, and the depth
@@ -243,7 +279,11 @@ impl App {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some(ENCODER_LABEL),
             });
-        let snapshot = self.snapshot(session);
+        let terrain = self.snapshot(session);
+        let hud = HudFrame {
+            layout: Arc::clone(&self.hud),
+            held: self.swatch(session),
+        };
         let target = RecordTarget {
             device: &self.gpu.device,
             queue: &self.gpu.queue,
@@ -251,10 +291,39 @@ impl App {
             color: view,
             size: self.size,
         };
-        if let Err(failure) = self.renderer.record_terrain(target, &self.phase, &snapshot) {
+        // Asked for, not decided here. Whether the overlay is being shown, and
+        // what it says if it is, are the session's answers — this hands one on
+        // and holds no opinion about it, which is what leaves nothing here for a
+        // scenario to have to reach.
+        let readout = session.overlay_readout();
+        let frame = FrameSnapshot {
+            terrain: &terrain,
+            hud: &hud,
+            overlay: readout.as_ref(),
+        };
+        if let Err(failure) = self.renderer.record_frame(target, &self.phase, &frame) {
             self.report(failure);
         }
         self.gpu.queue.submit([encoder.finish()]);
+    }
+
+    /// Which texture this frame's held-block indicator draws from, stating once
+    /// whatever leaves it drawing nothing.
+    ///
+    /// The block is the session's answer and the layers are the renderer's, and
+    /// neither is second-guessed here: what is left is one lookup and one report,
+    /// both of which are somebody else's decision spelled out where a test can
+    /// reach it. The lookup answers with an owned key, so the renderer's borrow is
+    /// over before the report needs this type mutably.
+    fn swatch(&mut self, session: &Session) -> Option<TextureKey> {
+        let swatch = held_swatch(
+            session.held_block().as_ref(),
+            self.renderer.texture_layers(),
+        );
+        if let Some(report) = swatch.unresolved_report() {
+            self.report_swatch(&report);
+        }
+        swatch.texture()
     }
 
     /// This frame's input: the tick and pose the simulation published, and
@@ -360,6 +429,11 @@ impl App {
             layers: prepared.layers,
             registry: prepared.registry,
         }));
+        // The HUD arrives with the scene because it was read from the same
+        // content root, on the same worker. Until this moment the frame path
+        // composed a layout declaring nothing, which is what a client that has
+        // not read its content yet has to draw.
+        self.hud = prepared.hud;
         self.phase = ScenePhase::Ready(scene);
         Ok(())
     }
@@ -378,6 +452,25 @@ impl App {
         if self.reported != Some(failure) {
             eprintln!("mycraft: a frame was dropped: {failure}");
             self.reported = Some(failure);
+        }
+    }
+
+    /// States a held block that draws no indicator once, however many frames go
+    /// on to hold it.
+    ///
+    /// Separate from [`report_remesh`](Self::report_remesh) rather than folded
+    /// into it, and not only because a third recurring fault must not silence the
+    /// other two: that one's sentence begins "an edit could not be shown", and a
+    /// block whose texture occupies no layer is not an edit. The one message a
+    /// content author reads has to be about what is wrong.
+    ///
+    /// It never ends the run. A HUD element that cannot be drawn is the rest of
+    /// the game still being playable, which is the same trade a failed re-mesh
+    /// makes.
+    fn report_swatch(&mut self, report: &str) {
+        if self.reported_swatch.as_deref() != Some(report) {
+            eprintln!("mycraft: {report}");
+            self.reported_swatch = Some(report.to_owned());
         }
     }
 
@@ -406,49 +499,4 @@ impl Acquired {
     fn acting_on(kind: SurfaceErrorKind) -> Self {
         Self::Act(surface_error_action(kind))
     }
-}
-
-/// Which of the formats a surface offers is configured.
-fn chosen_format(offered: &[wgpu::TextureFormat]) -> Result<wgpu::TextureFormat, SetupError> {
-    let facts: Vec<SurfaceFormatFacts> = offered
-        .iter()
-        .map(|format| SurfaceFormatFacts {
-            name: format!("{format:?}"),
-            is_srgb: format.is_srgb(),
-        })
-        .collect();
-    let index = select_surface_format(&facts)?;
-    offered
-        .get(index)
-        .copied()
-        // Unreachable: the index came from the list this one was built from. It is
-        // an error rather than a panic because this is a player's startup path.
-        .ok_or(SetupError::FormatVanished { index })
-}
-
-/// The pass's colour target, as the renderer spells it.
-fn color_format(format: wgpu::TextureFormat) -> Result<ColorFormat, SetupError> {
-    match format {
-        wgpu::TextureFormat::Rgba8UnormSrgb => Ok(ColorFormat::Rgba8UnormSrgb),
-        wgpu::TextureFormat::Bgra8UnormSrgb => Ok(ColorFormat::Bgra8UnormSrgb),
-        other => Err(SetupError::UnsupportedFormat {
-            name: format!("{other:?}"),
-        }),
-    }
-}
-
-/// The surface's own default configuration, pointed at the format that was
-/// chosen rather than the one it would have picked.
-fn configuration_for(
-    surface: &wgpu::Surface<'static>,
-    gpu: &Gpu,
-    size: SurfaceSize,
-    format: wgpu::TextureFormat,
-) -> Result<wgpu::SurfaceConfiguration, SetupError> {
-    let mut configuration = surface
-        .get_default_config(&gpu.adapter, size.width, size.height)
-        .ok_or(SetupError::NoDefaultConfiguration)?;
-    configuration.format = format;
-    configuration.usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
-    Ok(configuration)
 }

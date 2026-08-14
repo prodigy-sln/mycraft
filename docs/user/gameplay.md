@@ -13,9 +13,46 @@ implemented and why.
 | Space | Jump, while standing on something |
 | Escape | Release the cursor |
 | Click in the window | Re-capture the cursor |
+| F3 | Show or hide the debug overlay |
 
 The walk keys are bound by **physical position**, not by the letter printed on them, so the same four
 keys under your left hand walk the player on a QWERTZ or AZERTY keyboard as on a QWERTY one.
+
+## What's on screen
+
+Two things are drawn on top of the world:
+
+- **A crosshair at the exact centre of the screen** — two thin white bars crossing, each with a black
+  outline so they stay visible against snow, sky and an unlit cave alike. It marks the point your next
+  break or place is aimed at.
+- **A small square at the bottom centre showing the block a placement would use** — the same texture
+  that block is drawn with in the world, outlined the same way. There is no inventory or hotbar yet, so
+  the block never changes: the swatch shows you which one it is rather than letting you pick.
+
+Both scale with the window, so they look the same size at 1280×720 and on an ultrawide. Neither is
+part of the engine — both are declared in the game's own content files, exactly as a mod would declare
+its own (`docs/modding/hud.md`), which also means a mod shipping a broken HUD declaration stops the
+game from starting, with a message naming the file, the element and the field at fault, rather than
+launching with something quietly missing.
+
+## The debug overlay (F3)
+
+**F3 shows a small readout in the top-left corner, and it is hidden until you ask for it.** It exists
+to diagnose the game and its mods rather than to play with, and it shows four things:
+
+- your position, as x, y and z;
+- the **column** you are standing in — the 16×16 chunk column's coordinate, which is how the world is
+  stored;
+- the current **frame rate**;
+- the current **frame time**, in milliseconds.
+
+Press F3 again to hide it. Showing or hiding it changes nothing about the game itself — the same
+inputs produce the same world either way — and no mod can hide, move, restyle or disable it. That is
+deliberate: it is the instrument you use when a mod is misbehaving, so a mod must not be able to turn
+it off.
+
+Nothing else is on screen. There is no hotbar, inventory, menu, pause screen or health display, and no
+part of the HUD accepts a click.
 
 ## How movement feels
 

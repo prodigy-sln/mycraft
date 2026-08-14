@@ -27,15 +27,19 @@ use std::path::Path;
 use std::sync::Arc;
 
 use mc_core::id::BlockName;
+use mc_render::overlay::clock::OverlayClock;
+use mc_render::overlay::{DebugOverlay, OverlayReadout};
 use mc_render::window::{
     CaptureState, Ending, accepts_pointer_motion, capture_after_click, capture_after_escape,
     first_capture_attempt, next_capture_attempt,
 };
 use mc_sim::action::{ActionIntent, EditReport, TickIntent};
-use mc_sim::player::{InputState, PlayerAction};
+use mc_sim::player::InputState;
 use mc_sim::simulation::{SimSnapshot, Simulation};
 use mc_sim::world::RemeshWork;
 use mc_world::persistence::SaveError;
+
+use crate::bindings::BoundAction;
 
 /// What the platform can be asked to do with the pointer.
 ///
@@ -79,6 +83,11 @@ pub enum KeyKind {
     A,
     D,
     Space,
+    /// The two function keys a debug overlay is conventionally reached by. Each
+    /// is told apart because either may be *bound* to the toggle, and a key the
+    /// client cannot tell apart is a key nothing can be bound to.
+    F3,
+    F7,
     Escape,
     Other,
 }
@@ -98,28 +107,12 @@ pub enum MouseButtonKind {
     Other,
 }
 
-/// What the player asked for by pressing `key`, if the binding table names it.
+/// The keys this client answers to, and what each of them asks for.
 ///
-/// The declared table — W forward, S back, A strafe-left, D strafe-right, Space
-/// jump. It stays a *table*: what an action does is `mc-sim`'s, and the one
-/// branch that acts on a `None` is `InputState::apply`'s, so nothing here
-/// decides anything a test cannot ask about.
-///
-/// **Private, and that is load-bearing.** Nothing outside this module calls the
-/// table, and keeping it so is what makes a test that wanted to ask the table
-/// the question the session asks it a compile error rather than a text-scan
-/// finding.
-#[must_use]
-const fn bound_action(key: KeyKind) -> Option<PlayerAction> {
-    match key {
-        KeyKind::W => Some(PlayerAction::Forward),
-        KeyKind::S => Some(PlayerAction::Back),
-        KeyKind::A => Some(PlayerAction::StrafeLeft),
-        KeyKind::D => Some(PlayerAction::StrafeRight),
-        KeyKind::Space => Some(PlayerAction::Jump),
-        KeyKind::Escape | KeyKind::Other => None,
-    }
-}
+/// Re-exported rather than reached for through its own module: a reader meeting
+/// [`Session::bound`] looks for the value it takes here, and the table's own file
+/// is not public.
+pub use crate::bindings::Bindings;
 
 /// Everything the client decides about input, and the world it decides it over.
 pub struct Session {
@@ -165,12 +158,21 @@ pub struct Session {
     /// loading screen is not something they are still asking for when the world
     /// appears.
     pending_action: Option<ActionIntent>,
+    /// Which key asks for what, as this run was started with.
+    bindings: Bindings,
+    /// The client's own debug overlay: whether it is being shown, and how long
+    /// the last frames took.
+    ///
+    /// **It lives here because the key that shows it arrives here**, and a
+    /// visibility owned on the other side of the seam would be one no windowless
+    /// test could reach.
+    overlay: DebugOverlay,
     pointer: Box<dyn PointerPlatform>,
 }
 
 impl Session {
     /// A session over `pointer`, which it has already asked for the first
-    /// capture.
+    /// capture, deciding what the declared binding table says.
     ///
     /// The ask is part of construction rather than a second call, and that is
     /// not tidiness: a separate `start()` would let "the client never asks the
@@ -179,12 +181,24 @@ impl Session {
     /// nowhere to spell it that a scenario does not watch.
     #[must_use]
     pub fn new(pointer: Box<dyn PointerPlatform>) -> Self {
+        Self::bound(pointer, Bindings::declared())
+    }
+
+    /// The same, deciding what `bindings` says instead.
+    ///
+    /// The client itself always passes the declared table; this exists so a
+    /// binding a player moved is something a scenario can hand over rather than
+    /// something only a rebuilt binary could have.
+    #[must_use]
+    pub fn bound(pointer: Box<dyn PointerPlatform>, bindings: Bindings) -> Self {
         let mut session = Self {
             input: InputState::default(),
             capture: CaptureState::Uncaptured,
             simulation: None,
             holding: None,
             pending_action: None,
+            bindings,
+            overlay: DebugOverlay::default(),
             pointer,
         };
         session.hold(first_capture_attempt());
@@ -202,11 +216,21 @@ impl Session {
     /// of a key they have already spent, and asking for the capture back a
     /// moment after giving it up is exactly what the release policy exists to
     /// not do.
+    ///
+    /// **The overlay's toggle is spent on the press alone**, for a different
+    /// reason than Escape's: acting on the release too would make one
+    /// press-and-release two changes of visibility, leaving the overlay exactly
+    /// where it started — a key that reads as doing nothing.
     pub fn on_key(&mut self, key: KeyKind, pressed: bool) {
         match key {
             KeyKind::Escape if pressed => self.hold(capture_after_escape(self.capture)),
             KeyKind::Escape => {}
-            bindable => self.input.apply(bound_action(bindable), pressed),
+            bindable => match self.bindings.bound_action(bindable) {
+                Some(BoundAction::Overlay) if pressed => self.overlay.toggle(),
+                Some(BoundAction::Overlay) => {}
+                Some(BoundAction::Player(action)) => self.input.apply(Some(action), pressed),
+                None => self.input.apply(None, pressed),
+            },
         }
     }
 
@@ -341,6 +365,71 @@ impl Session {
         self.simulation.as_mut()?.take_remesh_work()
     }
 
+    /// The block a place request would name, for whoever has to draw it.
+    ///
+    /// **An owned clone rather than a borrow**, which is what lets this type
+    /// grow a reader without giving up the property its header is about:
+    /// `BlockName` is an `Arc<str>` newtype, so the copy is a refcount bump and
+    /// the caller is handed a value it cannot ask a second question through.
+    /// A borrow would put the session's own field in a caller's hands, and the
+    /// distinction between that and the request `action_for` builds — private, and
+    /// so not linkable from public documentation — is the whole of what this
+    /// module claims.
+    ///
+    /// `None` for exactly as long as there is no world, which is every frame
+    /// before the preparation lands: a client with nothing to place into holds
+    /// nothing, and an indicator of nothing is not something to draw.
+    #[must_use]
+    pub fn held_block(&self) -> Option<BlockName> {
+        self.holding.clone()
+    }
+
+    /// Whether the client is showing its debug overlay.
+    ///
+    /// **A `Copy` value, the same no-borrow shape [`held_block`](Self::held_block)
+    /// has**, and for the identical reason: a borrow of the overlay would put the
+    /// thing a keystroke changes into a caller's hands, and the module header's
+    /// claim would stop being true of the type.
+    #[must_use]
+    pub const fn overlay_visible(&self) -> bool {
+        self.overlay.visible()
+    }
+
+    /// What the debug overlay publishes for whoever paints it this frame, and
+    /// nothing at all while it is hidden.
+    ///
+    /// **`None` is how "do not draw it" is spelled**, rather than a readout a
+    /// caller is expected to suppress: a frame path handed a reading it must
+    /// remember not to use is one line away from drawing an overlay nobody asked
+    /// for, and that line lives where nothing in this workspace runs it.
+    ///
+    /// **The reading is derived here rather than assembled by the frame path.**
+    /// Where the player is standing is something this type already knows, and
+    /// every piece a caller gathered itself would be a piece that could be wrong
+    /// with the whole suite green.
+    ///
+    /// **An owned value rather than a borrow**, the same no-borrow shape
+    /// [`held_block`](Self::held_block) has and for the identical reason.
+    #[must_use]
+    pub fn overlay_readout(&self) -> Option<OverlayReadout> {
+        self.overlay.visible().then(|| {
+            self.overlay
+                .readout(self.latest().map(|published| published.player.position))
+        })
+    }
+
+    /// Tells the overlay that a frame was drawn, so the next reading has a frame
+    /// time in it.
+    ///
+    /// The clock arrives per call rather than being held here, which is what keeps
+    /// a session drivable without one: every scenario about what a key does, what
+    /// the world reaches, or what a replay ends at runs a whole session and never
+    /// names a clock, so no test of any of those waits on a scheduler. The one
+    /// caller that does have a clock is the object that draws frames.
+    pub fn record_frame_time(&mut self, clock: &impl OverlayClock) {
+        self.overlay.record_frame_time(clock);
+    }
+
     /// Whatever the simulation published most recently, if there is one.
     #[must_use]
     pub fn latest(&self) -> Option<Arc<SimSnapshot>> {
@@ -425,6 +514,7 @@ impl fmt::Debug for Session {
             .field("input", &self.input)
             .field("capture", &self.capture)
             .field("pending_action", &self.pending_action)
+            .field("overlay", &self.overlay)
             .field("simulation", &self.simulation)
             .finish_non_exhaustive()
     }

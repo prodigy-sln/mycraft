@@ -9,6 +9,8 @@
 // Each test binary links this whole module and uses a subset of it.
 #![allow(dead_code)]
 
+pub mod hud;
+
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin, RegistryError};
 use mc_core::id::{BlockName, NamespacedIdError, TextureKey};

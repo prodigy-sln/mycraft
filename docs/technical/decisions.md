@@ -679,3 +679,129 @@ incremental, per-chunk or streamed persistence, which is the access pattern it i
 hand-written codec — vetoed before this record settled: parsing untrusted bytes is a discipline a
 widely-used, adversarially-tested library has orders of magnitude more experience at than one
 feature's implementation can produce.
+
+---
+
+## ADR-017 — `egui` for the debug overlay, without `egui-winit`, with the project's first per-crate licence exception
+
+**Status**: Accepted · **Date**: 2026-08-14
+
+**Context.** The debug overlay (SPEC-010) has to render four lines of text — position, column,
+frame rate, frame time — and nothing in `mc-render` can draw a glyph. `egui`, `egui-wgpu` and
+`egui-winit` were pinned at 0.36.1 in `[workspace.dependencies]` and **resolved by nothing**;
+`crates/mc-render/CLAUDE.md` already reserves `egui` for debug and tooling UI, and the issue names
+it. Taking it is therefore not a technology *search* but a decision about a fresh dependency edge
+that two gate stages will see: `cargo machete` fails a declared-but-unused dependency, and
+`cargo deny` runs advisories, licences, bans and sources with `all-features = true` across three
+targets. The alternative to a toolkit is a glyph atlas, which needs its own determinism argument
+before any frame containing text can be trusted, and which the spec puts out of scope.
+
+**Verified by a real resolve rather than by reading manifests.** All three crates exist at 0.36.1
+with `rust-version` 1.95 ≤ 1.97; `egui-wgpu` 0.36.1 declares `wgpu = "30.0"` and
+`winit = "0.30.13"`, which are exactly the workspace pins; a scratch crate outside the repository
+resolved 275 packages with `wgpu 30.0.0` and `winit 0.30.13` unchanged; `Renderer::{new,
+update_buffers, render}` are unconditional and carry no `compile_error!`, so this is not a stub
+whose useful half is feature-gated. Twenty-six new crates enter the graph — egui's own
+(`emath`, `ecolor`, `epaint`, `accesskit`) and the Linebender/Google-Fonts lineage (`skrifa`,
+`read-fonts`, `harfrust`, `kurbo`, `peniko`, `vello_common`, `vello_cpu`, `fearless_simd`) — all
+actively maintained, none advisory-flagged.
+
+**Decision.** Take `egui` with default features (for `default_fonts`) and
+`egui-wgpu` with `default-features = false`, both **optional under `mc-render`'s existing `gpu`
+feature** so that `--no-default-features` keeps the dependency-graph seam green, and both added in
+the phase that first uses them. Do **not** take `egui-winit`. Add one per-crate licence exception
+for `epaint_default_fonts`. Confine every `egui::` and `egui_wgpu::` path to
+`crates/mc-render/src/gpu/overlay.rs` — the litmus being that egui disappearing changes one file.
+
+**`egui-winit` is refused, and its unused pin is *disarmed* rather than deleted.** Its `default`
+features include `winit/default`, which re-enables `wayland-csd-adwaita` → `sctk-adwaita 0.10.1` →
+`ab_glyph` → `owned_ttf_parser` → **`ttf-parser 0.25.1`** — unmaintained with no safe upgrade, and
+the exact crate the workspace's `winit` entry was hand-trimmed to remove
+(`technical/testing.md` §"Supply chain"). `cargo deny check advisories` **failed** on that graph,
+naming `egui-winit` as the second parent of `winit`, and **feature unification is additive, so
+`mc-client`'s own `default-features = false` on `winit` cannot undo it.** The pin therefore gains
+`default-features = false` plus a dated comment mirroring the `winit` entry's: deleting the pin
+would lose the knowledge, and leaving it bare arms the trap for whoever opts in next. Nothing is
+lost by refusing it — the overlay is non-interactive and constructs `egui::RawInput` directly — and
+refusing it also keeps `winit` out of a second `mc-client` file, which
+`crates/mc-client/tests/winit_boundary.rs` fails the build over, and out of `mc-render` entirely.
+
+**The licence exception, measured before it was written.**
+
+```toml
+[[licenses.exceptions]]
+name = "epaint_default_fonts"
+allow = ["OFL-1.1", "Ubuntu-font-1.0"]
+```
+
+This is the **first per-crate exception in `deny.toml`**, and it is per crate rather than a global
+allowlist entry because `deny.toml`'s own rule says an exception is a decision about one dependency
+and not a hole in the allowlist — a font licence does not generalise to code. Three measurements
+decided its shape:
+
+- **The mechanism.** The licence is `(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0`: the code
+  half is satisfied by the allowlist and the two font licences are **ANDed onto it**, so no choice
+  of branch escapes them and only an exception can admit the crate.
+- **It is *not* technically unavoidable, and saying otherwise would be overclaiming.** With
+  `egui = { default-features = false }` the crate leaves the lock entirely (156 → 155 packages) and
+  licences go `ok`. But `epaint`'s `FontDefinitions::default()` is `Self::empty()` without that
+  feature, so the overlay would lay out four lines and rasterise **nothing**. The honest form of
+  "unavoidable" is conditional, on three things: the overlay must render text, **this repository
+  ships no font**, and vendoring one is rejected below.
+- **The premise that a font was already here was false, and was checked rather than argued with.**
+  `git ls-files` matches no `.ttf`, `.otf`, `.ttc`, `.woff`, `.pcf`, `.bdf` or `.fon` anywhere; the
+  only committed binary assets are the golden PNGs; `include_bytes!` appears nowhere and the two
+  `include_str!`s are WGSL shaders.
+
+**Rejected — vendoring a font and dropping `default_fonts`.** The reason this lost is recorded in
+full, because a reviewer re-deriving it will find the alternative **cheaper than it was first
+written down as being**: of the four fonts the crate bundles, `Hack-Regular.ttf` is MIT plus
+Bitstream Vera — both permissive, MIT already on the allowlist — at 309 KB of the crate's ~1.4 MB,
+and the two offending licences come from Ubuntu-Light (UFL) and NotoEmoji (OFL), neither of which
+the overlay uses. So "a new licence question" understates how tractable it is. **What decides it
+instead is visibility.** A `.ttf` in this tree is not a crate, so no gate stage would ever read its
+licence again, and Bitstream Vera's reserved-font-name clause — a real distribution condition —
+would then be held by nobody. `cargo deny` re-reads the exception on **every** gate run, names the
+crate, names both licences, and carries the reason beside them. This project holds every other guard
+mechanically, and has already recorded two "nothing mechanical prompts the entry" hazards as known
+holes rather than as designs to copy (`technical/architecture.md` §"Mechanically enforced
+invariants", `technical/rendering.md` §"The HUD's derived prediction"); moving a licence obligation
+out of the one place that re-checks one would be a third.
+
+**Rejected — taking no toolkit at all.** A hidden-by-default tooling overlay is the sole consumer of
+26 crates and ~1.4 MB of font data, which is a real argument against. It loses because the only
+alternative is a glyph atlas with its own determinism argument, which is out of scope, and because
+the pin and the reservation for debug UI both already existed.
+
+**Consequences.**
+
+- **Binding: egui's glyph rasterisation must never reach a committed golden.** Drivers legitimately
+  disagree about glyph rasterisation, so the first golden to hold text makes whatever produced it
+  the ground truth every machine must then reproduce. The overlay is hidden by default, no declared
+  capture is taken with it shown, and the assertion that content cannot obscure it is a **difference
+  between two frames**, never a golden. The price is that the overlay's readout *content* is graded
+  by no automated check — an adapter painting a fixed string passes every test — recorded in
+  `technical/testing.md` and filed as **PRO-897**.
+- **`RendererOptions::PREDICTABLE`, not `default()`.** `default()` enables dithering — noise applied
+  to values falling between two 8-bit steps, to hide banding in gradients — and disables the
+  software texture filtering that option set exists to provide. Four lines of text have no
+  gradients, so dithering could only contribute nondeterminism to the one crate whose verification
+  story is frames a second machine reproduces, and target hardware spans an RTX 4090 and an Intel
+  UHD 770. **Nothing grades this choice**: restoring `default()` leaves the whole suite green,
+  because the only oracle over the overlay's pixels compares two frames of one run and dithering is
+  a deterministic function of the fragment's value and position, so it cancels. Taken on judgement,
+  recorded as earned by no test.
+- **The one-file confinement paid for itself immediately.** The first implementation applied epaint's
+  texture deltas and never consumed them; `TexturesDelta` asserts on drop that somebody did, so
+  three frame scenarios failed with a **panic in the render loop** — which
+  `crates/mc-render/CLAUDE.md` bans outright. The fix (clear the delta after both halves are
+  applied, freeing *after* the pass rather than before, because a texture this frame stopped using
+  may still be sampled by the draw this frame recorded) touched that one file.
+- **The exception carries a live obligation, and only a public-domain face can retire it.**
+  **PRO-894** owns it. A permissively-licensed-but-conditioned face does not clear it — Bitstream
+  Vera's reserved-font-name clause is precisely the kind of condition that would move back to being
+  held by a human — so the exit is a face with no conditions at all, or no bundled fonts.
+- The overlay renders as egui's stock light grey (140) directly over terrain with no panel behind
+  it: legible against sky, marginal against bright ground. This is within spec — the contrast rule
+  is about *content* HUD elements, and the stock look is explicitly permitted for
+  hidden-by-default tooling — and is filed as **PRO-898** rather than fixed mid-flight.

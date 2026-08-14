@@ -33,8 +33,9 @@ build on it, so reporting it is noise.
 **Generated, vendored, or non-source:**
 - `target/`, `Cargo.lock`, `**/*.profraw`, `**/*.profdata`, `coverage/`
 - Vendored C sources pulled in by `mlua` (Luau) and other `-sys` crates
-- `artifacts/frames/` golden images — a changed golden is reviewed as a *decision*
-  (was the visual change intended?), never as code
+- `crates/mc-render/goldens/**/*.png` — the committed golden images. A changed
+  golden is reviewed as a *decision* (was the visual change intended?), never as
+  code. `artifacts/frames/` is scratch capture output and is not committed.
 - `.prospect-incoming` files
 
 **Enforced by the gate — never report as a finding:**
@@ -50,8 +51,11 @@ build on it, so reporting it is noise.
 
 **Do NOT skip these, even though they look mechanical** — the gate cannot see them:
 - Whether a test actually asserts its scenario's outcome, as opposed to merely executing the path
-- Whether a golden-frame update was justified (`mc-render` is coverage-exempt per ADR-008, so
-  review is the only remaining check on it)
+- Whether a golden-frame update was justified. ADR-013 narrowed ADR-008's exclusion, so the
+  exempt subtree is `crates/mc-render/src/gpu/` only — the rest of `mc-render` **is** measured.
+- Anything in `crates/mc-client/` or `crates/mc-server/`. Both are excluded from coverage
+  **wholesale**, so a coverage figure says nothing whatever about them and review is the only
+  check they get. Read them as if no percentage existed — because for them, none does.
 - Whether a client-supplied value is trusted anywhere in `mc-net` or `mc-sim`
 - Whether a new `mc-script` binding widens the sandbox
 - Whether state that must survive hot reload is being held in Lua rather than the ECS

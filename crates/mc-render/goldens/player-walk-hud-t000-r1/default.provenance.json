@@ -1,0 +1,6 @@
+{
+  "capture": "player-walk-hud-t000-r1",
+  "adapter": "NVIDIA GeForce RTX 4090",
+  "backend": "vulkan",
+  "driver_description": "596.21"
+}

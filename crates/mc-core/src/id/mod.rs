@@ -2,4 +2,4 @@
 
 mod namespaced;
 
-pub use namespaced::{BlockName, NamespacedIdError, TextureKey};
+pub use namespaced::{BlockName, HudElementName, NamespacedIdError, TextureKey};

@@ -638,6 +638,204 @@ becomes a failed ending naming the path and the reason rather than a silent one.
 lives in `mc-client` — those answers all come from `mc-sim` and `mc-world`, unchanged by which crate
 happens to call them.
 
+## The HUD: content in three crates, composed through one entry point
+
+The HUD (`docs/modding/hud.md` is the authoring contract) is the first thing
+that is *purely presentation* and is nonetheless content: what is drawn, and
+where on the screen, is declared under `content/` with no HUD definition
+anywhere in Rust — invariant 1 applied to something that is not a block. The
+debug overlay beside it is deliberately the opposite: engine-owned tooling
+content cannot reach. Both halves land on the crate map above without adding
+an edge between workspace crates.
+
+| Piece | Location | Why there |
+|---|---|---|
+| Element model, field checking, namespaced name, the published draw-kind and readable-value sets | `mc-core/src/hud/` | Pure, no I/O, and the only place both the loader (`mc-world`) and the composer (`mc-render`) can reach. `mc_core::id::namespaced` is already here. |
+| TOML directory reader | `mc-world/src/content/hud_toml_source.rs` | `toml` is confined to `src/content/` by `mc-world`'s own dependency-graph invariant, and this is the one file MVP 2's swap deletes. |
+| Rectangle derivation, two-pass ordering, clipping, colour decode, held-block resolution | `mc-render/src/hud/` — **outside** `src/gpu/` | Pure functions, so ADR-013 counts them. |
+| Screen-space pipeline and `hud.wgsl` | `mc-render/src/gpu/hud.rs` | Needs a device. |
+| Overlay state, readout, clock port | `mc-render/src/overlay/` — **outside** `src/gpu/` | Counted by the gate. In `mc-client` it would be invisible to coverage entirely. |
+| egui painting | `mc-render/src/gpu/overlay.rs` | Needs a device, and is the egui adapter (ADR-017). |
+| Toggle binding, held-block reader, launch refusal | `mc-client/src/{bindings.rs, session.rs, startup.rs, app.rs}` | Composition root. |
+
+**`mc-render` may not name `mc-sim`, so the HUD model lives in `mc-core`.**
+Two alternatives were weighed and rejected: the whole HUD in `mc-client`,
+where ADR-013 excludes the crate from coverage wholesale, so forty-odd pure
+scenarios would be measured by nothing; and the whole HUD in `mc-world`
+beside blocks, which would make `mc-render` reach composition maths through
+`mc-world` and file screen-space geometry as world data. The cost of the
+split chosen is stated rather than hidden: **a reader chasing one
+declaration crosses two crate boundaries to see it drawn.** That is the
+shape blocks already have (`mc-core` definition → `mc-world` loader →
+`mc-render` texture), so it is a topology a contributor already knows.
+
+**`HudElementSource` is its own port, not a reuse of `DefinitionSource`.**
+`DefinitionSource` yields `BlockDefinition`; a parallel port yielding
+`HudElement` is the only shape that keeps the two loaders swappable
+independently at MVP 2. It is mandatory at first use as an I/O boundary,
+which is the exemption `code-quality.md` §1 grants ports from the
+three-uses rule. Two implementations exist immediately, as for blocks:
+`TomlFileHudSource` in `mc-world`, and `InMemoryHudSource` beside the port.
+
+`InMemoryHudSource` deliberately parts company with
+`InMemoryDefinitionSource`: it holds **raw declarations**, not
+already-checked elements. A source of accepted elements cannot express "a
+declaration stating `size = [0, 4]`" at all — a test would have to
+hand-build the fault it claims the model produces, and would then pass
+against a model that produced no faults. Holding declarations is also the
+shape a Luau table arrives in. The stated cost is that it cannot express an
+unreadable source, which nothing needs it to.
+
+**A separate `HudFault { origin, element, field, cause }`, not a renamed
+`DefinitionFault`.** The block fault's field is literally named `block` and
+its `Display` writes ``block `…` `` — reused as-is, every HUD failure would
+read "block `base:crosshair-horizontal`", which is the wrong vocabulary in
+the one message a content author reads. Renaming the field in `mc-core`
+would change a public field, its `Display` output, and every block-loading
+error message and test. So roughly 25 lines are duplicated, which
+`code-quality.md` §1's "tolerate harmless duplication" covers. The argument
+against is real — two fault types will drift in message shape — and what
+holds it is that both are asserted per field by scenarios, which is exactly
+where drift would show.
+
+**The raw declaration form is format-agnostic, not TOML-shaped, and that was
+forced rather than chosen.** `toml` and `serde` may not reach `mc-core` (the
+resolved-graph invariant below, which follows dev-dependency edges too), so
+the `#[serde(deny_unknown_fields)]`-over-`Option<toml::Value>` shape
+`RawBlockDefinition` uses in `mc-world` was unavailable one crate in.
+`mc_core::hud::RawHudElement` is a list of `(String, DeclaredValue)` pairs
+where `DeclaredValue` is a small closed enum with an `Opaque(kind)` arm that
+makes the conversion from any format **total**; unknown-field rejection is
+`mc-core`'s own job rather than serde's, checked against an `ACCEPTED_FIELDS`
+list assembled from the same field-name constants the checking reads. The
+loader converts `toml::Value → DeclaredValue` and hands over a key/value
+list; it deserializes into no struct. This is what the evolvability driver
+actually bought: at MVP 2 a Luau table is not a `toml::Value` either, so the
+checking survives the loader swap instead of being deleted with it.
+
+### One composition entry point, and `record_terrain` preserved beside it
+
+```rust
+pub struct FrameSnapshot<'a> {
+    pub terrain: &'a TerrainSnapshot,
+    pub hud: &'a HudFrame,                    // may hold zero elements
+    pub overlay: Option<&'a OverlayReadout>,  // None when hidden
+}
+
+impl FrameRenderer {
+    /// The client's only frame call: terrain, then `compose_hud` exactly
+    /// once, then the overlay when one is supplied.
+    pub fn record_frame(&mut self, …) -> Result<FrameStats, FrameError>;
+    /// The single HUD composition entry point, public so a test can compose
+    /// onto an arbitrary cleared target.
+    pub fn compose_hud(&mut self, …) -> Result<(), FrameError>;
+    /// How many times `compose_hud` has run.
+    pub fn hud_compositions(&self) -> u64;
+}
+```
+
+`App::draw` calls `record_frame` and nothing else, and `App` owns a
+`FrameRenderer` where it used to own a `TerrainRenderer`. **A frame test
+that composed the HUD through a path the windowed client never takes would
+verify a composition the product does not perform** — the "second entry
+point onto a tested path" failure this project has now met five times
+(`docs/technical/testing.md`). Two joined facts hold it, and neither is
+sufficient alone: a source scan asserts `mc-client/src` names no HUD-drawing
+spelling other than the one `record_frame` call site, and an offscreen test
+drives `record_frame` once and watches `hud_compositions()` go 0 → 1. A test
+cannot open a window in CI, so "the windowed client" is reached through the
+object the windowed client owns.
+
+**`TerrainRenderer::record_terrain` stays public and unchanged.** It *is*
+"the HUD stage not run at all" — the zero-HUD baseline that every
+"pixels outside the footprint are untouched" assertion compares against, and
+what the three frozen terrain goldens are shot through. Its cost is recorded
+in `technical/rendering.md`: the terrain goldens no longer traverse the
+client's exact frame call, and it is the *pair* of golden sets that covers
+the product path.
+
+The HUD pass is a second render pass with `LoadOp::Load` on colour and **no
+depth attachment**; the overlay is a third, likewise `Load`. Order is
+terrain → HUD → overlay, which is what makes "content cannot obscure the
+overlay" true by construction rather than by a check.
+
+**Error contract.** A HUD load failure is fatal to the launch:
+`PreparationError` gains one variant carrying it. `FrameError` gains **no**
+variant — an unresolvable swatch texture draws nothing and is reported once
+through `App`'s existing "state it once" shape.
+
+### The debug overlay: engine-owned, clock-confined, unreachable from content
+
+**The overlay is deliberately not content, and that is a rule rather than a
+convention.** A mod must not be able to disable the instrument used to
+diagnose that mod. Three facts hold it: no field of a declaration can refer
+to the overlay, the published readable-value set is a constant asserted to
+be exactly `{"held-block"}`, and the overlay's pass is composed after all
+content. An element named `base:debug-overlay` is an ordinary element and
+changes nothing — the name is not recognised anywhere.
+
+**The guarantee is about *loaded, running* content, and the narrowing is
+correct only because content loads once, at startup.** A declaration that
+fails to load never runs: the launch is refused, and a fault naming file,
+element and field is a better diagnostic than an overlay showing a position
+and a frame time — which could not have diagnosed a malformed declaration
+anyway. **Forward constraint, named as an event so it is triggered rather
+than rediscovered: the commit that makes HUD or block declarations
+hot-reloadable (MVP 2) reopens this.** At that moment a HUD fault can arrive
+mid-session, refusing is no longer available because there is nothing left to
+refuse *to*, and invariant 3's reasoning — a bad mod never takes down the
+server — binds the client identically. The overlay guarantee then becomes
+load-bearing in the way the engine-contributor story originally intended, and
+the "no content-load-failure screen" position expires with it.
+
+**The wall clock is confined, not admitted.** `mc-render/src/overlay/clock.rs`
+holds the `OverlayClock` port and its one `SystemOverlayClock` adapter, and is
+the single file exempted from a scan asserting that no other production
+source under `crates/mc-client/src` or `crates/mc-render/src` names `Instant`
+or `SystemTime`. That is what keeps a replay identical at 30 and 300 fps while
+the overlay still shows a frame rate, and the injectable port is what makes
+"ten frames 20 ms apart" a test at all — a frame rate no test can drive is a
+readout no test can grade.
+
+`app.rs`'s header used to claim "no wall clock is read anywhere in this
+client". One now is, so the claim was **narrowed to the true one**: no clock
+reaches the tick, the snapshot or the capture path. A stale absolute in the
+very file a scan is about would be the worst place in the workspace to leave
+one.
+
+Four smaller shapes, each load-bearing:
+
+- **`Session::held_block()` returns an owned `Option<BlockName>`, never a
+  borrow.** `BlockName` is an `Arc<str>` newtype, so this is a refcount bump,
+  and it preserves the property `session.rs` protects: the session hands out
+  no borrow of what it owns. `overlay_visible()` is the same shape over a
+  `Copy` value.
+- **`Session::overlay_readout` derives the reading and `App` merely forwards
+  it.** `App` is the one object nothing in this workspace executes
+  (`docs/technical/testing.md`), so every piece of a readout assembled there
+  could be wrong with the whole suite green. `App` gained one call and no
+  arithmetic. For the same reason `DebugOverlay::readout(Option<Vec3>)`
+  derives the column from a position it is *handed*, rather than the client
+  assembling the readout field by field — otherwise "no position before the
+  world lands" would be a test setting `None` and asserting `None`, the
+  subject agreeing with the test.
+- **The toggle is a client-side action that never reaches `mc-sim`.**
+  `PlayerAction` is untouched, so "a replay reaches the same world state with
+  the overlay shown and hidden" holds by type rather than by discipline.
+  Visibility flips on press only. `Bindings` lives in its own
+  `mc-client/src/bindings.rs` rather than inside `session.rs` — with it
+  inside, that file measured 532 non-blank lines against the 500 limit — and
+  `bound_action` is `pub(crate)` there. The property the placement protects
+  is unchanged: an integration-test binary is a separate crate, so a test
+  asking the table what a key means is still a compile error, and a test
+  constructs bindings instead.
+- **`mc_world::column::column_containing(x: f32, z: f32) -> ColumnCoordinate`**
+  takes two scalars rather than a `Vec3` because **`mc-world` has no `glam`
+  dependency and this must not add one**; the caller destructures. It
+  **floors** rather than truncating, so x = −0.5 is column −1, and it lives
+  beside `SECTION_SIZE` and `ColumnCoordinate`, which is where its two facts
+  already are.
+
 ## The pure/GPU seam inside `mc-render`
 
 `mc-render` has a default-on `gpu` Cargo feature. **`wgpu::` may be named
@@ -665,8 +863,13 @@ side of `mc-client` is left holding the `winit` event-loop adapter,
 composition wiring, and the per-frame mechanics that have no pure form —
 acquire the surface texture, create an encoder, submit, present — and
 nothing that *decides* anything there. **This no longer describes all of
-`mc-client`**: `session.rs` decides the capture ladder, the pointer-motion
-gate and the key binding (§"The client input dispatch" above). ADR-013's
+`mc-client`**: `session.rs` decides the capture ladder and the pointer-motion
+gate, and `bindings.rs` holds the key binding table (§"The client input
+dispatch" above). The HUD and overlay work took the opposite direction
+deliberately for exactly this reason — the rectangle derivation, the two-pass
+composition and the whole overlay readout live in `mc-render`'s pure layer,
+counted, while `mc-client` gained a field, a call and a forward (§"The HUD"
+above). ADR-013's
 exclusion is unchanged, and its stated rationale no longer covers that file
 — see that section for why the narrowing is deferred rather than made. The
 GPU-touching layer keeps only the mechanical part: allocate, upload,
@@ -749,7 +952,51 @@ structure, not by convention:
   though the feature were off while the seam check fails.
 - **`winit` is nameable in `crates/mc-client/src/events.rs` alone**,
   pinned by a source scan whose filter was mutation-checked rather than
-  assumed.
+  assumed. This is one reason `egui-winit` is not taken (ADR-017): it would
+  name `winit` in a second `mc-client` file and fail the build over it.
+- **No shipped HUD element name or declared HUD colour appears in production
+  Rust**, and **this scan's watch list is derived from
+  `content/base/hud/` at test time** rather than hand-copied — so deleting a
+  content file cannot silently stop the scan watching its name, which is the
+  hole that made the hand-maintained retired list next door necessary. It
+  carries the same two controls as its neighbour (a fixture source naming a
+  shipped element is reported; a fixture naming a shipped colour as a byte
+  quadruple is reported) plus two vacuity guards the derivation makes
+  necessary: reading zero production sources fails, and an **empty derived
+  watch list** fails rather than passing an assertion it can no longer
+  falsify. The nine anchor names are deliberately **not** watched — they are
+  the engine's own vocabulary and must appear in Rust, and adding them would
+  force an exemption for the file that defines them, which is the thing this
+  guard exists to avoid needing.
+
+  **Deriving the list closes the deletion hole and cannot close the rename
+  one — measured, not reasoned about.** Renaming a shipped element in content
+  and writing the *old* name into a production Rust source leaves the whole
+  workspace green, because the retired list is empty and empty is the honest
+  state: an entry belongs there once a name has meant something to content and
+  stopped. **Nothing mechanical prompts that entry**, so the day an element is
+  renamed, adding its old name is part of that commit. One further limit,
+  easy to misread as covered: the colour needles are derived by formatting the
+  parsed colour, so the hex needle is upper case and a lower-case Rust literal
+  would not be caught — which is why the control is written against the byte
+  quadruple, the form a Rust constant far more readily takes.
+- **Every element `content/base/hud/` ships states a contrast outline**,
+  asserted over the **parsed** field rather than over the file's text: two of
+  the three shipped files also mention *outline* in a prose comment, so a text
+  scan would have stayed green under exactly the mutation this check exists to
+  catch — delete the field, keep the sentence explaining why it matters. The
+  element list is derived from the directory, so a fourth shipped element is
+  covered with no Rust edit.
+- **The client's frame path names no HUD drawing other than the one
+  `record_frame` call site**, and **no production source under
+  `crates/mc-client/src` or `crates/mc-render/src` names `Instant` or
+  `SystemTime`** except `mc-render/src/overlay/clock.rs`. Both scans carry a
+  positive control and a reads-zero-files refusal, and both were **verified
+  non-vacuous on day one**: the needles appeared in zero production sources
+  before the feature landed, so neither guard was born red and tuned around a
+  hit. The wall-clock scan's exemption is the only hit it will ever have —
+  which is exactly the shape of guard that goes green forever the day the
+  thing it watched is quietly removed, hence the controls.
 
 **The instrument matters, and the two questions are not the same
 question.** Feature questions go to `cargo tree --package`, which resolves

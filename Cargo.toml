@@ -60,9 +60,30 @@ winit = { version = "0.30.13", default-features = false, features = [
     "wayland",
     "wayland-dlopen",
 ] }
+# Default features, which is how `epaint_default_fonts` enters the graph — and it
+# is wanted, because there is no font in this repository to hand egui instead.
+# `FontDefinitions::default()` *is* `empty()` without it, so an overlay built on
+# `default-features = false` would lay out four lines and rasterise nothing.
+# Measured (2026-08-14): dropping the feature removes exactly that one crate from
+# the lock and `cargo deny check licenses` passes; keeping it needs the per-crate
+# licence exception `deny.toml` now carries. The exception is preferred because
+# cargo-deny re-reads it on every gate run, where a font vendored into this
+# repository would carry the same obligation with no stage able to see it.
 egui = "0.36.1"
-egui-wgpu = "0.36.1"
-egui-winit = "0.36.1"
+# `default-features = false` drops egui-wgpu's own `winit` and `fonts` edges. The
+# overlay is non-interactive and builds `egui::RawInput` directly, so nothing here
+# needs a window integration.
+egui-wgpu = { version = "0.36.1", default-features = false }
+# NOT TAKEN, and disarmed rather than deleted so the knowledge outlives the entry.
+# `egui-winit`'s default features re-arm RUSTSEC-2026-0192: `default` pulls
+# `winit/default` → `wayland-csd-adwaita` → `sctk-adwaita` → `ab_glyph` →
+# `owned_ttf_parser` → `ttf-parser 0.25.1`, unmaintained with no safe upgrade —
+# the exact crate the `winit` entry above was hand-trimmed to remove. Feature
+# unification is additive, so a local `default-features = false` on `winit`
+# cannot undo it; only not enabling the feature can. Verified 2026-08-14:
+# `cargo deny check advisories` FAILS on that graph, naming egui-winit as a second
+# parent of winit. Whoever opts in next gets the trimmed entry, not the trap.
+egui-winit = { version = "0.36.1", default-features = false }
 bytemuck = { version = "1.25.2", features = ["derive"] }
 # Shader validation at build time rather than at first draw. Pinned at the
 # version `cargo tree -p wgpu -i naga` reports, so the validator that gates the

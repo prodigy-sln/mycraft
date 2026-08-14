@@ -52,6 +52,60 @@ Redirect the output to a file, capture the exit code directly from the invocatio
 afterwards. The same caution applies to any wrapper that summarises a command's output: the summary
 is not the status, and only the status is the gate.
 
+### `GATE_EXIT=0` is necessary and not sufficient — read the body
+
+The rule above stops a red gate from being *reported* green. It does not stop the gate from **being**
+green over a real failure inside a stage, and that has happened. One root cause — two
+`cargo llvm-cov` runs sharing `target/llvm-cov-target`, leaving orphaned coverage binaries whose
+objects are newer than the profile data and whose files are locked mid-link (tracked as **PRO-891**)
+— produces **two** presentations, and the pair is the finding:
+
+- **The loud one, `exit 1`.** All tests pass and only the report fails:
+  `warning: …\deps\<name>-<hash>.exe: profile data may be out of date - object is newer`, then
+  `error: failed to load coverage: … permission denied`, then `GATE FAILED — 1 stage(s)`. It
+  announces itself and costs a re-run.
+- **The quiet one, `exit 0`.** The same locking caught during the *clean* step instead: the gate
+  prints `error: failed to remove file …\llvm-cov-target\debug\deps\<name>.exe`, carries on, and
+  **exits 0**, with a full passing test count and a plausible coverage figure on the other side.
+  **It survives every check listed above** — not piped, output redirected to a file, exit code
+  captured directly from the invocation — and the captured code reads 0. The recorded symptom of
+  this hazard elsewhere is coverage collapsing to roughly 17%, which is garbage a reader notices;
+  this is the form that reads as success.
+
+So the gate's **output body** is part of its result. Read it for `error:`, `failed to remove`,
+`permission denied`, `out of date`, `warning:` and `panicked`, not only for `ok:` lines and the exit
+code. Apparent matches on *fail* are usually behavioural test names sitting on `PASS` lines —
+**read them rather than counting them**, because counting a pattern instead of reading it is exactly
+how a real failure gets waved through.
+
+Three further rules, each added because the previous one was found insufficient:
+
+- **Check for live processes under `target/` before a run — necessary, not sufficient.** Orphans can
+  appear between the check and the run, which is what happened. This check had been recorded as
+  though it were a guarantee, and it is not one.
+- **That check has a standing false positive.** `Get-Process | Where-Object { $_.Path -like
+  '*\target\*' }` matches GitKraken's own `node-spawn-server.exe`, which lives under
+  `…\node_modules\@axosoft\node-spawn-server\target\release\`. It is not a workspace coverage binary.
+  The result has to be **read** rather than counted: a non-empty result is not by itself a reason to
+  hold a gate, and treating it as one is how a real orphan gets waved through beside a known-harmless
+  hit.
+- **Prefer letting a gate run finish over killing it, and run one at a time.** The orphans above were
+  the residue of a gate killed to avoid measuring a mutated tree; killing it poisoned the next two
+  runs, which is worse than one figure that is known to be meaningless. Two gates on one tree is not
+  two confirmations — it is the collision above. A gate is a *heavier* tree operation than a
+  mutation, not a lighter one.
+
+**What the figures are worth: reproducibility across invocations is the evidence, and the exit code
+is only the wrapper around it.** Two figures from one tree are not independent confirmation of each
+other. Five separate gate runs returning the *identical* triple — test count, line percentage,
+region percentage, tracked-line count — are, and that is the reading SPEC-009's and SPEC-010's
+records rest on, one of them after a full `target/llvm-cov-target` wipe on a quiet tree. A polluted
+coverage directory does not produce the same three numbers a fifth time; it produces ~17% garbage, a
+`permission denied`, or an object-newer-than-profile skew. **Those failure modes are loud and
+unstable, and that instability is what makes the stability meaningful.**
+
+Whether the gate should fail on its own clean error is a change to the gate, tracked in PRO-891.
+
 ### The gate is not safe to run from two contexts at once
 
 Two concurrent invocations contend over `target/llvm-cov-target` and fail in ways that look like
@@ -82,6 +136,17 @@ Also lint-denied workspace-wide: `unwrap`, `expect`, `panic!`, `dbg!`, `todo!`, 
 `mem::forget`, float equality, swallowed errors. Raw indexing matters most in `mc-net`, where a
 length prefix is attacker-controlled.
 
+**The file-length limit is measured two ways and they disagree, by about 12%.** The gate counts with
+`Measure-Object -Line`, which does **not** count blank lines; a reviewer counting physically counts
+them. `crates/mc-render/tests/hud_offscreen.rs` sits at exactly **600 physical** lines — the cap —
+and **529** non-blank, so the gate sees 71 lines of headroom and passes. Neither measure is wrong,
+and the gap applies to every file in the workspace. The standing instruction when a file reaches
+either figure is to **split it by responsibility rather than argue the measure**: `app.rs` reached
+506 non-blank against the 500 limit while the HUD landed and was split into a surface-setup module
+and a frame module, because configuring a surface happens once and what a frame shows is the other
+question. A split made to satisfy a count invents a boundary the design did not have; a split by
+responsibility would have been right at 400 lines too.
+
 **`too_many_arguments` counts `self`, so a method gets three parameters and not four.** Clippy
 measures the whole parameter list, receiver included. This is worth knowing before a signature is
 designed rather than after: a four-parameter method reads as compliant, passes review, and fails the
@@ -106,6 +171,32 @@ Advisory suppressions require a dated justification inline — never a silent sk
 upgrade and fails the advisories stage. The feature draws Wayland client-side decorations on a
 platform this project does not build for, and `winit` falls back to its own — so the dependency was
 dropped rather than ignored. The ignore list is for things that cannot be removed.
+
+**A trimmed feature can be re-armed by a *second parent*, and your own
+`default-features = false` cannot stop it, because feature unification is additive.** `egui-winit`'s
+default features include `winit/default`, which re-enables that exact chain and brings
+`ttf-parser 0.25.1` back — measured: `cargo deny check advisories` fails on that graph, naming
+`egui-winit` as the second parent of `winit`. `mc-client`'s own `default-features = false` on `winit`
+does not undo it. So when a crate is trimmed to remove a transitive dependency, the trim is a
+property of the *whole resolved graph* and every future edge into that crate has to be checked
+against it, not just the one entry that was edited. `ttf-parser` appears zero times in `Cargo.lock`
+today, which is the fact that premise rests on and is worth re-measuring rather than assuming.
+
+**An unused pin is disarmed, not deleted, and the difference is deliberate.** `egui-winit` is not
+taken (ADR-017) but stays pinned in `[workspace.dependencies]` carrying
+`default-features = false` and a dated comment. Deleting the entry would lose the knowledge; leaving
+it bare would arm the trap for whoever opts in next, since a bare entry is what a future opt-in would
+inherit.
+
+**A licence exception is per crate, and this project's first one is the shape to copy.** `deny.toml`
+carried no `[[licenses.exceptions]]` at all until `epaint_default_fonts` needed one: its licence is
+`(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0`, so the code half is satisfied by the
+allowlist and the two font licences are **ANDed onto it** — no choice of branch escapes them, which
+is why only an exception can admit it and why a global allowlist entry would be wrong (a font licence
+does not generalise to code). The exception's value as a *guard* is that `cargo deny` re-reads it on
+every gate run and names the crate, both licences and the reason, where a vendored font file would
+be a licence obligation no stage ever reads again. Its retirement is owned by **PRO-894**; the
+reasoning is in ADR-017.
 
 ### Secrets — a coupling that must not be broken
 
@@ -227,6 +318,53 @@ into two functions rather than one is deliberate — as a single test, "the
 control fails while the real assertion still passes" is not something a
 test run can show you happening; as two, it is.
 
+**Assert an exact verdict, not an absence: it closes the vacuity hole for
+free, and it does not close the one a positive control is for.** These are
+two different holes and a scan that returns a multi-armed verdict invites
+reading the arms as covering each other. They do not.
+
+- `assert!(untreated.is_empty())` cannot tell an empty answer from a broken
+  scan. `assert_eq!(verdict, EveryElementStatesAnOutline)` rejects **every
+  other verdict, including the ones that mean "I could not look"** — so the
+  directory-vanished case is refused by the assertion's *shape*, with no
+  extra guard and no extra test.
+- What it does not close is the asserted arm becoming **unreachable**. If the
+  function that finds offenders came to return an empty collection
+  unconditionally, the good verdict would be returned forever and nothing
+  grading the shipped content could ever say otherwise again — *a verdict of
+  "all treated" is indistinguishable from a scan that has stopped being able
+  to find an offender.* Only a control fed something it **must** report
+  separates them.
+
+Measured on the HUD's contrast-outline check, from both sides: with the
+scan's filter forced always-false, the positive control reddens alone and the
+shipped-content test **stays green**, because the shipped content really is
+all treated and a broken scan agrees with it for the wrong reason. With that
+break **and** a real defect shipping — the `outline` field deleted from a
+shipped declaration — the shipped-content test *still* passes and the control
+is the only failure in the workspace. That is the hole, measured rather than
+argued: before the control existed, a broken scan plus a missing outline
+would have shipped with everything green.
+
+Two construction rules fell out of the same check, both about telling two
+things that look alike apart:
+
+- **Read the parsed value, not the file's text.** Two of the three shipped
+  HUD declarations mention *outline* in a **prose comment** as well as in the
+  field, so a scan for the string would have gone green under precisely the
+  mutation the check exists to catch: delete the field, keep the sentence
+  explaining why the field matters. Only a parsed `Option` can tell a stated
+  field from a sentence about one. "Just grep the files" is the obvious wrong
+  simplification here.
+- **A control's expected message is written out literally, never assembled by
+  the code under test**, and it names the *file* rather than the origin's
+  absolute path, because a fixture root is a temporary directory whose path
+  differs per run. A control that built its expectation with the subject's own
+  `format!` would be the subject agreeing with itself. And a control that
+  reached its verdict by editing `content/base/` would be a test that can only
+  pass while the product is broken — the temptation is live, because the
+  shipped directory is read two functions away.
+
 **Two mutation-testing results are worth keeping as illustrations of what
 "looks correct but isn't" can survive a full green suite:**
 
@@ -290,6 +428,43 @@ offsets, and it was written *before* the mesher existed, so there was
 nothing to borrow from (invariant 5). An oracle that borrowed the mesher's
 own adjacency table would agree with a sign inversion or a swapped neighbour
 slot instead of catching it.
+
+**Stated as the general rule, because this project keeps re-deriving it:
+derive the oracle from something independent, and never derive the expectation
+from the subject.** Independence comes from the expectation arriving *from
+somewhere else*, not from its being written down twice. Four applications, the
+last two of which are the ones that look like the rule and are not:
+
+- The HUD's derived prediction re-implements the rectangle rule from the
+  content declarations and shares no code with the composition it grades
+  (`technical/rendering.md`). Merging them to remove the duplication would
+  delete the oracle.
+- A count of declared captures is taken from **two declaration constants**
+  rather than from `declared_capture_ids`, the function under test — which
+  would answer `(0, 0, 0)` against an expectation of `(0, 0, 0)` and pass
+  forever. Two constants can only go wrong by a declaration being deleted,
+  which is a different commit.
+- **A prediction that follows its input is not an oracle for that input.**
+  Deriving the HUD's *watch list* from the shipped content was right and
+  closed the deletion hole; deriving a *predicted footprint* from the same
+  declarations closes nothing about those declarations — delete a declared
+  outline and the prediction predicts no ring, the frame draws none, and the
+  two agree. The two constructions look alike and only one is evidence.
+- **A fourth restatement of a convention is not a fourth oracle; it is a
+  fourth thing to keep in step.** Asked whether a golden-id spelling deserved
+  a plain `assert_eq!(capture_id(0, "r1"), "player-walk-t000-r1")` beside the
+  three checks that already cover it, the answer was measured rather than
+  argued: corrupting that spelling reddens three tests, the strongest of which
+  compares the declared list against the **directory names committed on
+  disk** — an expectation not written in Rust at all, so it cannot drift with
+  the code. The extra assertion would have been actively **weaker**: it
+  restates the convention in the one place nothing forces to move when the
+  convention legitimately changes, so the first real rename reddens a correct
+  implementation and the cheapest green is to edit the literal. That is the
+  over-tight-assertion trap `standards/global/testing.md` §2 names, arriving
+  through an assertion somebody added for reassurance. On a *count* of
+  assertions the "then a fourth is harmless" reply is correct; the count is
+  the wrong measure, and where each expectation comes from is the right one.
 
 A fixture lesson worth keeping alongside this: a **spatially coherent**
 `terrain` heightmap is a binding constraint no test can enforce. Per-column
@@ -485,11 +660,16 @@ an unexplained golden update is a review stop (`validation-calibration.md`). `MY
 makes minting a golden a deliberate act rather than an accident — it cannot make it a *justified*
 one.
 
-**The announcement is currently lost in `mc-client`'s two golden suites, and that is a live gap.**
-`crates/mc-client/tests/support/frames.rs` builds the skip notice and then discards it, returning
-`None` for the device; both suites then early-return `Ok(())`, so under `MYCRAFT_ALLOW_NO_GPU` a run
-that rendered not one pixel reports **PASS** rather than a skip — indistinguishable in the summary
-from a run that rendered and matched, which is the exact failure this document is otherwise about.
+**The announcement is currently lost in every one of `mc-client`'s GPU suites, and that is a live
+gap that has widened.** `crates/mc-client/tests/support/frames.rs` builds the skip notice and then
+discards it, returning `None` for the device; each suite then early-returns `Ok(())`, so under
+`MYCRAFT_ALLOW_NO_GPU` a run that rendered not one pixel reports **PASS** rather than a skip —
+indistinguishable in the summary from a run that rendered and matched, which is the exact failure
+this document is otherwise about. It was two golden suites when this was written; the HUD and overlay
+work added five more binaries through the same door — the HUD prediction, the HUD golden, the
+held-block frames, the frame-path comparison and the overlay's own frames — so **eight** `mc-client`
+test binaries now share it, including the derived prediction that exists precisely to be the thing a
+golden cannot be.
 It has not bitten yet, because failure is failure **by default**: a missing adapter is a hard error
 unless the opt-in is deliberately set, and nothing in the repository or the gate sets it. That makes
 this a trap laid for the first environment without a rendering device — CI on a headless runner, a
@@ -703,9 +883,16 @@ Stated plainly, because pretending otherwise is how these get missed:
 - **Art direction and audio quality.**
 - **Whether a scripting API is pleasant to write against** — completeness is provable (the base
   game uses it), ergonomics is not.
-- **Pixel-scale correctness in the renderer.** Goldens and share-based probes verify terrain at
-  large scale; neither can see a scattered handful of pixels (`technical/rendering.md`). What is
-  left is reading the code, and a human looking at the window.
+- **Pixel-scale correctness of *terrain*.** Goldens and share-based probes verify it at large
+  scale; neither can see a scattered handful of pixels (`technical/rendering.md`). What is left is
+  reading the code, and a human looking at the window. **This no longer covers the whole frame:**
+  the content-declared HUD's 733 pixels are graded per pixel with no area budget, against a
+  prediction derived from the declarations alone. That file names the four things the prediction
+  still does not see.
+- **What a rendered readout *says*.** Nothing joins "these four lines carry the right values" to
+  "something reached pixels" — §"Nothing can tell a painted readout from a painted rectangle"
+  below. A human reading the window is the only instrument, and the section says what makes that
+  reading worth anything.
 
 ### The renderer has been visually accepted by a human — and what that does not cover
 
@@ -799,6 +986,16 @@ commit that retired checks 1, 2 and 4, and carrying them forward unchanged would
 assumption this column exists to refuse. The three checks are the only evidence these facts hold, and
 right now that evidence is one refactor old. Reset the column when the procedure is re-run, and
 record what was seen rather than what was expected.
+
+**SPEC-010's validation performed no manual acceptance and marked no exit criterion met.** That is
+recorded here deliberately, because that spec added a crosshair, a held-block swatch and a debug
+overlay to the same window these three checks are about, and because the spec folder that stated it
+no longer exists. Its validation report said so in as many words and required the statement to
+survive into this file. **Checks 3, 5 and 6 remain outstanding.** They belong to a human at the
+physical machine, nothing in that validation substitutes for any of them, and the column below is
+still one refactor old for exactly the reason the paragraph above gives. Do not read the launched-client
+measurements recorded further down this file as covering them: they observed what the client *drew*,
+and these three are about pointer capture.
 
 Checks 1 (walk with WASD), 2 (turn with the pointer, up is up and right is right) and 4 (the view
 does not turn while the cursor is free) are retired from this table: they are now
@@ -953,6 +1150,23 @@ turn on. Both cases are the same principle from two directions: an assertion is 
 geometry it is asked to distinguish, and that geometry is a constraint no assertion can enforce —
 it is held by the fixture's construction and by review.
 
+**A third case, at the smallest possible scale: a fixture whose coordinates are equal cannot see them
+swapped.** A readout scenario stands the player at `(32.0, 41.62, 32.0)` — **x equals z** — so an
+implementation printing `x {z} … z {x}` produces the byte-identical line and the assertion is blind to
+it, and the column line beside it is blind to the same swap for the same reason. What the fixture
+*does* catch is the height moving out of the middle, which is the plausible failure (a great many
+readouts lead with `y`) and is measured killing exactly one test. It was not widened, because widening
+it means inventing a scenario inside a phase against a closed set — so the blindness is stated in the
+suite's own header as well as here, since a green run cannot say it. **Two coordinates chosen equal
+for readability is a fixture decision that silently removes a falsifier**, and it is worth checking
+for whenever a fixture's numbers look tidy.
+
+**And a fixture's *symmetry* removes falsifiers the same way.** Three of the four rectangles the
+offscreen HUD fixtures assert against are vertically symmetric about the target midpoint, so they map
+to themselves under a flip and only the fourth can detect an inverted axis
+(`technical/rendering.md`). A later change to that one rectangle's extents would take the falsifier
+away with nothing going red to say so.
+
 **When two independent refusal checks discard which one fired, no assertion about the outcome can
 grade either — mutation O's lesson, one layer lower.** Deleting the block-registration check earlier
 in this same feature (mutation O) left the store's own write refusing an unknown name anyway, so both
@@ -970,6 +1184,192 @@ the scenario is written. What catches it is a **unit test** that calls the write
 matches the error variant by name — graded outside the scenario↔mutation mapping the rest of the table
 uses, and recorded as a weaker guarantee than the rest of the table for exactly that reason, not netted
 out against it.
+
+### A scenario that postdates the code it grades cannot be reddened by absence
+
+Seven scenarios of one spec were **green the moment they were written**, and each says so rather than
+disguising it. They have one thing in common: each was written *from* mutating an implementation that
+already existed — the nine-anchor placement table, the sRGB decode of a mid-tone colour, the
+wrong-kind check on an `offset` field, the shipped-content outline scan and its own positive control,
+a crosshair reaching a frame drawn before the world lands, and the observation that one frame invokes
+the composition entry point once. The scenario postdates the code, so **no skeleton could have made it
+red by absence.**
+
+Two rules held there, and both are worth stating because the alternatives are tempting:
+
+- **No RED was manufactured by committing broken production code.** That would have been a lie about
+  the order of events, recorded in git as a defect that never existed. And **no `feat:` commit was
+  due**, because what was missing was the *falsifier*, not the behaviour.
+- **Falsifiability is carried by a named mutation instead** — run by the test author and independently
+  re-run by the implementation, each reddening the new test **alone** while its neighbours stay green.
+  That second half is the load-bearing part: it is the measurement showing the new scenario grades
+  something none of the existing ones reach. A green test whose evidence is not written down anywhere
+  is indistinguishable from a vacuous one.
+
+**Relatedly: a RED report is re-measured rather than relayed, and the skeleton that produces it is
+chosen per phase.** `standards/global/testing.md` §2's "one skeleton is often not enough" was measured
+exactly here: against an *empty* skeleton, one scenario of nine passed vacuously — the one asserting
+that a frame with no HUD elements is pixel-identical to a frame with the stage not run, which a
+do-nothing pass satisfies trivially. Only a **clearing** skeleton reddens it, at all 921 600 pixels.
+The union of the two skeletons is what put every scenario red at a behavioural failure, and rebuilding
+both from the test author's description rather than trusting the reported counts is what surfaced it.
+Note also what a test run cannot see: a RED commit that fails the *docs* stage on a broken intra-doc
+link passes `cargo nextest` completely, so a RED verified by running tests alone leaves that whole
+class for the phase-boundary gate.
+
+### Nothing in this workspace runs `App`, and neither a test nor coverage will tell you
+
+**Measured, not assumed: no file outside `crates/mc-client/src/` names `App`, `redraw` or `draw`.**
+The whole windowed frame path is therefore graded by a source scan that *reads* it and never runs it.
+That has been re-measured at four sites across three specs now, and the sharp form is not the one a
+reader expects:
+
+- **Deletion is usually caught — by the lint, not by a test.** Removing a line from `App` tends to
+  make its helpers dead code, and `-D warnings` is on: deleting the held-block wiring made `swatch`,
+  `report_swatch` and `reported_swatch` dead; deleting the frame-time recording produced
+  `error: field overlay_clock is never read`. Dead-code analysis is a real backstop against removal.
+- **Wrongness is not caught at all.** Sharpen the same mutation to leave every helper used and hand
+  the frame a wrong answer, and nothing reports it. `App::swatch` resolving the held block correctly,
+  reporting an unresolved one correctly, and then **discarding the answer** leaves the whole
+  651-test workspace green *and* `cargo clippy --workspace --all-targets --all-features` clean —
+  while the window draws a crosshair and never an indicator. Recording the frame time **twice** per
+  frame leaves all 191 tests of the `mc-render` + `mc-client` suite green *and* clippy clean — while
+  the real client displays **double the true frame rate** for the whole run. `self.hud =
+  prepared.hud` deleted, so the loaded layout never reaches the running client, leaves the whole
+  645-test workspace green: a window with no crosshair in it.
+
+**Coverage cannot answer this either, and the reason is worth more than the fact.** `mc-client` and
+`mc-server` are excluded from the denominator **wholesale** (ADR-013), so a workspace coverage figure
+says nothing whatever about them — but that exclusion was never the obstacle. **"Reaches the
+product" and "is reached by a test" are different predicates.** One phase recorded eight uncovered
+lines of a clock adapter as "expected to move once the next phase wires it into `App`, where ADR-013
+does not exempt it either". The next phase wired it, and **the coverage triple did not move by a
+digit** — 5583 tracked lines, 94.21% lines, 92.20% regions, with `--show-missing-lines` naming the
+same eight. The adapter's file is counted and always was. **Coverage is produced by execution, and
+nothing executes `App`**, so wiring a line into `App` cannot cover it. The launched client executed
+those eight lines several hundred times and contributed no coverage at all, because a launch is not
+an instrumented run. Both instruments are right and they are not in tension: the launch proves the
+adapter runs; the coverage reading proves no *test* runs it. Knowingly uncovered lines from that work
+are filed as **PRO-892**, and per-file coverage costing a second full run — the gate deletes its own
+JSON — is **PRO-896**.
+
+Two working consequences:
+
+- **Put the decision somewhere counted.** This is why the HUD's rectangle derivation, its two-pass
+  composition and the whole overlay readout live in `mc-render`'s pure layer rather than in the client
+  (`technical/architecture.md`), and why the overlay's readout is derived by the session and merely
+  *forwarded* by `App`: a readout assembled field by field inside `App` could be wrong in every field
+  with the suite green. The phase that added the overlay deliberately added one field, one call and a
+  comment to that object and nothing else.
+- **Launch it and look, and treat that as evidence rather than ceremony.** Every launch recorded
+  against this feature found something no automated check could have: that the crosshair's fill is
+  exactly 17 white pixels with 40 ring pixels around it, that the swatch holds exactly two colours
+  over 576 pixels matching the held block's declared mean ± 10 per channel, and — the next section —
+  that a toggle reaching the painting is a different claim from a toggle changing session state.
+
+Closing this properly means a seam that lets a test drive one frame with no window, which is a spec of
+its own and has been asked for since this blindness was first measured. Nothing about it is a phase's
+work.
+
+### Before reporting that a product does nothing, confirm the instrument does something
+
+A launched-client check reported that pressing F3 moved **0 of 921 600 pixels**. The conclusion that
+the overlay never painted was available, plausible, and wrong: **the zero was the instrument.** The
+cause was a hand-rolled Win32 `INPUT` structure — on x64 the union begins at offset **8**, not 4, so
+the virtual-key code was written into padding and no keystroke was ever delivered. Replacing
+`SendInput` with `keybd_event`, which marshals no union, produced the real reading.
+
+**What said so was not the zero but the capture beside it**, which reproduced the previous phase's
+figures exactly: 17 white crosshair pixels, 40 black ring pixels, the swatch's two colours at 292 and
+284 occurrences, terrain at a named pixel. A capture that good could not be the thing at fault, and
+that is the whole of the reasoning. **The lesson generalises past Win32: before reporting that a
+product does nothing, confirm the instrument does something — and the confirmation has to come from a
+channel the suspected failure would not also explain.** A broken keystroke and an overlay that never
+paints are *identical* through the one channel being read.
+
+**A zero that is correct today is recorded with the condition that must change it.** An earlier phase
+measured the same F3 press at 0 of 921 600 and was right — nothing painted a readout yet — and wrote
+down its own supersede condition: a non-zero difference confined to the readout's region, with the
+terrain and all three HUD footprints byte-identical between the two frames. That turns "the next
+phase must make the overlay visible" from an instruction into a **falsifiable prior**, and it also
+tells a later reader how to interpret what they find: **a zero still standing with no newer
+measurement beside it means nobody re-ran the check, not that the overlay is hidden.**
+
+The corrected reading, at a client area of exactly 1280 × 720 so the derived footprints applied
+unchanged: **F3 moves 2517 pixels inside a bounding box of x 9..305, y 10..74, with zero moved pixels
+outside it**; a second press returns the frame to **0 of 921 600** differences — shown then hidden, in
+the windowed client, where no test can go; **all three HUD footprints and the terrain are
+byte-identical between the two frames**, which is what makes the overlay pass *additive* rather than
+destructive, and is the half of the condition that would have reported a destructive one.
+
+Three procedural notes, each of which cost something to learn:
+
+- **Capture the client area** via `GetClientRect`/`ClientToScreen`, not the screen, so what is in the
+  PNG is what the client drew.
+- **The four lines were read, and two of the four numbers cross-check each other arithmetically** —
+  `floor(32.5 / 16) = 2` against the displayed column, and `1000 / 31.25 = 32.0` against the
+  displayed frame rate. **That division is the only thing in this project that would have caught the
+  double-recording mutation above**: the screen would have shown roughly 64 fps beside a 31.25 ms
+  frame time, two numbers contradicting each other in the same four lines. It is the weakest kind of
+  verification and it was the only kind available for the readout's content. **A future readout whose
+  numbers are unrelated has no such check** — which is a reason to prefer a readout carrying a
+  redundancy over one that does not.
+- **A clean quit writes `saves/world.mcw`** (about 1 MB). `saves/` is in `.gitignore`, so
+  `git status --porcelain` stays empty with it present, and no test reads a repository-root save —
+  but delete it deliberately rather than rediscovering why. Worth noting how that entry aged: the
+  hazard was recorded accurately as "untracked and *not* in `.gitignore`", and was invalidated by the
+  commit that added the ignore rule and never revisited. **That is a different failure from a note
+  that was wrong, and the one to expect more of** — every fix ages some record of the problem it
+  fixed.
+
+### Nothing can tell a painted readout from a painted rectangle
+
+**The largest gap SPEC-010's closed scenario set leaves, measured rather than suspected.** With the
+overlay adapter painting the literal word `"mutation"` instead of the readout's four lines, **all 191
+tests of the `mc-render` + `mc-client` suite pass**. One layer grades what the four lines *say*, on
+plain values with no device anywhere near
+it; another grades that *something published* reaches pixels; **no scenario joins the two**, so a
+120 × 40 grey rectangle satisfies all three of the overlay's frame scenarios together.
+
+**It cannot be closed by a golden**, and that is a constraint rather than an oversight: no committed
+golden may hold rasterised text (ADR-017), because drivers disagree about glyph rasterisation and the
+first golden to hold one makes whatever produced it the ground truth every machine must then
+reproduce.
+
+The honest options for whoever picks it up are a **text-shaped oracle that is not a golden** — assert
+the count of distinct glyph bounding boxes, or that the painted region's width scales with the
+longest line's character count — or accepting that the readout's content is verified by a human
+reading it. Filed as **PRO-897**, with the differential design written into the issue. What stands
+today is the launch described above: a human read the four lines, and two of the four numbers
+cross-check each other. That is the whole of the evidence, and both halves of that sentence are
+meant.
+
+### What a closed scenario set leaves ungraded, and why the list is kept
+
+A scenario set is frozen before implementation, so a phase that discovers a gap **records** it rather
+than inventing a scenario mid-flight. The value of keeping the list is that each entry names a
+property a future reviewer would otherwise "simplify" on the grounds that a green suite covers it —
+and none of these is covered by anything. From SPEC-010, every row measured:
+
+| Ungraded property | What was measured | Owner |
+|---|---|---|
+| The overlay's readout **content** | An adapter painting a fixed string passes all 191 tests of the `mc-render` + `mc-client` suite | PRO-897 |
+| The frame ring's **capacity and eviction** | A ring of one passes; the eviction line is also uncovered — a non-biting mutation and an uncovered line, two instruments sharing no code, agreeing | PRO-895 |
+| An **untimed** overlay's frame rate | Dividing by zero instead of reading zero passes: no scenario reads the frame lines of an overlay that has timed nothing, so a client showing the overlay before two frames are drawn would read `frame rate  inf fps` | PRO-895 |
+| "One reading is not a frame time" | The driven clock is advanced by exactly one interval before the first reading, so an interval measured from clock-*construction* happens to equal it | PRO-895 |
+| Overlay **legibility** | Stock grey 140 over bare terrain: legible against sky, marginal against bright ground. Within spec — the contrast rule governs *content* elements — and not fixed mid-flight | PRO-898 |
+| The overlay's **determinism settings** | Restoring dithering passes, because the oracle compares the overlay's own pixels across two frames and dithering is deterministic in value and position, so it cancels | ADR-017 |
+| A **binding table** that compares keys vs one that lists the pairs it expects | Indistinguishable to every scenario, because none binds the toggle outside the two keys it is tested at. The better form was taken on code-quality grounds. **The day the toggle is bindable to a letter key, this is the line that has to be right** | — |
+| The shipped elements' **contrast outline** | Covered only by a content assertion over the parsed declarations; every frame assertion is a frame-to-frame equality a missing ring satisfies on both sides | — |
+| The HUD pass's **destination alpha**, an outline drawn as a ring rather than a solid, the zero-height early return, the one-pixel extent floor | Each measured green under its own mutation; all four recorded in `technical/rendering.md` beside the rule they belong to | — |
+
+Two of these are worth reading as a pair rather than as separate rows: **the frame ring's eviction
+executed for the first time in a launched client that ran roughly 450 frames against a ring of
+sixty** — so the eviction genuinely runs in the product, and always did. That was never the doubt.
+The doubt is that **nothing grades what the eviction does**, and a line executing incidentally inside
+a launch nobody asserts against is the weakest evidence available. The same line is *still* reported
+as uncovered, because a launch is not an instrumented run. A reader meeting either fact — the line
+ran; the line is uncovered — has met neither the issue nor its answer, and PRO-895 stays open.
 
 ### Persistence: a second entry point onto a tested path is untested until something asserts through it
 
@@ -992,6 +1392,19 @@ Each was found by deliberately mutating the shipped code and watching the existi
 asks for and which the general rule above generalises: a function correct for its first caller can
 still be silently wrong for its second, and the only way to know is a test that goes through the
 second caller, not the first.
+
+**A fifth instance, one level up, and the fix was structural rather than another test.** A frame test
+that composed the HUD through a path the windowed client never takes would verify a composition the
+product does not perform — the same failure wearing a different hat. So there is exactly **one**
+composition entry point, the client calls it and nothing else, a source scan asserts the client's frame
+path names no other HUD drawing, and an offscreen test drives that entry point and watches its own
+invocation counter go 0 → 1 (`technical/architecture.md` §"The HUD"). The same shape reappeared once
+more at the level above *that*, and was **not** closed: the three frozen terrain goldens go through
+the terrain-only call while the client draws through the frame call, so the terrain set no longer
+traverses the client's exact frame path. What covers the product path is the **pair** of golden sets —
+the HUD capture is shot through the client's own frame call, and a separate assertion pins that the HUD
+writes no pixel outside its declared footprints. Neither set alone covers it, which is why neither is
+retired in favour of the other (`technical/rendering.md`).
 
 ### A verification no test can perform: `sync_all()`
 
@@ -1039,6 +1452,21 @@ mutation is spelled against a *specific value*, check that the value can bite: r
 with a **non-solid** block emits no quad and leaves every rendering scenario green, so the same
 mutation spelled against a solid block is the one that grades four scenarios instead of two. A single
 row claiming both spellings would claim four falsifiers and deliver two.
+
+**A third rule, from the same family and a different instrument: a caller search cannot see an
+unexercised branch inside a function that *is* called.** A claim that "nothing runs this code" was
+made from a text search for callers, and reported a set of nine uncovered lines as eight. The missing
+one was a ring buffer's eviction — inside a function every scenario calls, on a branch that needs a
+sixty-first frame when no scenario drives ten. Per-file coverage found it; no text search could have.
+**When the claim is "nothing runs this", a text search answers it for a whole item and only a coverage
+reading answers it for a branch.** Recorded as an error of *method* rather than of fact, because the
+same search will be reached for again.
+
+The other half is what makes the correction valuable rather than embarrassing: that same eviction was
+already a **non-biting mutation** in the phase's own table. A mutation that did not bite and a line no
+test reached are the same finding arriving through two mechanisms that share no code, and **two
+independent instruments agreeing is worth more than either on its own** — which is also why a
+non-bite is recorded rather than dropped.
 
 **Mutual controls are demonstrated, not asserted.** Two scenarios of that feature — every cell above
 the surface holds nothing, every cell at or below it holds a block — are each other's control, and

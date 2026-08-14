@@ -67,6 +67,41 @@ pub struct ColumnCoordinate {
     pub z: i32,
 }
 
+/// Which column holds the voxel a player standing at `x`, `z` is inside.
+///
+/// **Two scalars rather than a vector**, because this crate has no vector library
+/// and must not gain one for a division: the caller destructures whatever it
+/// holds. It lives here because both facts it needs — how wide a section is, and
+/// what a column coordinate is — are here.
+///
+/// **Floored, never truncated.** Half of any world sits at a negative coordinate,
+/// and truncation walks toward zero: at `x = -0.5` it answers column 0, which is
+/// the column on the far side of the origin. Nothing about that failure is loud —
+/// the coordinate is plausible, it is merely the wrong one.
+///
+/// The conversion back to an integer saturates rather than wrapping, which is
+/// defined behaviour for a coordinate no world reaches.
+#[must_use]
+pub fn column_containing(x: f32, z: f32) -> ColumnCoordinate {
+    ColumnCoordinate {
+        x: column_of(x),
+        z: column_of(z),
+    }
+}
+
+/// Which column one axis's coordinate falls in.
+///
+/// Both axes go through it rather than each spelling the division, because the
+/// two are the same fact about a square column and a copy is a second place the
+/// floor could be dropped from.
+fn column_of(coordinate: f32) -> i32 {
+    // A float division, so `clippy::integer_division` is not the rule being
+    // stepped around: what is wanted here is the fractional part, and the floor
+    // below is what discards it in the one direction that stays correct at a
+    // negative coordinate.
+    (coordinate / SECTION_SIZE as f32).floor() as i32
+}
+
 /// Sixteen sections stacked at one coordinate.
 ///
 /// The array is what makes "a column has sixteen sections" a fact about the type

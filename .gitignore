@@ -48,3 +48,6 @@ perf.data*
 
 # Conductor working notes (untracked scratchpad)
 .claude/pm/
+
+# A clean quit writes the world here. A runtime artifact, never source.
+saves/

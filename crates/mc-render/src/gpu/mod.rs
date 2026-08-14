@@ -32,6 +32,9 @@
 
 mod buffers;
 mod depth;
+mod hud;
+mod hud_pass;
+mod overlay;
 mod pipeline;
 mod readback;
 mod record;
@@ -47,7 +50,10 @@ use crate::texture::TextureLayers;
 
 use buffers::SceneBuffers;
 use depth::DepthAttachment;
+use hud_pass::ArrayTexture;
 use pipeline::Pipelines;
+
+pub use hud::{FrameRenderer, FrameSnapshot};
 
 /// Everything one frame is recorded into and through.
 ///
@@ -145,6 +151,20 @@ impl TerrainRenderer {
         layers: &TextureLayers,
     ) -> Result<(), RendererError> {
         self.buffers.write_textures(queue, layers)
+    }
+
+    /// The array texture this pass samples, for a second pass that has to sample
+    /// the same texels.
+    ///
+    /// Private to this module and the passes under it, and lent rather than
+    /// handed over: the HUD's swatch of a block must be the texture that block is
+    /// drawn with, and the only way to guarantee that is for there to be one array
+    /// texture rather than two filled from the same layers.
+    const fn array_texture(&self) -> ArrayTexture<'_> {
+        ArrayTexture {
+            view: &self.buffers.texture,
+            sampler: &self.buffers.sampler,
+        }
     }
 
     /// Uploads a scene's vertices and section table.

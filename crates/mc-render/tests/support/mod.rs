@@ -27,6 +27,9 @@
 // Each test binary links this whole module and uses a subset of it.
 #![allow(dead_code)]
 
+pub mod frame;
+pub mod hud;
+
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::sync::Arc;

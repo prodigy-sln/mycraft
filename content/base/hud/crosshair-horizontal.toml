@@ -1,0 +1,18 @@
+# The crossbar of the crosshair the base game ships.
+#
+# Two files rather than one, because the engine knows a filled rectangle and not
+# a crosshair: the shape is composed here, in content, from two crossing bars.
+#
+# Nine units by one, centred. `ui-design.md` §5 reserves the screen centre for
+# the crosshair, and one UI unit is one physical pixel at a target height of 720,
+# so this is a nine-pixel hairline there and scales with the window.
+#
+# The outline is the §2 contrast treatment, and it is not decoration: the world
+# behind this bar is any colour and it moves, so a white bar alone would vanish
+# against snow and a black one against an unlit cave.
+name = "base:crosshair-horizontal"
+anchor = "center"
+size = [9, 1]
+draw = "fill"
+color = "#FFFFFFFF"
+outline = "#000000FF"

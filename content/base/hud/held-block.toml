@@ -1,0 +1,21 @@
+# The swatch showing which block a placement would put down.
+#
+# `draw = "block-texture"` names a drawing capability rather than a thing: the
+# engine knows how to paint a rectangle with a block's texture, and it is this
+# file that says the base game wants one, that big, down there. `source` names
+# the one live value the engine publishes to content, and content may name it
+# but not compute with it.
+#
+# Twenty-four units square, anchored bottom-centre. `ui-design.md` §5 reserves
+# the screen centre for the crosshair, so the swatch sits on the safe-area box's
+# bottom edge with its free axis centred on the target.
+#
+# The outline is the §2 contrast treatment, for the reason the crosshair's is:
+# the world behind this square is any colour and it moves, and a block texture
+# has no border of its own to separate it from whatever it is drawn over.
+name = "base:held-block"
+anchor = "bottom"
+size = [24, 24]
+draw = "block-texture"
+source = "held-block"
+outline = "#000000FF"

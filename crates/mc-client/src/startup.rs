@@ -18,6 +18,8 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use mc_core::block::{BlockRegistry, RegistryError};
+use mc_core::hud::source::InMemoryHudSource;
+use mc_core::hud::{HudLayout, HudLoadError, HudOrigin};
 use mc_core::id::{BlockName, NamespacedIdError, TextureKey};
 use mc_render::geometry::scene::{SceneError, SceneGeometry};
 use mc_render::geometry::{GeometryError, SectionOrigin, build_section_geometry};
@@ -27,7 +29,7 @@ use mc_sim::action::default_held_block;
 use mc_sim::persistence::{LaunchError, simulation_at_launch};
 use mc_sim::replay::{PrepareError, ReplayWorld, SectionQuads, WorldGenError, mesh_all};
 use mc_sim::simulation::Simulation;
-use mc_world::content::TomlFileDefinitionSource;
+use mc_world::content::{TomlFileDefinitionSource, TomlFileHudSource};
 use mc_world::persistence::{Acceptance, LoadError};
 use thiserror::Error;
 
@@ -71,6 +73,11 @@ const LOAD_CHANGED_BLOCKS: &str = "--load-changed-blocks";
 /// it before — [`prepare_scene`] computed it, packed it and dropped it — and a
 /// second whole-world mesh to recover it would be both slow and a second answer
 /// to a question the first one already answered.
+/// The HUD elements the same content root declared are carried for a fourth
+/// reason: they are read here, beside the blocks, because both are what the
+/// shipped content says and neither is something the frame path may decide. The
+/// layout is shared rather than handed over so that the composition a frame
+/// performs and the declarations a run was started with cannot be two things.
 #[derive(Debug)]
 pub struct PreparedScene {
     pub scene: SceneGeometry,
@@ -78,6 +85,7 @@ pub struct PreparedScene {
     pub meshed: Vec<SectionQuads>,
     pub world: ReplayWorld,
     pub registry: Arc<BlockRegistry>,
+    pub hud: Arc<HudLayout>,
 }
 
 /// The worker preparing the replay, until there is a window to draw what it
@@ -113,6 +121,21 @@ pub enum PreparationError {
     NoContentRoot { root: PathBuf },
     #[error("the shipped content could not be read")]
     Content(#[from] RegistryError),
+    /// The content root's HUD declarations were refused.
+    ///
+    /// **This stops the launch rather than degrading it**, which is the same
+    /// trade every variant here makes and is worth stating because the obvious
+    /// alternative — start anyway, with no HUD — is the one that costs a player
+    /// the most. A window that opens with a silently missing crosshair tells
+    /// nobody why; a refusal quoting the file, the element and the field tells a
+    /// content author exactly what to fix. There is no error screen and no
+    /// HUD-less mode to fall back to.
+    ///
+    /// The refusal underneath already names all three, so this adds no sentence
+    /// of its own: a message restating what its cause says would be a second
+    /// place for the two to disagree.
+    #[error("the shipped HUD declarations could not be read")]
+    Hud(#[from] HudLoadError),
     #[error("the replay world could not be generated")]
     WorldGen(#[from] WorldGenError),
     #[error("the replay world could not be meshed")]
@@ -306,6 +329,11 @@ pub fn prepare_scene(root: &Path) -> Result<PreparedScene, PreparationError> {
     let mut registry = BlockRegistry::new();
     registry.apply(&TomlFileDefinitionSource::new(root.to_owned()))?;
 
+    // Read from the same root and refused the same way, because a crosshair the
+    // content declares is content exactly as a block is. A fault here fails the
+    // preparation rather than being noted and skipped: see `PreparationError::Hud`.
+    let hud = HudLayout::load(&TomlFileHudSource::new(root))?;
+
     let world = ReplayWorld::generate(mc_sim::REPLAY_SEED, &registry)?;
     let meshed = mesh_all(&world, &registry)?;
     let layers = TextureLayers::resolve(&texture_keys(&meshed)?);
@@ -316,6 +344,7 @@ pub fn prepare_scene(root: &Path) -> Result<PreparedScene, PreparationError> {
         meshed,
         world,
         registry: Arc::new(registry),
+        hud: Arc::new(hud),
     })
 }
 
@@ -369,4 +398,31 @@ fn texture_keys(meshed: &[SectionQuads]) -> Result<BTreeSet<TextureKey>, Namespa
 /// drawn.
 pub fn empty_scene() -> Arc<SceneGeometry> {
     Arc::new(SceneGeometry::default())
+}
+
+/// What the frame path composes until the worker above lands: the HUD of a
+/// client that has not read its content yet.
+///
+/// **Built through the loader rather than constructed**, and that is not
+/// ceremony. [`HudLayout::load`] is the only door into a layout precisely so
+/// that no engine can put an element into one from Rust; a `Default` here would
+/// be a second door, and the invariant that the base game holds no privilege a
+/// mod lacks would then rest on nobody using it. A source declaring nothing is a
+/// valid, empty answer, which is the one place HUD loading diverges from block
+/// registration.
+///
+/// # Errors
+///
+/// Returns [`HudLoadError`] if a source declaring nothing is ever refused —
+/// which is the one thing HUD loading is specified never to do. It is an error
+/// rather than a panic for the reason [`SetupError::FormatVanished`] is: this
+/// runs on a player's startup path, and a client that cannot start should say so
+/// rather than abort.
+///
+/// [`SetupError::FormatVanished`]: crate::surface_setup::SetupError::FormatVanished
+pub fn empty_hud() -> Result<Arc<HudLayout>, HudLoadError> {
+    Ok(Arc::new(HudLayout::load(&InMemoryHudSource::new(
+        HudOrigin::new("a client that has not read its content yet"),
+        Vec::new(),
+    ))?))
 }

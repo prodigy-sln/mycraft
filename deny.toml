@@ -48,9 +48,34 @@ allow = [
     "OpenSSL",
 ]
 
-# No per-crate exceptions yet. Add them here only when a crate's license is
-# acceptable for a reason that does not generalise — an exception is a decision
-# about one dependency, not a hole in the allowlist.
+# Per-crate exceptions. Add them here only when a crate's license is acceptable
+# for a reason that does not generalise — an exception is a decision about one
+# dependency, not a hole in the allowlist.
+
+# The four fonts egui bundles for its debug UI. Its license is
+# `(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0`: the code half is already
+# allowed above and the two font licenses are ANDed onto it, so no choice of
+# branch reaches them and only an exception can.
+#
+# Why this is the narrow answer rather than a global `OFL-1.1` entry: a font
+# license does not generalise to code. OFL and the Ubuntu Font Licence govern
+# redistributing and modifying *typefaces* — reserved font names, and derivative
+# fonts carrying the same terms. Allowing them workspace-wide would silently admit
+# any future crate under them on the strength of a decision made about four .ttf
+# files, which is exactly the hole this file's rule exists to keep shut.
+#
+# Why the license is admitted at all rather than avoided: the debug overlay
+# renders text, and this repository ships no font. Verified 2026-08-14 with a
+# scratch resolve — `egui = { default-features = false }` removes this crate from
+# the lock (156 → 155 packages) and licenses pass, but `FontDefinitions::default()`
+# is then `empty()`, so the overlay would lay out its four lines and rasterise
+# nothing. Vendoring a font instead would move the same obligation somewhere
+# cargo-deny cannot read: a .ttf in this tree is not a crate, so no gate stage
+# would ever check it again. The dependency is a build-and-ship input, not
+# authored content, and the overlay is hidden-by-default tooling no player sees.
+[[licenses.exceptions]]
+name = "epaint_default_fonts"
+allow = ["OFL-1.1", "Ubuntu-font-1.0"]
 
 # ── Bans ───────────────────────────────────────────────────────────────────────
 [bans]

@@ -17,6 +17,7 @@
 
 pub mod assembled;
 pub mod handbuilt;
+pub mod hud;
 pub mod persistence;
 
 use std::collections::BTreeSet;

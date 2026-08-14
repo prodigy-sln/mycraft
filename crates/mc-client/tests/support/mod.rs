@@ -33,16 +33,31 @@
 // Each test binary links this whole module and uses a subset of it.
 #![allow(dead_code)]
 
+/// Content roots built from the shipped one, for scenarios about what a root
+/// declares and about what it stops declaring.
+pub mod content;
 /// Rendering one tick of the replay offscreen, at the declared capture size.
 pub mod frames;
 /// Judging a rendered capture against a committed golden, shared by the two
 /// golden binaries so the mint path and the verify path cannot differ.
 pub mod goldens;
+/// Rendering one tick of the replay with a HUD over it, through the frame call
+/// the windowed client makes.
+pub mod hud_frames;
 /// An independent prediction of what the player's camera sees, marched through
 /// the world's own voxels.
 pub mod oracle;
+/// Rendering one waiting frame with the debug overlay's readout over it, in the
+/// one fixture module that may carry a readout and shoots no golden.
+pub mod overlay_frames;
+/// An independent prediction of where a content root's HUD declarations land and
+/// what they paint, sharing no code with the composition it judges.
+pub mod prediction;
 /// Assertions about a captured frame that come from nowhere near the renderer.
 pub mod probe;
+/// Reading a rendered swatch against the colours the texture behind it is made
+/// of.
+pub mod swatch;
 
 use std::error::Error;
 use std::path::{Path, PathBuf};

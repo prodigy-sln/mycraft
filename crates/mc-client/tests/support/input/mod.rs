@@ -40,8 +40,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use mc_client::events::{dispatch_device_event, dispatch_key, dispatch_window_event};
-use mc_client::session::{PointerAsk, Session, ending_after_saving};
+use mc_client::session::{Bindings, PointerAsk, Session, ending_after_saving};
 use mc_core::id::BlockName;
+use mc_render::overlay::OverlayReadout;
 use mc_render::window::{CaptureState, Ending};
 use mc_sim::action::EditReport;
 use mc_sim::simulation::{SimSnapshot, Simulation};
@@ -76,6 +77,24 @@ impl InputHarness {
     #[must_use]
     pub fn started() -> Self {
         Self::granting(&[CaptureState::Locked])
+    }
+
+    /// The same, with the client deciding what `bindings` says rather than what
+    /// the declared table does.
+    ///
+    /// **The bindings arrive already built and are never inspected here.** A
+    /// harness that spelled which key means what would be translating on the
+    /// client's behalf, and the table it was supposed to be watching would have
+    /// nothing left watching it — which is the failure the sibling text guard
+    /// exists to keep out of this directory. What is handed over is an opaque
+    /// value a scenario constructed.
+    #[must_use]
+    pub fn bound(bindings: Bindings) -> Self {
+        let (platform, log) = RecordingPlatform::granting(&[CaptureState::Locked]);
+        Self {
+            session: Session::bound(Box::new(platform), bindings),
+            log,
+        }
     }
 
     /// Puts a player on the declared ground plane and hands it to the session.
@@ -187,6 +206,43 @@ impl InputHarness {
         let _ = dispatch_window_event(&mut self.session, &WindowEvent::Focused(false));
     }
 
+    /// The block a place request over this run would name, as the client's own
+    /// core reports it.
+    ///
+    /// Forwarded and nothing more, for the reason every other method here is:
+    /// what the client holds is the client's answer, and a harness that
+    /// remembered what it handed over would agree with itself while the core
+    /// reported nothing at all.
+    #[must_use]
+    pub fn held_block(&self) -> Option<BlockName> {
+        self.session.held_block()
+    }
+
+    /// Whether the client is showing its debug overlay, as the client's own core
+    /// reports it.
+    ///
+    /// Forwarded and nothing more, for the reason every other method here is: a
+    /// harness that remembered which keys it had dispatched and worked the answer
+    /// out would agree with itself while the client showed nothing at all.
+    #[must_use]
+    pub fn overlay_visible(&self) -> bool {
+        self.session.overlay_visible()
+    }
+
+    /// What this client's overlay publishes for whoever paints it, as the
+    /// client's own core answers it.
+    ///
+    /// **Forwarded and never assembled**, for the reason every other method here
+    /// is one call: a harness that decided when there is a reading to publish, or
+    /// what it holds, would agree with itself while the client published nothing
+    /// — and a frame drawn from the answer would be a frame of a client that does
+    /// not exist. Nothing here constructs a readout; this is the client's own,
+    /// carried.
+    #[must_use]
+    pub fn overlay_readout(&self) -> Option<OverlayReadout> {
+        self.session.overlay_readout()
+    }
+
     /// One tick step, and whatever it left published.
     ///
     /// `None` when no world has been started: a tick step with nothing to
@@ -228,6 +284,17 @@ impl InputHarness {
     /// thing to describe.
     pub fn edits(&mut self, ticks: u32) -> Vec<EditReport> {
         (0..ticks).filter_map(|_| self.edit()).collect()
+    }
+
+    /// One tick step, and **both** halves of what it left behind: what the action
+    /// it carried did to the world, and whatever the simulation published.
+    ///
+    /// [`tick`](Self::tick) drops the report and [`edit`](Self::edit) drops the
+    /// snapshot, so a scenario about the whole resulting state of a run cannot use
+    /// either — asking for both would take two tick steps and compare a run
+    /// against a different run. This is one step, reported whole.
+    pub fn step(&mut self) -> (Option<EditReport>, Option<Arc<SimSnapshot>>) {
+        (self.session.tick(), self.session.latest())
     }
 
     /// The captures the platform was asked for, in order.

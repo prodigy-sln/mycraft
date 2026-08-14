@@ -586,6 +586,239 @@ draw from one indirect draw**: a per-section CPU loop that reported `1` would
 satisfy any assertion over that field. The single-draw property rests on the draw
 path being built this way, not on a test that could catch its loss.
 
+## The HUD pass
+
+A frame is **three passes in one call**: terrain (cleared, depth-tested),
+then the content-declared HUD, then the debug overlay when one is supplied.
+The second and third both use `LoadOp::Load` on colour and **no depth
+attachment**, so each is additive over what is already there —
+which is what makes "content cannot obscure the overlay" a property of the
+pass order rather than a check
+(`technical/architecture.md` §"The HUD", `modding/hud.md`).
+
+The HUD pass is **one instanced draw whatever the layout holds**: a rectangle
+is an instance, its corners come from the vertex index, and nothing is read
+from a vertex buffer. It binds **one uniform and zero storage buffers**, so
+the four-per-stage budget above is untouched. `cull_mode: None` —
+a screen-space quad has no back to face away from the camera, and a cull mode
+would turn a winding mistake into an element that silently does not draw.
+
+**The pass is recorded even when the plan is empty, and a zero-instance draw
+is issued. That is a falsifiability decision, not a performance one.** With
+an early return on an empty plan — the obvious optimisation, one pass cheaper
+per frame — a pass that *cleared* the colour attachment instead of loading it
+would leave the one assertion about "the HUD stage did nothing" green:
+measured, a clearing pass alone reddens it at all 921 600 pixels, and a
+clearing pass plus that early return does not redden it at all. The early
+return, not the load op, would then be what preserved the picture.
+
+**A layout of more than 256 rectangles loses the ones past the ceiling,
+silently.** `MAX_HUD_RECTS` is the uniform's array length, the first 256 are
+taken, and no error variant reports it. An element contributes one rectangle
+for its fill plus four for its ring, so `content/base/`'s three elements
+cannot reach it; a third-party mod's HUD could. Revisit when one does, at
+which point the answer is a storage buffer rather than a bigger uniform.
+
+### The rectangle derivation, pinned
+
+Target `W × H`, `scale = H / 720.0`, `round` = half away from zero:
+
+- `w = max(1, round(size.x × scale))`, and the same for `h`.
+- `ox = round(offset.x × scale)`, `oy = round(offset.y × scale)`; +x right, +y down.
+- `inset_x = round(0.05 × W)`, `inset_y = round(0.05 × H)` — **per axis, from
+  that axis's own extent**. At 1280×720 that is 64 and 36.
+- `center` is centred on `(W/2, H/2)` and is **not** inset. Every other
+  anchor puts its named edges on the safe-area box and centres its free axis
+  on the target.
+- Origin from a centre `c` and extent `e` is `left = round(c − e/2)` — not
+  `round(c) − round(e/2)`, which is a distinct and wrong answer for an odd
+  extent.
+- `H == 0` yields an empty plan and no error.
+- Every rectangle is intersected with `0..W × 0..H` after offsetting, so
+  nothing is written outside the target and nothing wraps to the opposite
+  edge.
+- An outline is one UI unit thick, scaled by the same `max(1, round(·))` rule.
+
+**Three of those rules are graded by nothing, and a later simplification
+should know which.** The one-pixel floor never fires on its own numbers — at
+640×360 the scale is 0.5 and a declared height of 1 gives `round(0.5) = 1`
+by half-away-from-zero *before* the floor is consulted, so `max(1, …)` can be
+deleted outright with the whole suite green; what the small-target scenario
+actually grades is the rounding *direction*. The `H == 0` early return cannot
+be told from its absence by any observable, because a scale of 0 floors every
+extent to one pixel and the clip to `0..0` then drops every rectangle anyway;
+it is kept because a render pass over a zero extent is a validation error
+rather than a frame nobody sees. And "a free axis centres on the target, not
+on the safe-area box" is a distinction with **no** difference at any target
+size: the box is `inset .. span − inset`, so its centre is `span/2`
+identically. That last one is pinned so two independent implementations agree
+on a spelling, and it carries no evidence either way — nothing that agrees
+with it has verified anything.
+
+### Outlines compose as a ring, in their own prior pass
+
+Pass 1, file-name sorted: for every element declaring an outline, the four
+strips of (expanded rectangle − fill rectangle), in the outline colour. Pass
+2, file-name sorted: every fill.
+
+**One pass would let a later element's outline cut a black notch through an
+earlier element's fill** — which is exactly what the two crossing bars of the
+base crosshair would do to each other. This is not polish; with a single pass
+the shipped crosshair is visibly wrong.
+
+**A ring rather than a solid rectangle under the fill**, because a translucent
+fill over a solid under-rectangle would blend against its own outline colour
+instead of the scene, and whether an element declared an outline would then
+change what its own alpha means. Recorded honestly: replacing the four strips
+with one solid expanded rectangle keeps the whole suite green, because no
+fixture declares both an outline and a translucent fill. The rule is kept
+because the day a mod declares one the difference is visible, not because
+something measures it.
+
+**An element whose paint does not resolve composes nothing at all, ring
+included.** Each element's paint is resolved once, before either pass, and
+both passes iterate only what resolved — one list rather than two opinions.
+This came from a real defect: with the outline treated as a property of the
+rectangle rather than of what fills it, the held-block swatch drew a black
+26 × 26 ring around nothing at bottom-centre for every frame before the world
+landed — exactly **100** pixels, which is `26² − 24²`. **The rule is keyed on
+the paint being unavailable and never on clipping**: an element pushed off the
+target still has a fill and still rings as far as the target reaches.
+
+### Alpha composites in linear space, and the expected byte is derived
+
+The colour target is `Rgba8UnormSrgb`, so the blend hardware decodes the
+destination to linear, blends, and re-encodes on write. Declared colours are
+converted with `mc_render::color::srgb8_to_linear` on the CPU and handed to
+the shader as linear floats — the identical discipline this file records for
+clear colours. **Alpha is not a colour and passes through undecoded.**
+
+Computed, never read back from a frame: `#FFFFFF80` over `#000000FF` is
+`α·1.0 + (1−α)·0.0` at `α = 128/255`, giving linear **0.50196**, which
+sRGB-encodes to **0.7366469 → 187.845 → byte 188**. Not the 128 that reading
+the hex digits suggests; the gap is ΔE 22.66, which no tolerance reaches.
+
+**This is the second time this project has met this exact edge in a shipped
+path, and the first — the clear colour, above — is why the second was caught
+before it did damage.** The scenarios covering this blend were first drafted
+expecting 128, and **they would have gone red against a correct renderer**;
+the cheapest way to green them is to skip the sRGB decode of the declared
+colour, which is precisely the "plausible-looking, wrong in the same
+invisible direction everywhere" defect the clear-colour paragraph describes,
+arriving through a test instead of through the renderer. Deriving the
+expected byte from `α` and the two declared colours is what separated the two
+readings.
+
+**Byte 188 means two opposite things here, so it is never a verdict on its
+own.** For a 50%-white-over-black blend it is the *correct* answer. For a
+fully opaque `#808080FF`, whose correct answer is **128**, byte 188 is the
+signature of a *missing* sRGB decode — the same arithmetic arriving from the
+other direction, since an un-decoded 128 hands the shader the same 0.50196
+that blend produces legitimately. Which one a 188 means depends entirely on
+which fixture produced it.
+
+**Only a mid-tone fixture can grade the decode at all**, which is worth
+knowing before writing another colour assertion: **0 and 255 are fixed points
+of the sRGB transfer function**, so at those two bytes a correct decode and a
+bare `channel / 255` produce the identical linear value and the identical
+pixel. Every colour the base HUD and most of its fixtures declare is built
+from those two bytes alone, and against them `srgb8_to_linear` can be deleted
+from the HUD path with everything green. `decode(128/255)` is linear
+**0.2158605**, which the target re-encodes to byte **128.000**; skipping the
+decode renders **188**. Sixty bytes apart. The one assertion that grades this
+declares `#808080` and expects `#808080`, which reads as a tautology and is
+not: the identity is the *result of two inverse operations* and fails the
+moment either goes.
+
+### The swatch borrows the terrain's own array texture
+
+A `block-texture` element samples the **terrain's** array texture and sampler
+(`Nearest`, `Repeat`), lent through a private accessor, rather than
+allocating a second array filled from the same layers: a swatch of a block
+has to be the texture that block is drawn with, and two arrays are two
+answers waiting to disagree. The view outlives every upload into it, so a
+bind group built once stays valid.
+
+A rectangle carries its array layer as a third vector component, **negative
+for a flat fill** — the shader compares against zero, so one component
+carries both the question and the answer. The shader **samples
+unconditionally and `select`s** rather than sampling inside the branch:
+`textureSample` computes its own derivatives and wants uniform control flow,
+and while a per-instance layer *is* uniform across a triangle, that is a fact
+about the data rather than one the compiler must accept.
+
+Two things about a textured rectangle are read by nothing today. The colour
+it carries in the uniform is given opaque white and the shader `select`s the
+sampled texel over it, so any value would render identically — white is
+chosen so that the day it becomes a tint it is a neutral one rather than a
+value that would annihilate the swatch. And the **alpha the pass writes to
+the colour attachment** is graded by nothing: overwriting the destination
+alpha rather than accumulating coverage keeps everything green, because every
+colour assertion drops the alpha channel and every whole-pixel comparison is
+over regions the HUD did not paint. Invisible in an offscreen capture; a
+presented surface is where a destination alpha of 0.5 can reach a compositing
+window manager.
+
+### The HUD's derived prediction, and why the duplication is the oracle
+
+The rectangle derivation above is written **here**, in a document, rather than
+in either of the two places that implement it — because the frame assertions
+about the shipped crosshair and swatch are graded by a **predictor computed
+from the content declarations alone**, sharing no code with
+`mc_render::hud`. If either implementation were the other's source, the
+prediction would follow the thing it grades. This has an exact precedent one
+section up: `Frustum::admits` and the WGSL frustum test are the same maths
+written twice, deliberately, because merging them would delete the oracle.
+
+The prediction is in fact derived **three** times, and the third is what
+checks the second: this document's rule, the predictor over the parsed
+declarations, and a hand derivation of the six rectangles at 1280×720 in the
+test's own header. Every scenario refuses to run unless the second and third
+agree at all three elements *and* the footprint union comes to **733**
+pixels. A defect in the predictor is therefore caught by the hand derivation
+rather than shared with the code it grades — the property that would be lost
+the day somebody merges the predictor with `mc_render::hud::compose` to
+remove the duplication.
+
+**The standing hazard that independence buys, stated because nothing
+mechanical prompts it:** the predictor keeps its **own copy** of the outline
+thickness constant. Measured — with the renderer at two units and the
+predictor at one, the per-pixel colour assertion stays **green** (a ring drawn
+two pixels thick still paints black at every position a one-pixel ring would
+have) and only the area-based assertions redden. So the day an outline
+thickness legitimately changes, the predictor's constant has to be updated by
+hand, or the per-pixel check goes on grading positions that are no longer the
+ones drawn. Deriving it from the renderer would close this and would delete
+the oracle, so it is not closed. Same shape as the retired-name hole in
+`technical/architecture.md`: the entry belongs to the commit that makes the
+change.
+
+### The HUD's capture id
+
+`mc_render::capture` declares `HUD_CAPTURE_TICKS = [0]` and
+`hud_capture_id(tick, revision)`, and `declared_capture_ids` returns terrain
+ids ++ HUD ids — four directories. **`SCENE_REVISION` was not bumped**:
+nothing about the mesh contract changed, and bumping would have renamed and
+forced a re-shoot of exactly the frames being preserved.
+
+**One HUD golden, at tick 0, not three.** The HUD does not animate and the
+held block is set once, so ticks 59 and 119 would assert the same rectangles
+a third time against different terrain. Tick 0 is the frame with the least
+terrain coverage (77.91%, measured below), so the crosshair stands against
+the most sky.
+
+**The three committed terrain goldens were not re-shot, and did not move.**
+They were minted against a terrain path an independent ray-marched oracle had
+already judged at 441/544/542 sample pixels with zero disagreements;
+re-shooting would replace references with that provenance by references whose
+provenance is "the day the HUD landed", and would hide any terrain regression
+introduced in the same commit. Freezing them makes the merge condition a
+**zero-byte diff** under `crates/mc-render/goldens/player-walk-t*/`, which is
+a stronger statement than a re-shoot can make. Any movement there is a stop,
+not a cost. The honest price is recorded in the re-shoot section below: the
+terrain set no longer traverses the client's exact frame call, and only the
+pair of sets covers the product path.
+
 ## Re-shooting a golden set
 
 The committed goldens live in `crates/mc-render/goldens/<capture-id>/`, one
@@ -595,8 +828,14 @@ directories may exist, and `crates/mc-render/tests/golden_inventory.rs` fails
 when the set on disk is not exactly that list — a stale directory left behind
 by a previous scene revision is as much a defect as a missing one.
 
-**Regenerate through `terrain_goldens` and nothing wider. A run that reaches
-`golden_mismatch` with the opt-in set corrupts the set.**
+Two sets stand under that root and they are shot through different calls: the
+three `player-walk-t*` captures through `record_terrain`, and
+`player-walk-hud-t000-r1` through `record_frame`, the one frame call the windowed
+client makes. Only the pair covers the path the product draws through, so neither
+is retired in favour of the other and both are minted by the procedure below.
+
+**Regenerate through `terrain_goldens` and `hud_goldens` and nothing wider. A run
+that reaches `golden_mismatch` with the opt-in set corrupts the set.**
 
 ```
 # 1. The probes first. They are derived from a declared pose, world and
@@ -608,13 +847,21 @@ cargo nextest run -p mc-client --test terrain_probes
 #    the goldens are actually shot through, against the world's own voxels.
 cargo nextest run -p mc-client --test replay_oracle
 
-# 3. Mint. The whole binary, which holds only self-comparisons.
-MYCRAFT_UPDATE_GOLDENS=1 cargo nextest run -p mc-client --test terrain_goldens \
-    --no-tests=fail
+# 3. The HUD prediction, for the same reason and about the other half of the
+#    frame. It judges every pixel the content declarations predict against a
+#    derivation that shares no code with the composition, with no area budget.
+#    The default tolerance step 5 applies forgives 92 wrong pixels and the base
+#    crosshair's fill is 17, so this is the only thing that can tell a correct
+#    HUD from a broken one before a broken one becomes ground truth.
+cargo nextest run -p mc-client --test hud_prediction
 
-# 4. Verify with the opt-in unset, including the mismatch path and the inventory.
-cargo nextest run -p mc-client --test terrain_goldens --test golden_mismatch \
-    --no-tests=fail
+# 4. Mint. Whole binaries, both of which hold only self-comparisons.
+MYCRAFT_UPDATE_GOLDENS=1 cargo nextest run -p mc-client --test terrain_goldens \
+    --test hud_goldens --no-tests=fail
+
+# 5. Verify with the opt-in unset, including the mismatch path and the inventory.
+cargo nextest run -p mc-client --test terrain_goldens --test hud_goldens \
+    --test golden_mismatch --no-tests=fail
 cargo nextest run -p mc-render --test golden_inventory
 ```
 
@@ -631,20 +878,23 @@ shown it is a binary blob nobody can read. So the danger extends to a bare
 That is the failure the whole golden discipline exists to prevent — a golden of
 a renderer nothing checked — arriving through the regeneration procedure rather
 than through the renderer. The ordering rule that goldens are shot only after
-the derived probes pass does not cover this door, which is why step 3 is written
-down here as the command rather than left to be reconstructed.
+the derived probes pass does not cover this door, which is why the mint command
+is written down here rather than left to be reconstructed.
 
-**Step 3 names a binary, not a test, and that is deliberate: a document meant to
-be followed verbatim must not embed an identifier that a refactor moves
+**The mint step names binaries, not tests, and that is deliberate: a document
+meant to be followed verbatim must not embed an identifier that a refactor moves
 silently.** This command used to carry `-E 'test(matches_its_committed_golden)'`,
 a suffix three separate tests shared; when they collapsed into the one
 table-driven test the scenario asks for, the filter matched nothing and minted
 nothing. A binary name is a file name — `crates/mc-client/tests/terrain_goldens.rs`
-— so renaming it is a file move a diff shows, and the mint-unsafe test was given
-its own binary rather than being excluded by name so that this selection needs no
-filter at all. `--no-tests=fail` is what turns a selection that has decayed to
-zero matches into a failure at mint time rather than a silent no-op discovered at
-step 4.
+and `crates/mc-client/tests/hud_goldens.rs` — so renaming one is a file move a
+diff shows, and the mint-unsafe test was given its own binary rather than being
+excluded by name so that this selection needs no filter at all. Both binaries
+named at step 4 hold only judgements that are safe to mint: each capture is
+judged against *its own* golden, and `hud_goldens`'s other scenario compares two
+frames of one run against each other and reads no golden at all.
+`--no-tests=fail` is what turns a selection that has decayed to zero matches into
+a failure at mint time rather than a silent no-op discovered at step 5.
 
 Any re-shoot is a deliberate change that says so in its commit message. An
 unexplained golden update in a diff remains a review stop. When the cause is a
@@ -655,24 +905,42 @@ the inventory test forces the previous set out rather than letting it linger.
 
 ## What golden-frame verification cannot see
 
-Goldens and cluster-share probes verify terrain at *large scale*. Neither can see
-a scattered handful of pixels, and this is structural rather than a gap to be
-tuned away.
+**This section is now about terrain, and no longer about the whole frame.**
+Goldens and cluster-share probes verify terrain at *large scale*, and neither
+can see a scattered handful of pixels — structural rather than a gap to be
+tuned away. The content-declared HUD is the one part of the picture that
+**is** graded per pixel, by the derived prediction above rather than by a
+golden; the last part of this section says what that does and does not buy,
+and what remains unseen for both halves.
 
 - **A golden encodes whatever the renderer did.** It is minted from the renderer
   it verifies, so any artifact present at minting is baked into the reference and
-  the comparison agrees with it forever. This is why the derived probes are made
-  to pass before any golden is shot — but that ordering rule only covers
-  artifacts the probes can detect.
+  the comparison agrees with it forever. This is why the derived probes and the
+  HUD prediction are made to pass before any golden is shot — but that ordering
+  rule only covers artifacts they can detect.
 - **The committed set samples three ticks of a 120-tick walk** — 0, 59 and 119,
-  at 1280×720. Anything that appears only at another tick passes the whole suite
-  untouched, and anything present at a sampled tick is baked into that tick's
-  reference.
+  at 1280×720 — plus one HUD capture at tick 0. Anything that appears only at
+  another tick passes the whole suite untouched, and anything present at a
+  sampled tick is baked into that tick's reference.
 - **Share-based probes are blind to sparse pixels by construction.** A coverage
   assertion with a 0.25% floor over a 1280×720 frame cannot be moved by a few
   hundred pixels spread across a replay. Measured while building SPEC-004: 231
   isolated pixels across all 120 ticks, 0–9 per frame, moved no cluster share at
-  all, and two of the three committed goldens contain some.
+  all, and two of the three terrain goldens contain some.
+- **A golden's blindness has a precise shape, and it is not "small means
+  invisible".** `Thresholds::default` carries a **ΔE 10 hard ceiling that is
+  checked first**, before the 0.01% area budget, so *gross* wrongness of even
+  two pixels is a mismatch whatever share of the frame it is — measured: a
+  two-pixel defect at ΔE 100 failed the golden, and a one-pixel placement
+  error failed it at 536 pixels. What the golden is blind to is **drift inside
+  ΔE 10 over a small area**, which is exactly the crosshair case: every
+  crosshair fill pixel rendered at `[242, 242, 242]` where `[255, 255, 255]`
+  is declared is ΔE **4.506** — above the per-pixel tolerance of 2.0, below
+  the ceiling — and 17 failing pixels sit under the 92-pixel budget, so
+  **the golden returns Match while the entire crosshair is the wrong
+  colour.** So "a golden-frame test asserts the crosshair is present" is
+  satisfied by a frame whose crosshair is uniformly wrong, and read strictly
+  it understates what the harness would still have caught.
 
 **What the player's camera actually shows, measured rather than predicted.**
 Non-sky coverage from the published camera is **77.91% at tick 0, 95.01% at
@@ -707,10 +975,57 @@ sharing no code with the renderer: 38 dots checked, 38 agreements, and the voxel
 beyond the entered face not solid in every case.
 
 The lesson is not about those pixels. It is that **a defect of that size would
-have been equally invisible**, so pixel-scale correctness in this renderer rests
-on reading the code and on a human looking at the window, not on the golden set.
-When a change could plausibly produce sparse artifacts, verify it with a
+have been equally invisible**, so *terrain's* pixel-scale correctness rests on
+reading the code and on a human looking at the window, not on the golden set.
+When a change could plausibly produce sparse artifacts there, verify it with a
 per-pixel oracle or accept that nothing automated is watching.
+
+### The HUD's 733 pixels are the exception, and the exception is bounded
+
+**The content-declared HUD is graded per pixel with no area budget**, against
+the derived prediction described above — so the sentence about reading the
+code and looking at the window is no longer true of it. 733 pixels are
+predicted from the declarations alone: every pixel of both crosshair bars and
+their ring judged within ΔE 2.0 of the predicted composite, one failing pixel
+being a mismatch; every pixel *outside* the predicted footprints required
+equal to the zero-HUD frame; the swatch's footprint required to be covered
+exactly, with the pixel immediately outside it unchanged. The chain has both
+controls a prediction needs: applied to a frame rendered with zero HUD
+elements it must report a mismatch, and applied to a frame where the
+crosshair's fill pixels are rendered in its declared *outline* colour it must
+also report one — so "something was drawn there" does not satisfy it.
+
+**Four things it still does not see**, each measured rather than supposed:
+
+- **The shipped elements' contrast outline.** The prediction derives the ring
+  *from the declaration*, so deleting `outline` from a shipped file makes the
+  prediction predict no ring, the frame draw none, and the two agree. **A
+  prediction that follows its input is not an oracle for that input.** What
+  covers it instead is a content assertion over the parsed declarations
+  (`technical/architecture.md` §"Mechanically enforced invariants") — and
+  that is the *only* thing covering it: with the field deleted by hand, that
+  one test is the sole failure in the workspace, while every frame assertion
+  about the footprints stays green, because each is a frame-to-frame equality
+  that a missing ring satisfies **on both sides**.
+- **The overlay's text.** No committed golden may hold rasterised text
+  (ADR-017): drivers disagree about glyphs, and the first golden to hold one
+  makes whatever rasterised it the ground truth every machine must reproduce.
+  The overlay is hidden by default and no declared capture is taken with it
+  shown. What that leaves ungraded is recorded in
+  `docs/technical/testing.md` §"Nothing can tell a painted readout from a
+  painted rectangle".
+- **A vertical flip is caught by less than it looks.** Three of the four
+  rectangles the offscreen HUD fixtures assert against are *vertically
+  symmetric about the target midpoint* and map to themselves under
+  `y → H − y − h`; only the `9 × 1` bar does not. So an un-inverted shader y
+  axis was originally caught by two assertions and nothing else, and a later
+  change to that bar's extents would silently take the falsifier away. The
+  shipped swatch and crossbar footprints widened it to six once they existed,
+  and the HUD's own placement inversion — a different mutation from the
+  clip-space inversion `crates/mc-render/CLAUDE.md` warns about — reddens
+  fifteen.
+- **Terrain, still.** Everything above the sub-heading applies unchanged. The
+  HUD prediction says nothing about the world behind it.
 
 ## Relationship to the frame-capture harness
 

@@ -13,6 +13,14 @@
 //! command can name a *binary* — `terrain_goldens` — instead of a test function
 //! whose name a refactor moves silently. See `docs/technical/rendering.md`
 //! §"Re-shooting a golden set".
+//!
+//! **The HUD capture is a third binary and it is a mint target too.** Its two
+//! scenarios are safe to mint through: one judges the HUD capture against *its
+//! own* golden, and the other compares two frames of the same run against each
+//! other and reads no golden at all. The terrain captures below are shot through
+//! `record_terrain`; the HUD capture is shot through `record_frame`, the one call
+//! the windowed client makes — which is the whole point of it, since a frame
+//! recorded below `App::draw` would never have seen a HUD.
 
 use std::error::Error;
 use std::path::PathBuf;
@@ -40,11 +48,7 @@ pub const DECLARED_TICKS: [u16; 3] = [OPENING, WALKED, CLOSING];
 ///
 /// Returns the preparation, pipeline, spawn or capture failure.
 pub fn verified(tick: u16) -> Result<Option<GoldenOutcome>, Box<dyn Error>> {
-    judged(
-        tick,
-        tick,
-        repository_root()?.join("artifacts").join("frames"),
-    )
+    judged(tick, tick, artifact_root()?)
 }
 
 /// The verdict on `tick`'s capture against the golden committed for
@@ -80,13 +84,38 @@ pub fn judged(
 
 /// The golden lifecycle's settings for the capture declared at `tick`.
 fn settings(tick: u16, artifact_root: PathBuf) -> Result<GoldenSettings, Box<dyn Error>> {
+    settings_for(&capture_id(tick, SCENE_REVISION)?, artifact_root)
+}
+
+/// Where a golden comparison writes its evidence.
+///
+/// # Errors
+///
+/// Returns an error if the repository root cannot be located.
+pub fn artifact_root() -> Result<PathBuf, Box<dyn Error>> {
+    Ok(repository_root()?.join("artifacts").join("frames"))
+}
+
+/// The golden lifecycle's settings for the capture called `id`.
+///
+/// **One statement of the golden root, the thresholds and the opt-in reading for
+/// every capture this repository commits**, terrain and HUD alike. The capture id
+/// is a parameter because a HUD capture is named by a different function than a
+/// terrain one; everything else about the lifecycle is the same or the mint path
+/// and the verify path have parted company.
+///
+/// # Errors
+///
+/// Returns the name failure for an id that cannot be a directory under the golden
+/// root, or the failure to locate the repository.
+pub fn settings_for(id: &str, artifact_root: PathBuf) -> Result<GoldenSettings, Box<dyn Error>> {
     Ok(GoldenSettings {
         golden_root: repository_root()?
             .join("crates")
             .join("mc-render")
             .join("goldens"),
         artifact_root,
-        capture: CaptureId::new(&capture_id(tick, SCENE_REVISION)?)?,
+        capture: CaptureId::new(id)?,
         thresholds: Thresholds::default(),
         opt_ins: OptIns::from_environment(),
     })

@@ -5,7 +5,9 @@
 //! `DefinitionSource` port and nothing else, which is what lets MVP 2 swap this
 //! reader for a scripting host without the registry noticing.
 
+mod hud_toml_source;
 mod raw;
 mod toml_source;
 
+pub use hud_toml_source::TomlFileHudSource;
 pub use toml_source::TomlFileDefinitionSource;

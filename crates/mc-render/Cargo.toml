@@ -33,6 +33,21 @@ thiserror = { workspace = true }
 # ignore that would outlive its reason.
 wgpu = { workspace = true, optional = true }
 
+# The debug overlay's text, and nothing else. Both are optional under `gpu` for
+# the same reason wgpu is: `--no-default-features` has to remove them from the
+# graph rather than leave them unused, so a stray `use egui::` in the pure layer
+# is a build error instead of a review finding. `mc-render/CLAUDE.md` reserves
+# egui for debug and tooling UI only — every pixel a player sees during normal
+# play is drawn from a content declaration, not from a toolkit.
+#
+# `egui-winit` is deliberately absent. It would re-arm RUSTSEC-2026-0192 through
+# `winit/default` and name winit in a second client file, which
+# `crates/mc-client/tests/winit_boundary.rs` fails the build over; the workspace
+# entry carries the full reasoning. A non-interactive overlay needs no window
+# integration — `gpu/overlay.rs` builds `egui::RawInput` itself.
+egui = { workspace = true, optional = true }
+egui-wgpu = { workspace = true, optional = true }
+
 # Shader validation runs when this crate is built, not at first draw, and
 # `build/validate.rs` is compiled twice: once into the build script and once
 # into the test that exercises it. A build script sees only this table, so
@@ -72,7 +87,7 @@ mc-testkit = { workspace = true }
 # exercise this crate's GPU layer need the harness's own device half.
 [features]
 default = ["gpu"]
-gpu = ["dep:wgpu", "mc-testkit/gpu"]
+gpu = ["dep:wgpu", "dep:egui", "dep:egui-wgpu", "mc-testkit/gpu"]
 
 # The one test that has to name a wgpu type without needing a device: the
 # offscreen pass's colour format against the harness's own. `required-features`
@@ -98,6 +113,11 @@ required-features = ["gpu"]
 [[test]]
 name = "terrain_offscreen"
 path = "tests/terrain_offscreen.rs"
+required-features = ["gpu"]
+
+[[test]]
+name = "hud_offscreen"
+path = "tests/hud_offscreen.rs"
 required-features = ["gpu"]
 
 [lints]

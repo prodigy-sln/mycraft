@@ -1,9 +1,9 @@
 //! The `namespace:path` id every kind of definition is named by.
 //!
-//! One parse rule, two public types over it. They are deliberately not
+//! One parse rule, three public types over it. They are deliberately not
 //! interchangeable: handing a texture key to something expecting a block name is
 //! a compile error rather than a debugging session, and the shared core is what
-//! keeps a single rule from drifting into two.
+//! keeps a single rule from drifting into three.
 
 use std::sync::Arc;
 
@@ -115,6 +115,33 @@ impl TextureKey {
     }
 
     /// The key exactly as it was written.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+/// The namespaced name a HUD element is declared under, such as
+/// `example:crosshair-horizontal`.
+///
+/// A third type over the same rule rather than a reuse of [`BlockName`]: HUD
+/// element names and block names occupy separate namespaces and may collide
+/// without consequence, so a value of one that reached the other's registry
+/// would be a mistake the compiler should be able to see.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct HudElementName(NamespacedId);
+
+impl HudElementName {
+    /// Parses `text` as a HUD element name.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NamespacedIdError`] if `text` is not `namespace:path` with both
+    /// sides non-empty.
+    pub fn parse(text: &str) -> Result<Self, NamespacedIdError> {
+        Ok(Self(NamespacedId::parse(text)?))
+    }
+
+    /// The name exactly as it was written.
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }

@@ -34,7 +34,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use mc_render::capture::{
-    DECLARED_CAPTURE_TICKS, SCENE_REVISION, capture_id, declared_capture_ids,
+    DECLARED_CAPTURE_TICKS, HUD_CAPTURE_TICKS, SCENE_REVISION, capture_id, declared_capture_ids,
 };
 use mc_testkit::frame::{
     AdapterProvenance, Backend, CaptureId, GoldenFailureReason, GoldenOutcome, GoldenSettings,
@@ -61,6 +61,18 @@ const TICK: u16 = 59;
 
 /// The filename the golden lifecycle reads inside a capture's directory.
 const GOLDEN_FILE: &str = "default.png";
+
+/// How many captures a revision declares: one per declared terrain tick plus one
+/// per declared HUD tick.
+///
+/// **Summed from the two declaration constants rather than taken from
+/// `declared_capture_ids` itself**, which is the function under test. Its own
+/// length would make the assertion below self-referential — an implementation
+/// that declared *nothing* would answer `(0, 0, 0)` and satisfy an expectation of
+/// `(0, 0, 0)` — and it would be exactly the "expected quantity copied from a run
+/// of the code under test" that `testing.md` §2 refuses. Two constants can only
+/// go wrong by a declaration being deleted, which is a different commit.
+const DECLARED_CAPTURES: usize = DECLARED_CAPTURE_TICKS.len() + HUD_CAPTURE_TICKS.len();
 
 /// Opt-ins with the update variable unset, stated rather than read.
 ///
@@ -91,14 +103,12 @@ fn the_capture_ids_of_a_second_scene_revision_all_carry_it_and_none_repeats_the_
 
     assert_eq!(
         (second.len(), carrying, repeated),
-        (
-            DECLARED_CAPTURE_TICKS.len(),
-            DECLARED_CAPTURE_TICKS.len(),
-            0
-        ),
+        (DECLARED_CAPTURES, DECLARED_CAPTURES, 0),
         "a revision has to reach every declared capture's id and rename all of them: an id \
          that ignored the revision it was asked for would leave the new set colliding with \
          the old one, which is exactly the silent re-shoot the revision exists to prevent. \
+         Every declared capture, terrain and HUD alike — a set that renamed only some of \
+         itself is the same collision arriving through half the ids. \
          `{SCENE_REVISION}` gave {first:?} and `{SECOND_REVISION}` gave {second:?}"
     );
     Ok(())

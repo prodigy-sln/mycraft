@@ -316,6 +316,12 @@ const fn key_kind_of(key: KeyCode) -> KeyKind {
         KeyCode::KeyA => KeyKind::A,
         KeyCode::KeyD => KeyKind::D,
         KeyCode::Space => KeyKind::Space,
+        // Function keys are not under the player's left hand and are not
+        // positional in the sense the four walking keys are; they are here
+        // because either may be bound to the debug overlay, and a key the
+        // catch-all absorbs is a key nothing can be bound to.
+        KeyCode::F3 => KeyKind::F3,
+        KeyCode::F7 => KeyKind::F7,
         KeyCode::Escape => KeyKind::Escape,
         _ => KeyKind::Other,
     }
