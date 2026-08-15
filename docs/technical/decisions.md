@@ -805,3 +805,168 @@ the pin and the reservation for debug UI both already existed.
   it: legible against sky, marginal against bright ground. This is within spec — the contrast rule
   is about *content* HUD elements, and the stock look is explicitly permitted for
   hidden-by-default tooling — and is filed as **PRO-898** rather than fixed mid-flight.
+
+## ADR-018 — VoxForge's preview renders every view through one DDA ray march and one camera-basis formula
+
+**Status**: Accepted · **Date**: 2026-08-15
+
+**Context.** `tools/voxforge` (SPEC-013) previews a `.mcvox` model from fourteen fixed orthographic
+views — six axis-aligned, eight isometric. Three shapes were open: (a) one per-pixel DDA ray march
+serving every view; (b) a painter's algorithm — depth-sort voxels, rasterise each as a screen quad;
+(c) a fast direct scan for the six axis views, DDA only for the isometric ones. Correctness of
+orientation is this tool's dominant risk: `technical/rendering.md` already records that a silently
+row-flipped capture path would have made every golden wrong in the same invisible direction, and
+here it is worse — an agent self-corrects *against* the preview, so a mirrored view makes it "fix"
+correct geometry to match a broken picture.
+
+(b) was first rejected on the wrong ground (assumed O(voxels) cost) and the real objection is
+orientation: an orthographic depth sort is a per-axis sort key, and a wrong sign produces a
+*plausible* picture assembled from far faces rather than an obviously blank one — the same class of
+invisible defect as a row flip, with better camouflage. (c) is rejected for the reason this feature
+exists at all: two code paths producing "the same" picture is two chances to get orientation wrong,
+with the cheap path drawing the most test coverage while the isometric path carries the subtler bug.
+
+**Decision.** One DDA ray march serves all fourteen views. Its first hit is correct by construction
+and yields the face normal shading needs, with no depth-sort step to get a sign wrong. All fourteen
+camera bases derive from one formula rather than being fourteen hand-written cases: given a unit view
+direction `d` and an up-hint `w`,
+
+```
+right = normalize(d × w)
+up    = right × d
+```
+
+with `w = (0, 1, 0)` for every view except `top` and `bottom`, where `d` is parallel to it and `w`
+is chosen orthogonal instead. A pixel at `(col, row)` samples along `right` and `−up`, which makes
+image row 0 the top **by construction**, not by a flip applied afterward.
+
+**Consequences.** The four "under" isometric corners — added after the first real asset review
+because no view could show the underside of a horizontal surface — cost no new derivation: the same
+formula absorbed all four with no eleventh up-hint and no special case, which is the strongest
+evidence the shape was right. Whether "isometric" means true isometric (equal foreshortening on all
+three axes) or 2:1 dimetric (integer pixel steps, why pixel art conventionally uses it) is
+**deferred**, defaulting to true isometric; revisit once real previews are read at working
+resolution — a two-way door affecting no interface. The isometric AABB is larger than the axis
+views' — roughly 724 × 836 px at 8 px/voxel for a 64³ model, not the ≤512×512 an early estimate
+assumed — which the dense-volume representation of ADR-019 keeps fast enough for a sub-second
+edit-preview loop.
+
+## ADR-019 — VoxForge's assembled model is a dense positional array, never a hash- or tree-keyed map
+
+**Status**: Accepted · **Date**: 2026-08-15
+
+**Context.** VoxForge's preview ray march (ADR-018) and its `inspect` connectivity check both walk
+an assembled model's voxels by position, and its byte-identical-PNG requirement (deterministic
+output regardless of a document's declaration order) forbids any iteration order that depends on
+hashing. A first draft keyed the assembled volume as `BTreeMap<UVec3, MaterialKey>`. It did not
+compile — glam derives `Clone, Copy, PartialEq, Eq, Hash` on `UVec3` and no `Ord` — and, fixed to
+compile, would have missed the sub-second edit-loop target by roughly 50×: a B-tree lookup in the
+ray march's inner loop is on the order of 18 pointer-chased comparisons at the scale involved, against
+roughly 565 million total steps across all fourteen views of a worst-case 64³ model.
+
+**Decision.** The assembled model is a dense array over its own bounding box (at most 64³ = 262,144
+cells), indexed `x + y·extent.x + z·extent.x·extent.y`:
+
+```rust
+pub struct Volume {
+    extent: Extent,                    // ≤ 64 on every axis
+    cells: Vec<Option<MaterialSlot>>,  // x-fastest
+    palette: Vec<MaterialKey>,         // ascending key order — deterministic
+}
+pub struct MaterialSlot(NonZeroU16);   // index+1 into palette; 2 bytes, Copy
+```
+
+No `HashMap`/`HashSet` appears anywhere in `tools/voxforge`, following the precedent
+`world-format.md`'s save-table format already sets for the same reason. Where a filesystem read
+order is genuinely nondeterministic (`read_dir` over a materials directory), it is sorted before
+use rather than trusted, and that sort is contract, not tidiness — a duplicate-name error names a
+first and second file, which is only well defined under a fixed order.
+
+**Consequences.** The inner ray-march step becomes an integer index and a `Copy`, closing the ~50×
+gap. `inspect`'s connected-component flood fill becomes O(n) over the same array. The representation
+is *more* deterministic than the map it replaced, not merely as deterministic: positional iteration
+has no ordering question to answer at all.
+
+## ADR-020 — `mc_core::id::NamespacedId` is public, so VoxForge does not reimplement the namespaced-id rule
+
+**Status**: Accepted · **Date**: 2026-08-15
+
+**Context.** VoxForge's model names and material keys need the same rule blocks and textures already
+enforce — exactly one `:`, non-empty on both sides — and the same diagnostics `blocks-items.md`
+documents. `mc_core::id::NamespacedId` already implements this, but its field was private and only
+purpose-named aliases (`BlockName`, `HudElementName`, `TextureKey`) were exported; nothing let a
+crate outside `mc-core` express "this is a namespaced id, checked the same way" for a concept that
+is not one of those four things. The alternatives — reimplement the rule inside `tools/voxforge`, or
+newtype over an existing alias like `BlockName` — both fail on inspection: reimplementing risks the
+rule drifting between two copies, and newtyping over `BlockName` is exactly what `mc-core`'s own
+`namespaced.rs` argues against, since a model is not a block.
+
+**Decision.** `NamespacedId` becomes a public type in `mc-core`, with `parse` and `as_str` as its
+public surface; its inner `Arc<str>` field stays private. Two additive lines, no behaviour change,
+no existing export touched. `tools/voxforge` defines `MaterialKey(NamespacedId)` and
+`ModelName(NamespacedId)` as newtypes over it — `ModelName` rather than reusing `BlockName`, because
+a voxel model is not engine content and is not a block.
+
+**Consequences.** VoxForge's refusal diagnostics for a malformed `name` or palette material key are
+the same diagnostics blocks already give, for free. If materials become engine content later, the
+newtypes move with them; nothing about today's placement forecloses that.
+
+## ADR-021 — VoxForge's texture emission: shading is a render input, and tileability is a total verdict judged against the model, never against a second render
+
+**Status**: Accepted · **Date**: 2026-08-15
+
+**Context.** VoxForge's `texture` command emits a flat, unshaded block face — added after preview
+rendering (ADR-018) was already built and shipping shaded output. Two questions needed answers:
+where does "flat" live, and how is "this texture tiles" decided.
+
+**Flatness.** The only existing flat path was `emissive = 1.0`, and the material table is shared
+across the whole art set. Forcing a material's `emissive` to 1.0 to get a flat texture would
+silently unshade *every model* using that material too — one material cannot serve both a shaded
+preview and a flat texture. The alternative that changes `render`'s own signature was rejected only
+because it would edit test files a completed implementation phase already owned; the design it lost
+to differs from it by exactly one forwarder.
+
+**Decision (flatness).** Shading is passed to the render as an explicit setting
+(`Shading::Shaded | Flat`) consumed by a private core, reached through two public forwarders:
+`render` (shaded, unchanged) and `render_texture` (flat). `Flat` emits a material's declared colour
+for every facing regardless of that material's `emissive` — it does not reuse the emissive blend
+path. No scenario can currently tell this apart from the emissive-forcing alternative; the
+preference is **structural** (about which future shading term — ambient occlusion is already a
+named candidate — silently stops being flattened by the cheaper design) rather than behavioural, and
+is recorded as such rather than claimed as tested.
+
+**Tileability.** The terrain mesher (`terrain.wgsl`, `sweep.rs`) merges runs of matching faces into
+one quad under `AddressMode::Repeat`, so a texture whose opposing edges disagree draws a visible grid
+across any surface wider than one block — a real correctness question for a texture generator, even
+though nothing in `mc-render` is touched by this decision. Comparing a texture against a 3×3
+replicated re-render of the same model was considered and rejected: on an axis-aligned orthographic
+render with one opaque sample per pixel, the centre tile of such a replication is byte-identical to
+the single render *by construction, for any rasteriser* — the comparison is a tautology that could
+only ever catch what a silhouette-size check already catches directly, and a uniform sampling shift
+would move both sides together and stay green regardless.
+
+**Decision (tileability).** A total `SeamVerdict` enum, judged over three independent, ordered legs,
+each measured against something the rasteriser did not itself produce:
+
+1. **Period** — the assembled model's extent on each in-plane axis equals the document's declared
+   `scale`, checked against the *document*, never a render.
+2. **Coverage** — every pixel is opaque.
+3. **Edges** — integer, no declared threshold: for each row (and, on the other axis, each column)
+   independently, the wrap-around step may not exceed the largest step already present within that
+   row. Compared **per row rather than per image**, because a per-image maximum lets an extreme step
+   anywhere license a discontinuity anywhere else.
+
+The verdict is **always computed and reported**; it **refuses the emission only when the emission
+declares itself `--seamless`** (default off), mirroring the defect/observation partition `inspect`
+already draws — not every texture needs to tile, and refusing a legitimate one-off would be the tool
+inventing a rule nobody asked for. Under `--seamless` the first failing leg is the answer, for a
+reproducible diagnostic; without it, every leg is evaluated and reported, since a texture that can
+never pass leg 2 (glass, a leaf sprite) should still learn whether its edges agree.
+
+**Consequences.** The edge leg is deliberately permissive — it never false-refuses correct art, and
+under-refuses on high-contrast voxel art where the largest interior step already saturates; it earns
+its keep on low-contrast content carrying a high-contrast boundary. Tightening it later changes no
+interface. Where the "this texture is meant to be seamless" claim should live — the invocation
+(today) versus the document itself (a `seamless = true` field would be additive and one-to-one with
+a model, where the invocation is one-to-many and forgettable) — is an open, deliberately deferred
+question; revisit once an art set is regenerated more than once.

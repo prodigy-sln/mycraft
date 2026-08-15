@@ -8,17 +8,28 @@
 //!
 //! # The member set is a derived oracle, never a count
 //!
-//! `crates/` holds one directory per member, so that is what the metadata read
-//! is compared against — not the literal `10` today's tree would produce. A
-//! committed count goes red against a *correct* property the day an eleventh
-//! crate lands, and a reviewer's cheapest green is editing the number. The
-//! directories are read here, in the test, by code that shares nothing with the
-//! metadata read it grades.
+//! The workspace's member roots hold one directory per member, so that is what
+//! the metadata read is compared against — not the literal `11` today's tree
+//! would produce. A committed count goes red against a *correct* property the
+//! day a twelfth crate lands, and a reviewer's cheapest green is editing the
+//! number. The directories are read here, in the test, by code that shares
+//! nothing with the metadata read it grades.
 //!
-//! The oracle refuses to be empty, in [`crate_directories`]. Both readings
+//! **There is more than one member root, and [`MEMBER_ROOTS`] is where that is
+//! stated.** ADR-009's `tools/` became real with `tools/voxforge`, and an
+//! oracle that kept listing `crates/` alone would have gone on describing a
+//! ten-member workspace correctly and an eleven-member one not at all. The list
+//! is written here rather than read out of the workspace manifest on purpose: a
+//! manifest is what `cargo metadata` resolves, so an oracle taking its answer
+//! from there would agree with the read it exists to grade. A third root has to
+//! be stated here before this test will accept members living in it.
+//!
+//! The oracle refuses to be empty, in [`member_directories`]. Both readings
 //! below would otherwise agree with a metadata read that resolved nothing, and
 //! agree with it silently — which is the failure this whole check exists to
-//! catch in someone else's code.
+//! catch in someone else's code. It needs no *per-root* emptiness guard on top
+//! of that: `read_dir` fails loudly on a root that is not there, so a mistyped
+//! entry in [`MEMBER_ROOTS`] cannot narrow the oracle in silence.
 //!
 //! # A member declaring nothing is the vacuity hole
 //!
@@ -50,6 +61,7 @@ mod common;
 
 use std::error::Error;
 use std::fs;
+use std::path::Path;
 
 use common::license::{Declared, Refusal};
 use common::license_consumers::{
@@ -63,8 +75,12 @@ use tempfile::TempDir;
 /// The expression this workspace declares, and the one every member inherits.
 const DUAL_LICENSE: &str = "MIT OR Apache-2.0";
 
-/// The directory holding one subdirectory per workspace member.
-const CRATES: &str = "crates";
+/// The directories holding one subdirectory per workspace member.
+///
+/// `crates/` is the engine; `tools/` is developer tooling, which ADR-009
+/// reserved and `tools/voxforge` first occupied. Nothing but this list decides
+/// where the oracle looks, which is why a new root is a deliberate edit here.
+const MEMBER_ROOTS: [&str; 2] = ["crates", "tools"];
 
 /// The file the MIT licence ships as.
 const MIT_FILE: &str = "LICENSE-MIT";
@@ -89,14 +105,15 @@ const FOREIGN_EXPRESSION: &str = "GPL-3.0-only";
 
 #[test]
 fn the_workspace_members_cargo_resolves_are_the_crate_directories() -> TestResult {
-    let expected = crate_directories()?;
+    let expected = member_directories()?;
 
     assert_eq!(
         workspace_members(&resolved_workspace_metadata()?),
         expected,
-        "the member set is compared against the directories under {CRATES}/ rather than against a \
-         number, so it guards a metadata read that resolved nothing and still holds the day an \
-         eleventh crate lands. The resolved document also carries every third-party package cargo \
+        "the member set is compared against the directories under {MEMBER_ROOTS:?} rather than \
+         against a number, so it guards a metadata read that resolved nothing and still holds the \
+         day a twelfth crate lands — in whichever of those roots it lands in. The resolved \
+         document also carries every third-party package cargo \
          resolved, hundreds of which declare this same expression — so a read that took `packages` \
          for the member list would look like agreement while grading crates this workspace does \
          not own"
@@ -106,13 +123,14 @@ fn the_workspace_members_cargo_resolves_are_the_crate_directories() -> TestResul
 
 #[test]
 fn every_workspace_member_resolves_the_licence_expression_the_workspace_declares() -> TestResult {
-    let members = crate_directories()?;
+    let members = member_directories()?;
 
     assert_eq!(
         member_licenses(&resolved_workspace_metadata()?, DUAL_LICENSE),
         Members::AllDeclaring(members),
-        "a dual licence offered by nine crates out of ten is not the offer the manifest makes, and \
-         the members are inheriting one workspace value rather than repeating it — so this reads \
+        "a dual licence offered by ten crates out of eleven is not the offer the manifest makes, \
+         and a member under tools/ is no less a member than one under crates/. The members are \
+         inheriting one workspace value rather than repeating it — so this reads \
          the resolved value per member. The verdict names the members it graded: 'they all agree' \
          is trivially true of no members at all, which is precisely what a read that resolved \
          nothing produces"
@@ -240,8 +258,8 @@ Dual-licensed under MIT or Apache-2.0, as declared in `Cargo.toml`.
 See [the registry](specs/REGISTRY.md) and [the standards](<standards/global>).
 ";
 
-/// The name of every directory under `crates/`, in name order — one per
-/// workspace member.
+/// The name of every directory under each of [`MEMBER_ROOTS`], in name order —
+/// one per workspace member.
 ///
 /// The oracle the resolved member set is graded against, and it shares no code
 /// with the metadata read: a directory listing cannot agree with a broken
@@ -249,22 +267,42 @@ See [the registry](specs/REGISTRY.md) and [the standards](<standards/global>).
 ///
 /// # Errors
 ///
-/// Returns the I/O failure when the directory cannot be read, and an error when
-/// it holds no crate at all — an empty oracle would agree with a metadata read
-/// that resolved nothing, which is the one answer these tests exist to reject.
-fn crate_directories() -> Result<Vec<String>, Box<dyn Error>> {
+/// Returns the I/O failure when a root cannot be read — which is what a root
+/// named here but absent from the tree produces, and the reason this needs no
+/// separate guard against an oracle that quietly stopped looking somewhere.
+/// Returns an error when the roots between them hold no crate at all: an empty
+/// oracle would agree with a metadata read that resolved nothing, which is the
+/// one answer these tests exist to reject.
+fn member_directories() -> Result<Vec<String>, Box<dyn Error>> {
+    let root = repository_root()?;
     let mut named = Vec::new();
-    for entry in fs::read_dir(repository_root()?.join(CRATES))? {
+    for member_root in MEMBER_ROOTS {
+        named.extend(directories_under(&root.join(member_root))?);
+    }
+    named.sort();
+    if named.is_empty() {
+        return Err(format!(
+            "{MEMBER_ROOTS:?} hold no crate, so the oracle below would be vacuous"
+        )
+        .into());
+    }
+    Ok(named)
+}
+
+/// The name of every directory directly under `root`, in the order the
+/// filesystem hands them over.
+///
+/// # Errors
+///
+/// Returns the I/O failure when `root` cannot be read or an entry cannot be
+/// typed.
+fn directories_under(root: &Path) -> Result<Vec<String>, Box<dyn Error>> {
+    let mut named = Vec::new();
+    for entry in fs::read_dir(root)? {
         let entry = entry?;
         if entry.file_type()?.is_dir() {
             named.push(entry.file_name().to_string_lossy().into_owned());
         }
-    }
-    named.sort();
-    if named.is_empty() {
-        return Err(
-            format!("{CRATES}/ holds no crate, so the oracle below would be vacuous").into(),
-        );
     }
     Ok(named)
 }

@@ -1,0 +1,67 @@
+# The reference model: the one asset whose preview a human has looked at.
+#
+# Every automated orientation check in this tool descends from one convention
+# table, so the layer mapping and the raycaster could both be wrong in a way the
+# other agrees with. This model exists to be looked at, and it is shaped so that
+# looking at it settles the question:
+#
+#   - **L-shaped**, so it has a distinct top and a distinct foot.
+#   - **Non-cubic on every axis** — 5 wide, 4 tall, 2 deep — so a transposed
+#     raster is a differently shaped image rather than a plausible one.
+#   - **The foot runs +x only**, so a horizontal mirror moves it.
+#   - **The foot sits on z = 0 only**, so a depth mirror moves it between the
+#     front slab and the back one.
+#   - **One amber voxel at the top of the upright**, on its +x side and on
+#     z = 1, so the upright itself is asymmetric and a 180° rotation is visible.
+#     `+z` is toward the viewer of a `front` view, so z = 1 is the slab a front
+#     camera meets first and the lamp is visible there and hidden from `back` —
+#     which is itself one of the asymmetries worth being able to see.
+#   - **Three materials**, one of them emissive, so shading is legible and the
+#     unshaded path is exercised too.
+#
+# A symmetric model would look identical under a broken preview and a correct
+# one, which is the whole reason none of these choices is arbitrary.
+
+schema = 1
+name   = "base:reference_asymmetric"
+scale  = 16
+size   = [5, 4, 2]
+origin = [0, 0, 0]
+slice  = "y"
+
+[palette]
+"." = "empty"
+"m" = "base:oak_beam"
+"c" = "base:copper_plate"
+"a" = "base:amber_lamp"
+
+# Each layer is a floor plan: the first row printed is z = 0, the front of the
+# model, and the first column is x = 0, its left.
+
+[[layers]]                 # the foot, running +x from the upright
+y = 0
+grid = """
+mmccc
+mm...
+"""
+
+[[layers]]
+y = 1
+grid = """
+mm...
+mm...
+"""
+
+[[layers]]
+y = 2
+grid = """
+mm...
+mm...
+"""
+
+[[layers]]                 # the lamp, at the top of the upright's +x front edge
+y = 3
+grid = """
+mm...
+ma...
+"""

@@ -976,6 +976,15 @@ structure, not by convention:
   states `default-features` itself. A refusal would be a build error
   nobody could miss; what actually happens leaves the manifest reading as
   though the feature were off while the seam check fails.
+- **Nothing in `crates/` resolves `tools/voxforge`, in any dependency
+  kind.** A test walks every `crates/mc-*` package's resolved dependency
+  closure and fails if `voxforge` appears anywhere in it, carrying the
+  same positive control as the `mc-core`/`toml` walk above: it also
+  asserts that a dependency each inspected crate genuinely has *is*
+  present, so a walk that silently resolved nothing does not pass
+  vacuously. `tools/` — home to `voxforge` and, per ADR-009, developer
+  tooling generally — may depend inward on `crates/`; the reverse never
+  holds.
 - **`winit` is nameable in `crates/mc-client/src/events.rs` alone**,
   pinned by a source scan whose filter was mutation-checked rather than
   assumed. This is one reason `egui-winit` is not taken (ADR-017): it would

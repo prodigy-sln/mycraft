@@ -27,9 +27,14 @@ pub enum NamespacedIdError {
 /// A validated `namespace:path` id.
 ///
 /// `Arc<str>` because names are cloned per palette entry and per registry lookup
-/// and never mutated. It is private, so the representation is reversible.
+/// and never mutated. The field stays private, so the representation is
+/// reversible.
+///
+/// The type is public so that a newtype outside this crate can be built over
+/// the same rule rather than reimplementing it — the parse rule below is a
+/// content contract, and a second copy of it is a second thing to drift.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct NamespacedId(Arc<str>);
+pub struct NamespacedId(Arc<str>);
 
 impl NamespacedId {
     /// The rule is *exactly* one separator with both sides non-empty, and
@@ -45,7 +50,12 @@ impl NamespacedId {
     /// here would be a compatibility promise made blind. Refusing a second
     /// separator is safe in a way that guess would not be: a rule can be relaxed
     /// later without invalidating content, never tightened.
-    fn parse(text: &str) -> Result<Self, NamespacedIdError> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NamespacedIdError`] if `text` is not `namespace:path` with both
+    /// sides non-empty.
+    pub fn parse(text: &str) -> Result<Self, NamespacedIdError> {
         let Some((namespace, path)) = text.split_once(':') else {
             return Err(NamespacedIdError::MissingNamespace {
                 text: text.to_owned(),
@@ -69,7 +79,8 @@ impl NamespacedId {
         Ok(Self(Arc::from(text)))
     }
 
-    fn as_str(&self) -> &str {
+    /// The id exactly as it was written.
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 }

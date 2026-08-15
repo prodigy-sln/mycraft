@@ -204,24 +204,53 @@ Invoke-Stage 'docs (rustdoc, no broken intra-doc links)' {
 $env:RUSTDOCFLAGS = $PreviousRustdocFlags
 
 # ── 3. File size limits ────────────────────────────────────────────────────────
+# Every root holding Rust this project writes. `tools/` is here because it holds
+# a workspace member: walking `crates/` alone would leave anything under it
+# silently unmeasured, and the stage would report "all files within limits"
+# having never opened one.
+$SizeRoots = @('crates', 'tools')
+
 Write-StageHeader 'size (code-quality.md file limits)'
 $oversized = @()
-Get-ChildItem -Path (Join-Path $RepoRoot 'crates') -Recurse -Filter '*.rs' -File -ErrorAction SilentlyContinue |
-    ForEach-Object {
-        $rel = $_.FullName.Substring($RepoRoot.Length + 1)
-        $count = (Get-Content -LiteralPath $_.FullName | Measure-Object -Line).Lines
-        $isTest = $rel -match '[/\\](tests|benches)[/\\]' -or $_.Name -match '_test\.rs$'
+$measured = [ordered]@{}
+foreach ($root in $SizeRoots) {
+    # Counted from what the walk returned, never from Test-Path: the
+    # -ErrorAction below is what turns a mistyped root into zero results rather
+    # than an error, so the count *is* the evidence the root was real.
+    $found = @(Get-ChildItem -Path (Join-Path $RepoRoot $root) -Recurse -Filter '*.rs' -File -ErrorAction SilentlyContinue)
+    $measured[$root] = $found.Count
+    foreach ($file in $found) {
+        $rel = $file.FullName.Substring($RepoRoot.Length + 1)
+        $count = (Get-Content -LiteralPath $file.FullName | Measure-Object -Line).Lines
+        $isTest = $rel -match '[/\\](tests|benches)[/\\]' -or $file.Name -match '_test\.rs$'
         $limit = if ($isTest) { $MaxTestLines } else { $MaxSourceLines }
         if ($count -gt $limit) {
             $oversized += [pscustomobject]@{ File = $rel; Lines = $count; Limit = $limit }
         }
     }
+}
+
+# Per root, never as a total. A total is vacuous at the granularity that
+# matters: crates/ contributes some four hundred files, so a mistyped `tools`
+# root contributes zero, the total is still four hundred, and the stage passes
+# while tools/ goes unmeasured — the very defect this guard exists to close, one
+# level down.
+foreach ($root in $SizeRoots) { Write-Note "root '$root': $($measured[$root]) file(s) measured" }
+
+$unmeasured = @($SizeRoots | Where-Object { $measured[$_] -eq 0 })
+if ($unmeasured.Count -gt 0) {
+    $Failures.Add('size (declared root measured nothing)')
+    foreach ($root in $unmeasured) {
+        Write-Fail "root '$root' contributes no measured files — it is declared here but nothing under it was size-checked"
+    }
+}
+
 if ($oversized.Count -gt 0) {
     $Failures.Add('size (files over limit)')
     Write-Fail "$($oversized.Count) file(s) exceed the size limit — split by responsibility:"
     foreach ($o in $oversized) { Write-Host "     $($o.File): $($o.Lines) lines (limit $($o.Limit))" -ForegroundColor Red }
 }
-else {
+elseif ($unmeasured.Count -eq 0) {
     Write-Ok "size (all files within limits)"
 }
 

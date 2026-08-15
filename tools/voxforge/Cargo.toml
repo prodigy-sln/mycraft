@@ -1,0 +1,35 @@
+[package]
+name = "voxforge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# `tools/` may depend inward on `crates/`; nothing in `crates/` may depend back
+# on this package. That direction is asserted against the resolved dependency
+# graph in `crates/mc-testkit/tests/workspace_layering.rs`, not merely by
+# convention here.
+[dependencies]
+glam = { workspace = true }
+# PNG encoding only — the `png` feature is the whole of what is pinned
+# workspace-wide, and the preview's own raster is this crate's.
+image = { workspace = true }
+mc-core = { workspace = true }
+# Every DTO field is `Option<toml::Value>` and every DTO denies unknown fields,
+# so serde decides only *whether a key is recognised* and never what a value
+# must be. Refusals are this tool's own, in the terms the author needs.
+clap = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+# Dev only, and GPU-free: the workspace pins it `default-features = false`, so
+# `frame::{png, compare}` arrive without wgpu and the gate's gpu-free stage is
+# unaffected. `Preview` stays VoxForge's own type — the harness compares
+# pictures, it never enters the runtime graph.
+mc-testkit = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

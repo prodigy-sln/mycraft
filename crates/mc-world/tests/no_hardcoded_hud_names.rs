@@ -46,14 +46,24 @@
 //! the two controls: a fixture naming a declared element, and one writing a
 //! declared colour as its bytes.
 //!
+//! There is a third way, and it is the one that actually happened. Rust source
+//! is not only under `crates/`: `tools/voxforge` made `tools/` a second member
+//! root, and for the length of that change this scan was **green because it was
+//! not looking there**. [`MEMBER_ROOTS`] is where the roots are stated, and
+//! [`Verdict::ReadNothingUnder`] is the refusal for a root that contributed no
+//! source — asked per root, because "the scan read more than zero files" is
+//! vacuous when `crates/` alone contributes some three hundred of them and keeps
+//! the total healthy over a tree nothing read.
+//!
 //! The scan reads production text — a file minus its doc comments — under each
-//! crate's `src/`, skipping sibling `*_test.rs` unit files. A rustdoc example is
+//! member's `src/`, skipping sibling `*_test.rs` unit files. A rustdoc example is
 //! a doc test, so naming a declared element in one is not the engine knowing
 //! about it. Files under `tests/` are not read at all, which is what lets this
 //! one say the names out loud.
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::ffi::OsStr;
 use std::fs;
@@ -63,6 +73,13 @@ use common::{TestResult, repository_root};
 use mc_core::hud::{Draw, HudLayout, Rgba8};
 use mc_world::content::TomlFileHudSource;
 use tempfile::TempDir;
+
+/// The directories holding one subdirectory per workspace member.
+///
+/// `crates/` is the engine; `tools/` is developer tooling. Both hold production
+/// Rust, so both are scanned, and each is accounted for on its own — see
+/// [`Verdict::ReadNothingUnder`].
+const MEMBER_ROOTS: [&str; 2] = ["crates", "tools"];
 
 /// The HUD element names the base game has retired.
 ///
@@ -146,6 +163,9 @@ enum Verdict {
     WatchedNothing,
     /// No production source was read at all.
     ReadNothing,
+    /// These member roots contributed no production source, so whatever lives
+    /// under them went unscanned while the others kept the total healthy.
+    ReadNothingUnder(Vec<&'static str>),
     /// Every place a watched spelling appears.
     Named(Vec<String>),
 }
@@ -167,14 +187,15 @@ fn verdict(watched: &WatchList, scanned: &Scan) -> Verdict {
 #[test]
 fn no_production_rust_source_names_a_hud_element_or_colour_the_base_game_declares() -> TestResult {
     let watched = watch_list_of(&shipped_content_root()?)?;
-    let scanned = scan_of_production_sources(&watched.needles())?;
+    let production = scan_of_production_sources(&watched.needles())?;
 
     assert_eq!(
-        verdict(&watched, &scanned),
+        production_verdict(&watched, &production),
         Verdict::NothingNamed,
         "a HUD element's name and its colours belong to content, never to the engine: the base \
          game is a mod, and a crosshair the engine knows by name or by colour is a privilege no \
-         third-party mod has"
+         third-party mod has. The verdict names any member root it read nothing under, so a tree \
+         this scan stopped looking at cannot report the same clean answer an obedient engine does"
     );
     Ok(())
 }
@@ -438,17 +459,65 @@ fn scan_of(
 }
 
 /// A scan of every crate's production sources.
-fn scan_of_production_sources(needles: &[String]) -> Result<Scan, Box<dyn Error>> {
-    let mut scanned = Scan::default();
-    for entry in fs::read_dir(repository_root()?.join("crates"))? {
+/// A scan of every member root's production sources, and how many production
+/// files each root contributed to it.
+#[derive(Debug, Default)]
+struct ProductionScan {
+    scanned: Scan,
+    read_per_root: BTreeMap<&'static str, usize>,
+}
+
+/// # Errors
+///
+/// Returns the I/O failure when a root cannot be read — which is what a root
+/// named in [`MEMBER_ROOTS`] but absent from the tree produces. `read_dir`
+/// failing loudly is what keeps a mistyped root from narrowing this walk in
+/// silence, unlike the gate's `-ErrorAction SilentlyContinue` walk of the same
+/// two directories.
+fn scan_of_production_sources(needles: &[String]) -> Result<ProductionScan, Box<dyn Error>> {
+    let repository = repository_root()?;
+    let mut production = ProductionScan::default();
+    for member_root in MEMBER_ROOTS {
+        let read = scan_members_under(&repository.join(member_root), needles, &mut production)?;
+        production.read_per_root.insert(member_root, read);
+    }
+    Ok(production)
+}
+
+/// Scans the `src/` of every member directly under `root`, returning how many
+/// production files this call added.
+fn scan_members_under(
+    root: &Path,
+    needles: &[String],
+    production: &mut ProductionScan,
+) -> Result<usize, Box<dyn Error>> {
+    let before = production.scanned.files_read;
+    for entry in fs::read_dir(root)? {
         let sources = entry?.path().join("src");
         if sources.is_dir() {
             let found = scan(&sources, needles)?;
-            scanned.files_read += found.files_read;
-            scanned.hits.extend(found.hits);
+            production.scanned.files_read += found.files_read;
+            production.scanned.hits.extend(found.hits);
         }
     }
-    Ok(scanned)
+    Ok(production.scanned.files_read - before)
+}
+
+/// The verdict the real production tree amounts to for `watched`.
+///
+/// The unread-root check comes first because it explains away any answer that
+/// follows it: a hit list is only evidence about the trees that were read.
+fn production_verdict(watched: &WatchList, production: &ProductionScan) -> Verdict {
+    let unread: Vec<&'static str> = production
+        .read_per_root
+        .iter()
+        .filter(|(_, read)| **read == 0)
+        .map(|(root, _)| *root)
+        .collect();
+    if !unread.is_empty() {
+        return Verdict::ReadNothingUnder(unread);
+    }
+    verdict(watched, &production.scanned)
 }
 
 /// Reads every production Rust source under `root` and reports each place a

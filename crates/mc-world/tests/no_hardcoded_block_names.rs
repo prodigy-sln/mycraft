@@ -5,7 +5,7 @@
 //! moment a name appears in Rust, the base game has a privilege a third-party mod
 //! does not.
 //!
-//! The scan reads every `.rs` file under a crate's `src/` except the sibling
+//! The scan reads every `.rs` file under a member's `src/` except the sibling
 //! `*_test.rs` unit files, and looks at its **production text**: the file minus
 //! its doc comments. Both halves of that are deliberate. Unit tests live in
 //! sibling files (`docs/technical/testing.md`), so skipping test code is a
@@ -15,6 +15,21 @@
 //! Tests under `tests/` are not scanned at all — which is why this one may say
 //! the names out loud.
 //!
+//! # Every member root, and each one accounted for separately
+//!
+//! Rust source is not only under `crates/`: `tools/voxforge` made `tools/` a
+//! second member root, and for the length of that change this scan was **green
+//! because it was not looking there**. [`MEMBER_ROOTS`] is where the roots are
+//! stated.
+//!
+//! Widening the walk is half the fix. The other half is that a root's
+//! contribution is counted *per root*, because the obvious guard — "the scan
+//! read more than zero files" — is vacuous at the granularity that matters:
+//! `crates/` alone contributes some three hundred files, so a root that
+//! contributes none leaves the total healthy and the absence check green over a
+//! tree nothing read. That is the same defect one level down, and it is the
+//! defect this whole file exists to refuse.
+//!
 //! It scans for two lists. A name the base game *ships* must not be in the
 //! engine; a name the base game has *retired* must not be anywhere, and that
 //! second list exists because leaving `SHIPPED_NAMES` is otherwise how a name
@@ -22,6 +37,7 @@
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::ffi::OsStr;
 use std::fs;
@@ -29,6 +45,15 @@ use std::path::{Path, PathBuf};
 
 use common::{TestResult, repository_root};
 use tempfile::TempDir;
+
+/// The directories holding one subdirectory per workspace member.
+///
+/// `crates/` is the engine; `tools/` is developer tooling. Both hold production
+/// Rust, so both are scanned. A new root has to be stated here before anything
+/// living in it is watched, which is why the guard below reports per root rather
+/// than in total: a root nobody added is indistinguishable from a root that
+/// happens to be empty, unless each is counted on its own.
+const MEMBER_ROOTS: [&str; 2] = ["crates", "tools"];
 
 /// The blocks this repository ships as content.
 const SHIPPED_NAMES: [&str; 4] = ["base:stone", "base:dirt", "base:grass", "base:water"];
@@ -188,16 +213,107 @@ fn scan_file(path: &Path, scan: &mut Scan) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Every crate's production source directory.
-fn source_directories() -> Result<Vec<PathBuf>, Box<dyn Error>> {
+/// Every member's production source directory, kept under the root it came
+/// from so that each root's contribution can be counted on its own.
+///
+/// # Errors
+///
+/// Returns the I/O failure when a root cannot be read — which is what a root
+/// named in [`MEMBER_ROOTS`] but absent from the tree produces. `read_dir`
+/// failing loudly is what keeps a mistyped root from narrowing this walk in
+/// silence, unlike the gate's `-ErrorAction SilentlyContinue` walk of the same
+/// two directories.
+fn source_directories_by_root() -> Result<BTreeMap<&'static str, Vec<PathBuf>>, Box<dyn Error>> {
+    let repository = repository_root()?;
+    let mut by_root = BTreeMap::new();
+    for member_root in MEMBER_ROOTS {
+        by_root.insert(
+            member_root,
+            source_directories_under(&repository.join(member_root))?,
+        );
+    }
+    Ok(by_root)
+}
+
+/// The `src/` directory of every member directly under `root`.
+fn source_directories_under(root: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
     let mut directories = Vec::new();
-    for entry in fs::read_dir(repository_root()?.join("crates"))? {
+    for entry in fs::read_dir(root)? {
         let sources = entry?.path().join("src");
         if sources.is_dir() {
             directories.push(sources);
         }
     }
     Ok(directories)
+}
+
+/// A scan of every member root's production tree, and how many production files
+/// each root contributed to it.
+#[derive(Debug, Default)]
+struct ProductionScan {
+    scan: Scan,
+    read_per_root: BTreeMap<&'static str, usize>,
+}
+
+/// What a scan of the whole production tree amounts to.
+///
+/// A total verdict rather than a pair of assertions a caller has to remember to
+/// write in the right order: "nothing named it" and "a root went unread" are
+/// different facts, and only the first is good news. An `is_empty()` on the hit
+/// list cannot tell them apart.
+#[derive(Debug, PartialEq, Eq)]
+enum TreeVerdict {
+    /// Every member root contributed production source, and none of it named a
+    /// watched block.
+    NothingNamed,
+    /// These member roots contributed no production source at all, so whatever
+    /// lives under them went unscanned.
+    ReadNothingUnder(Vec<&'static str>),
+    /// Every place a watched block name appears.
+    Named(Vec<String>),
+}
+
+fn scan_the_production_tree() -> Result<ProductionScan, Box<dyn Error>> {
+    let mut production = ProductionScan::default();
+    for (root, directories) in source_directories_by_root()? {
+        let read = accumulate_scans(&directories, &mut production.scan)?;
+        production.read_per_root.insert(root, read);
+    }
+    Ok(production)
+}
+
+/// Scans each of `directories` into `scan`, returning how many production files
+/// this call added to it.
+fn accumulate_scans(directories: &[PathBuf], scan: &mut Scan) -> Result<usize, Box<dyn Error>> {
+    let before = scan.files_read;
+    for directory in directories {
+        let found = scan_for_shipped_names(directory)?;
+        scan.files_read += found.files_read;
+        scan.hits.extend(found.hits);
+        scan.retired.extend(found.retired);
+        scan.exempted.extend(found.exempted);
+    }
+    Ok(scan.files_read - before)
+}
+
+/// The verdict `production` amounts to for one of its hit lists.
+///
+/// The unread-root check comes first because it explains away any answer that
+/// follows it: a hit list is only evidence about the trees that were read.
+fn tree_verdict(production: &ProductionScan, hits: &[String]) -> TreeVerdict {
+    let unread: Vec<&'static str> = production
+        .read_per_root
+        .iter()
+        .filter(|(_, read)| **read == 0)
+        .map(|(root, _)| *root)
+        .collect();
+    if !unread.is_empty() {
+        return TreeVerdict::ReadNothingUnder(unread);
+    }
+    if hits.is_empty() {
+        return TreeVerdict::NothingNamed;
+    }
+    TreeVerdict::Named(hits.to_vec())
 }
 
 /// A scan of the given files, written into a temporary directory.
@@ -212,21 +328,14 @@ fn scan_of(files: &[(&str, &str)]) -> Result<(TempDir, Scan), Box<dyn Error>> {
 
 #[test]
 fn no_production_rust_source_names_a_block_the_base_game_ships() -> TestResult {
-    let mut scanned = Scan::default();
-    for directory in source_directories()? {
-        let found = scan_for_shipped_names(&directory)?;
-        scanned.files_read += found.files_read;
-        scanned.hits.extend(found.hits);
-    }
+    let production = scan_the_production_tree()?;
 
-    assert!(
-        scanned.files_read > 0,
-        "the scan read no Rust source at all, so the check below would be vacuous"
-    );
-    assert!(
-        scanned.hits.is_empty(),
-        "a block's name belongs to content, never to the engine: {:?}",
-        scanned.hits
+    assert_eq!(
+        tree_verdict(&production, &production.scan.hits),
+        TreeVerdict::NothingNamed,
+        "a block's name belongs to content, never to the engine. The verdict names the member \
+         roots it read nothing under, so a tree this scan stopped looking at reports as a refusal \
+         rather than as the same clean answer an obedient engine gives"
     );
     Ok(())
 }
@@ -270,22 +379,14 @@ fn the_scan_reports_a_source_that_does_name_a_block_the_base_game_ships() -> Tes
 /// working. The test below it is its control.
 #[test]
 fn no_production_rust_source_names_a_block_the_base_game_has_retired() -> TestResult {
-    let mut scanned = Scan::default();
-    for directory in source_directories()? {
-        let found = scan_for_shipped_names(&directory)?;
-        scanned.files_read += found.files_read;
-        scanned.retired.extend(found.retired);
-    }
+    let production = scan_the_production_tree()?;
 
-    assert!(
-        scanned.files_read > 0,
-        "the scan read no Rust source at all, so the check below would be vacuous"
-    );
-    assert!(
-        scanned.retired.is_empty(),
-        "a name the base game has retired means nothing to the engine and nothing to content, \
-         so it belongs in no production source: {:?}",
-        scanned.retired
+    assert_eq!(
+        tree_verdict(&production, &production.scan.retired),
+        TreeVerdict::NothingNamed,
+        "a name the base game has retired means nothing to the engine and nothing to content, so \
+         it belongs in no production source — and a member root that went unread is not evidence \
+         that no such name lives under it"
     );
     Ok(())
 }
@@ -363,17 +464,17 @@ fn a_name_in_a_sibling_unit_test_file_is_skipped_and_one_beside_it_is_still_foun
 #[test]
 fn the_exemption_skips_exactly_one_file_of_the_production_tree() -> TestResult {
     let root = repository_root()?;
-    let mut skipped = Vec::new();
-    for directory in source_directories()? {
-        for path in scan_for_shipped_names(&directory)?.exempted {
-            skipped.push(
-                path.strip_prefix(&root)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .replace('\\', "/"),
-            );
-        }
-    }
+    let mut skipped: Vec<String> = scan_the_production_tree()?
+        .scan
+        .exempted
+        .iter()
+        .map(|path| {
+            path.strip_prefix(&root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
     skipped.sort();
 
     assert_eq!(

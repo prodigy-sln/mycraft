@@ -37,7 +37,7 @@ identically to a small MVP — small means narrow scope, never lower standards.
 **Linear**: [MyCraft MVP 1: Playable Sandbox](https://linear.app/prodigy-solutions/project/mycraft-phase-1-foundation)
 **Goal**: A game that starts, renders a world, and lets you move and build in it.
 
-Decomposed into ten specs, in dependency order. Each moves the playable thing
+Decomposed into eleven specs, in dependency order. Each moves the playable thing
 forward; none is a pure layer.
 
 | Priority | Feature | Issue | Status |
@@ -53,7 +53,6 @@ forward; none is a pure layer.
 | P1 | World persistence — *quit and resume* | PRO-855 | **Done** |
 | P1 | Minimal HUD: crosshair, held block, debug overlay — *the HUD is content* | PRO-856 | **Done** |
 | P2 | Ship the LICENSE texts the workspace declares | PRO-874 | **Done** |
-| P2 | Terrain texture sampling and palette separation | PRO-869 | Todo |
 
 **PRO-873 goes before PRO-854, and the ordering is the point.** Every FR-5 scenario of
 PRO-853 is verified as policy and none as product behaviour: the winit `ApplicationHandler`
@@ -98,15 +97,86 @@ renderer could not have seen its own output. PRO-873 is the same argument applie
 Everything is a placeholder — procedural textures, no audio, one block type family. That is
 correct for MVP 1. Do not gold-plate it.
 
+Terrain textures (PRO-869) moved to MVP 2, where texture-by-key becomes the feature being built
+rather than an ornament on a pipeline that cannot yet express it.
+
+---
+
+## MVP 2 — Scriptable Content
+
+**Linear**: [MyCraft MVP 2: Scriptable Content](https://linear.app/prodigy-solutions/project/mycraft-mvp-2-scriptable-content)
+**Goal**: The base game becomes a mod. Blocks are defined in sandboxed Luau, reload live on a
+running server, wear real textures, and go into your hand when you break them.
+
+**Not current yet.** MVP 1 ends at the user's sign-off, which has not happened, so the `← current`
+marker has not moved. These criteria are written first because this document's own header requires
+it before a run starts.
+
+| Priority | Feature | Issue | Status |
+|----------|---------|-------|--------|
+| P0 | Composition model and API surface policy land in the standards — *a docs commit, not a spec* | PRO-928, PRO-924 | Todo |
+| P0 | Luau host, sandbox, hostile-mod harness — *verification precedes the thing it verifies* | PRO-916 | Todo |
+| P0 | Blocks defined in Luau — pure loader swap, TOML retired — *the base game is a mod* | PRO-917 | Todo |
+| P0 | Hot reload — *edit a block while playing* | PRO-918 | Todo |
+| P0 | Solid, drawn, occludes and targetable split, plus swimmable and density — *you can see water and swim in it* | PRO-904 | Todo |
+| P0 | Texture resolution through the registry, and per-face keys — *grass gets dirt sides* | PRO-902, PRO-914 | Todo |
+| P0 | Base block textures authored as content — *proper textures* | PRO-869 | Blocked on PRO-930 |
+| P0 | Components attach behaviour; grass spreads onto dirt — *the model proven, not just moved* | PRO-919 | Todo |
+| P0 | Break a block and hold it — *pick up what you took, place it again* | PRO-929 | Todo |
+
+**Two ordering rules produced this sequence, and both cost something.**
+
+- **The TOML loader dies before anything extends it.** The solid/drawn/occludes split and per-face
+  textures need no scripting and could ship first — but both add fields to `BlockDefinition`, and
+  adding them to a loader PRO-917 then deletes is work built to be thrown away. So the swap goes
+  first and **every later field is born in Lua.** The cost is real: everything after PRO-917 depends
+  on a new runtime. It is contained by PRO-917 being a *pure* swap — identical fields, no new
+  surface, exit criterion "the world renders identically".
+- **Components exist before any callback does.** No non-composition callback system is built and
+  then migrated. Attachment is the mechanism from the first line of PRO-919.
+
+**PRO-919 is not optional.** Without one real behaviour, MVP 2 only moves TOML into Lua: the sandbox
+would have nothing to sandbox and exit criterion 3 would test a host with no API. Grass spreading
+exercises random ticks, bounded neighbour reads, block replacement, determinism and the fault
+machinery at once, and it is visible.
+
+**Exit criteria** — all must hold:
+- `sdd-gate.ps1` exits 0
+- **Zero block definitions in Rust**, mechanically guarded — the hardcoded-name scan survives the
+  loader swap
+- **A hostile mod cannot take down the server.** Infinite loop, memory bomb, sandbox escape,
+  faulting callback, runaway cascade, hostile `__index` — each contained, each named, and each
+  proven by a mutation that reddens a test
+- **You can edit a block definition in a text editor while the game is running, save, and see it
+  change in the world without restarting**
+- **You can launch the client, walk on terrain wearing real textures, break a block, see what you
+  broke in your hand, place it again, quit, relaunch, and your changes are still there**
+
+The last criterion subsumes MVP 1's, which is the point — every increment ends playable.
+
+**Known gap, unresolved.** Every spec above is mechanism; none ships new *content*. MVP 2 as
+listed ends with the same four blocks it started with, so "the base game is a mod" is only weakly
+tested — missing hooks are found by authoring real content, and four trivial blocks exercise almost
+nothing. A block-set spec belongs here; it needs two answers first, since **breaking a block to
+obtain it makes the reachable set equal to the generated set**: which blocks, and how a player gets
+one that worldgen never places.
+
+**Deferred, recorded rather than dropped.** Per-cell state (PRO-911) and everything needing it —
+multi-cell instances and collision shapes (PRO-912), placement orientation (PRO-913). Tags
+(PRO-915), which wait only because no third-party content exists yet. The HUD content format
+(PRO-893) and fonts as content (PRO-894). Worldgen as content (PRO-921), non-cube geometry
+(PRO-925), derived geometry (PRO-926), propagation and lighting (PRO-922, PRO-923).
+
 ---
 
 ## Provisional — revised after you play MVP 1
 
 Sketch only. Order and contents are expected to change based on feedback.
 
+MVP 2 has left this table — it is specified above.
+
 | MVP | Adds | Still playable because |
 |-----|------|------------------------|
-| **2 — Scriptable Content** | Luau host, sandbox, registry, hot reload; `content/base/` blocks defined in script | The blocks you already had become script-defined; you can now add one live |
 | **3 — Multiplayer** | QUIC transport, ed25519 identity, replication, prediction; 2 players → 32, over LAN or a forwarded port | The same sandbox, now with someone else in it |
 | **4 — Survival Loop** | Items, inventory, tools, crafting — all script-defined | Building gains purpose and progression |
 | **5 — Living World** | NPCs with pathfinding and scripted brains; then quests, dialogue, storyline | The world is inhabited and has things to do |
@@ -130,6 +200,17 @@ adopts it.
 actively being built. Linear files a projectless issue into whichever project it guesses — it
 put PRO-905 into *MVP 2: Scriptable Content* — and an MVP project is precisely where a
 non-MVP issue must not sit, because the conductor will eventually read that table as its scope.
+
+**Developer tooling is not on this roadmap and is not conductor scope.** `tools/` holds
+developer tools that are not the game: ADR-009's `tools/asset-gen`, and **VoxForge**
+(`tools/voxforge`, PRO-905, SPEC-013) — an AI-authorable voxel model format, a CPU preview
+renderer and a CLI, so an agent can produce assets and see its own output well enough to
+self-correct. It is deliberately absent from every MVP feature table above: the conductor
+reads those tables to determine scope, and tooling built on demand must not be adopted as
+MVP scope by a run that finds it. Its assets have no engine consumer until **MVP 5** — there
+is no non-cube geometry or block-model path today (`docs/technical/rendering.md`) — so it
+ships the pipeline ahead of the thing that draws it, which is why its preview renderer
+carries the correctness weight the engine cannot yet carry for it.
 
 ### How a voxel model reaches the GPU
 

@@ -23,6 +23,41 @@ Test-first mandate: tests exist and fail before implementation begins.
 Never write implementation before tests, write tests afterwards "for
 coverage", or skip tests for "simple" code.
 
+**The scenario↔test mapping is a floor, not a ceiling.** "Each scenario
+becomes exactly one test" guarantees every scenario is *covered*; it has
+never meant coverage stops there. **If a test is missing that would catch
+something real, add it** — do not withhold one because the scenario it
+would strengthen already has its test, and do not defer a gap to a later
+phase where the same code path happens to be revisited. Two phases of this
+project have shipped a known hole for exactly that reason.
+
+The rule that actually binds is the opposite one: **no bogus tests.** A
+test that cannot fail, asserts a tautology, re-proves what another test
+already proves *through the same code path*, or exists to move a coverage
+number is worse than no test at all, because it reads as evidence and is
+not. That is what these rules are for — not to cap how many tests exist,
+but to ensure each one would tell somebody something they need to act on.
+
+Three shapes of extra test that routinely earn their keep:
+
+- **A second witness on a path with only one.** Where a single test is all
+  that stands between a code path and silence, a second one reaching it by
+  a different route is worth having. The single-witness case is where both
+  of this project's measured coverage holes lived.
+- **A stronger observable alongside a scenario's own.** A scenario's
+  wording is sometimes nearly true by construction — "reports a bounding
+  box whose minimum corner is `(0,0,0)`" is satisfied by any volume
+  indexed from zero. Keep the scenario's assertion and add, in the same
+  test, whatever makes it falsifiable.
+- **A direct assertion on a shared derivation.** Where many outputs come
+  from one formula, asserting the formula localises a defect that a
+  downstream assertion would only report as several failures at once.
+
+Extra tests still go in `test-map.md`: against the scenario they
+strengthen, or under an "additional coverage" heading with one line
+stating what each catches. A test whose purpose is not written down is one
+nobody can later judge — which is how a bogus test survives.
+
 **Ownership and arbitration (rigor medium+):** a phase's tests are
 authored by a test author that has not seen any implementation and owns
 them for the whole phase. The implementation context never edits test

@@ -36,9 +36,11 @@ downgrade only with explicit user confirmation.
 ## Key Principles
 
 1. **Specs are the source of truth.** Acceptance scenarios (EARS) are the
-   test contract: each scenario becomes exactly one test. The mapping lives
-   in the spec folder's `test-map.md` — test names stay behavioral, and
-   code never carries spec or scenario IDs.
+   test contract: each scenario gets at least one test, and that mapping is
+   a floor rather than a ceiling — add any test that would catch something
+   real, and never write one that could not fail (`testing.md` §1). The
+   mapping lives in the spec folder's `test-map.md` — test names stay
+   behavioral, and code never carries spec or scenario IDs.
 2. **TDD is non-negotiable.** Failing test output is displayed before any
    implementation. At `medium+`, tests are authored and owned by the test
    author — implementation never edits test files; disputes go to

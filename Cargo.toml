@@ -11,6 +11,7 @@ members = [
     "crates/mc-client",
     "crates/mc-server",
     "crates/mc-testkit",
+    "tools/voxforge",
 ]
 
 [workspace.package]

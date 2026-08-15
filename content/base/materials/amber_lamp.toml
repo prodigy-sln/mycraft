@@ -1,0 +1,6 @@
+# Emissive, so the reference model exercises the unshaded path as well as the
+# three face factors. 0.9 rather than 1.0 so it is still a blend rather than a
+# special case.
+name     = "base:amber_lamp"
+color    = "#ffbf40"
+emissive = 0.9

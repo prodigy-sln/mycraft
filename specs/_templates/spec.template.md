@@ -4,7 +4,7 @@ title: [Feature Title]
 status: active
 rigor: medium          # low | medium | high | xhigh | max
 branch: feature/YYYY-MM-DD-feature-name
-jira: [PROJ-XXX — remove if not applicable]
+issue: [PROJ-XXX — remove if not applicable]
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
 author: [name]

@@ -20,7 +20,7 @@ Every stage runs even when an earlier one fails, so one invocation reports every
 | 1 | format | `cargo fmt --check` | any deviation |
 | 2 | lint + complexity | `cargo clippy -D warnings` | any lint, incl. complexity thresholds |
 | 2b | gpu-free (`mc-testkit` + `mc-render`, no default features) | `cargo clippy` + `cargo nextest` with `--no-default-features` | any lint, or any test failure, in the configuration where `wgpu` is absent from the dependency graph |
-| 3 | size | built-in | source > 500 lines, tests > 600 |
+| 3 | size | built-in | source > 500 lines, tests > 600, or any declared root measuring zero files |
 | 4 | deps | `cargo machete` | any unused dependency |
 | 5 | sast | `cargo deny` | vulnerabilities, bad licenses, banned crates, untrusted sources |
 | 6 | secrets | `gitleaks` | credentials in the working tree |
@@ -285,6 +285,17 @@ and none of them can reach inside a file:
 - **Size limits.** The gate measures a `src/` file against 500 lines. A
   sibling spends that budget on production code alone, which is the code
   somebody has to read to understand the module.
+
+  The stage walks a declared list of roots — `crates/` and `tools/` — and
+  prints the file count it measured **per root**, failing if any root
+  contributes zero. The per-root count is the point, not decoration: the
+  walk carries `-ErrorAction SilentlyContinue`, so a root that does not
+  exist yields no files and no error, and `crates/` alone keeps the total
+  near three hundred and fifty. A total would therefore stay healthy while
+  a mistyped root left a whole tree unmeasured, and the stage would report
+  "all files within limits" having never opened a file there. That is not
+  hypothetical: `tools/` went unwalked from the day the directory was
+  reserved until the day it first held code.
 - **The source-literal scan** — the check that no hardcoded
   `base:`-namespaced block name appears outside test code
   (`technical/architecture.md`). Against siblings it is a file-name
@@ -524,6 +535,18 @@ last two of which are the ones that look like the rule and are not:
   declarations closes nothing about those declarations — delete a declared
   outline and the prediction predicts no ring, the frame draws none, and the
   two agree. The two constructions look alike and only one is evidence.
+- **A texture that tiles must not be judged by comparing it against a second render of itself.**
+  VoxForge's block-texture emission needs to know whether a texture's opposing edges would show a
+  seam once the terrain mesher wraps it. The tempting oracle — replicate the model 3×3, render that,
+  compare the centre tile against the single-render texture — is decidable and would catch a raster
+  sized wrong. It is rejected because, for an axis-aligned orthographic render with one opaque sample
+  per pixel, the centre tile of such a replication is byte-identical to the single render *by
+  construction, for any rasteriser at all*: there is no perspective and no cross-tile occlusion for
+  a neighbour to contribute. Both images come off the same code, so a uniform sampling shift would
+  move them together and the comparison would stay green regardless. The verdict is instead judged
+  against two things the rasteriser never produced: the model's own *declared* `scale` (for whether
+  the texture's period is the block grid's), and the texture's *own pixels, row by row* (for whether
+  a wrap step exceeds any step the row already contains) — see ADR-021.
 - **A fourth restatement of a convention is not a fourth oracle; it is a
   fourth thing to keep in step.** Asked whether a golden-id spelling deserved
   a plain `assert_eq!(capture_id(0, "r1"), "player-walk-t000-r1")` beside the
@@ -967,6 +990,9 @@ Stated plainly, because pretending otherwise is how these get missed:
   "something reached pixels" — §"Nothing can tell a painted readout from a painted rectangle"
   below. A human reading the window is the only instrument, and the section says what makes that
   reading worth anything.
+- **Whether a voxel model is structurally sound.** Connectivity is a graph property, not a physical
+  one; nothing in VoxForge's format or tooling can tell a correctly braced joint from a part
+  cantilevered on nothing — see the sign-off account below.
 
 ### The renderer has been visually accepted by a human — and what that does not cover
 
@@ -991,6 +1017,54 @@ a later reader does not read "accepted" as "the picture is finished":
 
 The first two are owned by the texture-sampling and palette work; the acceptance narrows what is
 unverified rather than clearing it.
+
+### VoxForge's preview loop has been signed off by a human — and what that does not cover
+
+VoxForge (`tools/voxforge`, `modding/voxel-models.md`) exists specifically so an AI agent can author
+a voxel model and self-correct against a rendered preview instead of reasoning blind about a grid of
+characters. Every automated check the tool has — orientation, shading arithmetic, the seam verdict —
+descends from one convention table (the camera-basis formula, the layer-orientation table), so the
+layer mapping and the ray march could both be wrong in a way the other agrees with, and nothing
+automated would notice. A human signed off against a committed asymmetric reference model — deliberately
+non-cubic, three materials, an emissive marker, built so every one of the fourteen views' features
+moves under a different mirror or transpose — read through the real `load_document → assemble →
+render` path, plus two real assets (`chair-slatback.mcvox`, `fox.mcvox`) built from nothing but the
+tool's own previews.
+
+**What the exercise found, recorded because it qualifies the sign-off rather than only supporting
+it:**
+
+- **The preview loop is reliable for proportion and orientation, and unreliable for structure.**
+  Armrests cantilevered on nothing survived ten views and a contact sheet; what caught them was a
+  human reading the model's own definition, not a render. A preview shows shape, and a part with
+  something solid behind it looks supported from every angle a camera can take.
+- **Connectivity does not detect an unsupported part, and an earlier draft of this finding claimed
+  it would — checked by running the defective model through the finished `inspect` report, which
+  answered one component, no floating voxels, exit 0.** The armrest was *connected*, by a single
+  voxel face, and merely unsupported. Connectivity is a graph property; being held up is a physical
+  one, and 6-connectivity cannot tell a cantilever from a correctly braced joint by construction.
+  Nothing in the format detects an unsupported part, and nothing claims to — an "overhang"
+  observation (upward flood from the model's floor) was proposed as a follow-up and is not built: it
+  would have legitimate false positives by design, since a wall torch or a hanging lantern is
+  correctly unsupported and nothing in a `.mcvox` file says which.
+- **The reviewer caught what the model's own author did not** — the same defect, and a second one, a
+  full revision after the author had declared the model sound. The loop worked here *with a second
+  pair of eyes in it*, which is the condition a sign-off is itself an instance of.
+- **Every asset built for the exercise was authored by a generator script, not hand-written grid
+  art.** Furniture-scale models run to hundreds of lines of ASCII per revision; the format is
+  excellent for reading, diffing and reasoning about at block scale, but at that scale an agent
+  writes a program that emits the grid rather than typing it by hand. Not a defect against the
+  format — editing verbs are explicitly out of scope — but a fact about how it gets used in practice,
+  visible only once something real was built with it.
+- **The four "under" isometric views (added mid-effort because the original ten could not show the
+  underside of any horizontal surface) earned their keep immediately**: they are what let the
+  reviewer diagnose the chair's unsupported armrest, on their first real use.
+
+Two defect classes are provably beyond every automated check, established by mutation rather than
+argued: a `right`-sign flip on the isometric views alone escapes every orientation witness, since
+each reads a vector the corners share with an axis view, or reads `up` rather than `right`; and for
+the paired "under" corners, the sign of the view direction's `y` component is the *only*
+discriminator between a corner and its twin anywhere in the suite.
 
 ### Manual acceptance — walking, looking, and the pointer
 
