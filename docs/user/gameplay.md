@@ -77,9 +77,10 @@ windows; clicking back in the game window always takes it again.
 ## Saving and resuming
 
 Closing the game normally saves the world you were playing in and where you were standing in it.
-Starting the client again picks that world back up — the blocks you broke and placed are still
-broken and placed, and you stand where you left off, facing the way you were. Killing the process
-instead of closing it normally does not save: whatever you built or moved since the last clean close
+Starting the client again picks that world back up and draws it that way from the very first frame —
+the blocks you broke and placed are still broken and placed, visibly as well as underfoot, and you
+stand where you left off, facing the way you were. Killing the process instead of closing it normally
+does not save: whatever you built or moved since the last clean close
 is lost, but the save from that last clean close is left exactly as it was, so a crash or a forced
 quit never puts something already saved at risk.
 

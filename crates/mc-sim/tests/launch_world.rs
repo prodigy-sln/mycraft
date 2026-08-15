@@ -52,7 +52,8 @@ fn a_launch_with_a_readable_save_plays_in_the_world_the_save_holds() -> TestResu
     let held = generated_with_the_marker(&generated, &registry)?;
     save_world(&save, &held, recorded_player(), &registry)?;
 
-    let launched = simulation_at_launch(&save, &generated, Arc::clone(&registry), ACCEPTING);
+    let launched =
+        simulation_at_launch(&save, mc_sim::REPLAY_SEED, Arc::clone(&registry), ACCEPTING);
 
     let (x, y, z) = MARKER_CELL;
     assert_eq!(
@@ -74,7 +75,8 @@ fn a_launch_with_no_save_plays_the_world_the_generator_makes() -> TestResult {
     let (registry, generated, directory) = a_world_to_launch_into()?;
     let save = save_path(&directory);
 
-    let launched = simulation_at_launch(&save, &generated, Arc::clone(&registry), ACCEPTING);
+    let launched =
+        simulation_at_launch(&save, mc_sim::REPLAY_SEED, Arc::clone(&registry), ACCEPTING);
 
     assert_eq!(
         (against_generated(&launched, &generated), save.exists()),
@@ -89,12 +91,13 @@ fn a_launch_with_no_save_plays_the_world_the_generator_makes() -> TestResult {
 
 #[test]
 fn a_launch_with_a_save_it_cannot_read_refuses_naming_the_file_and_the_reason() -> TestResult {
-    let (registry, generated, directory) = a_world_to_launch_into()?;
+    let (registry, _, directory) = a_world_to_launch_into()?;
     let save = save_path(&directory);
     written(&save, NOT_A_SAVE)?;
     let reason = why_it_cannot_be_read(&save)?;
 
-    let launched = simulation_at_launch(&save, &generated, Arc::clone(&registry), ACCEPTING);
+    let launched =
+        simulation_at_launch(&save, mc_sim::REPLAY_SEED, Arc::clone(&registry), ACCEPTING);
 
     let answer = answered(&launched);
     assert_eq!(

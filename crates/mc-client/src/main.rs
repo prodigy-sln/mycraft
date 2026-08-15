@@ -7,8 +7,7 @@
 
 use std::process::ExitCode;
 
-use mc_client::startup::Launch;
-use mc_client::{events, gpu_startup, startup};
+use mc_client::{events, gpu_startup, launch, startup};
 
 use mc_render::window::{Ending, exit_code};
 
@@ -48,14 +47,17 @@ fn run() -> Ending {
     };
     // The command line is read here rather than where its answer is spent, so
     // that the one place this process looks at its own arguments is the one
-    // place it is started from.
-    let launch = Launch {
-        preparation: startup::spawn_preparation(root),
-        accepting: startup::acceptance_from(std::env::args()),
-    };
+    // place it is started from. The save is located here for the same reason:
+    // both are inputs the process's own environment supplies, and the worker
+    // below is handed answers rather than the means to go looking for them.
+    let preparation = launch::spawn_preparation(
+        root,
+        launch::save_path(),
+        startup::acceptance_from(std::env::args()),
+    );
 
     match gpu_startup::open() {
-        Ok(gpu) => events::run(gpu, launch),
+        Ok(gpu) => events::run(gpu, preparation),
         Err(ending) => ending,
     }
 }

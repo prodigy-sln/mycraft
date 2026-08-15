@@ -119,6 +119,30 @@ holding its own device, buffer set and 256-layer array texture aborted a driver 
 (`code 0xc0000005`). It has not recurred at `--test-threads 2`; a nextest test-group for the GPU
 suites is the remedy if it does.
 
+### A phase whose tree does not compile at its start has no gate evidence at its start
+
+The adaptation-commit split — a test author adapting pre-existing test files for a signature change,
+in a dedicated commit, before the matching implementation lands — deliberately leaves the tree unable
+to build for the span between that commit and the implementation that follows it. That window is the
+pattern's whole point, not a defect in it: it is what keeps a mechanical adaptation (an import path, an
+argument) out of the same commit as the behaviour change it enables. Its price is that nothing gates
+inside the window. A `clippy::excessive_nesting` violation in a test fixture survived 697 passing tests
+and two rounds of deliberate falsification precisely because the gate had no clean compile to run
+clippy against until the implementation commit landed — it was not that the lint was weak or the
+falsifications careless, it was that no gate run had reached that stage yet.
+
+The mitigation is a rule, not a tooling fix: **a test author who cannot run the full gate must still
+run `cargo clippy --workspace --all-targets --all-features -- -D warnings` (or the narrower invocation
+that covers the files just touched) before handing the adaptation commit off.** A compile failure
+elsewhere in the workspace does not stop clippy from checking the crate that does compile.
+
+The window's own size is a second estimate worth checking rather than trusting. A design that changes
+a signature names the pre-existing call sites it will force open, and that list is derived by reading,
+so it is a hypothesis in the same way a falsifier list is (below). The most recent one named **five**
+test files and the adaptation touched **four**: the fifth reached the changed function only through a
+helper that does not call it. Confirm each named site actually needs the edit before making it — an
+unnecessary adaptation is churn inside exactly the span nothing is gating.
+
 ### Complexity thresholds
 
 `clippy.toml` makes `code-quality.md` §2 machine-enforceable rather than reviewer-enforced:
@@ -997,6 +1021,13 @@ still one refactor old for exactly the reason the paragraph above gives. Do not 
 measurements recorded further down this file as covering them: they observed what the client *drew*,
 and these three are about pointer capture.
 
+**SPEC-012's validation also performed no manual acceptance and marks no exit criterion met.** That
+spec fixed the defect that had falsified MVP 1's fourth exit criterion — a relaunched client rendering
+a freshly generated world while the simulation resumed a saved one — and only a human at the physical
+machine can confirm the fix: quit, relaunch, and see the world as it was left, rather than the world
+the generator would have produced. Nothing in that validation substitutes for that check, or for any
+of checks 3, 5 and 6 above, which remain outstanding for the same reasons already given.
+
 Checks 1 (walk with WASD), 2 (turn with the pointer, up is up and right is right) and 4 (the view
 does not turn while the cursor is free) are retired from this table: they are now
 `every_declared_binding_moves_the_player_along_its_own_axis_and_no_other`,
@@ -1423,6 +1454,40 @@ function, does not read a green gate as permission. The call is held by review a
 and that is the correct place for it to be held — not a gap to be closed by inventing a scenario for
 a failure mode that only a machine which has actually stopped can distinguish.
 
+### Three rules held by a reader, and the reason no fixture can hold them instead
+
+Each of these is real, each was checked by deliberately trying to build a discriminating fixture, and
+each attempt failed for a structural reason rather than a lack of effort — so the rule is recorded
+here for a reviewer to check by reading, not left as an assumed gap.
+
+- **The texture key set must read a definition's `texture` field, never its `name`.** Every shipped
+  block declares the two identically, so a key set built from `name` instead of `texture` passes every
+  scenario that exists today and is wrong only the first time a mod declares them differently. It
+  cannot be closed by a fixture *here*: `mc-render`'s quad-to-key match (`geometry/mod.rs`) itself keys
+  off a quad's block **name**, never consulting the registry, so a fixture built to discriminate the
+  two fields would fail packing under a *correct* implementation exactly as it would under a wrong one.
+  Blocked on routing that match through the registry (tracked as **PRO-902**, recorded against MVP 2 in
+  `crates/mc-render/CLAUDE.md`), not on writing a better test.
+- **A section must be resolved by its coordinate, never by its position in a `Vec`.** Every
+  `VoxelWorld` built anywhere in this codebase happens to keep insertion order and coordinate order
+  equal, so a mesher that looked sections up by `Vec` position instead of `column(cx, cz)` would pass
+  every test in the workspace today. A save whose sections arrived in a different order would mesh
+  wrong geometry rather than being refused — tracked as **PRO-903**.
+- **A launch must not generate a world it does not need.** What every scenario here can see is a launch
+  that generates a world it *cannot* build; none can see one that generates a world it does not need
+  and *succeeds* anyway. A speculative generate-and-discard, its result silently swallowed, leaves the
+  whole suite green — measured, not assumed. It is ruled out by the design (Out of Scope, and the
+  decision that a launch establishes which world is needed before doing any work for it), not by a
+  fixture, because closing it would mean asserting the absence of a call, which is an implementation
+  detail rather than behaviour.
+
+**One more risk is stronger than any test guarding it, because the type system makes the failure
+unspellable.** `World::mesh` takes `&self`; marking a section dirty is reachable only through
+`write`'s `&mut self`. A falsifier meant to check "meshing also marks what it meshed" cannot be
+written against the shipped signature at all — trying to write it needs a widened signature and an
+accessor that does not exist, which is itself the evidence. Where a mutation can be spelled and shown
+not to bite, this one cannot be spelled, and that is the stronger guarantee.
+
 ### A falsifier list derived from call paths is a hypothesis, not a measurement
 
 Retiring the base game's empty block (`modding/blocks-items.md`) was the third feature to make the
@@ -1476,6 +1541,18 @@ satisfies the first vacuously. The second was reported by the test author as una
 was true of the RED against the unchanged tree and false of the mutation table. A scenario green on
 first compile is not ungraded; it is graded somewhere other than its own RED, and the table is where
 that is written down.
+
+### A requirement that nothing changes yields only guards
+
+A scenario asserting that behaviour is *unchanged* cannot be red at authoring time — there is no new
+behaviour to fail against — so every scenario under such a requirement is a guard, never a driver,
+regardless of what the spec that wrote it assumed. One requirement's four scenarios were split two
+and two, by reasoning about what each scenario *said* rather than by running it; both of the ones
+called capable of driving a RED were in fact already green before any implementation existed. A spec
+author classifying scenarios by intuition rather than by executing them will mislabel some this way,
+and a guard recorded as a driver is a claimed RED that never happened — `test-map.md`'s Driver/Guard
+column, and running every scenario before recording which column it belongs in, is what catches the
+mislabelling before it is trusted.
 
 ### The 10 000-block exit criterion, and what makes it honest
 

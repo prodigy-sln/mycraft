@@ -30,7 +30,8 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
-use mc_client::startup::{PreparationError, PreparedScene, prepare_scene, save_path};
+use mc_client::launch::save_path;
+use mc_client::startup::{PreparationError, PreparedScene, prepare_scene};
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
 use mc_core::id::{BlockName, TextureKey};

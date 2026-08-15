@@ -46,6 +46,86 @@ impl ContentRoot {
     pub fn path(&self) -> &Path {
         self.directory.path()
     }
+
+    /// This root with one more block declaration written into `blocks/`.
+    ///
+    /// **Taken and handed back by value so that roots compose**: a scenario needing
+    /// a root that declares one block and stops declaring another chains the two
+    /// helpers rather than asking for a third one that does both.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails, or if the root already declares that
+    /// file — a root that declared the block all along is not a root a block was
+    /// added to, and a scenario about what the addition changes would be reading a
+    /// root it never built.
+    pub fn declaring_block(
+        self,
+        file_name: &str,
+        declaration: &str,
+    ) -> Result<Self, Box<dyn Error>> {
+        let blocks = self.path().join(BLOCK_DIRECTORY);
+        let declared = blocks.join(file_name);
+        if declared.exists() {
+            return Err(format!(
+                "this fixture has to add `{BLOCK_DIRECTORY}/{file_name}` to a copy of the shipped \
+                 content root, but the shipped root already declares it. What it would build is a \
+                 root whose block came from the shipped content rather than from this fixture, and \
+                 the declaration a scenario is about would be one nobody here wrote"
+            )
+            .into());
+        }
+        fs::create_dir_all(&blocks)?;
+        fs::write(&declared, declaration)?;
+        Ok(self)
+    }
+
+    /// This root with the named block declarations taken out of `blocks/`.
+    ///
+    /// **Taken and handed back by value for the same reason
+    /// [`declaring_block`](Self::declaring_block) is**, and this is the pair that
+    /// reason was written for: a root that declares a block of its own *and*
+    /// stops declaring the ones a generator places is two operations on one copy,
+    /// and neither of the two is a usable root on its own.
+    ///
+    /// **A root with nothing left in `blocks/` is not what this builds.**
+    /// `BlockRegistry::apply` refuses a source that declares nothing at all, so
+    /// such a root fails at *registration* — before anything that generates a
+    /// world is reached, and a scenario about what a generator cannot place would
+    /// then be passing or failing over a registry that was never built. Chain
+    /// this after a `declaring_block` that leaves something behind.
+    ///
+    /// **Every name is checked before any file goes**, so a root this refuses is
+    /// the root it was handed rather than a half-stripped one. The alternative
+    /// leaves a temporary directory that declares some of what was asked for and
+    /// not the rest, which is precisely the "root nobody built" this refuses in
+    /// order to avoid.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a named declaration was not there to remove — see this
+    /// module's header for why that is a failure rather than nothing happening —
+    /// or if a removal fails.
+    pub fn not_declaring_blocks(self, file_names: &[&str]) -> Result<Self, Box<dyn Error>> {
+        let blocks = self.path().join(BLOCK_DIRECTORY);
+        if let Some(file_name) = file_names
+            .iter()
+            .find(|file_name| !blocks.join(file_name).is_file())
+        {
+            return Err(format!(
+                "this fixture has to remove `{BLOCK_DIRECTORY}/{file_name}` from a copy of the \
+                 shipped content root, but the shipped root does not declare it. What it would \
+                 build is a root that never declared the block rather than one whose declaration \
+                 was taken away, and a scenario about a world the generator can no longer build \
+                 would be about a block nobody stopped declaring"
+            )
+            .into());
+        }
+        for file_name in file_names {
+            fs::remove_file(blocks.join(file_name))?;
+        }
+        Ok(self)
+    }
 }
 
 /// The shipped content root, copied whole into a temporary directory.

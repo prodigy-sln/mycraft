@@ -283,10 +283,11 @@ separately and by review.
 `mc_sim::replay::simulation_for(world: &ReplayWorld, registry: &BlockRegistry) ->
 Result<Simulation, SpawnError>` resolves `SolidVoxels`, derives the spawn and constructs the
 `Simulation`; the client calls it and decides nothing. `PreparedScene` carries `world` and
-`registry` alongside the mesh, so the composition root — and the golden, probe and determinism
-suites — build the simulation from the same preparation the product runs, and
-`PreparationError::Spawn` is the variant that carries a refused `SpawnError` across the crate
-boundary. Because the world is generated on the preparation worker several frames after the window
+`registry` alongside the mesh, so the golden, probe and determinism suites build their simulation
+from the same preparation their frames are packed by; the composition root builds its own from
+`PreparedLaunch`, which carries the `Simulation` itself rather than a world to derive one from,
+because on a resume there is no `ReplayWorld` in the process at all. `PreparationError::Spawn` is
+the variant that carries a refused `SpawnError` across the crate boundary. Because the world is generated on the preparation worker several frames after the window
 opens, `collect_preparation` hands the constructed `Simulation` to `Session::attach_simulation` once
 the scene reaches `ScenePhase::Ready` — the phase lives in `App`, the simulation lives in `Session`,
 and the invariant that one is `Some` exactly when the other is `Ready` is held jointly by that one
@@ -470,6 +471,12 @@ would keep passing too. The chosen shape keeps the oracle's independence at the 
 invariant instead of a structural guarantee — recorded here because a future reviewer proposing the
 derived form should know what it would cost, not just what it would buy.
 
+**`World::mesh(&self) -> Result<Vec<SectionQuads>, PrepareError>` reads the whole world once and marks
+nothing dirty.** It takes `&self`, and `mark_dirty` is reachable only through `write`'s `&mut self` —
+so a call to `mesh` cannot also dirty what it just meshed, by the borrow checker rather than by
+convention or review. That is what lets a launch mesh a resumed world exactly once, at preparation
+time, with nothing left in the dirty set for the frame path to drain afterward.
+
 **The raycast's reach bound is a single site.** `targeted(origin, direction, reach, world) -> Option<Hit>`
 walks voxels in ascending entry distance and stops as soon as the next voxel's entry distance exceeds
 `REACH` (5.0 blocks) — there is no second, separate `distance <= REACH` check anywhere else. This is
@@ -571,13 +578,16 @@ either. `splice` replaces sections **positionally**, matching each remeshed sect
 existing slot by `(column, section index)` — it never appends and never sorts — which is exactly what
 keeps `mesh_all`'s section ordering, a golden-frame dependency, from moving under an edit.
 
-**Texture layer assignment is not re-resolved on a remesh, and that is a scoped, accepted gap rather
-than an oversight.** Layers are assigned once, from the initial mesh's own quad keys. Re-resolving
-against every *registered* block instead would shift every layer index the first mesh assigned —
-silently invalidating every committed golden. It holds for MVP 1 because everything placeable (dirt,
-grass, stone) is already among the initially-meshed keys; the failure mode if that ever stops being
-true is a loud, named error rather than a wrong texture, and the general gap is already recorded in
-`crates/mc-render/CLAUDE.md` against MVP 2, where script-defined blocks make it live.
+**Texture layer assignment is not re-resolved on a remesh, and that no longer rests on which blocks a
+world happens to contain.** Layers are resolved once, at launch, from `layers_of(&registry)` — every
+block the content registers, never the meshed world's quads (`technical/rendering.md` §"Textures are
+array layers, never an atlas") — so an edit or a resumed save can add a block a world had none of
+without shifting anything already assigned. Re-resolving on every remesh is unnecessary rather than
+deferred: nothing about which blocks are registered changes mid-session in MVP 1. Hot-reloadable
+content reopens the question, and the failure mode if a quad ever named an unresolved key is a loud
+error at packing time (`GeometryError::UnresolvedTexture`) rather than a wrong texture — recorded
+against MVP 2 in `crates/mc-render/CLAUDE.md`, which is a separate gap: a quad is still matched to a
+key by the block's *name*, not through the registry.
 
 **A failed remesh batch is dropped and reported once — the opposite rule from scene preparation,
 deliberately.** Preparation fails the whole run if it cannot build a scene at all; a remesh that cannot
@@ -605,7 +615,10 @@ workspace, because nothing outside the module had ever named the encoder or its 
 `mc_sim::world::World` gains `pub(crate) fn blocks(&self) -> &VoxelWorld` — a shared borrow, so the
 crate's single private write path (`World::write`, see "The editable world" above) is untouched by
 it — and a new `mc_sim::persistence` module owns both `save(simulation, path)` and
-`simulation_at_launch(save, generated, registry, accepting)`. Deciding which world a launch plays,
+`simulation_at_launch(save, seed, registry, accepting)`. It takes the **seed** rather than a world
+built from it, and generates one only in the arm where there is no save to resume — a caller handing
+over a `ReplayWorld` has already generated one, so "a resume derives no world from the seed" would
+otherwise be true of the function and false of the process running it. Deciding which world a launch plays,
 what a refusal does, and what happens on quit is policy, and `mc-sim` is where it lives: it is the
 crate the coverage gate actually measures (ADR-013), and a save is server state (invariant 4)
 regardless of which process happens to host the authoritative simulation in MVP 1. Putting that
@@ -613,17 +626,30 @@ policy in `mc-client` instead — a crate ADR-013 excludes from coverage on the 
 "holds only wiring", with its own Rejected section warning that narrowing the exclusion is "a new
 record, not a quiet edit" — would have put a real decision in the one place nothing measures it.
 
-**The resume decision sits above `prepare_scene`, in the client, and never inside it.**
-`prepare_scene` is the public entry point the golden-frame, probe and determinism suites all shoot
-through — the same pipeline a player launches, not a copy of it. A "load the save if one exists"
-branch inside `prepare_scene` would let a save file sitting in a capture's working directory change
-what a golden frame shows, silently, for a reason that has nothing to do with the renderer. So
-`mc-client`'s `startup::simulation_to_play` calls `mc_sim::persistence::simulation_at_launch`
-*after* `prepare_scene` has already produced a generated world and a registry, and `prepare_scene`
-itself carries no save-aware branch of any kind — a scene it prepares is always built from the world
-the generator makes, whatever is sitting on disk beside it.
+**The resume decision sits inside the launch preparation, and `prepare_scene` is save-blind because
+it is a different function.** `prepare_scene` is the public entry point the golden-frame, probe and
+determinism suites all shoot through — the same pipeline a player launches, not a copy of it. A
+"load the save if one exists" branch inside it would let a save file sitting in a capture's working
+directory change what a golden frame shows, silently, for a reason that has nothing to do with the
+renderer. That is the invariant, and it is unchanged.
 
-**`mc-client` gains wiring and one ending translation, and no policy.** `startup::save_path()` names
+What changed is where the other path lives. There are two preparation entry points rather than one
+with a branch above it: `startup::prepare_scene(root)` turns a content root into a drawable
+*generated* scene and reads no save, and `launch::prepare_launch(root, save, accepting)` asks
+`mc-sim` which world this launch plays and prepares **that** world. The launch path establishes
+which world is needed before doing any work for it — `launch::simulation_to_play` calls
+`mc_sim::persistence::simulation_at_launch` first, and only then meshes, resolves layers and packs —
+so a resume generates nothing at all, rather than generating a world, meshing it and discarding both
+once a save turns up.
+
+Two of anything on the golden path is how images drift, so the split is answered structurally rather
+than by care: both doors share one mesher (`mesh_world`), one definition of the texture key set
+(`layers_of`, over the *registry* and never over a world) and one packer (`scene_of`), so the only
+thing that can differ between them is which world's blocks went in — and that equality is asserted
+byte for byte, over both the section table and the packed vertices, by
+`crates/mc-client/tests/launch_and_capture_agree.rs`.
+
+**`mc-client` gains wiring and one ending translation, and no policy.** `launch::save_path()` names
 where the save lives (relative to the working directory, mirroring `CONTENT_ROOT`'s own convention,
 and deliberately not checked for existence — a missing save is the no-save case, not a failure);
 `startup::acceptance_from(args)` parses the one command-line flag MVP 1's human channel needs

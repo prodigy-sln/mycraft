@@ -6,10 +6,12 @@
 //! save is server state, which is what this crate is. The client wires this up
 //! and decides nothing.
 //!
-//! **Above the scene preparation and never inside it.** A save file lying in a
-//! capture's working directory must not be able to change what a golden frame
-//! shows, so the branch sits where the client makes it rather than inside the
-//! path the golden suites shoot through.
+//! **Nowhere the golden suites can reach it.** A save file lying in a capture's
+//! working directory must not be able to change what a golden frame shows. So
+//! this is asked by the client's *launch* preparation and by nothing on the
+//! path the golden suites shoot through — the two are separate entry points,
+//! rather than one with the question asked above it, which is what makes the
+//! capture path unable to read a save rather than merely not doing so.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -22,7 +24,7 @@ use mc_world::persistence::{
 use thiserror::Error;
 
 use crate::player::PlayerState;
-use crate::replay::{ReplayWorld, SpawnError, simulation_for};
+use crate::replay::{ReplayWorld, SpawnError, WorldGenError, simulation_for};
 use crate::simulation::Simulation;
 use crate::world::World;
 
@@ -53,6 +55,19 @@ pub enum LaunchError {
         #[source]
         source: Box<LoadError>,
     },
+    /// There is no save to resume and no world could be generated in its place.
+    ///
+    /// **This one interpolates its cause rather than only carrying it**, unlike
+    /// the transparent variants below, and unlike [`Load`](Self::Load) whose own
+    /// message already names the file. The refusal a turned-away player reads is
+    /// rendered from `Display` alone — nothing walks the source chain — so a
+    /// message that stopped at "a new world could not be generated" would leave
+    /// out the one thing a content author can act on: which block the generator
+    /// asked for and did not get. It is not transparent either, because the
+    /// sentence a player needs is *why the world was being generated at all*,
+    /// and that is what this level knows and the cause does not.
+    #[error("a new world could not be generated: {0}")]
+    WorldGen(#[from] WorldGenError),
     /// The generated world cannot place a player.
     #[error(transparent)]
     Spawn(#[from] SpawnError),
@@ -97,6 +112,15 @@ pub fn save(simulation: &Simulation, path: &Path) -> Result<(), SaveError> {
 /// [`LoadError::Missing`] is a variant of its own rather than folded into
 /// "could not be read".
 ///
+/// **The seed is taken rather than a world built from it, and that is what makes
+/// the distinction above mean anything.** A caller handing over a
+/// [`ReplayWorld`] has already generated one, so "a resume derives no world from
+/// the seed" would be a claim about this function while being false of the
+/// process running it. Generation happens in the [`LoadError::Missing`] arm
+/// below and nowhere else, which is the whole of the claim — a resumed launch
+/// never reaches it, so a content root that could not generate a world is still
+/// a content root a save plays against.
+///
 /// A resumed player is placed **from the save**, deriving no height from the
 /// loaded world's blocks — the stored position is the whole of it. Only the
 /// generated path still derives a spawn, and it derives it exactly as it always
@@ -105,12 +129,13 @@ pub fn save(simulation: &Simulation, path: &Path) -> Result<(), SaveError> {
 /// # Errors
 ///
 /// Returns [`LaunchError::Load`] naming the save and why it could not be read,
-/// [`LaunchError::Spawn`] where the generated world cannot place a player, and
-/// [`LaunchError::Registry`] where a world holds a block `registry` does not
-/// know.
+/// [`LaunchError::WorldGen`] naming the block a first launch's world could not
+/// be built without, [`LaunchError::Spawn`] where the generated world cannot
+/// place a player, and [`LaunchError::Registry`] where a world holds a block
+/// `registry` does not know.
 pub fn simulation_at_launch(
     save: &Path,
-    generated: &ReplayWorld,
+    seed: u64,
     registry: Arc<BlockRegistry>,
     accepting: Acceptance,
 ) -> Result<Simulation, LaunchError> {
@@ -119,7 +144,10 @@ pub fn simulation_at_launch(
             resuming(&loaded.player),
             World::new(loaded.world, registry)?,
         )),
-        Err(LoadError::Missing { .. }) => Ok(simulation_for(generated, registry)?),
+        Err(LoadError::Missing { .. }) => {
+            let generated = ReplayWorld::generate(seed, &registry)?;
+            Ok(simulation_for(&generated, registry)?)
+        }
         Err(refusal) => Err(LaunchError::Load {
             save: save.to_owned(),
             source: Box::new(refusal),

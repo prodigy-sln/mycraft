@@ -66,7 +66,8 @@ fn a_launch_resuming_from_a_save_stands_the_player_where_the_save_recorded_them(
     let recorded = recorded_player();
     save_world(&save, generated.blocks(), recorded, &registry)?;
 
-    let launched = simulation_at_launch(&save, &generated, Arc::clone(&registry), ACCEPTING);
+    let launched =
+        simulation_at_launch(&save, mc_sim::REPLAY_SEED, Arc::clone(&registry), ACCEPTING);
 
     let [_, height, _] = recorded.position;
     assert_eq!(
@@ -98,7 +99,8 @@ fn a_launch_with_no_save_stands_the_player_at_the_height_the_heightmap_reports()
     let surface = surface_height(&generated, column_x, column_z)?;
     let derived = (surface + SPAWN_ABOVE_SURFACE) as f32;
 
-    let launched = simulation_at_launch(&save, &generated, Arc::clone(&registry), ACCEPTING);
+    let launched =
+        simulation_at_launch(&save, mc_sim::REPLAY_SEED, Arc::clone(&registry), ACCEPTING);
 
     assert_eq!(
         (stood(&launched), save.exists()),
@@ -123,7 +125,8 @@ fn a_player_saved_while_they_were_moving_resumes_at_rest() -> TestResult {
     let speed_when_saved = playing.latest().player.velocity.length();
     persistence::save(&playing, &save)?;
 
-    let launched = simulation_at_launch(&save, &generated, Arc::clone(&registry), ACCEPTING);
+    let launched =
+        simulation_at_launch(&save, mc_sim::REPLAY_SEED, Arc::clone(&registry), ACCEPTING);
 
     assert_eq!(
         (

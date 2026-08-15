@@ -33,17 +33,17 @@ mod persistence;
 use std::error::Error;
 use std::sync::Arc;
 
-use mc_client::startup::{acceptance_from, simulation_to_play};
+use mc_client::launch::simulation_to_play;
+use mc_client::startup::acceptance_from;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
 use mc_core::id::{BlockName, TextureKey};
-use mc_sim::replay::ReplayWorld;
 use mc_world::persistence::{SavedPlayer, save_world};
 use mc_world::world::{VoxelWorld, WorldPos};
 use tempfile::TempDir;
 
 use persistence::{
-    EVERY_DECLARED_CELL, Launched, TestResult, against, generated_world, refusal, registry_of,
-    save_in, with_the_replay_blocks,
+    EVERY_DECLARED_CELL, Launched, TestResult, against, refusal, registry_of, save_in,
+    with_the_replay_blocks,
 };
 
 /// The two blocks whose declared behaviour changed between the save being
@@ -81,13 +81,11 @@ const RECORDED_PLAYER: SavedPlayer = SavedPlayer {
     pitch: -0.25,
 };
 
-/// A save, the registry a client would read it against now, and the world a
-/// launch generates when there is no save to read.
+/// A save and the registry a client would read it against now.
 #[derive(Debug)]
 struct ASave {
     written: VoxelWorld,
     registry: Arc<BlockRegistry>,
-    generated: ReplayWorld,
     directory: TempDir,
 }
 
@@ -158,7 +156,7 @@ fn a_save_whose_blocks_are_unchanged_is_played_with_no_flag_passed() -> TestResu
 /// What the client makes of `save` when it is started with `argv`.
 fn launch(save: &ASave, path: &std::path::Path, argv: &[&str]) -> Launched {
     simulation_to_play(
-        &save.generated,
+        mc_sim::REPLAY_SEED,
         Arc::clone(&save.registry),
         path,
         acceptance_from(argv.iter().map(|argument| (*argument).to_string())),
@@ -193,11 +191,9 @@ fn a_save_read_against(now: Vec<BlockDefinition>) -> Result<ASave, Box<dyn Error
     save_world(&save_in(&directory), &blocks, RECORDED_PLAYER, &written)?;
 
     let registry = Arc::new(with_the_replay_blocks(registry_of(now)?)?);
-    let generated = generated_world(&registry)?;
     Ok(ASave {
         written: blocks,
         registry,
-        generated,
         directory,
     })
 }

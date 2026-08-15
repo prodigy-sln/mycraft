@@ -42,15 +42,12 @@ use mc_render::surface::{
     FrameAction, ResizeAction, SurfaceErrorKind, SurfaceSize, resize_action, surface_error_action,
 };
 use mc_render::window::Ending;
-use mc_world::persistence::Acceptance;
 
 use crate::gpu_startup::Gpu;
+use crate::launch::{PreparationHandle, collect};
 use crate::remesh::{Remesher, Retained};
 use crate::session::Session;
-use crate::startup::{
-    Launch, PreparationError, PreparationHandle, collect, empty_hud, empty_scene, save_path,
-    simulation_to_play,
-};
+use crate::startup::{PreparationError, empty_hud, empty_scene};
 use crate::surface_setup::{SetupError, chosen_format, color_format, configuration_for};
 
 /// The label the frame's command encoder carries in a driver capture.
@@ -63,7 +60,7 @@ pub struct App {
     surface: wgpu::Surface<'static>,
     configuration: wgpu::SurfaceConfiguration,
     renderer: FrameRenderer,
-    /// The worker preparing the replay, until it is collected. `None` afterwards,
+    /// The worker preparing the launch, until it is collected. `None` afterwards,
     /// which is also what says the collection already happened.
     preparation: Option<PreparationHandle>,
     phase: ScenePhase,
@@ -103,13 +100,6 @@ pub struct App {
     /// recurs every frame for as long as that block is held, which is the whole
     /// run.
     reported_swatch: Option<String>,
-    /// What the player said about loading a save whose blocks have changed,
-    /// read off the command line before the window opened.
-    ///
-    /// Carried rather than asked for where it is spent, because the answer is
-    /// the player's and the frame path is not where a player is asked anything:
-    /// a UI later replaces where this value comes from and touches nothing else.
-    accepting: Acceptance,
 }
 
 impl App {
@@ -124,7 +114,7 @@ impl App {
         gpu: Gpu,
         surface: wgpu::Surface<'static>,
         size: SurfaceSize,
-        launch: Launch,
+        preparation: PreparationHandle,
     ) -> Result<Self, SetupError> {
         let capabilities = surface.get_capabilities(&gpu.adapter);
         let format = chosen_format(&capabilities.formats)?;
@@ -142,7 +132,7 @@ impl App {
             surface,
             configuration,
             renderer,
-            preparation: Some(launch.preparation),
+            preparation: Some(preparation),
             phase: ScenePhase::Preparing,
             nothing: empty_scene(),
             hud: empty_hud()?,
@@ -152,7 +142,6 @@ impl App {
             reported: None,
             reported_remesh: None,
             reported_swatch: None,
-            accepting: launch.accepting,
         })
     }
 
@@ -377,14 +366,15 @@ impl App {
         }
     }
 
-    /// Takes the prepared scene when the worker has finished with it, uploads it,
-    /// starts the simulation of the world it came with, and moves the frame path
+    /// Takes the prepared launch when the worker has finished with it, uploads
+    /// its scene, attaches the simulation it came with, and moves the frame path
     /// off the clear colour.
     ///
-    /// The simulation is built here and nowhere earlier because the player's
-    /// spawn is derived from the world, and the world arrives several frames
-    /// after the window opens. Ticking before then would drop the player through
-    /// a world that does not exist yet for the whole of the load.
+    /// **It decides nothing.** Which world is played and which block is held are
+    /// both answered on the worker, where the registry the world was resolved
+    /// against is in hand — so what is left here is an upload and an attach. That
+    /// ordering is why a save that cannot be read now refuses before anything
+    /// reaches the device rather than after.
     ///
     /// **The invariant this holds is now a cross-object one.** "There is a
     /// simulation exactly when the phase is `Ready`" used to relate two fields
@@ -410,17 +400,7 @@ impl App {
             .upload_textures(&self.gpu.queue, &prepared.layers)?;
         let scene = Arc::new(prepared.scene);
         self.renderer.upload_scene(&self.gpu.queue, &scene)?;
-        // Which world is played, and which block is held, are both decided
-        // where the registry the world was resolved against is in hand — and
-        // both are somebody else's answers: the save decides the first and the
-        // simulation's own policy decides the second.
-        let (simulation, holding) = simulation_to_play(
-            &prepared.world,
-            Arc::clone(&prepared.registry),
-            &save_path(),
-            self.accepting,
-        )?;
-        session.attach_simulation(simulation, holding);
+        session.attach_simulation(prepared.simulation, prepared.holding);
         // The meshed sections, the layers and the registry are handed to the
         // worker rather than kept here: they are what a re-mesh works on, and a
         // copy on each side would be a second answer waiting to disagree.

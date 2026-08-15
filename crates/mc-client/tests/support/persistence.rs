@@ -42,7 +42,6 @@ use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::action::default_held_block;
 use mc_sim::player::{BlockPos, PlayerState};
-use mc_sim::replay::ReplayWorld;
 use mc_sim::simulation::Simulation;
 use mc_sim::world::World;
 use mc_world::persistence::{Acceptance, load_world};
@@ -98,8 +97,8 @@ pub const EVERY_DECLARED_CELL: usize = (COLUMNS * ACROSS * COLUMNS * ACROSS * HE
 
 /// The blocks the replay's own generator places, spelled as content spells them.
 ///
-/// Named here only so that a `ReplayWorld` can be generated at all — the world a
-/// resume never looks at, and the parameter a launch reads exactly when there is
+/// Named here only so that a world can be generated at all — the world a resume
+/// never looks at, and the one a launch builds for itself exactly when there is
 /// no save. Files under `tests/` are not read by `mc-world`'s hardcoded-name
 /// scan, which is why this fixture may say them out loud.
 const REPLAY_BLOCKS: [(&str, bool); 4] = [
@@ -173,20 +172,6 @@ pub fn with_the_replay_blocks(
         declarations.into_iter().map(Ok).collect(),
     ))?;
     Ok(registry)
-}
-
-/// The world a launch generates when there is no save to read.
-///
-/// Every scenario in this phase writes a save, so this is the argument a
-/// correct launch never looks at — and the world a launch that ignored the save
-/// would hand back instead, which is what makes it worth building rather than
-/// stubbing.
-///
-/// # Errors
-///
-/// Returns an error if generation refuses.
-pub fn generated_world(registry: &BlockRegistry) -> Result<ReplayWorld, Box<dyn Error>> {
-    Ok(ReplayWorld::generate(mc_sim::REPLAY_SEED, registry)?)
 }
 
 /// An empty world with one solid layer laid into it at [`FLOOR`].

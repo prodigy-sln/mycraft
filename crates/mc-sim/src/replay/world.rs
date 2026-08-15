@@ -137,11 +137,6 @@ impl ReplayWorld {
     pub fn block_at(&self, x: u32, y: u32, z: u32) -> Option<Contents<&BlockName>> {
         self.blocks.block_at(WorldPos { x, y, z }).ok()
     }
-
-    /// The column at `(column_x, column_z)` in column coordinates.
-    pub(super) fn column(&self, column_x: u32, column_z: u32) -> Option<&ChunkColumn> {
-        self.blocks.column(column_x, column_z)
-    }
 }
 
 /// Where a block column sits in the heightmap, or nothing outside the footprint.
@@ -151,7 +146,11 @@ fn column_offset(x: u32, z: u32) -> Option<usize> {
 
 /// Every column of the footprint in the declared assembly order — `(cz, cx)`
 /// ascending — as `(column_x, column_z)`.
-pub(super) fn every_column() -> impl Iterator<Item = (u32, u32)> {
+///
+/// Private, because the mesher walks a world's own footprint rather than this
+/// constant one: generation is the only thing left that knows how big the replay
+/// is before it has built it.
+fn every_column() -> impl Iterator<Item = (u32, u32)> {
     (0..FOOTPRINT_COLUMNS)
         .flat_map(|column_z| (0..FOOTPRINT_COLUMNS).map(move |column_x| (column_x, column_z)))
 }

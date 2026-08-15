@@ -41,12 +41,11 @@ mod persistence;
 use std::error::Error;
 use std::sync::Arc;
 
-use mc_client::startup::simulation_to_play;
+use mc_client::launch::simulation_to_play;
 use mc_core::block::BlockRegistry;
 use mc_render::window::Ending;
 use mc_sim::action::EditReport;
 use mc_sim::player::{BlockPos, PlayerState};
-use mc_sim::replay::ReplayWorld;
 use mc_world::persistence::Acceptance;
 use tempfile::TempDir;
 use winit::event::MouseButton;
@@ -54,9 +53,8 @@ use winit::keyboard::KeyCode;
 
 use input::InputHarness;
 use persistence::{
-    GROUND, Launched, NOTHING, SPAWN, TestResult, declared, described, facing, generated_world,
-    held_at, refusal, registry_of, save_in, standing_on_the_floor, stood_at,
-    with_the_replay_blocks,
+    GROUND, Launched, NOTHING, SPAWN, TestResult, declared, described, facing, held_at, refusal,
+    registry_of, save_in, standing_on_the_floor, stood_at, with_the_replay_blocks,
 };
 
 /// Every save here is written against the registry it is read against, so
@@ -229,25 +227,20 @@ fn a_player_who_turned_before_the_quit_faces_that_way_when_the_client_starts_aga
     Ok(())
 }
 
-/// The registry a run is played against, the world a launch would generate if
-/// there were no save, and the directory the save lives in.
+/// The registry a run is played against, and the directory the save lives in.
 #[derive(Debug)]
 struct AWorld {
     registry: Arc<BlockRegistry>,
-    generated: ReplayWorld,
     directory: TempDir,
 }
 
-/// A registry declaring the fixture floor, the world a launch generates, and
-/// somewhere to keep a save.
+/// A registry declaring the fixture floor, and somewhere to keep a save.
 fn a_world_to_play_in() -> Result<AWorld, Box<dyn Error>> {
     let registry = Arc::new(with_the_replay_blocks(registry_of(vec![declared(
         GROUND, true,
     )?])?)?);
-    let generated = generated_world(&registry)?;
     Ok(AWorld {
         registry,
-        generated,
         directory: TempDir::new()?,
     })
 }
@@ -263,7 +256,7 @@ fn a_client_playing(world: &AWorld) -> Result<InputHarness, Box<dyn Error>> {
 /// What the client starts in the next time it is launched.
 fn launch(world: &AWorld, save: &std::path::Path) -> Launched {
     simulation_to_play(
-        &world.generated,
+        mc_sim::REPLAY_SEED,
         Arc::clone(&world.registry),
         save,
         ACCEPTING,

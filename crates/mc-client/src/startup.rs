@@ -12,23 +12,18 @@
 //! order every time, because a golden frame is a claim about what a camera saw
 //! and the claim is only checkable if the bytes it saw are reproducible.
 
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::thread::JoinHandle;
 
 use mc_core::block::{BlockRegistry, RegistryError};
 use mc_core::hud::source::InMemoryHudSource;
 use mc_core::hud::{HudLayout, HudLoadError, HudOrigin};
-use mc_core::id::{BlockName, NamespacedIdError, TextureKey};
 use mc_render::geometry::scene::{SceneError, SceneGeometry};
 use mc_render::geometry::{GeometryError, SectionOrigin, build_section_geometry};
 use mc_render::gpu::RendererError;
 use mc_render::texture::TextureLayers;
-use mc_sim::action::default_held_block;
-use mc_sim::persistence::{LaunchError, simulation_at_launch};
+use mc_sim::persistence::LaunchError;
 use mc_sim::replay::{PrepareError, ReplayWorld, SectionQuads, WorldGenError, mesh_all};
-use mc_sim::simulation::Simulation;
 use mc_world::content::{TomlFileDefinitionSource, TomlFileHudSource};
 use mc_world::persistence::{Acceptance, LoadError};
 use thiserror::Error;
@@ -36,10 +31,6 @@ use thiserror::Error;
 /// Where the shipped content is looked for, relative to the directory the client
 /// was started in.
 const CONTENT_ROOT: [&str; 2] = ["content", "base"];
-
-/// Where the client keeps its save, relative to the directory it was started in
-/// — the same convention [`CONTENT_ROOT`] follows.
-const SAVE_PATH: [&str; 2] = ["saves", "world.mcw"];
 
 /// What a player types to load a save whose blocks are no longer what they were.
 ///
@@ -88,25 +79,13 @@ pub struct PreparedScene {
     pub hud: Arc<HudLayout>,
 }
 
-/// The worker preparing the replay, until there is a window to draw what it
-/// produces.
-pub type PreparationHandle = JoinHandle<Result<PreparedScene, PreparationError>>;
-
-/// What a run was started with, before there is a window to draw it in: the
-/// worker generating the world, and what the player said about loading a save
-/// whose blocks have changed.
+/// Why a preparation — of the generated scene here, or of a launch in
+/// [`crate::launch`] — could not be completed.
 ///
-/// **One value rather than two arguments carried side by side through three
-/// layers.** Both are decided before the window opens and both are spent at the
-/// same moment — when the preparation lands and a world has to be chosen — so
-/// they travel together.
-#[derive(Debug)]
-pub struct Launch {
-    pub preparation: PreparationHandle,
-    pub accepting: Acceptance,
-}
-
-/// Why the replay could not be prepared.
+/// **One enum for both paths**, because `--load-changed-blocks` is spelled in one
+/// constant here: the parse that accepts the flag and the refusal that advertises
+/// it must not be able to disagree, and the refusal is interpolated inside this
+/// type's own `Display`.
 ///
 /// Every one of these fails the run rather than degrading it: a world that could
 /// not be meshed has no picture to show, and a window drawing the clear colour
@@ -140,8 +119,6 @@ pub enum PreparationError {
     WorldGen(#[from] WorldGenError),
     #[error("the replay world could not be meshed")]
     Mesh(#[from] PrepareError),
-    #[error("a quad named a block whose name is not a texture key")]
-    TextureKey(#[from] NamespacedIdError),
     #[error("a meshed section could not be packed into vertices")]
     Geometry(#[from] GeometryError),
     #[error("the packed sections could not be assembled into one scene")]
@@ -194,16 +171,6 @@ pub fn content_root() -> Result<PathBuf, PreparationError> {
     }
 }
 
-/// Where this client keeps its save.
-///
-/// **Not checked for existence**, unlike [`content_root`], and the asymmetry is
-/// the point: content that is not there is somebody running the binary from the
-/// wrong directory, and a save that is not there is a first launch.
-#[must_use]
-pub fn save_path() -> PathBuf {
-    SAVE_PATH.iter().collect()
-}
-
 /// What the player said about loading a save whose blocks have changed.
 ///
 /// One flag, parsed by hand, with **no default in the domain value**: absent
@@ -220,31 +187,6 @@ pub fn acceptance_from(args: impl Iterator<Item = String>) -> Acceptance {
     } else {
         Acceptance::OnlyUnchangedBlocks
     }
-}
-
-/// The simulation a launch plays, and the block a client holds in it.
-///
-/// **The wiring the composition root does when the preparation lands**, lifted
-/// out of the frame path so that which world a launch plays can be asked with no
-/// device and no window present. It decides nothing itself: which world is
-/// `mc-sim`'s answer, and which block is the simulation's own policy.
-///
-/// # Errors
-///
-/// Returns [`PreparationError::Launch`] when the save is there and cannot be
-/// read, and [`PreparationError::NothingToPlace`] when the content registers no
-/// solid block for a player to place.
-pub fn simulation_to_play(
-    generated: &ReplayWorld,
-    registry: Arc<BlockRegistry>,
-    save: &Path,
-    accepting: Acceptance,
-) -> Result<(Simulation, BlockName), PreparationError> {
-    let holding = default_held_block(&registry).ok_or(PreparationError::NothingToPlace)?;
-    Ok((
-        simulation_at_launch(save, generated, registry, accepting)?,
-        holding,
-    ))
 }
 
 /// What to tell a player about `failure` beyond what it already says — the way
@@ -279,34 +221,6 @@ fn refused_only_for_changed_blocks(failure: &LaunchError) -> bool {
     )
 }
 
-/// Starts preparing the replay on a worker, and hands back the handle to collect
-/// it through.
-///
-/// The caller polls the handle rather than joining it, so the frame path never
-/// waits: a window that is drawing the clear colour is a window that is visibly
-/// working.
-///
-/// **The thread is why this is not the entry point a test should use.** A
-/// `std::thread` spawned inside a `rayon` pool's `install` does not inherit that
-/// pool, so a caller that wanted to decide how many workers mesh the world would
-/// silently get the global one. Anything asking that question calls
-/// [`prepare_scene`] directly, on its own thread.
-pub fn spawn_preparation(root: PathBuf) -> PreparationHandle {
-    std::thread::spawn(move || prepare_scene(&root))
-}
-
-/// Collects a finished preparation, translating a worker that panicked into an
-/// error rather than a second panic here.
-///
-/// # Errors
-///
-/// Returns whatever the preparation failed with, or
-/// [`PreparationError::WorkerLost`] when the worker did not survive to report
-/// anything at all.
-pub fn collect(handle: PreparationHandle) -> Result<PreparedScene, PreparationError> {
-    handle.join().unwrap_or(Err(PreparationError::WorkerLost))
-}
-
 /// Generates the replay world, meshes it, resolves its textures and packs every
 /// section into one scene, reading its content from `root`.
 ///
@@ -336,7 +250,7 @@ pub fn prepare_scene(root: &Path) -> Result<PreparedScene, PreparationError> {
 
     let world = ReplayWorld::generate(mc_sim::REPLAY_SEED, &registry)?;
     let meshed = mesh_all(&world, &registry)?;
-    let layers = TextureLayers::resolve(&texture_keys(&meshed)?);
+    let layers = layers_of(&registry);
 
     Ok(PreparedScene {
         scene: scene_of(&meshed, &layers)?,
@@ -359,10 +273,11 @@ pub fn prepare_scene(root: &Path) -> Result<PreparedScene, PreparationError> {
 /// It touches no device, opens no window and spawns no thread, so what a scene
 /// is made of can be asserted with none of the three present.
 ///
-/// **The layers are a parameter and are never re-resolved here.** They are
-/// assigned from the *initially meshed* quads' keys; resolving over every
-/// registered block instead would insert a key at position 0 and shift every
-/// layer index, which rewrites every committed golden frame.
+/// **The layers are a parameter and are never re-resolved here.** They are the
+/// registry's, resolved once when the run started, and the registry does not change
+/// mid-session — so a re-mesh splicing its sections into this list needs the same
+/// layers the rest of the scene was packed against, not a second opinion about
+/// them.
 ///
 /// # Errors
 ///
@@ -381,13 +296,21 @@ pub fn scene_of(
     Ok(SceneGeometry::assemble(geometry)?)
 }
 
-/// Every texture key the meshed world's quads reference.
-fn texture_keys(meshed: &[SectionQuads]) -> Result<BTreeSet<TextureKey>, NamespacedIdError> {
-    meshed
-        .iter()
-        .flat_map(|section| section.quads.iter())
-        .map(|quad| TextureKey::parse(quad.block.as_str()))
-        .collect()
+/// The layers every registered block's texture key resolves to.
+///
+/// **The one place the key set is chosen, and it takes no world — it cannot be
+/// given one.** A layer index is assigned positionally over the sorted keys and
+/// then travels inside every packed vertex, so a set derived from the blocks a
+/// particular world happens to draw would make every layer index depend on that
+/// world: a save that broke the last stone out of existence would renumber the
+/// array texture, invisibly, because no golden frame is shot after a resume. That
+/// is a worse defect than any it could fix, and asking the registry is what makes
+/// it unspellable rather than guarded against.
+///
+/// Both preparation paths call this, so the geometry a player is handed and the
+/// geometry a golden is shot from are packed against layers that cannot differ.
+pub(crate) fn layers_of(registry: &BlockRegistry) -> TextureLayers {
+    TextureLayers::resolve(&registry.texture_keys())
 }
 
 /// A scene holding nothing, which is what the frame path draws from until the

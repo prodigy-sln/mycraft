@@ -41,6 +41,7 @@ use mc_world::world::{Extent, VoxelWorld, WorldError, WorldPos};
 
 use crate::player::{BlockPos, Solidity};
 use crate::replay::SolidVoxels;
+use crate::replay::prepare::{PrepareError, SectionQuads, mesh_world};
 
 use remesh::with_its_neighbours;
 
@@ -139,6 +140,32 @@ impl World {
     #[must_use]
     pub fn extent(&self) -> Extent {
         self.blocks.extent()
+    }
+
+    /// Every section of this world, meshed, in the declared assembly order.
+    ///
+    /// **The only way to mesh the world a launch actually plays**, and the
+    /// reason the crate-visible `blocks` accessor does not have to become `pub`
+    /// for one: what comes back is owned quads, which is a value rather than
+    /// the store, so the claim that nothing outside this module can write any
+    /// of the three views is untouched.
+    ///
+    /// Takes no registry, because this world owns the one its blocks were
+    /// resolved against and a second opinion about a name is exactly the
+    /// disagreement this type exists to make unspellable.
+    ///
+    /// **It marks nothing dirty.** Reading a world is not editing it, and a
+    /// launch that handed over geometry while leaving the sections it had just
+    /// meshed outstanding would ship the defect this is part of fixing: the
+    /// frame path would re-mesh the whole world a batch at a time, drawing the
+    /// wrong one until it had finished.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PrepareError::Mesh`] naming the first section in assembly
+    /// order which could not be meshed.
+    pub fn mesh(&self) -> Result<Vec<SectionQuads>, PrepareError> {
+        mesh_world(&self.blocks, &self.registry)
     }
 
     /// Leaves `residue` where a broken block was.

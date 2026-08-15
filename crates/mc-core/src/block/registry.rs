@@ -1,12 +1,12 @@
 //! What a name resolves to, and the single door definitions come in through.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use thiserror::Error;
 
 use super::definition::{BlockDefinition, BlockId, DefinitionOrigin};
 use super::source::{DefinitionSource, DefinitionSourceError};
-use crate::id::BlockName;
+use crate::id::{BlockName, TextureKey};
 
 /// The blocks a running game knows about.
 ///
@@ -31,6 +31,32 @@ impl BlockRegistry {
     /// How many blocks are registered.
     pub fn registered_count(&self) -> usize {
         self.definitions.len()
+    }
+
+    /// Every texture key the registered definitions declare.
+    ///
+    /// **A pure function of what content declared, and the answer to "which keys
+    /// exist" for anything that has to assign them array-texture layers.** A layer
+    /// index is assigned positionally over the sorted set and then travels inside
+    /// every packed vertex, so a key set derived from the blocks a particular world
+    /// happens to draw would make every layer index depend on that world — and a
+    /// world that lost its last stone would silently renumber the array texture.
+    /// Asking the registry instead cannot move with a world, because it never sees
+    /// one.
+    ///
+    /// It reads each definition's `texture` and never its `name`. The two coincide
+    /// across the blocks the base game happens to ship, which is exactly why the
+    /// distinction has to be made here rather than discovered the first time a mod
+    /// declares them differently.
+    ///
+    /// A set rather than a list: two blocks may legitimately draw the same texture,
+    /// and they then share its layer.
+    #[must_use]
+    pub fn texture_keys(&self) -> BTreeSet<TextureKey> {
+        self.definitions
+            .iter()
+            .map(|definition| definition.texture.clone())
+            .collect()
     }
 
     /// Registers every definition the source yields, or none of them.

@@ -33,6 +33,8 @@ mod bindings;
 pub mod events;
 /// Adapter facts, the startup verdict, and opening a device.
 pub mod gpu_startup;
+/// Which world a launch plays, and preparing that world for the renderer.
+pub mod launch;
 /// Turning an edit into a scene, off the tick thread and off the frame thread.
 pub mod remesh;
 /// The client's input dispatch, drivable with no window and no adapter.

@@ -420,6 +420,16 @@ and a single block texture that can hot-reload without rebuilding everything.
 insertion, registry-id or hash order. Layer indices sit inside packed vertices,
 so the committed goldens depend on this ordering and nothing else pins it.
 
+**The set that order is applied to is every block the content registers, never the set a particular
+world's quads happen to reference.** `BlockRegistry::texture_keys()` (`mc-core`) declares it, reading
+each definition's `texture` field and never its `name`; `layers_of(&registry)` (`mc-client`) is the
+only place `TextureLayers::resolve` is called, and it takes a registry, not a world, so it cannot be
+handed one. No expression in the tree derives a layer index from a world — a save cannot move one
+because nothing can, which is stronger than any single test guarding the property. The shipped root
+declares four blocks, all with `texture` equal to `name`: `base:dirt`, `base:grass` and `base:stone`
+sort before `base:water`, so water appends at layer 3 and the other three keep 0/1/2 — the fact every
+committed golden's layer indices depend on.
+
 The `Srgb` in the format is load-bearing: a texel is decoded to linear on sample
 and the sRGB colour target encodes it back on write, so the byte a capture reads
 back is the byte the texture generator produced. `Rgba8Unorm` would skip the
