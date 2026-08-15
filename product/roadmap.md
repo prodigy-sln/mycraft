@@ -24,7 +24,7 @@ Two rules follow from that:
 1. **An increment is not done until you can play it.** A green gate is necessary, not sufficient.
    Every MVP's exit criterion includes a human-playable build.
 2. **Depth of planning decreases with distance.** MVP 1 is specified; later MVPs are a sketch and
-   are expected to change once you have played the earlier ones. Planning MVP 5 in detail now
+   are expected to change once you have played the earlier ones. Planning MVP 6 in detail now
    would be the waterfall this structure exists to avoid.
 
 Quality is *not* traded away for increment size. The gate, TDD discipline, and rigor tier apply
@@ -81,7 +81,7 @@ Two invariants that MVP 1 could plausibly breach, resolved up front:
   inspects the engine, including when content is broken, so a mod must not be
   able to disable the instrument used to diagnose that mod.
 - **Singleplayer, yet invariant 4 still binds.** `mc-sim` is authoritative in-process;
-  the client submits intents. Otherwise MVP 3 is a rewrite, not a transport swap.
+  the client submits intents. Otherwise MVP 4 is a rewrite, not a transport swap.
 
 **Exit criteria** — all must hold:
 - `sdd-gate.ps1` exits 0
@@ -177,13 +177,18 @@ MVP 2 has left this table — it is specified above.
 
 | MVP | Adds | Still playable because |
 |-----|------|------------------------|
-| **3 — Multiplayer** | QUIC transport, ed25519 identity, replication, prediction; 2 players → 32, over LAN or a forwarded port | The same sandbox, now with someone else in it |
-| **4 — Survival Loop** | Items, inventory, tools, crafting — all script-defined | Building gains purpose and progression |
-| **5 — Living World** | NPCs with pathfinding and scripted brains; then quests, dialogue, storyline | The world is inhabited and has things to do |
-| **6 — Public & Polished** | NAT hole punching and relay fallback; moderation, anti-abuse, rollback; lighting, audio, UI polish, mod packaging | Ready for strangers on a public server, and reachable without a router |
+| **3 — Worldgen** | Terrain shape, biomes, surface rules, ores and structures declared as content instead of Rust; caves and trees | The world stops being one generated shape and becomes somewhere worth exploring |
+| **4 — Multiplayer** | QUIC transport, ed25519 identity, replication, prediction; 2 players → 32, over LAN or a forwarded port | The same sandbox, now with someone else in it |
+| **5 — Survival Loop** | Items, inventory, tools, crafting — all script-defined | Building gains purpose and progression |
+| **6 — Living World** | NPCs with pathfinding and scripted brains; then quests, dialogue, storyline | The world is inhabited and has things to do |
+| **7 — Public & Polished** | NAT hole punching and relay fallback; moderation, anti-abuse, rollback; lighting, audio, UI polish, mod packaging | Ready for strangers on a public server, and reachable without a router |
+
+**Worldgen moved ahead of multiplayer, 2026-08-15.** Two reasons, and the second is the load-bearing one. It closes the last hardcoded-block-name exemption, which is what makes "the base game is a mod" true rather than nearly true. And **a wire format is far harder to change after it exists than a function call is to turn into a message** — content streaming is part of multiplayer's own design below, and content only becomes addressable and hashable once it is scriptable, so designing the protocol first would mean designing it before knowing what it carries. Multiplayer into a four-block world would be a demo; multiplayer into a generated world is a game.
+
+The counter-argument, recorded because it is a good one: 32-player authoritative multiplayer is this project's headline claim, and this leaves its biggest technical risk unvalidated longest. That risk is retired by a **measurement** — snapshot size and tick cost at 32 simulated players — not by reordering an increment around it.
 
 Backlog, unscheduled: WASM mod backend · cross-server identity · real art assets (decide by
-MVP 4) · dimensions and portals · a redstone-equivalent logic system (a strong test of scripting
+MVP 5) · dimensions and portals · a redstone-equivalent logic system (a strong test of scripting
 API expressiveness).
 
 **That line now has a home in Linear:
@@ -207,7 +212,7 @@ developer tools that are not the game: ADR-009's `tools/asset-gen`, and **VoxFor
 renderer and a CLI, so an agent can produce assets and see its own output well enough to
 self-correct. It is deliberately absent from every MVP feature table above: the conductor
 reads those tables to determine scope, and tooling built on demand must not be adopted as
-MVP scope by a run that finds it. Its assets have no engine consumer until **MVP 5** — there
+MVP scope by a run that finds it. Its assets have no engine consumer until **MVP 6** — there
 is no non-cube geometry or block-model path today (`docs/technical/rendering.md`) — so it
 ships the pipeline ahead of the thing that draws it, which is why its preview renderer
 carries the correctness weight the engine cannot yet carry for it.
@@ -245,21 +250,21 @@ Settled 2026-08-15 in discussion, filed rather than built. A `.mcvox` file (SPEC
   the compiler, which does not fit the content-addressed cache's "changed and missing are the
   same case" property. Leaning toward streaming the small source and compiling client-side,
   keyed `(source hash, compiler version)`, so a compiler change invalidates local caches with no
-  server involvement. To be settled **with** MVP 3's streaming work, not ahead of it.
+  server involvement. To be settled **with** MVP 4's streaming work, not ahead of it.
 
 **Art assets are already licensed and available** — see ADR-010 for the two-class handling.
 Bundle purchases (music, SFX, GUI, 2.5D sprites) live at `\\ds01\assets\GameAssets`; CC0 material
 is [PixVoxelAssets](https://github.com/tommyettinger/PixVoxelAssets) and
 `VoxelCoreLab_Watercolor_Terrain_Textures_1024px` (dirt/grass/stone/water, four variants each).
 Earliest use is **MVP 2**, where texture-by-key becomes a real feature; the voxel character and
-dungeon models suit **MVP 5**, and audio and GUI belong to **MVP 6**. MVP 1 stays on placeholders.
+dungeon models suit **MVP 6**, and audio and GUI belong to **MVP 7**. MVP 1 stays on placeholders.
 
 ### Content streaming, home hosting, and reachability
 
 Still a sketch: each part becomes binding only when the MVP that owns it adopts it, and
-**the two are now split.** Content streaming and the content-addressed cache are **MVP 3**'s,
+**the two are now split.** Content streaming and the content-addressed cache are **MVP 4**'s,
 and that substance must survive into its spec. From *"Home hosting without opening a port"*
-onward — the rendezvous service, hole punching, relay assignment — is **MVP 6**'s, per the
+onward — the rendezvous service, hole punching, relay assignment — is **MVP 7**'s, per the
 decision recorded at the end of this section.
 
 **Content is edited server-side and streams to players — textures included, not just
@@ -287,7 +292,7 @@ traffic as TCP would, and asset streams can be prioritised below gameplay. Laten
 *prioritisation* question; a CDN answers a *volume* question — and for live edits a CDN is
 strictly slower, needing upload plus propagation first. The real CDN case is **cold joins
 against a large modpack**, a first-join cost only since nobody fetches twice, and that
-belongs to MVP 6.
+belongs to MVP 7.
 
 **Home hosting without opening a port.** A lobby/rendezvous service introduces two peers and
 performs NAT hole punching, so a player can host from home. The lobby is a **mode of
@@ -330,14 +335,14 @@ real work to be there, not in the choosing.
 Both are free to honour now and expensive to retrofit the moment something assumes a hosted
 URL exists.
 
-**Settled 2026-08-15: MVP 3 means *"multiplayer works"*** — direct connection and LAN.
-**NAT hole punching, the rendezvous service and relay assignment all defer to MVP 6**,
+**Settled 2026-08-15: MVP 4 means *"multiplayer works"*** — direct connection and LAN.
+**NAT hole punching, the rendezvous service and relay assignment all defer to MVP 7**,
 alongside the public-server work they belong with.
 
-So MVP 3 is the transport and the authority: QUIC, identity, replication, the client
+So MVP 4 is the transport and the authority: QUIC, identity, replication, the client
 submitting intents against a server that recomputes them, and 32 players on a LAN or
 behind a forwarded port. Everything above about assigners, relays and dying relays stays
-in this document as the sketch it is — none of it is MVP 3's to build.
+in this document as the sketch it is — none of it is MVP 4's to build.
 
 Rule 2 above is why this costs nothing later: LAN and direct connection must work
 regardless of what arrives afterwards, so punching is **additive to a shipped path**
