@@ -411,6 +411,26 @@ Use it to record your own notes, the current state of the MVP, and any other inf
 Do not write product code or spec content here — that belongs in the working tree and is subject to the same rules as any other stage.
 Begin by reading .claude/pm/state.md to understand the current state and any relevant information about the working tree.
 
+**These notes are gitignored, local, and invisible to every reader of the
+repository. This section is the only place in the tree that may name them.**
+Nothing you or a subagent writes into the working tree may reference them — not
+by path, not by filename, and not obliquely as "the conductor's record" or "the
+scratchpad". When a decision here has to reach a spec, a document, or a commit
+message, **state its substance and drop its provenance**: record the decision and
+the reason it was made, never a pointer to where you happened to write it down.
+A citation to this directory is a dangling reference the moment the session ends.
+
+Two consequences worth stating, because both have bitten:
+
+- **These notes do not survive as a record.** Spec folders are deleted at
+  completion, so `docs/`, `specs/REGISTRY.md` and the git history are the only
+  durable account of what happened. Anything here that a future reader needs
+  belongs in one of those three before the spec closes.
+- **A note is not an instruction.** What you know is worthless to a stage that
+  cannot read it. Anything load-bearing goes in the spawn prompt itself, and then
+  into the spec folder — a subagent cannot be assumed to reach your notes, your
+  conversation, or the issue tracker.
+
 ## Anti-patterns
 
 - Writing product code yourself instead of delegating
