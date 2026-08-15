@@ -116,6 +116,49 @@ Backlog, unscheduled: WASM mod backend · cross-server identity · real art asse
 MVP 4) · dimensions and portals · a redstone-equivalent logic system (a strong test of scripting
 API expressiveness).
 
+**That line now has a home in Linear:
+[MyCraft Backlog and Deferred Decisions](https://linear.app/prodigy-solutions/project/mycraft-backlog-and-deferred-decisions-2267497c6cce).**
+It holds cross-cutting decisions that outlive any single MVP, recorded so they are not
+re-derived from scratch when the MVP that needs them arrives. It is deliberately **not** an
+MVP project: the conductor reads the MVP marked `← current` and its feature table, so nothing
+there is autonomous-build scope. An item leaves by being promoted into the feature table of
+the MVP that adopts it.
+
+### How a voxel model reaches the GPU
+
+Settled 2026-08-15 in discussion, filed rather than built. A `.mcvox` file (SPEC-013) is
+**source**; what the renderer consumes is a compiled artifact.
+
+- **PRO-906 — the model compiler.** Interior face culling first and it is nearly free (a solid
+  32³ model naively drawn as cubes is 196 608 faces; only 6 144 are on the surface), then a
+  greedy merge of coplanar same-material faces — the algorithm `mc_world::mesh` already runs on
+  terrain sections, at a different scale. **Baking a texture is the wrong reflex by default**:
+  merging by material makes every quad uniform by construction, so there is nothing to bake and
+  a per-quad material index beats a texture fetch. Baking only wins when colour varies every
+  voxel and merge-by-material degenerates to one quad per face — true of a detailed character,
+  false of a door. **Both are supported and the choice is made per model by measuring the merge
+  ratio at compile time.** Binding constraint inherited from SPEC-013: the compiler emits one
+  mesh *per part* and does not flatten, because a flattened mesh cannot rotate an arm about its
+  attachment point, which is why parts exist. (`.vox` export flattens — that is an interchange
+  lane, not the runtime path.)
+- **PRO-907 — instanced batching, which is the larger win.** A compiled door is a few dozen
+  quads whichever strategy it gets; what costs at 32 players is draw calls, and 500 doors as
+  500 draws dwarfs any per-model quad count. The terrain path already found the answer — one
+  `draw_indexed_indirect` for the whole world — and the open question is whether models can keep
+  its portability property (`instance_count: 1` and `first_instance: 0` avoid two optional
+  device features) or must pay for it.
+- **PRO-908 — model AO is whole-model self-occlusion, baked, or nothing.** A model is shaded
+  from its own voxels only and rendered in full even when partly occluded. This is the cheap
+  variant, and it buys something specific: because AO then depends on nothing outside the model,
+  the merge narrowing `technical/rendering.md` warns about is paid once, deterministically, in
+  the compiler — so compiled model meshes stay reproducible. **Terrain gets no such reprieve**;
+  its AO remains world-dependent and still invalidates terrain goldens whenever it arrives.
+- **PRO-909 — where compilation happens.** A compiled artifact has two inputs, the source and
+  the compiler, which does not fit the content-addressed cache's "changed and missing are the
+  same case" property. Leaning toward streaming the small source and compiling client-side,
+  keyed `(source hash, compiler version)`, so a compiler change invalidates local caches with no
+  server involvement. To be settled **with** MVP 3's streaming work, not ahead of it.
+
 **Art assets are already licensed and available** — see ADR-010 for the two-class handling.
 Bundle purchases (music, SFX, GUI, 2.5D sprites) live at `\\ds01\assets\GameAssets`; CC0 material
 is [PixVoxelAssets](https://github.com/tommyettinger/PixVoxelAssets) and
