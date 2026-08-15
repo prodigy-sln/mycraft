@@ -117,12 +117,19 @@ MVP 4) · dimensions and portals · a redstone-equivalent logic system (a strong
 API expressiveness).
 
 **That line now has a home in Linear:
-[MyCraft Backlog and Deferred Decisions](https://linear.app/prodigy-solutions/project/mycraft-backlog-and-deferred-decisions-2267497c6cce).**
-It holds cross-cutting decisions that outlive any single MVP, recorded so they are not
-re-derived from scratch when the MVP that needs them arrives. It is deliberately **not** an
-MVP project: the conductor reads the MVP marked `← current` and its feature table, so nothing
-there is autonomous-build scope. An item leaves by being promoted into the feature table of
-the MVP that adopts it.
+[MyCraft: Tooling and Deferred Decisions](https://linear.app/prodigy-solutions/project/mycraft-tooling-and-deferred-decisions-2267497c6cce).**
+Two kinds of thing live there and they share one property — **the conductor must never read
+them as MVP scope**, since it determines scope from the MVP marked `← current` and that MVP's
+feature table. The first kind is **developer tooling**: `tools/` members, which are not the
+game and have their own lifecycle. The second is **deferred decisions**: cross-cutting choices
+that outlive any single MVP, recorded so they are not re-derived from scratch when the MVP that
+needs them arrives. An item leaves by being promoted into the feature table of the MVP that
+adopts it.
+
+**Every non-MVP `PRO-` issue belongs to that project explicitly**, including tooling that is
+actively being built. Linear files a projectless issue into whichever project it guesses — it
+put PRO-905 into *MVP 2: Scriptable Content* — and an MVP project is precisely where a
+non-MVP issue must not sit, because the conductor will eventually read that table as its scope.
 
 ### How a voxel model reaches the GPU
 
