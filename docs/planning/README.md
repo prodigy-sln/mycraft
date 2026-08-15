@@ -1,0 +1,25 @@
+# Planning documents
+
+This folder holds **design discussions for features in the planning state** —
+feasibility analyses, open questions, and research syntheses for work that has
+not been specced, let alone built.
+
+**It is explicitly exempt from the "`docs/` describes the system as built"
+rule** (`docs/INDEX.md`). Everything under `docs/planning/` is *forward-looking*
+and carries no promise: any statement here may be contradicted by the spec that
+eventually lands, and the spec wins. When a feature discussed here is actually
+built, its permanent documentation is consolidated into the ordinary `docs/`
+branches by `/sdd-complete`, and the planning document is either deleted or
+trimmed to what remains unbuilt.
+
+A planning document should:
+
+- name the Linear issue(s) it elaborates,
+- date its claims (measurements go stale; so do external references),
+- separate **what was verified** (in-tree measurements, cited sources) from
+  **what is derived** (reasoning that has not been observed anywhere), and
+- record open questions as questions, not as decisions.
+
+| File | Topic | Issues |
+|------|-------|--------|
+| city-generation.md | City generation as a partition: feasibility, infinite-height buildings, layered streets and transit, lighting | PRO-935 |
