@@ -54,9 +54,10 @@ skeleton is the one that passes vacuously. Pick the skeletons that make
 ## 2. Falsifiability
 
 **Green is not evidence unless the test could have been red, for the
-right reason.** Fifteen instances across four specs of something passing
-for the wrong reason is what this section is paid for; assume the next one
-is in the diff you are looking at.
+right reason.** Twenty-two instances of something passing for the wrong
+reason are what this section is paid for, and the escalation is the point:
+each was invisible to the defence that caught the one before it. Assume
+the next is in the diff you are looking at.
 
 - **Prefer a derived oracle to a committed number.** No expected quantity
   may be copied from a run of the code under test. A count snapshotted
@@ -103,6 +104,53 @@ is in the diff you are looking at.
   *nothing* — the same way a summary line cannot distinguish a passing
   assertion from one that never ran. Check the per-reviewer payloads, not
   the merged result.
+- **Policy is not wiring.** Testing a pure decision does not test that the
+  application consults it. A client submitting a default movement intent
+  every tick — no key press and no pointer motion reaching the player at
+  all — left 406 of 406 green, as did deleting the guard that stops a free
+  cursor turning the camera. A test that calls the same pure function the
+  adapter calls is agreement between two copies of one decision; the
+  adapter can stop calling it entirely and both stay green. Ask of any
+  pure core: **what calls this, and what would go red if it stopped?** The
+  tell is structural — a handler needing a real window, socket or device
+  that nothing constructs, sitting in a layer coverage is configured not
+  to count.
+- **A second entry point onto a tested path is untested until something
+  asserts through it.** `load_world` handed back a zeroed player and 213
+  tests stayed green, because every scenario read the player through
+  `saved_player` and the two share one preamble — which is exactly why the
+  shared part looked covered. Separately, a launch helper ignored its
+  acceptance argument entirely and 140 stayed green. Coverage says the
+  code ran; it does not say anything was checking. Assert through the new
+  caller, not through the one that was already covered.
+- **An enumerated verdict beats an absence assertion.**
+  `assert!(found.is_empty())` cannot tell an empty answer from a scan that
+  can no longer look. `assert_eq!(verdict, EveryElementStatesAnOutline)`
+  rejects every other verdict *including* the ones that mean "I could not
+  look", so a vanished input directory reddens for free. Prefer a total
+  enum verdict wherever a scan reports one. It does not retire the
+  positive control above: the hole that survives is *inside* the good
+  verdict, where a scan that came to return an empty list unconditionally
+  would answer "all treated" forever.
+- **Red for a known reason hides red for an unknown one.** A test already
+  failing on a stale count also swallowed a revision-substitution defect —
+  the only test in 661 that could see it. This is the same family with the
+  sign flipped, and worse in one way: a known-red test invites deferral
+  ("we know about that one"), which is precisely the state in which it
+  stops reporting anything new. A test red for an expected reason is fixed
+  before the phase closes, never annotated.
+- **A green suite is no evidence about a lint.** A nesting-threshold
+  defect survived 697 passing tests and two rounds of falsification: a
+  suite and a lint answer different questions. The only instrument that
+  can report it is the gate, and a phase opening with an adaptation commit
+  has **no compilable tree for the gate to run on** until the
+  implementation lands — so anything only the gate can see accumulates
+  silently across that whole window. Whoever authors tests inside it runs
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+  directly. Checking at a lower severity asks a different question, and
+  without `-D warnings` cargo attributes the diagnostic to the first
+  binary and marks the rest `(1 duplicate)` — which means *this same
+  diagnostic, repeated*, not *a pre-existing one lives elsewhere*.
 
 Test placement — sibling `foo_test.rs` files for unit tests (a considered
 departure from Rust's inline default), `tests/` for integration tests,
