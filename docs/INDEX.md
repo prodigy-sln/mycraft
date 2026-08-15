@@ -4,6 +4,12 @@ Registry and routing guide for the living documentation. `docs/` describes
 the system **as built** — never planned or future behavior. Future concepts
 live in active specs and `product/roadmap.md`.
 
+**One deliberate exemption:** `docs/planning/` holds design discussions for
+features still in the planning state (see `planning/README.md`). Nothing in it
+describes built behaviour, nothing in it is binding, and a spec that lands
+supersedes it. It exists so that deep pre-spec analysis has a home in the tree
+instead of living only in an issue tracker.
+
 Consolidation updates this file: add the source identifier to the Sources
 column of every updated file, and register newly created files.
 
@@ -15,6 +21,7 @@ docs/
 ├── technical/            ← engine contributors: architecture, protocol, formats
 ├── modding/              ← content authors: block/item/... authoring and (eventually) the Luau API surface
 ├── user/                 ← players — currently just movement and controls; server operators still planned
+├── planning/             ← pre-spec design discussions; exempt from the as-built rule (see planning/README.md)
 └── ops/        (planned) ← running a public server: deploy, backup, moderation
 ```
 
