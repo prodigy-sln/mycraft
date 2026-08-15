@@ -942,6 +942,84 @@ question the prototype exists to ask. The list above is what *shipping* the
 aesthetic requires, and item 2 is the only one that is expensive to get
 wrong.
 
+### 7.4 Would hardware ray tracing (RTX / AMD) make lighting easier? No.
+
+Asked directly, researched directly, answered directly: **hardware RT makes
+this project's lighting strictly harder** — it adds four to five subsystems,
+removes none, shrinks the audience, and breaks the verification discipline.
+The per-axis findings:
+
+- **It does not replace the light field; it duplicates it.** The precedent
+  is exact: Minecraft RTX still runs the 0–15 flood fill for gameplay —
+  mob spawning and crop growth read it; RTX only changed pixels, and
+  players filed feedback because they could no longer *see* where mobs
+  spawn. For MyCraft the coupling is harder still: the server is
+  authoritative and headless, and under invariant 2 Luau scripts will
+  query light as state — so the deterministic CPU field must exist on
+  machines with no GPU at all, whatever the client renders. RT can only
+  ever be an *additional* system on top of §7.3, never a substitute for
+  any part of it.
+- **The API is experimental in this stack.** wgpu's ray tracing is
+  `Features::EXPERIMENTAL_RAY_QUERY`, whose own spec says the features
+  "may have major bugs" and are "subject to breaking changes"; ray-tracing
+  *pipelines* are unimplemented, and the tracking issue lists undefined
+  behaviour, AMD failures and Metal synchronisation among open items
+  ([spec](https://github.com/gfx-rs/wgpu/blob/v30/docs/api-specs/ray_tracing.md),
+  [tracking](https://github.com/gfx-rs/wgpu/issues/6762)). The WebGPU
+  standard has no RT at all. A load-bearing subsystem cannot stand on that.
+- **The hardware floor excludes the target audience's tail.** Nominal RT
+  capability on Steam mid-2026 is around two-thirds of users; mandatory-RT
+  titles set floors at RTX 2060 Super / RX 6600, and the Steam Deck runs
+  Quake II RTX at ~216p to hold 60 fps. A mandatory-RT lighting path turns
+  away roughly a third of the platform — or forces maintaining the raster
+  path *as well*, which is the flood-fill system again, plus everything RT
+  adds.
+- **The engineering is the opposite of "easier".** Q2VKPT — the minimal
+  serious voxel-era path tracer — is ~12,000 lines replacing the renderer
+  of one of the simplest licensable games, before NVIDIA productised it.
+  Minecraft RTX's frame is ~10 G-buffer targets, everything rendered twice
+  for transmissives, three ray dispatches, an irradiance cache, SVGF
+  temporal reprojection, per-signal multi-pass bilateral filters, and
+  **mandatory DLSS** because native-resolution path tracing was not viable
+  ([frame analysis](https://alain.xyz/blog/frame-analysis-minecraftrtx)).
+  Every denoiser stage is its own failure-mode family (ghosting, boiling,
+  disocclusion noise, light lag). None of that machinery exists in the
+  flood-fill path.
+- **Editable chunks are the worst case for acceleration structures.** DXR
+  wants stable BLASes; refits require unchanged topology, and a
+  greedy-meshed chunk changes triangle count on nearly every edit — so
+  every block edit is a full per-chunk BLAS rebuild, the operation wgpu's
+  own docs flag as slow, running continuously under 32-player streaming
+  ([NVIDIA best practices](https://developer.nvidia.com/blog/rtx-best-practices/)).
+- **Golden frames die.** The Vulkan spec makes ray-triangle intersection
+  implementation-specific, with traversal order unspecified and
+  watertightness guaranteed only within a geometry
+  ([spec](https://docs.vulkan.org/spec/latest/chapters/raytraversal.html));
+  acceleration structures are opaque vendor blobs. Even ray-*query* output
+  is not bit-reproducible across vendors or drivers, and path-traced
+  output additionally depends on accumulation history. The project's
+  entire GPU verification strategy (ADR-008: golden frames because GPU
+  code is otherwise unverifiable) is incompatible with a
+  non-reproducible-by-specification draw path.
+- **If traced lighting is ever wanted, the voxel-native route beats the
+  hardware route.** Teardown ships fully traced-looking lighting by
+  raymarching its voxel data in ordinary shaders — no DXR, minimum GPU a
+  GTX 1070. Hardware RT cores accelerate *triangle* tests; custom AABB
+  intersections measure ~2× slower than hardware triangle tests
+  ([JCGT](https://jcgt.org/published/0011/03/06/paper-lowres.pdf)), and a
+  chunked voxel world **already is an acceleration structure** — DDA
+  traversal ([Amanatides–Woo](http://www.cse.yorku.ca/~amana/research/grid.pdf))
+  traces the same occupancy data the game maintains, so the "AS rebuild"
+  after an edit is the chunk update that happens anyway, deterministic and
+  testable in plain compute.
+
+**Verdict:** the flood-fill field stays the single source of truth for
+gameplay and raster shading. If a premium GI mode is ever wanted, it is a
+compute-shader DDA over the chunk grid as an optional client effect —
+re-evaluate hardware RT only if wgpu's support exits experimental status,
+and never as the lighting foundation. This slots into §7.3 as a refinement
+of item 7, changing nothing above it.
+
 ---
 
 ## 8. Pitfalls, consolidated
@@ -1066,3 +1144,16 @@ Beyond the issue's own source list. Verified 2026-08-15.
 [Clustered shading](http://www.aortiz.me/2018/12/21/CG.html) ·
 [DDGI overview](https://morgan3d.github.io/articles/2019-04-01-ddgi/overview.html) ·
 [Colored Lux limits](https://www.curseforge.com/minecraft/mc-mods/colored-lux)
+
+**Hardware ray tracing (§7.4)** —
+[wgpu ray-tracing API spec](https://github.com/gfx-rs/wgpu/blob/v30/docs/api-specs/ray_tracing.md) ·
+[wgpu RT tracking issue](https://github.com/gfx-rs/wgpu/issues/6762) ·
+[Minecraft RTX frame analysis](https://alain.xyz/blog/frame-analysis-minecraftrtx) ·
+[Q2VKPT](https://brechpunkt.de/q2vkpt/) ·
+[NVIDIA RTX best practices (BLAS refit rules)](https://developer.nvidia.com/blog/rtx-best-practices/) ·
+[Vulkan ray traversal (implementation-specific intersection)](https://docs.vulkan.org/spec/latest/chapters/raytraversal.html) ·
+[SDF-grid vs hardware triangle intersection, JCGT](https://jcgt.org/published/0011/03/06/paper-lowres.pdf) ·
+[Amanatides–Woo DDA](http://www.cse.yorku.ca/~amana/research/grid.pdf) ·
+[Teardown minimum spec interview](https://80.lv/articles/teardown-developer-breaks-down-multiplayer-and-voxel-destruction-tech) ·
+[Steam Deck RT measurements](https://www.digitaltrends.com/computing/ray-tracing-on-steam-deck-is-possible-with-a-catch/) ·
+[Steam hardware survey](https://store.steampowered.com/hwsurvey/videocard/)
