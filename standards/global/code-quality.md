@@ -26,6 +26,17 @@
   generalization: generic repositories, custom base classes, "flexible"
   wrappers around your own code. It does not apply to ports at external
   boundaries, which are mandatory at first use.
+- **Nor does it apply to a published extension API**, which is an external
+  boundary of the same kind — its consumers are third parties who do not
+  exist yet. Waiting for three uses means whoever needed a hook already
+  worked around its absence, and the workaround becomes the thing that
+  cannot be broken. The discipline that replaces it is **breadth of
+  capability, narrowness of commitment**: ship the capability, version the
+  surface so deprecation stays possible, mark provisional parts
+  mechanically rather than in prose, and filter on *"can this be abused,
+  and is it bounded?"* rather than on *"do we need it yet?"* The exemption
+  covers the published surface only — internal abstractions behind it are
+  governed by the rule above, unchanged.
 - Tolerate harmless duplication; wait for abstractions to prove stable.
 - Use the **application framework** (HTTP router, DI container, ORM entry
   points, frontend framework) idiomatically and directly. Never wrap it

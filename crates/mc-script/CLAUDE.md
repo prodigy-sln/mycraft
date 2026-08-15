@@ -62,12 +62,81 @@ easier"; if you need work off-thread, move the *data* off-thread, not the VM.
 - Reload failure paths are tested: syntax error, failed validation, failing mod test, error thrown
   inside `on_reload`. Each must leave the previous registry serving.
 
+## Composition is the extension model
+
+**Content extends the game by attaching components, never by subclassing.** This matches the
+runtime: the engine is already an ECS, so the content model and the execution model are one idea
+rather than two.
+
+**Blocks are flyweight; entities are not.** A block cannot have an entity — a section is 16³ and a
+definition is shared by millions of placements. So components attach to the **definition** for
+blocks and to the **instance** for entities. Same model, different granularity. **State this
+wherever it could be misread**, because purifying it into an entity-per-voxel kills the mesher.
+
+One question — *which components does this definition have?* — replaces four mechanisms: **tags**
+are marker components with no data, **capabilities** are components carrying a contract,
+**behaviour** is components carrying callbacks, and inheritance is not needed at all.
+
+**Why not inheritance**, since it is the obvious alternative: it is single-parent and exclusive.
+One mod wanting "furnace, but faster" and another wanting "furnace, but bigger" both subclass, and
+a player installing both gets two incompatible furnaces. Composition lets both attach. It also
+keeps the property inheritance structurally cannot have — **a third party can attach to a block
+whose author never heard of them**, which is what interop actually needs, since the integrating mod
+controls neither party.
+
+**Ordering, when two components carry the same callback.** Derived from the fault split above
+rather than invented:
+
+- **Queries** (may a block be placed here) — **conjunction.** Every attached component must agree;
+  any refusal refuses. Order-independent, so the question does not arise.
+- **Notifications** — **all run, none cancels**, ordered by *declared constraints*
+  (`after = "base:furnace"`), never by a priority number. A dependency graph is checkable; a
+  priority integer is a race to the top that every modding ecosystem has lost.
+
+**Budgets, quarantine and per-cell state are per component, not per block.** A broken attachment
+from one mod stops acting while another mod's behaviour on the same block keeps working — strictly
+finer isolation than disabling the block, and it follows from invariant 4 rather than replacing it.
+Namespace per-component state by the component's id, or two mods declaring a `fuel` field collide.
+
+**Attach yes, remove no.** Removing another mod's component silently breaks its assumptions;
+removal needs the owner's permission or does not exist.
+
+## API surface policy — breadth of capability, narrowness of commitment
+
+**A published modding API is exempt from "no abstraction before three concrete uses."** Waiting for
+three uses means the modder who needed a hook already worked around its absence, and the workaround
+becomes the thing that cannot be broken. Provide capability for uses you cannot enumerate.
+
+**But the cost model is not wasted effort, it is permanent commitment.** A speculative method that
+turns out wrong is not work you can delete — it is a wart you cannot withdraw, and mods will build
+on it *because* it exists. Four disciplines replace the rule that no longer applies:
+
+1. **Ship the capability, version the surface.** An API version in the mod manifest is what makes
+   deprecation possible. Without one, v1 is forever.
+2. **Mark provisional things mechanically.** An `unstable` namespace content must opt into, so "this
+   may change" is enforced by the loader rather than written in a document nobody read.
+3. **Expose intent, not mechanism.** The exposure that hurts is a signature encoding how the mesher
+   happens to work today.
+4. **Invariant 3 above becomes the filter** — not *"do we need this yet?"* but *"can this be abused,
+   and is it bounded?"* A method nobody uses costs nothing; one that lets a mod allocate without
+   limit costs the server.
+
+**This exemption is scoped to the published scripting surface and nowhere else.** Inside the engine
+— ports, internal abstractions, generic wrappers over our own code — three-uses still binds. Cite
+this section to justify a speculative *internal* trait and you have misread it.
+
 ## When adding a binding
 
 Ask in order:
 1. Could a hostile mod use this to hang the server, exhaust memory, escape the sandbox, or read
-   another player's private state?
-2. Does the base game need it? If not, why does it exist? (ADR-005: the base game is the API's
-   proof of completeness.)
+   another player's private state? **This is the gate**, and a hook with no consumer yet passes it
+   as easily as one with three.
+2. Is it bounded — in allocation, in instruction count, in the radius or volume it can read or
+   write? An unbounded binding is a Blocker however useful it is.
 3. Is it named for the capability rather than the implementation?
 4. Is it documented in `docs/modding/api-reference.md` in the same change?
+
+**"The base game does not need it yet" is not a reason to refuse it** — see the surface policy
+above. ADR-005's claim that the base game is the API's proof of completeness still holds and is not
+this: it says the base game must *exercise* the API, never that the API may hold only what the base
+game happens to use.
