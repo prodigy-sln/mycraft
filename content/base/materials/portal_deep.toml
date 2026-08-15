@@ -1,0 +1,4 @@
+# The field's outermost course, where the vortex sinks away from the frame.
+name     = "base:portal_deep"
+color    = "#3d1b6b"
+emissive = 0.3

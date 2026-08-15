@@ -1,0 +1,4 @@
+# A sharpened edge, ground bright. Only the cutting line uses it, so the
+# lighter tone reads as a highlight rather than as a second metal.
+name  = "base:iron_edge"
+color = "#dfe4e9"

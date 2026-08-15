@@ -1,0 +1,5 @@
+# The frame's inner lip, where a portal's light bleeds onto the stone. Not
+# emissive: it is lit rock, not a light source, and that is the difference
+# that makes the field read as emitting.
+name  = "base:obsidian_violet"
+color = "#3b2456"

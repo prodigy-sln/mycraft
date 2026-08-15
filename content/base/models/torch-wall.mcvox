@@ -1,0 +1,106 @@
+# A torch on a wall bracket, its shaft climbing away from the wall at 45°.
+#
+# Sliced on `x`, so each layer is a side elevation — the view the diagonal
+# actually lives in. The first row printed is the top of the model and the
+# first column is z = 0, the face that sits flat against the wall. Read left
+# to right in a layer and you walk out from the wall; read down and you fall
+# to the floor.
+#
+# The 45° is exact rather than eyeballed: the shaft steps one voxel in z for
+# every voxel in y, from (z 1–2, y 1) to (z 5–6, y 5). Its axis runs
+# (1.5, 1) → (5.5, 5), so Δz = Δy = 4. A voxel grid cannot rotate a box, so a
+# diagonal is a staircase; the two-wide run per step is what keeps consecutive
+# steps sharing a face instead of only a corner, which is the difference
+# between a stick and a chain of loose cubes.
+#
+# This is the first cut, kept by the author's choice over two later revisions.
+# A reviewer argued the flame is too large a fraction of the model and hides
+# the shaft from the front-oblique angles, and drove it down to a slim
+# eight-step version; that one is more legible and less of a torch. The head
+# being big and the stick being short is what makes this one read as fire on a
+# stub of wood rather than as a lit stick, and that was the call.
+#
+# The flame flares to 4 × 4 with the corners cut, so a corner view sees an
+# octagon rather than a slab, and it sits directly above the shaft's tip —
+# fire does not care which way its fuel leans. The pale course is its base,
+# where the fuel is.
+#
+# Mirror-symmetric about x = 2. Only two layers are distinct: the outer pair
+# carry the backplate and the flame's shoulders, the inner pair everything.
+#
+# 76 filled voxels in a 4 x 10 x 8 box — half a block deep, sticking out of
+# the wall about as far as it stands tall.
+
+schema = 1
+name   = "base:torch_wall"
+scale  = 16
+size   = [4, 10, 8]
+origin = [2, 0, 0]        # mount point: wall face, floor level, centred on x
+slice  = "x"
+
+[palette]
+"." = "empty"
+"p" = "base:copper_plate"
+"w" = "base:oak_beam"
+"f" = "base:flame"
+"c" = "base:flame_core"
+
+[[layers]]                # x = 0, the left cheek: backplate and flame shoulder
+x = 0
+grid = """
+........
+........
+.....ff.
+.....cc.
+........
+p.......
+p.......
+p.......
+p.......
+p.......
+"""
+
+[[layers]]                # x = 1, the near half of the shaft
+x = 1
+grid = """
+.....ff.
+.....ff.
+....ffff
+....cccc
+.....ww.
+p...ww..
+p..ww...
+p.ww....
+pww.....
+ppp.....
+"""
+
+[[layers]]                # x = 2, mirror of x = 1
+x = 2
+grid = """
+.....ff.
+.....ff.
+....ffff
+....cccc
+.....ww.
+p...ww..
+p..ww...
+p.ww....
+pww.....
+ppp.....
+"""
+
+[[layers]]                # x = 3, mirror of x = 0
+x = 3
+grid = """
+........
+........
+.....ff.
+.....cc.
+........
+p.......
+p.......
+p.......
+p.......
+p.......
+"""

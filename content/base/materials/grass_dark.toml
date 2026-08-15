@@ -1,0 +1,5 @@
+# One step down from the base green, not two. The tones across this set are a
+# few per cent apart on purpose: a single large step makes every accent texel
+# an event, and events are what the eye tracks from one tile to the next.
+name  = "base:grass_dark"
+color = "#5f9c48"

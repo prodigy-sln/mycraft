@@ -1,0 +1,4 @@
+# The dim field between the vortex and the frame.
+name     = "base:portal_glow"
+color    = "#7a34c9"
+emissive = 0.65

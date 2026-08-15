@@ -1,0 +1,111 @@
+# A felling axe: oak haft, iron head, bit ground bright.
+#
+# Sliced on `x`, so each layer is a side elevation — the profile view, and the
+# only one an axe is really recognised from. The first row printed is the top
+# of the haft and the first column is z = 0, behind the poll. Columns run
+# z = 0 → 7, so the bit opens toward the right of the grid.
+#
+# Revision 3. Revision 1 was a sledgehammer — a head six courses tall on a
+# fourteen-tall tool. Revision 2 fixed the height and became a mallet instead,
+# because the head was then eight long against four tall: a horizontal bar.
+# The rule that fell out of it, and the one worth keeping: **an axe head is
+# taller than it is long.** The bit is a tall vertical arc and the eye is a
+# short collar behind it, and no amount of bevel detail rescues a head whose
+# bounding box is wider than it is high.
+#
+# So the head is now 7 long by 6 tall. Its reach past the haft runs +1, +3,
+# +4, +4, +4, +2 down the six courses, and that profile is **monotonic** — no
+# course reaches less far than one lying between it and the widest. A profile
+# that steps out, back in and out again reads as damage rather than as a
+# curve, which is what the previous cut did.
+#
+# The poll exists only on the two middle courses, so the back of the head is
+# short and the front is tall, which is where the diagonal in the silhouette
+# comes from. That diagonal is the only thing that still says "axe" rather
+# than "hammer" once the model is scaled down to an inventory slot.
+#
+# The head is **3 thick at the eye and 1 at the bit**. Odd thickness is
+# available because a mirror plane may pass through the centre of a voxel
+# column rather than only between two — the haft, 3 wide, is already that
+# case. A 2-thick edge is a chamfered corner and cannot read as sharp at any
+# size; only the centre layer carries the last two bit columns, and only it
+# carries the bright edge material.
+#
+# The beard — the bit's lower forward corner, dropped a course below the head
+# body — is two voxels and set one column in from the widest reach, so it has
+# something to hang off instead of ending in a lone jagged voxel.
+#
+# 132 filled voxels in a 3 x 15 x 8 box.
+
+schema = 1
+name   = "base:axe"
+scale  = 16
+size   = [3, 15, 8]
+origin = [1, 0, 2]        # butt of the haft, on its centreline
+slice  = "x"
+
+[palette]
+"." = "empty"
+"w" = "base:oak_beam"
+"i" = "base:iron"
+"e" = "base:iron_edge"
+
+[[layers]]                # x = 0, the cheek: eye and poll, no bit
+x = 0
+grid = """
+..ww....
+..iii...
+..iiii..
+.iiiii..
+.iiiii..
+..iiii..
+..ww....
+..ww....
+..ww....
+..ww....
+..ww....
+..ww....
+..ww....
+..ww....
+..ww....
+"""
+
+[[layers]]                # x = 1, the centreline: the bit, the beard, the haft
+x = 1
+grid = """
+..ww....
+..iie...
+..iiiie.
+.iiiiiie
+.iiiiiie
+..iiiiie
+..wwie..
+..ww....
+..ww....
+..ww....
+..ww....
+..ww....
+..ww....
+..ww....
+..ww....
+"""
+
+[[layers]]                # x = 2, mirror of x = 0
+x = 2
+grid = """
+..ww....
+..iii...
+..iiii..
+.iiiii..
+.iiiii..
+..iiii..
+..ww....
+..ww....
+..ww....
+..ww....
+..ww....
+..ww....
+..ww....
+..ww....
+..ww....
+"""

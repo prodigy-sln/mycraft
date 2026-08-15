@@ -1,0 +1,440 @@
+# A grass block: dirt with a growth of grass over its top and a ragged fringe
+# hanging down its sides.
+#
+# Sliced on `y`, so each layer is a floor plan and the block is sixteen of
+# them read from the ground up. The first row printed is z = 0 and the first
+# column is x = 0.
+#
+# Sixteen voxels on every axis at `scale = 16`, because a **face set is by
+# definition a block's six faces** and the tool refuses one for a model that
+# is not exactly `scale` across (FR-10.5-S3). At one pixel per voxel that
+# emits the 16 x 16 textures the terrain wants.
+#
+# **Only the outer shell is ever seen.** A face texture is a flat axis-aligned
+# view, so each of the six images is one plane of this model and the interior
+# is invisible from every direction. The interiors are plain dirt and all the
+# authoring effort goes to the six planes that show.
+#
+# No `empty` marker in the palette: the block is solid, so a character for
+# "no voxel" would be an entry no grid ever spells, which the inspector
+# reports as a defect and rightly. This is the only model in the set that
+# does not need one.
+#
+# ## Shape is authored; noise is generated
+#
+# The fringe, the shadow course and the blades are shape, and they are written
+# by hand — a hash does not know that a sod line wants four depths, or that
+# the deepest blade should be the odd one out.
+#
+# The speckle is noise, and it is generated, because three hand-written
+# attempts at it failed in three different ways and each failure was invisible
+# until the texture was laid out nine times over. In order: a plain band every
+# sixteen pixels, from holding the whole border at one tone; two vertical
+# stripes, from nudging one dirt pattern up and down between courses; and a
+# diagonal lattice, from fixing the stripes with a constant shift per course.
+# That last one is the instructive failure — **a constant shift does not
+# decorrelate the axes, it rotates the correlation**, and a column histogram
+# cannot see it, because the accents do visit every column equally while
+# marching through them in order.
+#
+# So the placement hashes the coordinate tuple with no term relating one axis
+# to another, and the check bins all four families — rows, columns and both
+# diagonals — against the null: the same number of accents scattered at random
+# over the same grid, many times over. A fixed threshold cannot judge this,
+# because a side face carries about fifty accents across sixteen bins and a
+# worst bin near 2.4x the mean is simply what randomness looks like at that
+# size, while the top face with five times the accents lands near 1.3x for the
+# same reason. The salts were then chosen *by that test* rather than by eye,
+# which is the only part of this a person is reliably bad at.
+#
+# One caveat on that number, since choosing the salt by the test spends some
+# of the evidence the test reports: the percentile is a best-of-N over the
+# candidate salts, not a random draw, so it says "least structured of the ones
+# tried" and not "unlikely to be structured". Fine for selecting generated
+# noise; not safe as a pass/fail gate over authored content without
+# recalibrating against best-of-N.
+#
+# `scratchpad/gen_grass.py` and `assemble_grass.py` hold the generator and the
+# assembler.
+#
+# ## Tiling, which is the arithmetic half
+#
+# The seam check is per row and per column: an axis fails if the difference
+# across the wrap is larger than the largest difference that row already
+# contains. Three rules make all six faces pass:
+#
+#   * **Every layer's four corner voxels are one value**, so the left and
+#     right edges of all four side textures wrap at a difference of zero.
+#   * **The top and bottom planes repeat their first row as their last, and
+#     their first column as their last**, so those two wrap at zero as well —
+#     whatever their interiors do.
+#   * **Every grass voxel in the fringe is the base green, and the dirt
+#     directly beneath any grass is the dark tone.** A side texture's vertical
+#     wrap compares its top row against its bottom row, and that difference
+#     has to be matched by a step the column already contains — which is the
+#     fringe's own grass-over-dirt boundary. Base green against dark earth is
+#     80 on the green channel, above any top-to-bottom pairing the mottling
+#     can produce. This is not theoretical: the two dirt texels pushed up into
+#     the solid course were the mid tone at first, which left those columns
+#     with no grass-over-dark step at all, and `--seamless` refused the left
+#     face naming column 5, 80 against 62.
+#
+# **Passing that check is a floor, not a verdict.** It was green for the plain
+# band, green for the vertical stripes and green for the diagonal lattice. The
+# tool says as much itself: it never refuses a correct texture and frequently
+# under-refuses.
+#
+# 4096 filled voxels in a 16 x 16 x 16 box.
+
+schema = 1
+name   = "base:grass_block"
+scale  = 16
+size   = [16, 16, 16]
+origin = [8, 0, 8]
+slice  = "y"
+
+[palette]
+"g" = "base:grass"
+"G" = "base:grass_dark"
+"b" = "base:grass_deep"
+"l" = "base:grass_light"
+"y" = "base:grass_pale"
+"d" = "base:dirt"
+"D" = "base:dirt_dark"
+"m" = "base:dirt_light"
+
+[[layers]]                # y = 0, the underside: earth, seen whole from below
+y = 0
+grid = """
+DdddddmddddddddD
+ddDmdmdDDDmdddmd
+dddddddDdddddmdd
+ddDDdmddddDdmddd
+ddDmddddDddddddd
+dddDDdddDddddddd
+dddDdmmddddddDmd
+ddddddmdmdDddddd
+DDDdDdddddmddddD
+ddddmDddddddDddd
+mDdDmDddDddddddm
+ddDdDdmdmddmDDdd
+ddmdddddDdmddddd
+dddmmddDdddddddd
+ddddDddddmdDdddd
+DdddddmddddddddD
+"""
+
+[[layers]]                # y = 1
+y = 1
+grid = """
+dDdddddDdddDdddd
+dddddddddddddddd
+dddddddddddddddm
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddD
+dddddddddddddddD
+dddddddddddddddd
+mddddddddddddddd
+dddddddddddddddd
+dddddddddddddddd
+mddddddddddddddd
+dddddddddddddddD
+dddddddddddddddd
+mddddddddddddddd
+ddmddmmddddmdDmd
+"""
+
+[[layers]]                # y = 2
+y = 2
+grid = """
+dddddmmDdddddmdd
+mddddddddddddddd
+Dddddddddddddddm
+mddddddddddddddD
+dddddddddddddddD
+dddddddddddddddm
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddD
+Dddddddddddddddd
+dddddddddddddddd
+mddddddddddddddd
+dddddddddddddddD
+dddddddddddddddD
+Dddddddddddddddd
+ddddddDdDmdddddd
+"""
+
+[[layers]]                # y = 3
+y = 3
+grid = """
+ddDdddDddddddddd
+mddddddddddddddd
+mddddddddddddddm
+mddddddddddddddd
+dddddddddddddddd
+Dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddm
+dddddddddddddddD
+Dddddddddddddddd
+mddddddddddddddm
+dddddddddddddddD
+Dddddddddddddddd
+dddddddddddddddm
+dddddddddddddddd
+dddddDdDdddddddd
+"""
+
+[[layers]]                # y = 4
+y = 4
+grid = """
+dddmmddddDddmmmd
+mddddddddddddddD
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddD
+mddddddddddddddm
+Dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddd
+dddmmmddDdmdmddd
+"""
+
+[[layers]]                # y = 5
+y = 5
+grid = """
+dmdddmDmddddDdDd
+Dddddddddddddddd
+dddddddddddddddd
+mddddddddddddddm
+dddddddddddddddd
+mddddddddddddddD
+mddddddddddddddd
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddm
+dddddddddddddddd
+DddddddddddddddD
+dddddddddddddddd
+dddddddddddddddd
+ddddddDDddddDddd
+"""
+
+[[layers]]                # y = 6
+y = 6
+grid = """
+dDdmdDDddDddmddd
+Dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddd
+Dddddddddddddddd
+DddddddddddddddD
+Dddddddddddddddd
+dddddddddddddddd
+Dddddddddddddddd
+Dddddddddddddddd
+DddddddddddddddD
+dddddddddddddddD
+dddmddmddddDddDd
+"""
+
+[[layers]]                # y = 7
+y = 7
+grid = """
+ddDddmddDdddmdmd
+dddddddddddddddd
+Dddddddddddddddd
+dddddddddddddddD
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddm
+mddddddddddddddD
+dddddddddddddddd
+dddddddddddddddd
+Dddddddddddddddd
+mddddddddddddddd
+dddddddddddddddd
+Dddddddddddddddd
+dDDddmmdmmdddddd
+"""
+
+[[layers]]                # y = 8
+y = 8
+grid = """
+dDddddddddmdddDd
+mddddddddddddddd
+dddddddddddddddd
+Dddddddddddddddd
+dddddddddddddddm
+Dddddddddddddddd
+dddddddddddddddD
+dddddddddddddddm
+dddddddddddddddD
+dddddddddddddddd
+Dddddddddddddddd
+dddddddddddddddd
+DddddddddddddddD
+dddddddddddddddm
+dddddddddddddddd
+ddddDDdddmddDdmd
+"""
+
+[[layers]]                # y = 9
+y = 9
+grid = """
+ddmDddDDdmdmdddd
+dddddddddddddddd
+Dddddddddddddddd
+dddddddddddddddd
+mddddddddddddddm
+dddddddddddddddm
+mddddddddddddddm
+Dddddddddddddddd
+mddddddddddddddm
+dddddddddddddddD
+dddddddddddddddd
+dddddddddddddddd
+dddddddddddddddD
+mddddddddddddddd
+mddddddddddddddd
+ddddddddDdddmdDd
+"""
+
+[[layers]]                # y = 10, the sod's shadow — broken, and dark under every blade
+y = 10
+grid = """
+DdDDDDgdDDdDDDdD
+DddddddddddddddD
+dddddddddddddddD
+DddddddddddddddD
+DddddddddddddddD
+Dddddddddddddddd
+DddddddddddddddD
+DddddddddddddddD
+DddddddddddddddD
+dddddddddddddddD
+Dddddddddddddddd
+DddddddddddddddD
+DddddddddddddddD
+dddddddddddddddD
+DddddddddddddddD
+DDdDDDDDdDDDdDDD
+"""
+
+[[layers]]                # y = 11, three lone blades, no two the same depth
+y = 11
+grid = """
+DDDDDDgDDDDDDDDD
+DddddddddddddddD
+DddddddddddddddD
+DddddddddddddddD
+gddddddddddddddD
+DddddddddddddddD
+DddddddddddddddD
+DddddddddddddddD
+DddddddddddddddD
+DddddddddddddddD
+DddddddddddddddD
+DddddddddddddddD
+DddddddddddddddD
+DddddddddddddddD
+DddddddddddddddD
+DDDgDDDDDDDDDDDD
+"""
+
+[[layers]]                # y = 12, about three in ten
+y = 12
+grid = """
+DgDDDgDDDDgDDgDD
+DddddddddddddddD
+DddddddddddddddD
+gddddddddddddddD
+DddddddddddddddD
+DddddddddddddddD
+Dddddddddddddddg
+DddddddddddddddD
+DddddddddddddddD
+gddddddddddddddD
+DddddddddddddddD
+DddddddddddddddD
+Dddddddddddddddg
+DddddddddddddddD
+DddddddddddddddD
+DDgDDDgDDgDDDgDD
+"""
+
+[[layers]]                # y = 13, about seven in ten
+y = 13
+grid = """
+ggDgDggDggDgggDg
+gdddddddddddddDg
+Ddddddddddddddgg
+gddddddddddddddg
+gdddddddddddddDg
+Dddddddddddddddg
+gddddddddddddddg
+gdddddddddddddDg
+Ddddddddddddddgg
+gddddddddddddddg
+gdddddddddddddDg
+Dddddddddddddddg
+gddddddddddddddg
+gdddddddddddddgg
+Ddddddddddddddgg
+gDggDgggDgDgggDg
+"""
+
+[[layers]]                # y = 14, solid, with two dirt texels pushed up
+y = 14
+grid = """
+ggggDgggggggDggg
+gddddddddddddddg
+gddddddddddddddg
+gddddddddddddddD
+gddddddddddddddg
+Dddddddddddddddg
+gddddddddddddddg
+gddddddddddddddg
+gddddddddddddddg
+gddddddddddddddD
+gddddddddddddddg
+Dddddddddddddddg
+gddddddddddddddg
+gddddddddddddddg
+gddddddddddddddg
+ggDgggggggDggggg
+"""
+
+[[layers]]                # y = 15, the growth itself, seen whole from above
+y = 15
+grid = """
+bgGgGGGGGbggGggb
+blggggbgGGyygGbb
+blgggbygygGlgylb
+GyyggglgybGGgGgG
+gygggybbbGyybbgg
+ggggggbbggygbgbg
+gggggGGGlllgggbg
+ggllggGyggyggggg
+GGblgggylbggggGG
+ggGbggggGbbbglgg
+blGgbggygGGyGggb
+glbggbglgggggGlg
+gGbgbggylblybllg
+bybgGllggGggblyb
+gblGgbgylygbbggg
+bgGgGGGGGbggGggb
+"""

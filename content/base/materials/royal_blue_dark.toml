@@ -1,0 +1,5 @@
+# The cloak's blue, a shade below the shield's field. Same livery, but a cloak
+# that matches the shield exactly turns into a second shield from behind —
+# they read as the same rectangle at the same aspect ratio.
+name  = "base:royal_blue_dark"
+color = "#16386b"

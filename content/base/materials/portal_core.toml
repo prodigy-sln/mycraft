@@ -1,0 +1,5 @@
+# The bright ring of a portal's vortex. Fully emissive: a portal is a light
+# source, and shading its face would read as a painted wall.
+name     = "base:portal_core"
+color    = "#c46bff"
+emissive = 1.0

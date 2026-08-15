@@ -1,0 +1,5 @@
+# The outer body of a flame — orange, and lit enough to read at night without
+# washing out the shading on the fuel beneath it.
+name     = "base:flame"
+color    = "#ff9a3c"
+emissive = 0.8

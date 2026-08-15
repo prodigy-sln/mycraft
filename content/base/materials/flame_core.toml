@@ -1,0 +1,5 @@
+# The hot centre of a flame, at the base where the fuel is. Fully emissive, so
+# it renders unshaded and stays the brightest thing on any face.
+name     = "base:flame_core"
+color    = "#ffe08a"
+emissive = 1.0

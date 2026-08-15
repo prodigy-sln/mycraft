@@ -1,0 +1,204 @@
+# A bunny, sitting.
+#
+# Sliced on `x`, so each layer is a side elevation. The first row printed is
+# the ear tips and the first column is z = 0, the tail end; columns run
+# z = 0 → 8, so the bunny faces right.
+#
+# Revision 4. The body arrived in revision 3 and is unchanged here: the head
+# is one volume carrying eye, nose and cheek together, which is what stopped
+# it reading as a llama — **if a step in the body runs between the eye and the
+# muzzle, the thing above the step is a neck, however short it is.**
+#
+# What this revision fixes is the ears, and the lesson is narrower but sharper:
+# **at two voxels deep there is no such thing as a subtle lean.** Revision 3
+# offset the ear's top three courses by one voxel to stop them reading as
+# chimneys, and on a two-deep ear a one-voxel offset is not a lean, it is a
+# fifty-percent fracture. With a dropped tip voxel on top of it each ear broke
+# into three or four separate-looking chunks — legible as a crown or a piece
+# of coral, not as an ear. Dull beats illegible. The ears are square, vertical
+# and identical again.
+#
+# The pink is the other half. A voxel is one material on all six of its faces,
+# so an outer *column* of pink puts pink on the whole outward side of the ear
+# and every corner view shows a pink slab. The only build that gets pink on
+# the front and grey everywhere else is a three-wide ear: grey outer column,
+# grey inner column, and pink in the middle column of the forward depth layer
+# only, stopping a course short of the tip and a course above the base. The
+# pink is then boxed in on five sides and shows exactly where an ear's pink
+# should.
+#
+# The gap between haunch and head is now a notch rather than a slot. Open for
+# its full width at the top it was a slit clean through the animal, and from
+# the side it read as the head having been sliced off. Its lower courses are
+# filled; only the top of it is open to the sky, which is all the silhouette
+# needed.
+#
+# Mirror-symmetric about x = 3. 562 filled voxels in a 7 x 17 x 9 box.
+
+schema = 1
+name   = "base:bunny"
+scale  = 16
+size   = [7, 17, 9]
+origin = [3, 0, 4]
+slice  = "x"
+
+[palette]
+"." = "empty"
+"f" = "base:bunny_fur"
+"c" = "base:fox_cream"
+"p" = "base:flesh_pink"
+"e" = "base:fox_soot"
+
+[[layers]]                # x = 0, the ear's outer column, the haunch's swell
+x = 0
+grid = """
+.....ff..
+.....ff..
+.....ff..
+.....ff..
+.....ff..
+.....ff..
+.ffff....
+.ffff....
+.ffff....
+.ffff....
+.ffff....
+.fffff...
+.fffff...
+.fffff...
+.fffff...
+.ccccc...
+.........
+"""
+
+[[layers]]                # x = 1, the ear's pink middle column, the eye
+x = 1
+grid = """
+.....ff..
+.....fp..
+.....fp..
+.....fp..
+.....fp..
+.....ff..
+.ffff.fff
+.ffff.fff
+.ffff.ffe
+.ffffffff
+.ffffffff
+.fffffff.
+.fffffff.
+.fffffff.
+.fffffff.
+.ccccccc.
+.fff..ff.
+"""
+
+[[layers]]                # x = 2, the ear's inner column, the tail, the muzzle
+x = 2
+grid = """
+.....ff..
+.....ff..
+.....ff..
+.....ff..
+.....ff..
+c....ff..
+cffff.fff
+.ffff.fff
+.ffff.fff
+.fffffffc
+.fffffffc
+.fffffff.
+.fffffff.
+.fffffff.
+.fffffff.
+.ccccccc.
+.fff..ff.
+"""
+
+[[layers]]                # x = 3, the centreline: the gap between ears, the nose
+x = 3
+grid = """
+.........
+.........
+.........
+.........
+.........
+c........
+cffff.fff
+.ffff.fff
+.ffff.fff
+.fffffffp
+.fffffffc
+.fffffff.
+.fffffff.
+.fffffff.
+.fffffff.
+.ccccccc.
+.........
+"""
+
+[[layers]]                # x = 4, mirror of x = 2
+x = 4
+grid = """
+.....ff..
+.....ff..
+.....ff..
+.....ff..
+.....ff..
+c....ff..
+cffff.fff
+.ffff.fff
+.ffff.fff
+.fffffffc
+.fffffffc
+.fffffff.
+.fffffff.
+.fffffff.
+.fffffff.
+.ccccccc.
+.fff..ff.
+"""
+
+[[layers]]                # x = 5, mirror of x = 1
+x = 5
+grid = """
+.....ff..
+.....fp..
+.....fp..
+.....fp..
+.....fp..
+.....ff..
+.ffff.fff
+.ffff.fff
+.ffff.ffe
+.ffffffff
+.ffffffff
+.fffffff.
+.fffffff.
+.fffffff.
+.fffffff.
+.ccccccc.
+.fff..ff.
+"""
+
+[[layers]]                # x = 6, mirror of x = 0
+x = 6
+grid = """
+.....ff..
+.....ff..
+.....ff..
+.....ff..
+.....ff..
+.....ff..
+.ffff....
+.ffff....
+.ffff....
+.ffff....
+.ffff....
+.fffff...
+.fffff...
+.fffff...
+.fffff...
+.ccccc...
+.........
+"""

@@ -1,0 +1,5 @@
+# The hottest points of a portal's streaks — near-white, and used only in
+# ones and twos.
+name     = "base:portal_flare"
+color    = "#ecdcff"
+emissive = 1.0

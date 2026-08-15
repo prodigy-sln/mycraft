@@ -1,0 +1,4 @@
+# Polished plate. Light enough that the face shading reads as curvature on a
+# breastplate rather than as three flat greys.
+name  = "base:steel"
+color = "#b9c0c9"

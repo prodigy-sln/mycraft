@@ -1,0 +1,148 @@
+# A purple portal: an obsidian frame two voxels thick with a vortex burning
+# in the opening.
+#
+# Sliced on `z`, so each layer is a front elevation — the view a portal is
+# built to be seen from. The first row printed is the top of the frame and the
+# first column is x = 0. z = 0 is the face you walk toward; z = 3 is the back.
+#
+# Revision 2, after a reviewer read the fourteen views and said it looked like
+# a rug medallion or a cartoon eye. That was right, and the diagnosis was
+# better than the symptom: the field was drawn as closed concentric rings with
+# a bright cross at dead centre, and **energy does not close a loop**. Rings
+# read as ornament — a target, a mandala, a woven border. What replaced them:
+#
+#   * Vertical streaks only, no horizontal runs, so nothing loops.
+#   * Streaks of unequal length starting and ending at unequal heights, and
+#     deliberately different left from right, so the field cannot be read as a
+#     symmetric pattern. This is the one place in the whole set where mirror
+#     symmetry is the enemy.
+#   * One irregular bright blob two wide by three tall, pushed up and to the
+#     left of centre — off both midlines, so it reads as a hot spot rather
+#     than as a pupil.
+#   * Four values instead of two: a near-white flare in ones and twos at the
+#     streak cores, the bright ring colour, the dim field, and a deep violet
+#     course all round the inside of the opening so the field sinks at its
+#     edges instead of butting flat against the frame.
+#
+# The frame's inner lip is a lit violet rather than black, so the glow touches
+# the stone it passes. That course is deliberately **not** emissive: it is rock
+# catching light, and the difference between lit rock and a light source is
+# what tells the eye which one is emitting.
+#
+# The field lives at z = 1 and z = 2 only, so it sits one voxel inside the
+# frame on both faces. That recess is the model's best portal cue — from any
+# corner view you see the frame's inner reveal in shadow before you see light.
+#
+# Four runes are cut into the front face only, so the model has a front, which
+# a symmetric frame otherwise would not. Each sits in the violet lip, which
+# rings it and stops it reading as a chip floating on black.
+#
+# 640 filled voxels in a 12 x 18 x 4 box.
+
+schema = 1
+name   = "base:portal_purple"
+scale  = 16
+size   = [12, 18, 4]
+origin = [6, 0, 2]        # centre of the threshold, floor level
+slice  = "z"
+
+[palette]
+"." = "empty"
+"o" = "base:obsidian"
+"v" = "base:obsidian_violet"
+"d" = "base:portal_deep"
+"g" = "base:portal_glow"
+"e" = "base:portal_core"
+"l" = "base:portal_flare"
+
+[[layers]]                # z = 0, the front face — frame, lit lip and runes
+z = 0
+grid = """
+oooooooooooo
+ovvvveevvvvo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+oe........eo
+oe........eo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ovvvveevvvvo
+oooooooooooo
+"""
+
+[[layers]]                # z = 1, the field
+z = 1
+grid = """
+oooooooooooo
+ovvvvvvvvvvo
+ovddddddddvo
+ovdglggdgdvo
+ovdgegeggdvo
+ovdeegeggdvo
+ovdeeglgedvo
+ovdlgeegedvo
+ovdedeeeldvo
+ovdegegledvo
+ovdgeedeedvo
+ovdgleeegdvo
+ovddeleegdvo
+ovdgeeglddvo
+ovdggldggdvo
+ovddddddddvo
+ovvvvvvvvvvo
+oooooooooooo
+"""
+
+[[layers]]                # z = 2, the field's back half
+z = 2
+grid = """
+oooooooooooo
+ovvvvvvvvvvo
+ovddddddddvo
+ovdglggdgdvo
+ovdgegeggdvo
+ovdeegeggdvo
+ovdeeglgedvo
+ovdlgeegedvo
+ovdedeeeldvo
+ovdegegledvo
+ovdgeedeedvo
+ovdgleeegdvo
+ovddeleegdvo
+ovdgeeglddvo
+ovdggldggdvo
+ovddddddddvo
+ovvvvvvvvvvo
+oooooooooooo
+"""
+
+[[layers]]                # z = 3, the back face — no runes
+z = 3
+grid = """
+oooooooooooo
+ovvvvvvvvvvo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ov........vo
+ovvvvvvvvvvo
+oooooooooooo
+"""
