@@ -107,10 +107,10 @@ Sketch only. Order and contents are expected to change based on feedback.
 | MVP | Adds | Still playable because |
 |-----|------|------------------------|
 | **2 — Scriptable Content** | Luau host, sandbox, registry, hot reload; `content/base/` blocks defined in script | The blocks you already had become script-defined; you can now add one live |
-| **3 — Multiplayer** | QUIC transport, ed25519 identity, replication, prediction; 2 players → 32 | The same sandbox, now with someone else in it |
+| **3 — Multiplayer** | QUIC transport, ed25519 identity, replication, prediction; 2 players → 32, over LAN or a forwarded port | The same sandbox, now with someone else in it |
 | **4 — Survival Loop** | Items, inventory, tools, crafting — all script-defined | Building gains purpose and progression |
 | **5 — Living World** | NPCs with pathfinding and scripted brains; then quests, dialogue, storyline | The world is inhabited and has things to do |
-| **6 — Public & Polished** | Moderation, anti-abuse, rollback; lighting, audio, UI polish, mod packaging | Ready for strangers on a public server |
+| **6 — Public & Polished** | NAT hole punching and relay fallback; moderation, anti-abuse, rollback; lighting, audio, UI polish, mod packaging | Ready for strangers on a public server, and reachable without a router |
 
 Backlog, unscheduled: WASM mod backend · cross-server identity · real art assets (decide by
 MVP 4) · dimensions and portals · a redstone-equivalent logic system (a strong test of scripting
@@ -123,10 +123,13 @@ is [PixVoxelAssets](https://github.com/tommyettinger/PixVoxelAssets) and
 Earliest use is **MVP 2**, where texture-by-key becomes a real feature; the voxel character and
 dungeon models suit **MVP 5**, and audio and GUI belong to **MVP 6**. MVP 1 stays on placeholders.
 
-### MVP 3 in more detail — content streaming and home hosting
+### Content streaming, home hosting, and reachability
 
-Still a sketch: this becomes binding only when MVP 3's own spec adopts it. What follows is
-the substance that must survive into that spec.
+Still a sketch: each part becomes binding only when the MVP that owns it adopts it, and
+**the two are now split.** Content streaming and the content-addressed cache are **MVP 3**'s,
+and that substance must survive into its spec. From *"Home hosting without opening a port"*
+onward — the rendezvous service, hole punching, relay assignment — is **MVP 6**'s, per the
+decision recorded at the end of this section.
 
 **Content is edited server-side and streams to players — textures included, not just
 scripts.** A texture swapped on a running server reaches every connected client live.
@@ -196,15 +199,21 @@ real work to be there, not in the choosing.
 Both are free to honour now and expensive to retrofit the moment something assumes a hosted
 URL exists.
 
-**Open, and not yet put to the user — do not assume a reading.** MVP 3's scope has two, and
-they differ by real scope:
+**Settled 2026-08-15: MVP 3 means *"multiplayer works"*** — direct connection and LAN.
+**NAT hole punching, the rendezvous service and relay assignment all defer to MVP 6**,
+alongside the public-server work they belong with.
 
-- *"Multiplayer works"* — direct connection and LAN, with NAT punching deferred to MVP 6
-  alongside the public-server work.
-- *"Play with friends without touching a router"* — punching lands in MVP 3, and the plan
-  changes to match.
+So MVP 3 is the transport and the authority: QUIC, identity, replication, the client
+submitting intents against a server that recomputes them, and 32 players on a LAN or
+behind a forwarded port. Everything above about assigners, relays and dying relays stays
+in this document as the sketch it is — none of it is MVP 3's to build.
 
-Unresolved.
+Rule 2 above is why this costs nothing later: LAN and direct connection must work
+regardless of what arrives afterwards, so punching is **additive to a shipped path**
+rather than a rewrite of one. The order also holds the project's own invariant — a bot
+harness exercising many clients has to exist before multiplayer, and an adversarial suite
+before anything faces the public internet. Punching lands next to the second, not the
+first.
 
 ---
 
