@@ -418,6 +418,56 @@ implementation (mutation testing, not a real regression), delete that file
 rather than committing it — a committed seed should mean "this once broke
 the real implementation," not "this once broke a scratch mutant."
 
+### A test asserting the correct value can still be a defect
+
+The licence-text check (`technical/licensing.md`) is a structural-invariant
+test whose subject is a document nobody may edit, and that constraint
+produces rules the earlier scans did not need.
+
+**No test names the copyright holder, and that is deliberate.** A test
+asserting `prodigy.solutions` would be a defect *even though the value is
+correct*. Resolving the holder removed the uncertainty; it did not remove
+the coupling hazard, which sits exactly where it always was. Couple the
+licence text to the suite grading it and the licence becomes something a
+test edit can force. The checks grade that *a* copyright line, *a* holder
+and *a* year are present, and that no unfilled placeholder marker survives
+— never *who*.
+
+**A structural assertion that fails against a correct licence has "edit the
+licence" as its cheapest green.** That is the over-tight-assertion trap of
+`standards/global/testing.md` §2 in its worst form, because a licence
+edited to satisfy a test is not the licence. Any such failure is a defect in
+the assertion and is fixed there.
+
+**One detector shared across two texts reports a violation against a
+byte-perfect file.** `LICENSE-APACHE`'s line 190 reads
+`Copyright [yyyy] [name of copyright owner]` — canonical published form,
+carrying copyright *shape* and a placeholder marker at once. The placeholder
+detector is therefore scoped to the MIT reading alone. Widening it is what
+looks like a simplification and is not.
+
+**One fixture must not grade two detectors.** Truncating the Apache text to
+remove section 9 removes the appendix marker with it, which would leave both
+detectors unfalsified individually. The two are deliberately separate
+fixtures.
+
+Three mutation results from the same check are worth keeping, because each
+is about what a mutation claim may assert:
+
+- **A mutation's result depends on how much it replaces, so the claim must
+  say which spelling was run.** A hardcoded `["LICENSE-MIT",
+  "LICENSE-APACHE"]` is caught by exactly **one** scenario when it replaces
+  the whole derivation, and by **two** when it leaves the refusal pre-scan
+  standing. "A hardcoded list is caught" is not a measurement.
+- **A README-blind link check passes two of the three link scenarios.** Only
+  the third catches it — weaken that one and nothing in the suite requires
+  the README to be read at all.
+- **Deleting the empty-expression guard still *refuses*, just wrongly.** The
+  safety property survived the mutation, so only asserting the **exact
+  enumerated variant** caught the regression; an absence-style assertion
+  would have gone green. This is the section above, met a second time in a
+  case where the absence assertion looks entirely adequate.
+
 ### The derived-oracle rule: what coverage does not vouch for
 
 `benches/` code that a test reaches through `#[path]` is **outside the
@@ -1393,6 +1443,15 @@ and none of these is covered by anything. From SPEC-010, every row measured:
 | A **binding table** that compares keys vs one that lists the pairs it expects | Indistinguishable to every scenario, because none binds the toggle outside the two keys it is tested at. The better form was taken on code-quality grounds. **The day the toggle is bindable to a letter key, this is the line that has to be right** | — |
 | The shipped elements' **contrast outline** | Covered only by a content assertion over the parsed declarations; every frame assertion is a frame-to-frame equality a missing ring satisfies on both sides | — |
 | The HUD pass's **destination alpha**, an outline drawn as a ring rather than a solid, the zero-height early return, the one-pixel extent floor | Each measured green under its own mutation; all four recorded in `technical/rendering.md` beside the rule they belong to | — |
+
+From SPEC-011, two more, each **re-measured against the shipped code** rather than inherited from
+the brief that predicted them. Neither is a defect and neither is to be closed by inventing a
+scenario — they are recorded so a reviewer meeting the code does not read the gap as an oversight:
+
+| Ungraded property | What was measured | Owner |
+|---|---|---|
+| Workspace **member name ordering** | Holds **incidentally** — `cargo metadata` already emits packages in name order, so removing the sort changes no verdict | — |
+| A `docs/LICENSE-MIT`-shaped **link target** | Every target in the shipped README and in both fixtures is a bare filename, so matching a whole string rather than a final path segment changes no verdict. No scenario covers it and none was invented | — |
 
 Two of these are worth reading as a pair rather than as separate rows: **the frame ring's eviction
 executed for the first time in a launched client that ran roughly 450 frames against a ring of

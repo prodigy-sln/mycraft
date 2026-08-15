@@ -144,5 +144,6 @@ The framework itself lives at
 
 ## License
 
-Dual-licensed under MIT or Apache-2.0, as declared in `Cargo.toml`. The license texts are not yet in
-the tree.
+Dual-licensed under either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option, as
+declared in `Cargo.toml`. A check in the test suite fails if the declaration and the shipped texts
+ever drift apart.

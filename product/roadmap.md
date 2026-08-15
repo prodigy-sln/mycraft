@@ -52,7 +52,7 @@ forward; none is a pure layer.
 | P0 | A cell holds a block or nothing — *air is not a block* | PRO-876 | **Done** |
 | P1 | World persistence — *quit and resume* | PRO-855 | **Done** |
 | P1 | Minimal HUD: crosshair, held block, debug overlay — *the HUD is content* | PRO-856 | **Done** |
-| P2 | Ship the LICENSE texts the workspace declares | PRO-874 | Todo |
+| P2 | Ship the LICENSE texts the workspace declares | PRO-874 | **Done** |
 | P2 | Terrain texture sampling and palette separation | PRO-869 | Todo |
 
 **PRO-873 goes before PRO-854, and the ordering is the point.** Every FR-5 scenario of
@@ -64,8 +64,9 @@ place to that same unreachable dispatch, so invariant 5 applies directly: verifi
 precedes the thing it verifies. **Exit criterion: each of those two mutations turns at
 least one test red.**
 
-PRO-874 is small and unglamorous — `Cargo.toml` declares `MIT OR Apache-2.0` and the
-workspace carries neither text.
+PRO-874 was small and unglamorous — `Cargo.toml` declared `MIT OR Apache-2.0` and the
+workspace carried neither text. Both now ship, and a check on every gate run fails if the
+declaration and the shipped texts drift apart again (`docs/technical/licensing.md`).
 
 The workspace skeleton and quality gate predate the first spec (commits `f5780f3`,
 `a93d2da`), which is why PRO-849 is the capture harness alone.
@@ -222,6 +223,7 @@ Unresolved.
 | World persistence (PRO-855) | 2026-08-14 | `2026-08-13-world-persistence` |
 | Minimal HUD — crosshair, held block, debug overlay (PRO-856) | 2026-08-14 | `2026-08-14-minimal-hud` |
 | A resumed save is rendered from the first frame (PRO-900) | 2026-08-15 | `2026-08-14-loaded-save-render` |
+| Ship the LICENSE texts the workspace declares (PRO-874) | 2026-08-15 | `2026-08-14-license-texts` |
 
 ---
 

@@ -18,6 +18,14 @@
 pub mod assembled;
 pub mod handbuilt;
 pub mod hud;
+// Not a fixture builder like its neighbours: the licence check itself, shared
+// because two test binaries read the same declaration and a second copy of the
+// extraction would be a second opinion about what "declares nothing" means.
+pub mod license;
+// The two places that declaration has to reach — every workspace member, and
+// the README. Its own module because the gate caps a file at 600 lines, not
+// because the concerns are unrelated.
+pub mod license_consumers;
 pub mod persistence;
 
 use std::collections::BTreeSet;

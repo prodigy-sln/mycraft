@@ -9,3 +9,8 @@
 # golden is. Pinning LF keeps it stable across platforms, so a checkout on
 # another machine does not present it as modified.
 *.provenance.json text eol=lf
+
+# A redistributor gets the bytes in the working tree, and a licence is the one
+# file they are entitled to receive unaltered. Without this rule a Windows
+# checkout hands them a CRLF licence where a Linux one hands them LF.
+LICENSE-* text eol=lf
