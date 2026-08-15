@@ -221,6 +221,7 @@ Unresolved.
 | A cell holds a block or nothing (PRO-876) | 2026-08-13 | `2026-08-13-empty-cells` |
 | World persistence (PRO-855) | 2026-08-14 | `2026-08-13-world-persistence` |
 | Minimal HUD — crosshair, held block, debug overlay (PRO-856) | 2026-08-14 | `2026-08-14-minimal-hud` |
+| A resumed save is rendered from the first frame (PRO-900) | 2026-08-15 | `2026-08-14-loaded-save-render` |
 
 ---
 
