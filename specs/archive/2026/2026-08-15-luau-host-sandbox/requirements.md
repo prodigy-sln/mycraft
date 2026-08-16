@@ -157,7 +157,7 @@ whether the reload path in ADR-004 wants to discard one VM or all of them). It
 does not block: every FR-3 scenario is stated at the boundary a script observes,
 and reads the same under either answer.
 
-### D7 — The per-crate lint table is in scope
+### D7 — Denying `unwrap`/`expect`/`panic!` in this crate is in scope
 
 `crates/mc-script/CLAUDE.md` invariant 4 claims `unwrap`/`expect`/`panic!` "are
 lint-denied here". They are not: the workspace lint table sets them to `warn` and
@@ -165,10 +165,23 @@ every member carries exactly `[lints] workspace = true`. The gate's `-D warnings
 promotes them, so the practical effect matches today — but the claim as written is
 false and this is the spec that creates the code it governs.
 
-`crates/mc-script/Cargo.toml` gains the workspace's first per-crate
-`[lints.clippy]` table setting those three to `deny`, so the invariant is true at
-`cargo check` and not only under the gate. Recorded here rather than as a
-functional requirement because it has no observable behaviour of its own.
+**The mechanism is a crate-root attribute, not a manifest table.** A per-crate
+`[lints.clippy]` table was what this decision originally named, and it cannot be
+built: cargo hard-errors with `cannot override 'workspace.lints' in 'lints'` on a
+manifest carrying both `[lints] workspace = true` and a local table. What ships is
+`#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]` at the top of
+`crates/mc-script/src/lib.rs`, measured to compose with the inherited workspace
+lints rather than replace them — so the invariant is true at `cargo check` and not
+only under the gate.
+
+**One scope difference from the table, stated so nobody assumes parity:** the
+attribute covers the lib target and its sibling `_test.rs` modules but **not**
+`crates/mc-script/tests/*`, where each integration test is its own crate root. Those
+are reached only by the gate's `-D warnings` promoting the workspace `warn`, exactly
+as every other crate's are.
+
+Recorded here rather than as a functional requirement because it has no observable
+behaviour of its own.
 
 ### D8 — Fault attribution is in scope; CPU accounting is not
 

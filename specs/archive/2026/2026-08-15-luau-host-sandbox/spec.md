@@ -1,12 +1,13 @@
 ---
 id: SPEC-014
 title: Luau host, sandbox and the hostile-mod harness
-status: active
+status: implemented
 rigor: high
 branch: feature/PRO-916-luau-host-sandbox
 issue: PRO-916
 created: 2026-08-15
-updated: 2026-08-15
+updated: 2026-08-16
+completed: 2026-08-16
 author: Sebastian Grunow
 ---
 
@@ -100,9 +101,12 @@ two. The consequence for whoever sizes this, and for whoever writes content agai
     enumerated THE SYSTEM SHALL report it as exactly equal to the permitted set the
     host declares, naming any name reachable but undeclared.
   - FR-1.2-S6: WHEN a content chunk calls `print` THE SYSTEM SHALL record the call at
-    the host, and a chunk that first attempts to replace `print` and then calls it
-    SHALL have that call recorded at the host too, rather than reaching a `print` the
-    host does not observe.
+    the host, and a chunk that attempts to replace `print` inside a protected call and
+    then calls it SHALL report the replacement as refused and SHALL have that later
+    call recorded at the host too, rather than reaching a `print` the host does not
+    observe. *(The protected call is load-bearing rather than incidental: under a
+    frozen environment an unprotected replacement aborts the chunk at the assignment,
+    so it never reaches the call this scenario is about.)*
 
 ### FR-2 — Every entry into script is budgeted, per attachment
 
@@ -141,11 +145,14 @@ two. The consequence for whoever sizes this, and for whoever writes content agai
   - FR-3.1-S4: IF a callback wraps its allocation past the 1 MiB limit in a protected
     call THEN THE SYSTEM SHALL still abort the invocation and report an allocation
     fault, rather than returning control to the callback.
-  - FR-3.1-S5: WHILE the host's collected memory baseline is high enough that a further
-    1 MiB no longer fits below the absolute backstop, WHEN an attachment whose callback
+  - FR-3.1-S5: WHILE the host's collected memory baseline is high enough that not even
+    a further 64 KiB fits below the absolute backstop, WHEN an attachment whose callback
     allocates only 64 KiB is invoked three times THE SYSTEM SHALL report each fault as a
     host-memory-pressure fault carrying no subject and no component, and SHALL report
-    that attachment as not quarantined.
+    that attachment as not quarantined. *(The tighter precondition is what the fixture
+    builds to. "A further 1 MiB no longer fits" is the classification condition and it
+    still admits a 64 KiB allocation succeeding, which would leave nothing faulting and
+    so no fault to reclassify.)*
   - FR-3.1-S6: WHEN a callback is aborted for exceeding the 1 MiB memory limit THE
     SYSTEM SHALL report a fault whose rendered cause is non-empty and states the limit
     that was exceeded.
@@ -332,10 +339,17 @@ Rationale for each decision, with the alternative considered, is in
   shared VM makes interop trivial, one per mod isolates the memory cap the way FR-2
   isolates the call-and-loop budget. Every FR-3 scenario is stated at the boundary a
   script observes and reads identically under either answer.
-- **`crates/mc-script/Cargo.toml` gains a per-crate `[lints.clippy]` table** setting
-  `unwrap_used`, `expect_used` and `panic` to `deny` (D7). It would be the
-  workspace's first; `crates/mc-script/CLAUDE.md` invariant 4 already claims this is
-  true and today it is not.
+- **`crates/mc-script/src/lib.rs` carries a crate-root `#![deny(...)]`** for
+  `unwrap_used`, `expect_used` and `panic` (D7). The per-crate `[lints.clippy]`
+  table this originally specified is *unbuildable*: cargo hard-errors with
+  `cannot override 'workspace.lints' in 'lints'` on a manifest carrying both
+  `[lints] workspace = true` and a local table. The attribute composes with the
+  inherited workspace lints instead of displacing them, so
+  `crates/mc-script/CLAUDE.md` invariant 4 becomes true at plain `cargo check`.
+  **Its scope is narrower than the manifest table would have been:** it covers
+  the lib target and its sibling `_test.rs` modules but **not**
+  `crates/mc-script/tests/*`, where each file is its own crate root and only the
+  gate's `-D warnings` reaches.
 - **Fault attribution is in scope; per-mod CPU accounting is not** (D8). Accounting
   needs a tick to attribute against, and `mc-sim` does not call `mc-script` here.
 - **Fault type shape follows the two ports already in the tree.** `DefinitionFault`
@@ -486,7 +500,8 @@ Binding. Recorded, not built.
   `mc-script` at the end of this spec.
 - **Per-mod CPU time accounting and exposure.**
 - **Multi-file mods and `require` confinement** — see D1.
-- **A per-crate lint table anywhere other than `crates/mc-script`.**
+- **Raising these three lints to `deny` anywhere other than `crates/mc-script`**,
+  whether per crate or in `[workspace.lints.clippy]`.
 - **Any content authored in Luau under `content/base/`.** The four blocks stay TOML
   until PRO-917.
 - **Preventing content from installing `__index` on tables the *scripting API*
