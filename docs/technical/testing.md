@@ -908,10 +908,22 @@ dupe, malformed and oversized packets, replayed auth challenges.
 
 ### Scripting — reload and sandbox
 
+The sandbox half of this list is built and is described in detail below (§"The hostile-mod
+harness" and the two sections after it); the reload half is not, and its entries are here as the
+standing rules a reload spec inherits rather than as a description of anything that runs today.
+
 - Sandbox escapes get one explicit test each. A test asserting `io` is absent is worth more than
-  ten happy-path binding tests.
-- Every limit — instruction budget, memory cap, failure-disable threshold — has a test that trips
-  it.
+  ten happy-path binding tests. The **reachable** set is enumerated too, and compared against the
+  host's declaration in both directions — a deny list catches a capability being reintroduced and
+  cannot catch one being added.
+- Every limit — the call-and-loop budget, the memory cap, the fault threshold — has a test that
+  trips it. **The budget counts calls, returns and loop edges, never instructions**, so a test
+  sized against how much code a workload is measures the wrong thing by the size of every loop
+  body in it.
+- **Watch for one limit masking another.** Filling a megabyte costs far more interrupt ticks than
+  a test-sized budget admits, so a memory test written under a small budget dies of ticks and
+  reports the wrong limit while passing. Every test in this crate configures the limit it is
+  about and leaves the others where the work cannot approach them.
 - Hot reload is tested for **state preservation**, not merely that new code ran.
 - Every reload failure path (syntax error, failed validation, failing mod test, error inside
   `on_reload`) must leave the previous registry serving.
@@ -1339,6 +1351,213 @@ the scenario is written. What catches it is a **unit test** that calls the write
 matches the error variant by name — graded outside the scenario↔mutation mapping the rest of the table
 uses, and recorded as a weaker guarantee than the rest of the table for exactly that reason, not netted
 out against it.
+
+### The hostile-mod harness
+
+`crates/mc-script/tests/support/hostile/` runs six named shapes of bad mod against a real scripting
+host and reports what became of each. It is test support included by path, not a `mc-testkit`
+citizen — that crate may name no `mc-*` dependency in any section of its manifest, and this harness
+needs the host's own types — and it is placed inside the crate it exercises for the same reason the
+client-input harness is.
+
+**The six, and the evidence each declares:**
+
+| Case | Contained by |
+|---|---|
+| `infinite-loop` | a reported fault of kind *call-and-loop budget exhausted* |
+| `memory-bomb` | a reported fault of kind *allocation refused* |
+| `sandbox-escape` | every global the host declares denied reported unavailable |
+| `faulting-callback` | a reported fault of kind *script error* |
+| `runaway-cascade` | a reported fault of kind *cascade refused* |
+| `hostile-index` | the `__index` a mod hung on a table it handed the host never running |
+
+The evidence is **declared per case rather than inferred from whether anything faulted**, and the
+kind is exact. A memory bomb stopped for exhausting its tick budget has measured the wrong
+mechanism and would pass any check that only asked whether the host complained.
+
+**The verdict is three-valued: contained, uncontained, not exercised.** Two of the six are contained
+by producing no fault at all, so "did anything fault?" is not a verdict this harness can give — and
+a case whose script failed to compile produces no fault either, which is indistinguishable from
+perfect containment on every axis. So a compile failure is decided first and named separately.
+Folding it into *contained* would let a typo retire a hostile shape from the suite in silence;
+folding it into *uncontained* would report a host defect where there is a script defect. A harness
+that stopped running must never read like one that ran clean.
+
+**The harness decides nothing the host decides, and a text guard keeps it that way.** Every case
+runs against a host built with **no configuration at all**, so the budget that stops the loop, the
+cap that stops the bomb and the two queue bounds that stop the cascade are the ones the host ships;
+the names the escape case probes are generated from the host's own `DENIED_GLOBALS`; the evidence
+each case requires is the host's own fault kind. This matters more here than in most harnesses
+because **every scenario about the harness runs through the harness**, so nothing else in the suite
+could see it cheating: a harness carrying its own copy of the deny list would report all six
+contained on the day the host's enforcement was deleted, and the run would read exactly as it reads
+now. `crates/mc-script/tests/harness_boundaries.rs` scans the harness directory for the spellings
+that would constitute a second source of policy — a limits record, a host built with limits of
+somebody's choosing, the three non-zero types those limits are made of, a second interrupt, and each
+denied global as a Rust string literal — and returns an enumerated verdict rather than a hit list,
+so a harness directory that moved reports as a refusal instead of as the clean answer an obedient
+harness gives. Its control points the same scan at a tree that *does* re-implement the policy, with
+**every needle committed exactly once**, because a needle no fixture ever commits is a needle nobody
+has watched match anything: mistype one and it reports a clean harness for as long as it stands
+there. The control also requires two files to be passed over — a harness file wearing the name of a
+suite file that is allowed to name these things, and a file *beside* the harness directory whose
+name merely begins with the directory's — because the exemption is compared segment by segment
+against the whole path and a bare-name comparison would excuse exactly the file a
+policy-re-implementing harness would be called.
+
+**Two probes that would otherwise agree with themselves.** The escape chunk reports the names it was
+*asked about* as well as the ones still standing, and the case's verdict requires the asked list to
+equal the host's whole declaration — an empty survivor list is exactly what a probe that asked about
+nothing reports. The `hostile-index` case carries three witnesses rather than one, each blind to a
+different failure: a counter inside the script, a line printed to the host independently of that
+script-side number, and a value coming back for a field nothing ever stored.
+
+**Two of the six could take the machine down instead of failing, so neither is written as an
+unbounded loop.** The bomb asks for a fixed multiple of the host's own cap — in **buffers, not
+strings**, because the backend shares identical strings and a bomb built from one repeated string
+allocates it once and grows the state by almost nothing while every count written against it still
+reads plausibly. The cascade stops requesting after a round's worth of invocations and is then
+drained, so the next case does not start behind somebody else's queue. Against a host that enforces
+nothing, both return visibly and quickly rather than running until something outside the suite
+intervenes. The infinite loop is the one workload that genuinely cannot be bounded from the test
+side — that the host stops it *is* the claim — which is why it is bounded by the runner instead.
+
+**The host is deliberately left running across all six.** Each is a shape a server has to survive,
+and a harness that needed a fresh host per case could not say whether surviving one leaves the next
+one possible.
+
+### Where a missing mechanism wedges instead of failing
+
+Every other test in this workspace fails by asserting something false. The scripting host's runaway
+tests do not: they run script whose top level or whose callback never returns, and rely on the host
+aborting it. If the abort is missing — interrupt unarmed, latch not re-arming, budget never charged
+— there is nothing left to fail. The chunk runs forever, the test never returns, and the whole run
+wedges, which is worse than a red run because it reports nothing about which mechanism broke.
+Measured: with the interrupt never armed, the six-case sequence did not return in 42 seconds and had
+to be killed; a host with an effectively infinite budget wedged the shipped-defaults test until it
+was terminated at ten seconds.
+
+Seven tests therefore carry an exact-name `terminate-after` override in `.config/nextest.toml`, and
+only those seven — a blanket timeout would change what the gate does to 900-odd tests in order to
+bound seven. The period is generous against their real cost (each aborts in single-digit
+milliseconds at the budget it configures; the six-case sequence costs 0.05 s), so the override can
+only fire when the abort is genuinely absent. **Those test names are load-bearing**: the filter
+matches them exactly, so renaming one silently stops the override applying and puts the wedged run
+back with no signal at all — a filter that matches nothing looks identical to one that is never
+reached.
+
+The same shape rules a mutation out of a table rather than merely making it awkward: **a mutation
+whose falsifier would be a hang is not a falsifier**, which is why the reach-bound removal was
+struck from the break/place table above for the same reason.
+
+### The scripting host's mutation tables
+
+The deliverable for the host's containment claims is the mutation table, not the scenario count.
+Each mutation was applied by hand, observed, and reverted by re-editing the line — never
+`git checkout --` — with `git diff --exit-code` confirmed clean before the next one; the ones run in
+a scratch copy of the crate left the tree untouched throughout.
+
+**The six hostile cases are independent, measured rather than asserted.** Seven deliberately-less
+hosts, each of which reddens the six-case scenario naming **exactly one** case:
+
+| The host does this instead | What goes red |
+|---|---|
+| Leaves one denied global standing | `sandbox-escape`, **and** the probe test reporting `standing: ["os"]` |
+| Reports a budget abort as a script error | `infinite-loop`, and nothing else |
+| Enforces no per-invocation memory cap | `memory-bomb`, and nothing else |
+| Reads a supplied field with an ordinary indexed read | `hostile-index`, and nothing else |
+| Admits every follow-up request (no pending bound) | `runaway-cascade`, and nothing else |
+| Swallows a raised script error as a returned value | `faulting-callback`, and nothing else |
+| The **harness** carries its own three-name deny list | the boundary guard, the probe test, and the sequence naming `sandbox-escape` |
+
+Six deliberately-less hosts for the bounded cascade, each listed with what it reddens:
+
+| The host does this instead | What goes red |
+|---|---|
+| Enters follow-up work inline, recursing rather than queueing | the ordering, the multi-round and the refusal tests and both quarantine witnesses; **and the non-terminating test overflows the stack and aborts the process**, taking its whole test binary with it — the outcome the never-re-entrant decision exists to prevent, observed rather than argued |
+| Charges a skipped quarantined entry against the round bound | the quarantined-target test, and nothing else |
+| Enforces no round bound | the multi-round test, and the non-terminating one **wedges** |
+| Enforces no pending bound | the fan-out refusal test and its witness, and nothing else |
+| Blames the entry that could not run rather than its requester | the deferral test, and nothing else |
+| Counts cascade faults toward quarantine | both quarantine witnesses, and nothing else |
+
+And five against the shipped defaults, all of which bit:
+
+| The host does this instead | What goes red |
+|---|---|
+| `pending_bound` 256 → 255 | the reported-limits test, naming the field and both values |
+| `memory_backstop` 16 MiB → 8 MiB | the reported-limits test. A sibling asserting only that the backstop *leaves room above the cap* stays green — the difference between asserting a relation and asserting a value |
+| A host built without configuration arms a 10,000-tick budget | the reported-limits test on the budget, **and** the enforcement test — but only on its counting half |
+| Dispatch enforces 10,000 ticks while the host keeps *reporting* the documented million | **the enforcement test alone.** A number reported is not a number enforced, and this is the mutation that says so |
+| `call_and_loop_budget` → `u64::MAX` | the reported-limits test, and the enforcement test **wedges** rather than failing |
+
+**A skeleton is a mutation table's other half, and one skeleton is usually not enough.** Where a
+group of scenarios includes some asserting a thing *happens* and some asserting it *does not*, a
+single deliberately-less implementation cannot redden both halves. Quarantine needed two — *nothing
+is ever quarantined*, which eight of eleven tests catch and which the three "is not quarantined"
+assertions satisfy by construction, and *quarantined on the first fault with no pressure exclusion*,
+which reddens exactly those three. The raw-read tests needed two for the mirror-image reason: an
+ordinary indexed read reddens four of five and leaves the present-field control green, while a host
+answering *absent* unconditionally reddens only that control. No test in either group is green
+against both, and a third run against a correct implementation puts every one of them green, so
+nothing there is unpassable.
+
+**An unbitten mutation is evidence only once it is confirmed to have landed.** This feature met both
+failure modes in one sweep: one mutation was absorbed by a second enforcement site further down, and
+one silently failed to apply at all. The first is a fact about the code's structure and worth
+recording; the second is a measurement that never happened, wearing the same clothes.
+
+**A fixture that establishes a weaker condition than the scenario needs measures nothing.** Host
+memory pressure is the sharpest instance in this crate. The classification condition is
+*this invocation's whole allowance no longer fits below the backstop* — but a fixture built only to
+"a further 1 MiB no longer fits" still admits the modest 64 KiB allocation the scenario's callback
+makes, so nothing faults, nothing needs reclassifying, and every assertion is green over a state
+nobody put under pressure. The fixture therefore fills until **not even that 64 KiB fits**, fails
+loudly rather than returning a state it did not establish, and derives its growth from the host's
+own cap rather than from a number written in the test. The retained values are also made distinct,
+for the same reason the bomb uses buffers: identical strings are shared, so a fill loop retaining
+one repeated string retains nothing at all while every count still reads plausibly.
+
+### Three lints denied at a crate root, and the target the denial does not reach
+
+Nothing in `mc-script` may panic, because a panic in the host is a mod taking down the server
+through the host. The mechanism is a crate-root
+`#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]` in
+`crates/mc-script/src/lib.rs`, which makes those three a hard error at plain `cargo check` rather
+than only under a lint-gated build, and which **composes with** the workspace lint table rather than
+displacing it.
+
+**It is an attribute and not a per-crate `[lints.clippy]` manifest table, because that table is
+unbuildable here.** Cargo hard-errors with `cannot override 'workspace.lints' in 'lints'` on a
+manifest carrying both `[lints] workspace = true` and a local table, so the two cannot coexist and
+the attribute is the form that keeps the inherited lints.
+
+**Its scope is narrower than the manifest table's would have been, and the gap is worth knowing.**
+The attribute covers the lib target and its sibling `*_test.rs` modules. It does **not** cover
+`crates/mc-script/tests/*`, where each file is its own crate root: nothing there inherits the
+denial, and the only thing that reaches it is the quality gate's own `-D warnings`. That is the
+same asymmetry §"A phase whose tree does not compile at its start has no gate evidence at its start"
+describes from the other direction — a green suite is no evidence about a lint, and the gate is the
+only instrument that can report one.
+
+### What the sandbox verification does not establish
+
+Recorded because a verification that claims more than it established is worse than one that admits
+its edges.
+
+- **The chunk label carried on a table handle is not witnessed by any test.** Replacing it, at the
+  point where a field read is translated, with a deliberately wrong value reddens nothing: every
+  callback the suite attaches is labelled where its chunk is named, and the follow-up entries read
+  out of a returned table are identities rather than callables, so no fault is ever attributed
+  through the labelled value. It ships as a reasoned argument, not as covered.
+- **Five of the six shipped limits are reported but not witnessed enforcing at their shipped
+  values.** One scenario covers the call-and-loop budget at its default, and the hostile harness
+  exercises the fault threshold and the round bound at shipped values because it configures nothing.
+  A 16 MiB backstop is not reachable inside a test's time budget. Recorded deliberately rather than
+  assumed away.
+- **A malformed follow-up entry is passed over silently.** Never fabricating a target the mod did
+  not store is the deliberate half; the absence of any signal to the mod author is a known
+  diagnosability gap.
 
 ### A scenario that postdates the code it grades cannot be reddened by absence
 

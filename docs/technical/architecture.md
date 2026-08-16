@@ -862,6 +862,130 @@ Four smaller shapes, each load-bearing:
   beside `SECTION_SIZE` and `ColumnCoordinate`, which is where its two facts
   already are.
 
+## The scripting host: what is Rust-side, what is behind the backend adapter
+
+`mc-script` holds the sandboxed Luau state, the callbacks content registers, and
+everything that bounds what content may do inside it (`modding/sandbox.md` is
+the authoring contract). Its position on the crate map is the first thing worth
+recording, because it is unusual: **`mc-script` resolves `mlua` and no workspace
+crate at all**, and **nothing in `crates/` depends on `mc-script`**. The host is
+exercised solely by its own tests and by the hostile-mod harness. Two absences
+follow from that and are deliberate rather than pending: there is no
+`DefinitionSource` adapter backed by script — the registry seam above is
+untouched — and there is no per-mod CPU accounting, because accounting needs a
+tick to attribute against and no tick calls into this crate.
+
+**The backend is nameable in `crates/mc-script/src/luau/` and nowhere else.**
+Everything outside that directory speaks in the crate's own vocabulary —
+`ScriptHost`, `ScriptValue`, `ScriptTable`, `ScriptFunction`, `ScriptFault`,
+`HostLimits`, `DispatchReport` — and `mlua`'s `Lua`, `Function`, `Table`,
+`Value` and `Error` appear on no public signature. This is the same
+boundary-isolation shape as `mc_world::persistence`'s encoder confinement, and
+for the same measured reason: the backend is pre-1.0, breaking minor releases
+are routine, and a vendor type on a public signature is a migration the crate
+could not perform without breaking every consumer. The port is shaped around
+what the host needs — *evaluate this chunk under a budget; invoke this
+attachment; tell me how it ended* — not around the backend's surface, which is
+what a replacement would otherwise have to reproduce.
+
+Five backend behaviours the design rests on carry no stability promise: which
+globals closing the sandbox leaves standing, the writable child environment it
+hands the running thread, the interrupt's error propagation, how allocation
+failure is reported, and the `[string "name"]:N:` prefix a message carries. All
+five are observed only inside that directory, which is what makes an `mlua`
+upgrade a re-measurement rather than a rewrite.
+
+**The split, stated as the two halves it is.** Behind the adapter live the
+things that are the backend's shape: the state's construction order, the frozen
+per-chunk environment, the interrupt guard and its latch, the script-side
+protected call every callback is invoked through, value translation and the
+handles. On the Rust side, keyed by `Attachment` — the `(subject, component)`
+pair — live the things that are the host's policy: which callback belongs to
+which attachment, the cumulative invocation count, the consecutive-fault count
+and the quarantined set, the pending-work queue, the round index, and the
+construction and attribution of every fault.
+
+| Concern | Where | Why there |
+|---|---|---|
+| Denied globals removed, host `print` installed, sandbox closed, globals frozen, interrupt armed | `src/luau/vm.rs` | The order is load-bearing (below) and every step names the backend. |
+| Per-chunk frozen environment, and the three tables that have to be frozen | `src/luau/env.rs` | Chunk isolation is a property of how the environment is built. |
+| The latch: budget and memory cap on one interrupt tick | `src/luau/guard.rs` | It is the interrupt callback's own state, shared by a refcounted handle. |
+| `pcall` trampoline, backend-error classification | `src/luau/trampoline.rs` | A raised value must come back as a return value, not as a propagating error. |
+| Message/line splitting, value translation, raw rendering | `src/luau/translate.rs` | Vendor error translation belongs at the adapter and this is the whole of it. |
+| Callback registry, invocation counts, the pending queue, round bookkeeping | `src/dispatch.rs` | Policy about attachments, expressible without naming a VM. |
+| Consecutive-fault counting, quarantine, which kinds count | `src/quarantine.rs` | Same. |
+| The six limits and their shipped defaults | `src/limits.rs` | One source for the numbers, with the reason each holds beside it. |
+
+**The construction order is a design decision, not a style.** Everything the
+host removes or installs happens **before** the sandbox is closed, because
+afterwards the running thread reads through a child table: setting a denied
+global to `nil` then returns success and removes nothing, and a host `print`
+installed late is bypassed by a fall-through to the backend's own, which writes
+to raw file descriptor 1 outside every log and every limit the host controls.
+That is a capability escaping the sandbox, not a logging inconvenience.
+Closing the backend's sandbox is not sufficient in two separate ways — it
+removes five of the fourteen denied names and leaves nine standing, and it
+leaves the sandboxed globals table itself writable, so the host freezes that
+too.
+
+**One latch, two limits, and it is what makes a limit mean anything.** The
+interrupt checks memory before charging the tick — with a budget generous enough
+not to trip, an allocation bomb must be stopped by the cap, and charging first
+would report whichever limit happened to be nearer. Once either trips, the guard
+is sticky: every subsequent interrupt fails without looking at anything, so no
+script frame runs, including the `pcall` handler that would have caught the
+error. `Lua::set_memory_limit` alone does not cap allocation — the allocator's
+refusal is an ordinary catchable Lua error — so it is set *above* the enforced
+cap as an absolute backstop, and the enforced per-invocation cap is the
+interrupt reading `Lua::used_memory()` each tick against the baseline the entry
+started from. The host clears the latch at the start of each guarded entry,
+which is what keeps the budget per-invocation rather than a one-way ratchet.
+
+**Dispatch is never re-entrant, and that is the load-bearing decision behind the
+round.** Follow-up work a callback asks for is appended to a queue and drained
+by later invocations of the same round or by later rounds; entering it inline
+would turn an unbounded cascade into Rust stack growth, and a stack overflow is
+an abort — exactly the outcome invariant 3 forbids. Queueing converts recursion
+depth into queue length, which is countable and therefore boundable, and two
+bounds are needed rather than one: the round bound limits invocations per round
+and says nothing about queue length, while a callback returning a fan-out grows
+the queue faster than a round drains it, and every entry is a host-side
+allocation outside every script-side limit. Work that cannot be admitted is
+**refused and named**; work that merely did not fit this round is **deferred**.
+They are different fault kinds because only refusal loses the work, and an
+operator reading one kind cannot otherwise tell "wait" from "something is gone".
+A seed is appended to whatever is still waiting rather than replacing it, so a
+round with an empty seed drains the residue; and a quarantined entry is skipped
+**without spending an invocation**, or a queue full of quarantined targets would
+crowd out everything still running.
+
+**Every value the host reads out of script is read raw.** An ordinary indexed
+read consults `__index`, which is script the table's author chose — so a host
+reading a field the ordinary way runs a mod's code on its own schedule,
+unbudgeted, at a moment the mod picked. The follow-up list is the one value in
+the design whose shape a mod chooses, and the field, each slot and both identity
+strings are all read raw; an entry that is not two strings is passed over rather
+than guessed at. The same rule governs rendering: a raised value is rendered by
+matching on it and never through `tostring`, because the backend installs a
+message handler for every protected call it makes and that handler would run a
+`__tostring` before the host ever saw the error.
+
+**Handles carry two facts the engine cannot reconstruct later.** A
+`ScriptTable` or `ScriptFunction` is opaque — the engine may hold one and hand
+it back, never reach through it — and each is stamped at creation with the
+script state it came from and the chunk it came out of. The chunk is what lets a
+fault name the file that *defined* the failing callback rather than only the
+round it ran in; the state tag is what will make substituting a scratch-state
+callback for a live one verifiable when reload builds candidate registries off
+the tick thread.
+
+**Nothing in the crate may panic, and that is a build error rather than a
+convention:** `crates/mc-script/src/lib.rs` carries a crate-root
+`#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`, which
+composes with the inherited workspace lints. Its scope stops at the library and
+its sibling unit-test modules — `technical/testing.md` has what that leaves
+uncovered and what reaches it instead.
+
 ## The pure/GPU seam inside `mc-render`
 
 `mc-render` has a default-on `gpu` Cargo feature. **`wgpu::` may be named
@@ -985,6 +1109,36 @@ structure, not by convention:
   vacuously. `tools/` — home to `voxforge` and, per ADR-009, developer
   tooling generally — may depend inward on `crates/`; the reverse never
   holds.
+- **`mc-client`'s resolved closure excludes `mc-script`, in every dependency
+  kind.** The client is untrusted code running on a player's machine and the
+  scripting host is the server's enforcement of what a mod may do; an edge
+  between them — through any intermediary, dev-dependencies included — would put
+  the enforcement inside the thing it enforces against. The walk reads `cargo
+  metadata`'s `resolve.nodes[].deps`, which is cargo's own resolution with every
+  kind already folded in, rather than a manifest (direct edges only) or
+  `Cargo.lock` (every workspace member, which would make the assertion vacuously
+  false). It returns an **enumerated verdict** rather than a boolean, so
+  "the host is absent from the metadata altogether" and "the client does not
+  reach it" cannot be reported the same way — a renamed or removed crate reddens
+  for free. Two controls sit beside it: the same walk over doctored metadata
+  with the host removed must *refuse*, and the same walk must report a
+  dependency the client genuinely has (`winit`) as present, because the walk
+  seeds itself with its own root and would otherwise report a closure having
+  followed no edge at all.
+- **`mlua` is nameable under `crates/mc-script/src/luau/` and nowhere else**,
+  asserted by a text guard over both the crate's `src/` and its `tests/` roots.
+  `tests/` is scanned because the hostile-mod harness is the code most likely to
+  reach for the backend directly, and a harness that built its own VM would be
+  verifying the host against a copy of the thing it watches. Each root's
+  contribution is counted **on its own** — a root that contributes nothing
+  leaves a total healthy and the absence check green over a tree nothing read.
+  Its two exemptions (the adapter directory, and the guard file itself, whose
+  needle would be its own hit) are compared **segment by segment against the
+  whole path**, never against a bare file name: a name-only exemption for
+  `vm.rs` would silently excuse a `tests/support/hostile/vm.rs`, which is
+  precisely what a leak would be called. Unlike the other text guards here,
+  sibling `*_test.rs` files are **not** exempt — those guards are about
+  production behaviour, this one is about which code may hold a vendor type.
 - **`winit` is nameable in `crates/mc-client/src/events.rs` alone**,
   pinned by a source scan whose filter was mutation-checked rather than
   assumed. This is one reason `egui-winit` is not taken (ADR-017): it would

@@ -58,10 +58,28 @@ model, not raw call performance, is the deciding constraint.
 **Decision.** Luau via `mlua` 0.12, with `luau` + `vendored` features.
 
 **Consequences.** `Lua::sandbox(true)` gives read-only stdlib and globals. `Lua::set_interrupt`
-gives a per-callback instruction budget, so a runaway loop in a mod is killed rather than the
-server. `Lua::set_memory_limit` caps allocation. Gradual typing gives mod authors real editor
-tooling — which matters disproportionately for a scripting-first game. `mlua` is `!Send` by default;
-the VM is therefore pinned to the tick thread, which we want anyway for determinism.
+gives a per-callback budget, so a runaway loop in a mod is killed rather than the server. Gradual
+typing gives mod authors real editor tooling — which matters disproportionately for a
+scripting-first game. `mlua` is `!Send` by default; the VM is therefore pinned to the tick thread,
+which we want anyway for determinism.
+
+**Two claims in this record were corrected against measurement once the host was built.** The
+decision stands; these are factual repairs to its consequences, not a change of direction.
+
+- **The budget is not an instruction budget.** The Luau interrupt is emitted at seven opcodes —
+  calls, returns and loop edges — and at nothing else. A loop body of any size is free, a thousand
+  straight-line statements cost one, a call within Luau costs two and a call into the host costs
+  one. Sizing it against VM instructions is wrong by the size of the loop body. It is a
+  call-and-loop budget and is named that everywhere the host uses it.
+- **`Lua::set_memory_limit` does not cap allocation on its own.** The allocator-raised error is an
+  ordinary catchable Lua error: measured, under a 1 MiB limit with no other mechanism, a
+  `pcall`-wrapped allocation bomb caught it, dropped the table, let the collector reclaim it and
+  looped ten times before returning normally. What enforces the per-invocation cap is the interrupt
+  reading `Lua::used_memory()` each tick against the baseline the invocation started from, and
+  latching — once a limit trips, no further script frame runs, including the handler that would
+  have caught it. `set_memory_limit` is set *above* the enforced cap as an absolute backstop, so a
+  single allocation large enough to jump the gap between two interrupt ticks still fails rather
+  than sailing past. It bounds peak allocation; it does not by itself contain.
 
 **Rejected.** LuaJIT — faster, but Lua 5.1, no sandbox mode, no interrupt hook; untrusted mods make
 it a non-starter. JS via `rquickjs` — viable, weaker sandbox story for this threat model.
@@ -970,3 +988,105 @@ interface. Where the "this texture is meant to be seamless" claim should live �
 (today) versus the document itself (a `seamless = true` field would be additive and one-to-one with
 a model, where the invocation is one-to-many and forgettable) — is an open, deliberately deferred
 question; revisit once an art set is regenerated more than once.
+
+---
+
+## ADR-022 — One Luau state for the whole host; the isolation unit is a loader's to choose, not content's
+
+**Status**: Accepted · **Date**: 2026-08-16 · **Named revisit**
+
+**Context.** ADR-003 embeds Luau and ADR-004 pins the VM to the tick thread, but neither says how
+many VMs exist. The question is forced by where the memory limit lives. Measured against this
+toolchain:
+
+| Measurement | Value |
+|---|---|
+| Footprint of `Lua::new()` + `sandbox(true)` | **385,952 B** Lua-reported, **389,169 B** process-side |
+| Linearity at 1 / 8 / 64 / 256 states | **exactly 389,169 B per state at every count** — nothing amortises |
+| Construction cost | ~95–130 µs per state |
+| Footprint with `StdLib::NONE` instead of `ALL_SAFE` | 364,617 B — trimming libraries saves 6 % |
+| Scope of `set_memory_limit` | **per `Lua` state** (it attaches to that state's `MemoryState`) |
+| Scope of `set_interrupt` | per `Lua` state |
+
+So isolation per state is genuinely cheap, and **a memory cap that is per mod requires a state that
+is per mod.** There is no way to divide one state's allowance between the things running inside it.
+
+**Decision.** One state, owned by the host. The per-invocation memory cap is enforced by the
+interrupt against the baseline an invocation started from (ADR-003), and every policy mechanism —
+the call-and-loop budget, quarantine, fault counting and the follow-up queue — is Rust-side and
+keyed by the `(subject, component)` attachment, touching the state not at all.
+
+**Rejected: one state per component.** This is the option that looks safe and is not, and the
+argument that carries is not arithmetic. **Component count is controlled by content; mod count is
+controlled by a loader, which is to say by the operator.** Making the number of states a function of
+a content-controlled quantity turns 389 KiB of unreclaimable fixed overhead into a per-registration
+multiplier — spent at registration, and therefore invisible to every containment mechanism the host
+has, since the budget, the memory delta and quarantine all act during an *invocation* and this cost
+is incurred before one happens. That is a breach of "a bad mod never takes down the server"
+manufactured by the isolation mechanism itself, and it needs no hostile intent. **The unit that
+makes per-state isolation safe is one a loader controls.**
+
+**Deferred, not rejected: one state per mod.** This is the answer the memory measurement points at,
+and it cannot be taken yet because there is no mod. Mod loading, multi-file content and `require`
+confinement do not exist; the host's own vocabulary defines a subject and a component as opaque
+identities it *stores and never interprets*, and a host forbidden from reading structure into a
+namespace cannot derive a mod from a component name. The decision belongs to the work that first
+makes a mod a loader-controlled unit, and it should be treated there as a correctness requirement
+rather than an optimisation. Reversal is cheap and the seam is named: the host would hold a map from
+isolation unit to state and dispatch would look one up. Only `crates/mc-script/src/luau/` changes.
+
+**Consequences — the residual, stated because it is real.** Under one state, memory *retained
+across* invocations is not bounded per attachment. A callback is a closure and a closure holds
+upvalues, so `local kept = {} return function() kept[#kept+1] = buffer.create(1024) end` retains
+with no state API at all, and a suspended coroutine is a second door into the same room — it holds
+its own stack and everything that stack references, for as long as anything references the
+coroutine. Neither trips the per-invocation cap, which bounds what one entry *adds* and not what the
+state already holds. Aggregate retention is bounded, by the absolute backstop; what is unbounded is
+retention per attachment.
+
+**The damage is misattribution, and the framing is the accidental one.** As the backstop is
+approached, *every* attachment's allocations begin failing, and each failure would otherwise be
+charged to whoever happened to be running — disabling a mod that did nothing and sending an operator
+to remove the wrong file. The population this concerns is careless authors, not hostile ones: a mod
+weaponising containment is not the threat this record is about. So the host detects the condition at
+entry, from its own definition rather than from a tuned fraction:
+
+> `entry_baseline + memory_cap > memory_backstop`
+
+— *this invocation could fail for a reason that is not its own*. While that holds, a fault is
+attributed to the **host** rather than to whoever was running: it carries no subject and no
+component, and it does not count toward the attachment's consecutive-fault total. There is no
+constant to choose, defend, or re-choose when the backstop moves.
+
+**The cost of that exclusion is named rather than hidden.** The condition is a property of the whole
+state, not of an attachment, so while it holds a genuinely looping mod is not quarantined either,
+and an attachment whose own retention raised the baseline is the one the rule excuses. That was
+weighed on which failure is *visible*: excusing means a slow server an operator notices and acts on;
+not excusing means an innocent mod permanently disabled with the blame filed against the wrong
+author. Quarantine would not have reclaimed anything in any case — retention lives in closure
+upvalues, which survive it.
+
+**Refused, and priced: a per-attachment retention ledger.** Attributing retained bytes to whoever
+allocated them would name the offender directly. It is refused rather than deferred, because it is a
+second unverified mechanism layered on a mitigation that already closes the gap **by construction**:
+the derived condition above makes the misattribution impossible rather than merely detectable, which
+is the stronger property, and a ledger's own attribution would be a heuristic needing its own
+evidence before anyone believed it. The price of refusing is stated plainly — **under pressure,
+nothing names which attachment caused it.** The operator sees that scripting is degraded and not who
+degraded it, and finds out by removing mods until it stops. That is accepted for a server whose
+operator chose every mod installed; it would not be accepted for a host running mods it did not
+choose, and that is the condition under which to reopen it.
+
+**One structural consequence taken now.** Script handles (`ScriptFunction`, `ScriptTable`) carry an
+opaque isolation-unit tag from the first design, even though exactly one unit value exists. The
+reason is **hot reload, not speculation about a second state**: reload builds its candidate registry
+in a scratch state off the tick thread, and its whole job is substituting a scratch-state function
+for a live one. A handle that does not say which state it came from makes that substitution
+unverifiable in the one path whose partial-failure mode is a hard stop. It is explicitly **not**
+justified by the modding API's exemption from "no abstraction before three concrete uses" — that
+exemption is scoped to the published scripting surface, and these are Rust handles consumed by
+sibling crates. Recording the wrong reason would be worse than recording none, because anyone
+reading the standard correctly would find the justification void and delete the field.
+
+**Revisit when** a mod becomes a loader-controlled unit. Escalate sooner if any work gives content a
+further way to retain state across invocations.

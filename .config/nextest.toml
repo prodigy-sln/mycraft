@@ -1,0 +1,36 @@
+# Test-runner configuration.
+#
+# Deliberately narrow. There is no blanket timeout here and there should not be:
+# the suite carries tests that legitimately take tens of seconds (a world of
+# 65,537 distinct blocks reading back, the golden-frame captures), and a global
+# `terminate-after` would change what the gate does to 900-odd tests in order to
+# bound two.
+
+[profile.default]
+# Report a test that is taking unusually long, without acting on it. This is
+# information, not a limit.
+slow-timeout = { period = "30s" }
+
+# The scripting host's runaway tests are the one place where a missing
+# mechanism does not produce a failure.
+#
+# Every other test in this workspace fails by asserting something false. These
+# run script whose top level, or whose callback, never returns, and they rely on
+# the host aborting it. If the abort is missing — the interrupt unarmed, the latch not
+# re-arming, the budget never charged — there is nothing left to fail: the
+# chunk runs forever, the test never returns, and the whole run wedges rather
+# than going red. A wedged run is worse than a red one, because it reports
+# nothing about which mechanism broke.
+#
+# So these, and only these, are bounded. The period is generous against
+# their real cost — both abort in single-digit milliseconds at the budget they
+# configure — so this can only fire when the abort is genuinely absent.
+#
+# THE TEST NAMES BELOW ARE LOAD-BEARING. The filter matches them exactly, so
+# renaming either test silently stops this override applying and puts the wedged
+# run back with no signal at all — a filter that matches nothing looks identical
+# to one that is simply never reached. If you rename one, update it here in the
+# same change.
+[[profile.default.overrides]]
+filter = 'test(=a_chunk_whose_top_level_never_returns_is_aborted_and_leaves_the_host_usable) + test(=a_chunk_that_catches_its_own_abort_in_a_loop_is_still_stopped) + test(=an_attachment_looping_under_a_full_state_is_still_not_quarantined_for_it) + test(=a_table_whose_index_never_returns_is_read_and_leaves_its_attachment_a_whole_budget) + test(=a_cascade_that_never_terminates_ends_its_round_and_blames_whoever_asked_for_what_is_left) + test(=all_six_hostile_cases_are_contained_in_sequence_and_the_host_still_evaluates_afterwards) + test(=a_callback_that_never_returns_is_stopped_under_the_shipped_budget_and_reported_as_exhausted)'
+slow-timeout = { period = "10s", terminate-after = 1 }

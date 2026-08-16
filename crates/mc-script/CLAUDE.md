@@ -14,14 +14,31 @@ commonly, careless.
 
 ## Non-negotiable invariants
 
-1. **Every VM is sandboxed.** `Lua::sandbox(true)` before any user code is loaded. No `io`, no
-   `os.execute`, no `package.loadlib`. `require` resolves only inside the mod's own directory —
-   path traversal out of it is a Blocker.
-2. **Every script entry point has an instruction budget.** Set via `Lua::set_interrupt`. A callback
+1. **Every VM is sandboxed, and `sandbox(true)` is not what does it.** Measured: closing the
+   sandbox removes five of the denied globals and leaves the rest standing — `os`, `require`,
+   `loadstring`, `debug`, `getfenv`, `setfenv`, `collectgarbage`, `newproxy` and `gcinfo` all
+   survive it. The host removes every denied name **itself, before** closing the sandbox, because
+   afterwards a write to a global lands in a child table and removes nothing. Do not read this
+   invariant as "the backend handles `require`/`os`/`debug`"; it does not.
+   `require` is currently **absent rather than confined**. There is no mod-directory concept yet,
+   so absence over-satisfies the rule; confinement arrives with multi-file mods, and path traversal
+   out of a mod's own directory is a Blocker then.
+2. **Every script entry point has a call-and-loop budget.** Set via `Lua::set_interrupt`. A callback
    that exceeds it is aborted and its mod marked degraded. There is no unbudgeted path from engine
-   into script.
-3. **Every VM has a memory limit.** `Lua::set_memory_limit`. Allocation failure surfaces as a Lua
-   error, never an abort.
+   into script — **including chunk evaluation**, which is such a path.
+   **It does not count instructions**, and the name matters: the interrupt fires at seven opcodes,
+   so a loop body of any size is free, a thousand straight-line statements cost one, a call within
+   script costs two and a call into the host costs one. Size it against how many calls a workload
+   makes, never against how much code it is.
+3. **Every VM has a memory limit, and the allocator's own limit is not enough on its own.**
+   `Lua::set_memory_limit` is the absolute backstop; what enforces the per-invocation cap is the
+   interrupt, reading usage each tick against the baseline the invocation started from.
+   Allocation failure does surface to script as an ordinary Lua error — which is exactly the
+   problem. **Measured: a `pcall`-wrapped allocation bomb caught it, dropped the table, let the
+   collector reclaim it, and looped ten times before returning normally.** A limit script can catch
+   bounds nothing, so the abort **latches**: once tripped, no further script frame runs, including
+   the handler that would have caught it. Reclaiming after an allocation fault takes **two**
+   explicit collections, not one — the first ends the cycle in progress and the second sweeps.
 4. **No script error propagates as a panic.** Every callback is invoked through the catch-all
    wrapper. Errors are logged with mod attribution; after N consecutive failures the callback is
    disabled and the server keeps running. `unwrap`/`expect`/`panic!` are lint-denied here for this
@@ -35,6 +52,32 @@ commonly, careless.
    registry keeps serving and the failure is reported. Partial application is a Blocker.
 8. **Numeric IDs are never persisted directly.** Persist the string↔numeric mapping alongside the
    world so IDs can be reassigned when the mod set changes. Unknown blocks round-trip losslessly.
+
+## Freezing a table does not freeze what its metatable points at
+
+A standing constraint on any change to how a chunk's environment is built, recorded because it
+was got wrong once and because the scenario nearest to it stayed green throughout.
+
+A chunk is evaluated against a fresh table of its own, frozen, whose metatable reads through to
+the sandboxed globals. **Three tables have to be frozen and it is easy to see only two.** Freezing
+the environment stops a chunk writing its own globals. Freezing the metatable stops it repointing
+what the environment reads through. Neither stops it doing this:
+
+```lua
+local above = getmetatable(_G).__index
+rawset(above, 'smuggled', 1)          -- and plain assignment works too
+```
+
+`above` is the table **every chunk on the server reads through**. Measured, by both routes: the
+write succeeds and every later chunk reads the planted name. That is one mod adding to the global
+environment exactly as if nothing were frozen.
+
+The scenario that looks like it covers this writes `rawset(_G, 'smuggled', 1)` — same verb, same
+name, one table apart — which lands on the frozen environment and is correctly refused. **It stays
+green against a host with the hole.** The test that does catch it plants one level up and asserts a
+*later* chunk cannot see the name.
+
+Whoever refactors the environment construction re-introduces this by freezing the obvious two.
 
 ## Threading
 
@@ -56,8 +99,10 @@ easier"; if you need work off-thread, move the *data* off-thread, not the VM.
 
 - Sandbox escapes get an explicit test each. A test that asserts `io` is absent is worth more than
   ten tests of happy-path binding behaviour.
-- Every limit (instruction budget, memory cap, failure-disable threshold) has a test that actually
-  trips it.
+- Every limit (call-and-loop budget, memory cap, failure-disable threshold) has a test that
+  actually trips it. **Watch for one limit masking another**: filling a megabyte costs far more
+  interrupt ticks than a test-sized budget allows, so a memory test under a small budget dies of
+  ticks and reports the wrong limit while passing.
 - Hot reload is tested for state preservation, not just for "the new code ran".
 - Reload failure paths are tested: syntax error, failed validation, failing mod test, error thrown
   inside `on_reload`. Each must leave the previous registry serving.
@@ -131,8 +176,8 @@ Ask in order:
 1. Could a hostile mod use this to hang the server, exhaust memory, escape the sandbox, or read
    another player's private state? **This is the gate**, and a hook with no consumer yet passes it
    as easily as one with three.
-2. Is it bounded — in allocation, in instruction count, in the radius or volume it can read or
-   write? An unbounded binding is a Blocker however useful it is.
+2. Is it bounded — in allocation, in calls made, in the radius or volume it can read or write?
+   An unbounded binding is a Blocker however useful it is.
 3. Is it named for the capability rather than the implementation?
 4. Is it documented in `docs/modding/api-reference.md` in the same change?
 

@@ -40,7 +40,7 @@ const TOOL: &str = "voxforge";
 const INSPECTED: [(&str, Option<&str>); 11] = [
     ("mc-core", Some("thiserror")),
     ("mc-world", Some("mc-core")),
-    ("mc-script", None),
+    ("mc-script", Some("mlua")),
     ("mc-proto", None),
     ("mc-net", None),
     ("mc-sim", Some("rayon")),
