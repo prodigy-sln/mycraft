@@ -48,6 +48,19 @@ downgrade only with explicit user confirmation.
 3. **`docs/` is as-built reality.** Completed specs consolidate into
    `docs/` via `docs/INDEX.md` routing. Future concepts live in
    `specs/active/` and `product/roadmap.md`, never in `docs/`.
+
+   **The spec that builds a capability documents it for everyone the
+   capability reaches — that is part of its definition of done, not a
+   follow-up and never a separate issue.** Three audiences, and a spec
+   addresses each one it touches: the **engine reader** (as-built technical
+   record), the **mod author** (how to write it — files, shape, fields with
+   their bounds, what a refusal looks like, a worked example that runs), and
+   the **player** (what changed that they can see). An audience a spec does
+   not touch is addressed by saying so in one line, never by silence —
+   silence is indistinguishable from an omission, which is how a capability
+   ships that nobody outside this repository can use. Documentation written
+   one increment later is written by someone reconstructing intent, and it
+   shows.
 4. **Gates are deterministic.** `scripts/sdd-gate.*` must exit 0 at every
    phase end, before validation, and before completion.
 5. **Out of Scope is binding.** Unspecced work is recorded, not built.
