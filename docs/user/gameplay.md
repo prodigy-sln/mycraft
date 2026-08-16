@@ -11,6 +11,8 @@ implemented and why.
 | W / A / S / D | Walk forward / strafe left / back / strafe right, relative to the direction you're facing |
 | Mouse movement | Look around — turn (yaw) and tilt (pitch) |
 | Space | Jump, while standing on something |
+| Left mouse button | Break the block the crosshair is on |
+| Right mouse button | Place a block against the one the crosshair is on |
 | Escape | Release the cursor |
 | Click in the window | Re-capture the cursor |
 | F3 | Show or hide the debug overlay |

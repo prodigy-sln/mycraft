@@ -19,7 +19,7 @@ column of every updated file, and register newly created files.
 docs/
 ├── INDEX.md              ← you are here
 ├── technical/            ← engine contributors: architecture, protocol, formats
-├── modding/              ← content authors: block/item/... authoring and (eventually) the Luau API surface
+├── modding/              ← content authors: start at `modding/README.md`; per-kind contracts beside it
 ├── user/                 ← players — currently just movement and controls; server operators still planned
 ├── planning/             ← pre-spec design discussions; exempt from the as-built rule (see planning/README.md)
 └── ops/        (planned) ← running a public server: deploy, backup, moderation
@@ -52,6 +52,7 @@ the Routing Guide below is where future destinations are declared.
 
 | File | Purpose | Sources |
 |------|---------|---------|
+| README.md | **The way into `docs/modding/`.** What a mod is here and that the client reads one content root today; the four kinds of file and which two reach a running game at all; a complete first block — write one file, run one command, see it on screen and place it; the held-block rule that makes a new block reachable and why it is a placeholder for an inventory; all-or-nothing loading, the four refusals, and how much of a refusal actually reaches the terminal; where each per-kind contract is written; and where the scripting host fits, which is nowhere an author can reach | SPEC-002, SPEC-005, SPEC-007, SPEC-010, SPEC-013, SPEC-014 |
 | blocks-items.md | Block authoring contract: file layout, required and optional fields (including `replaceable`, `breakable`, `breaks_into`), namespaced-id rule, failure reporting, and why there is no empty block to declare | SPEC-002, SPEC-007, SPEC-008 |
 | hud.md | HUD authoring contract: file layout, every field with its requirement and mutual-exclusion rules, the nine anchors and the safe-area inset, UI units against the 720-pixel reference height, eight-digit colours and linear-space alpha, the outline convention and its two-pass ordering, the published draw kinds and readable values, why a root declaring no HUD is valid where one declaring no blocks is not, what content categorically cannot do, and why the debug overlay is unreachable from content | SPEC-010 |
 | sandbox.md | The environment a script runs in, **not** an authoring API — nothing can be authored in Luau yet, and the page says so up front. What a script may reach and what stops it: the attachment a callback is registered under, the exact reachable and denied global sets and why the interesting denials are denials, the frozen per-chunk environment, every shipped limit with its default, why the budget counts calls and loop edges rather than instructions and what that means for sizing a workload, the two authoring rules that pull against each other (a cursor in a closure upvalue, and an abort no `pcall` can recover from), what a fault carries back to its author, quarantine and how it is lifted, and why a fault raised under host memory pressure names nobody | SPEC-014 |
@@ -61,7 +62,7 @@ the Routing Guide below is where future destinations are declared.
 
 | File | Purpose | Sources |
 |------|---------|---------|
-| gameplay.md | Player-facing controls and movement feel: WASD walking, mouse look, jump, cursor capture; what is on screen (crosshair, held-block swatch) and the F3 debug overlay; saving on quit and resuming on relaunch — drawn as saved from the first frame, not only walkable as saved — what a player sees and can do when a save can't be loaded outright, and that the scripting host is machinery a player never meets, nothing on screen being scripted | SPEC-005, SPEC-009, SPEC-010, SPEC-012, SPEC-014 |
+| gameplay.md | Player-facing controls and movement feel: WASD walking, mouse look, jump, cursor capture, the two mouse buttons that break and place; what is on screen (crosshair, held-block swatch) and the F3 debug overlay; saving on quit and resuming on relaunch — drawn as saved from the first frame, not only walkable as saved — what a player sees and can do when a save can't be loaded outright, and that the scripting host is machinery a player never meets, nothing on screen being scripted | SPEC-005, SPEC-007, SPEC-008, SPEC-009, SPEC-010, SPEC-012, SPEC-014 |
 
 ### ops/
 
@@ -80,6 +81,7 @@ When consolidating source material, update the files mapped to its topics:
 | Packets, replication, interest management, QUIC usage | `technical/protocol.md` |
 | Meshing, draw path, lighting, texture handling | `technical/rendering.md` |
 | Test harnesses, golden frames, load rigs, benchmarks | `technical/testing.md` |
+| What a mod is, where content roots live, how an author gets a first thing working, what reaches a running game | `modding/README.md` |
 | Any `mycraft.*` Luau binding | `modding/api-reference.md` + the relevant topic file |
 | Sandbox limits, call-and-loop budgets, memory caps, fault isolation | `modding/sandbox.md` + `technical/architecture.md` |
 | Hot-reload semantics and state migration | `modding/hot-reload.md` |
