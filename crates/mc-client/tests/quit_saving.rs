@@ -175,7 +175,7 @@ fn why_the_save_refuses(save: &Path, blocks: &VoxelWorld, registry: &BlockRegist
 /// What an ending reports, or what it did instead of reporting anything.
 fn report_of(ending: &Ending) -> String {
     match ending {
-        Ending::Failed { report } => report.clone(),
+        Ending::Failed { report, .. } => report.clone(),
         other => format!("the run ended as {other:?}, reporting no failure at all"),
     }
 }

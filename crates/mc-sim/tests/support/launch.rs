@@ -247,7 +247,17 @@ pub fn against_generated(
     Ok((compared, wrong))
 }
 
-/// The refusal a launch gave, rendered — or what it did instead of refusing.
+/// The refusal a launch gave, in its own words — or what it did instead of
+/// refusing.
+///
+/// **Its own words and not the whole report a player reads.** What reaches a
+/// terminal is this sentence and every failure beneath it, joined and printed by
+/// `mc-render`, and this crate may not resolve `mc-render` in any dependency
+/// kind. Walking the chain here instead would put a second renderer in the
+/// workspace, asserted against its own output and reaching no printing — which
+/// is the defect a whole spec was spent removing. So what this crate's own tests
+/// hold it to is the typed obligation: this layer's sentence, and separately
+/// what it carries beneath (see [`beneath`]).
 #[must_use]
 pub fn answered(launched: &Result<Simulation, LaunchError>) -> String {
     match launched {
@@ -255,6 +265,30 @@ pub fn answered(launched: &Result<Simulation, LaunchError>) -> String {
         Err(refusal) => refusal.to_string(),
     }
 }
+
+/// What the refusal a launch gave carries beneath it, in that layer's own words
+/// — or [`NOTHING_BENEATH`] where it carries nothing.
+///
+/// One hop and no joining, which is the whole difference between this and a
+/// renderer: it answers *what is carried*, never *what is printed*. A refusal
+/// that stopped carrying its reason is now invisible to every message anybody
+/// reads at this level, so this is the one thing standing between a player and
+/// the reason their save would not load.
+#[must_use]
+pub fn beneath(launched: &Result<Simulation, LaunchError>) -> String {
+    match launched {
+        Ok(_) => "it started a simulation".to_owned(),
+        Err(refusal) => refusal
+            .source()
+            .map_or_else(|| NOTHING_BENEATH.to_owned(), ToString::to_string),
+    }
+}
+
+/// What a refusal carrying nothing beneath it is called.
+///
+/// A sentence rather than an empty string, so "it carries nothing" and "it
+/// carries a reason with nothing to say" cannot be mistaken for one another.
+pub const NOTHING_BENEATH: &str = "it carries no reason beneath it";
 
 /// The simulation a launch started, or the refusal it gave instead.
 fn playing(launched: &Result<Simulation, LaunchError>) -> Result<&Simulation, String> {

@@ -37,19 +37,26 @@ use crate::world::World;
 pub enum LaunchError {
     /// A save is there and cannot be read.
     ///
-    /// **It names the file as well as the reason**, which is why it carries the
-    /// path rather than deriving from [`LoadError`] alone: most of the refusals
-    /// a save can raise are about its bytes and know nothing about where those
-    /// bytes came from, and "the save could not be read" without saying *which*
-    /// file is a message a player cannot act on. This is the level that knows
-    /// the path, so this is the level that says it.
+    /// **It names the file**, which is why it carries the path rather than
+    /// deriving from [`LoadError`] alone: most of the refusals a save can raise
+    /// are about its bytes and know nothing about where those bytes came from,
+    /// and "the save could not be read" without saying *which* file is a message
+    /// a player cannot act on. This is the level that knows the path, so this is
+    /// the level that says it.
+    ///
+    /// **It does not name the reason, and it did once.** The reason is what the
+    /// level beneath knows, and it is rendered from there: a report is a failure
+    /// and every failure under it, so a message quoting its own source has that
+    /// source read out twice. What a player reads is unchanged to the character —
+    /// the joiner moved out of this string and into the rendering, and it is the
+    /// same `": "`.
     ///
     /// **The reason is boxed**, because [`LoadError`] is a wide enum — it names
     /// every list, count and position a save can be wrong about — and a launch
     /// that succeeds would otherwise carry all of it in every `Result` it
     /// returns. That is what `clippy::result_large_err` is about, and the answer
     /// it asks for.
-    #[error("{save} could not be read: {source}", save = save.display())]
+    #[error("{save} could not be read", save = save.display())]
     Load {
         save: PathBuf,
         #[source]
@@ -57,16 +64,18 @@ pub enum LaunchError {
     },
     /// There is no save to resume and no world could be generated in its place.
     ///
-    /// **This one interpolates its cause rather than only carrying it**, unlike
-    /// the transparent variants below, and unlike [`Load`](Self::Load) whose own
-    /// message already names the file. The refusal a turned-away player reads is
-    /// rendered from `Display` alone — nothing walks the source chain — so a
-    /// message that stopped at "a new world could not be generated" would leave
-    /// out the one thing a content author can act on: which block the generator
-    /// asked for and did not get. It is not transparent either, because the
-    /// sentence a player needs is *why the world was being generated at all*,
-    /// and that is what this level knows and the cause does not.
-    #[error("a new world could not be generated: {0}")]
+    /// **It carries its cause rather than interpolating it**, and it did the
+    /// opposite once. The refusal a turned-away player reads is rendered by
+    /// walking the source chain, so a message quoting its own source hands a
+    /// content author the block twice and buries the sentence saying why a world
+    /// was being built at all. Carrying it loses nothing: the cause is still
+    /// read out, one layer down, joined with the same `": "` this string used to
+    /// spell itself.
+    ///
+    /// It is not transparent either, because the sentence a player needs *is*
+    /// why the world was being generated, and that is what this level knows and
+    /// the cause does not.
+    #[error("a new world could not be generated")]
     WorldGen(#[from] WorldGenError),
     /// The generated world cannot place a player.
     #[error(transparent)]

@@ -112,6 +112,18 @@ running game never calls into the scripting host at all. So nothing about how th
 launches, saves or looks changed with it, and there is nothing here for a player to turn on, try or
 configure.
 
+**If the game will not start, it now tells you what it could not read.** The
+blocks and the on-screen crosshair come from content files, and a broken one
+stops the game rather than letting it open with pieces silently missing. Where
+that used to end in a single line saying the content could not be read, the game
+now prints the file it was reading, the thing declared in it, and the part it
+could not accept — so a file you or a mod author edited can be found and fixed
+without hunting through all of them. The same holds for a saved world it cannot
+load: it says which save, and why, once rather than twice, and where passing
+`--load-changed-blocks` would let you in anyway it says so at the end, after the
+reason. Look on the terminal you started the game from; the text begins
+`mycraft: `.
+
 ## What this does not cover yet
 
 This is walking, looking, jumping and saving on a fixed, already-generated world. It does not

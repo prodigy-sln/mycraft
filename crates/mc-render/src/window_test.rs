@@ -22,15 +22,30 @@
 //! property of their type rather than a thing a test has to catch them not
 //! doing.
 //!
+//! **How a failure reads is asserted here for the same reason the exit status
+//! is.** A refusal is the only thing a mod author whose file is wrong ever gets,
+//! and a client that composed it inside its own `main` would put the one text
+//! this project asks about where no test can call it. The rendering and the sink
+//! are therefore functions beside the endings: what is compared below is the
+//! whole of what is written, prefix and line ending included, because a text
+//! merely containing the right words cannot tell a clean rendering from one that
+//! appended a separator to an empty layer.
+//!
 //! Losing focus and admitting pointer motion are decided here too, but their
 //! consequences are `mc-sim`'s — a cleared key and an unaccumulated look delta —
 //! so those two scenarios are asserted end to end in
 //! `crates/mc-client/tests/window_input.rs`, the one crate that resolves both
 //! halves of the seam.
 
+use std::error::Error;
+use std::fmt;
+use std::io;
+
+use crate::surface::{FatalReason, StartupError};
+
 use super::{
     CaptureState, Ending, LoopAction, WindowEventKind, capture_after_click, capture_after_escape,
-    exit_code, first_capture_attempt, next_capture_attempt, window_event_action,
+    exit_code, first_capture_attempt, next_capture_attempt, rendered, report, window_event_action,
 };
 
 #[test]
@@ -115,6 +130,229 @@ fn a_click_with_the_cursor_free_asks_for_the_capture_the_ladder_starts_at() {
          ladder starts at is a separate decision, pinned separately, and restating it here \
          would leave both tests agreeing about a wrong answer"
     );
+}
+
+/// A failure stating `message`, over whatever failure caused it.
+///
+/// Hand-written rather than derived, because what the scenarios below are about
+/// is the walk of `source()` itself: a chain a macro assembled would leave the
+/// test asserting the macro's idea of a cause rather than one this file states.
+#[derive(Debug)]
+struct Layer {
+    message: String,
+    beneath: Option<Box<Layer>>,
+}
+
+impl Layer {
+    /// A failure with nothing beneath it.
+    fn stating(message: &str) -> Self {
+        Self {
+            message: message.to_owned(),
+            beneath: None,
+        }
+    }
+
+    /// A failure stating `message`, caused by `beneath`.
+    fn over(message: &str, beneath: Self) -> Self {
+        Self {
+            message: message.to_owned(),
+            beneath: Some(Box::new(beneath)),
+        }
+    }
+}
+
+impl fmt::Display for Layer {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl Error for Layer {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        let beneath = self.beneath.as_deref()?;
+        Some(beneath)
+    }
+}
+
+/// What `ending` writes to a sink a test holds — every byte of it, because these
+/// scenarios are about the text a person reads rather than about a value.
+fn reported(ending: &Ending) -> io::Result<String> {
+    let mut sink = Vec::new();
+    report(ending, &mut sink)?;
+    Ok(String::from_utf8_lossy(&sink).into_owned())
+}
+
+/// A layer's own message spanning several lines, in the shape a TOML parser
+/// produces for a field nobody recognises: a heading, the offending line, a
+/// marker under it, and the reason.
+const SEVERAL_LINES: &str =
+    "TOML parse error at line 4, column 1\n4 | slid = true\n  | ^^^^\nunknown field `slid`";
+
+/// The layer above the several-line one, and the layer below it. Both are stated
+/// so the rendering can be compared whole rather than searched for its middle.
+const ABOVE: &str = "the shipped content could not be read";
+const BELOW: &str = "the declaration was refused";
+
+/// A refusal a way out exists for, and the sentence that offers it.
+const REFUSED_SAVE: &str = "the save could not be read";
+const REDECLARED: &str = "`base:amber` is no longer declared as it was";
+const WAY_OUT: &str = ". Pass --load-changed-blocks to load it anyway";
+
+#[test]
+fn a_failure_is_rendered_with_the_failure_beneath_it_after_a_separator() {
+    let refused = Layer::over(
+        "the shipped content could not be read",
+        Layer::stating("a namespaced id is written namespace:path"),
+    );
+
+    assert_eq!(
+        rendered(&refused),
+        "the shipped content could not be read: a namespaced id is written namespace:path",
+        "what a mod author needs is beneath the message rather than in it: a rendering of the \
+         outermost layer alone tells them the content could not be read and never which of their \
+         files was wrong, which is the state this repairs"
+    );
+}
+
+#[test]
+fn a_failure_with_nothing_beneath_it_is_rendered_as_its_own_message_alone() {
+    let refused = Layer::stating("no content was found at content/base");
+
+    assert_eq!(
+        rendered(&refused),
+        "no content was found at content/base",
+        "a failure carrying no cause has no layer to join to, so nothing is joined. The whole \
+         rendering is compared rather than searched, because a text merely *containing* the \
+         message cannot tell a clean rendering from one that appended a separator and an empty \
+         layer after it"
+    );
+}
+
+#[test]
+fn every_failure_beneath_a_failure_is_rendered_and_not_only_the_first() {
+    let refused = Layer::over(
+        "the save could not be read",
+        Layer::over(
+            "chunk 4 is truncated",
+            Layer::stating("expected 512 bytes, found 128"),
+        ),
+    );
+
+    assert_eq!(
+        rendered(&refused),
+        "the save could not be read: chunk 4 is truncated: expected 512 bytes, found 128",
+        "three levels rather than two, deliberately: a two-level chain is rendered correctly by a \
+         walk that takes one hop and stops, so only a third level tells the two apart. Comparing \
+         the whole rendering rejects both the defect this repairs — the outermost message alone — \
+         and its mirror, the innermost alone, which says what went wrong and never which stage \
+         it went wrong in"
+    );
+}
+
+#[test]
+fn a_message_of_several_lines_is_rendered_whole_between_the_layers_around_it() {
+    let refused = Layer::over(ABOVE, Layer::over(SEVERAL_LINES, Layer::stating(BELOW)));
+
+    assert_eq!(
+        rendered(&refused),
+        format!("{ABOVE}: {SEVERAL_LINES}: {BELOW}"),
+        "a parser's diagnostic is a block, and the block is what a person needs: the line it \
+         points at and the marker under it mean nothing folded onto one line. It is emitted whole, \
+         its own line breaks kept, and the layers on either side of it are joined to it exactly \
+         as any other pair of layers is"
+    );
+}
+
+#[test]
+fn a_run_the_player_ended_by_closing_the_window_says_nothing_at_all() -> io::Result<()> {
+    assert_eq!(
+        reported(&Ending::Closed)?,
+        "",
+        "closing the window is the one ending that is not a failure, so nothing is written — not \
+         a prefix, not a blank line. The whole sink is compared, because a report that wrote a \
+         bare `mycraft: ` here would leave a player who quit normally reading a refusal with no \
+         text in it"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_run_that_found_no_adapter_to_draw_with_reports_that_refusal() -> io::Result<()> {
+    let refused = StartupError::NoAdapter {
+        tried: vec!["vulkan".to_owned(), "gl".to_owned()],
+    };
+
+    assert_eq!(
+        reported(&Ending::Startup(refused.clone()))?,
+        format!("mycraft: {refused}\n"),
+        "a machine with nothing to draw with is told so, and told which backends were tried. The \
+         expectation is the refusal's own sentence rather than a second copy of it, so what this \
+         asks is where the text is written and what is wrapped around it — the prefix and the \
+         line ending — rather than re-stating wording that lives with the refusal"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_run_that_lost_the_graphics_device_reports_the_reason_it_was_lost() -> io::Result<()> {
+    let reason = FatalReason::DeviceLost;
+
+    assert_eq!(
+        reported(&Ending::Frame(reason))?,
+        format!("mycraft: the run stopped because the graphics device was lost ({reason:?})\n"),
+        "a lost device ends the run and the reason is named: nothing the client can do brings the \
+         device back, so a player left with a window that closed itself and no sentence has \
+         nothing to search for. The sentence moves to where a test can ask for it; it does not \
+         change on the way"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_context_the_failure_does_not_know_is_said_above_the_whole_chain() -> io::Result<()> {
+    let refused = Layer::over(
+        "the display server refused the connection",
+        Layer::stating("connection reset by peer"),
+    );
+
+    assert_eq!(
+        reported(&Ending::failed_under("no window could be opened", &refused))?,
+        "mycraft: no window could be opened: the display server refused the connection: \
+         connection reset by peer\n",
+        "a site that knows a sentence its failure does not says it as one more layer above the \
+         chain, joined the same way every other layer is. Nothing asserts these sites' text \
+         otherwise: a context silently dropped, or joined without the separator, would reach a \
+         player through seven call sites with nothing red"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_refusal_with_nothing_beneath_it_is_reported_as_its_own_sentence() -> io::Result<()> {
+    assert_eq!(
+        reported(&Ending::stated("the device was already handed to a window"))?,
+        "mycraft: the device was already handed to a window\n",
+        "a refusal with no failure under it is a sentence and nothing else: prefixed, ended with \
+         a line break, and joined to nothing. It is the door a site with nothing to render walks \
+         through, and a door that appended a separator to an empty layer would show every one of \
+         them a dangling colon"
+    );
+    Ok(())
+}
+
+#[test]
+fn guidance_a_site_supplies_is_said_after_the_whole_chain_it_answers() -> io::Result<()> {
+    let refused = Layer::over(REFUSED_SAVE, Layer::stating(REDECLARED));
+
+    assert_eq!(
+        reported(&Ending::failed(&refused, WAY_OUT))?,
+        format!("mycraft: {REFUSED_SAVE}: {REDECLARED}{WAY_OUT}\n"),
+        "a way out is not a cause: it says what to do rather than what happened, so it is said \
+         after the whole chain and never inside it. Guidance dropped on the floor here would take \
+         a player's only route back into their world with it, and the refusal would read as \
+         final when it is not"
+    );
+    Ok(())
 }
 
 #[test]

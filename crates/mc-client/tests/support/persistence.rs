@@ -40,6 +40,7 @@ use mc_client::startup::PreparationError;
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
 use mc_core::id::{BlockName, TextureKey};
+use mc_render::window::{Ending, report};
 use mc_sim::action::default_held_block;
 use mc_sim::player::{BlockPos, PlayerState};
 use mc_sim::simulation::Simulation;
@@ -355,15 +356,43 @@ fn compared_with(
     (compared, wrong)
 }
 
-/// The refusal a launch gave, rendered — or what it did instead of refusing.
+/// The refusal a launch gave, as a player reads it — or what it did instead of
+/// refusing.
 ///
-/// This is the text a player is shown: the client turns a failed preparation
-/// into an ending carrying exactly this string, and the binary prints it.
+/// **Taken through the door the client goes through, not composed here.** A
+/// refusal is the failure and every failure beneath it, and then the way out
+/// where the refusal has one; the outermost layer's own sentence is a fraction
+/// of that. A helper reading that sentence would be asserting against a string
+/// the client never prints — which is exactly the state in which a message can
+/// lose the one line telling a player how to get their world back while every
+/// test stays green.
+///
+/// It goes through [`Ending::failed`] and [`report`] rather than assembling the
+/// same two pieces itself, and that is the load-bearing part: a `failed` that
+/// stopped appending guidance altogether would leave a hand-assembled helper
+/// green, because the helper would be a second copy of the decision rather than
+/// a reader of it.
 #[must_use]
 pub fn refusal(launched: &Launched) -> String {
     match launched {
         Ok(_) => "it started a simulation".to_owned(),
-        Err(turned_away) => turned_away.to_string(),
+        Err(turned_away) => shown_to_a_player(turned_away),
+    }
+}
+
+/// What the client writes for `turned_away`, captured whole.
+///
+/// A `Vec` never refuses bytes, so the refusing arm is unreachable; it says so
+/// in words rather than unwrapping, because a helper that panicked here would
+/// report a sink as a failed launch.
+fn shown_to_a_player(turned_away: &PreparationError) -> String {
+    let mut sink = Vec::new();
+    match report(
+        &Ending::failed(turned_away, &turned_away.way_out()),
+        &mut sink,
+    ) {
+        Ok(()) => String::from_utf8_lossy(&sink).into_owned(),
+        Err(refused) => format!("what a player would be shown could not be written: {refused}"),
     }
 }
 

@@ -16,9 +16,13 @@
 //! frames that were never going to differ.
 
 use std::error::Error;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use mc_core::block::{BlockRegistry, RegistryError};
+use mc_core::hud::{HudLayout, HudLoadError};
+use mc_world::content::{TomlFileDefinitionSource, TomlFileHudSource};
 use tempfile::TempDir;
 
 use super::content_root;
@@ -28,6 +32,9 @@ pub const HUD_DIRECTORY: &str = "hud";
 
 /// The subdirectory of a content root that block definitions live in.
 pub const BLOCK_DIRECTORY: &str = "blocks";
+
+/// The extension a declaration is written with, in either directory.
+pub const DECLARATION_EXTENSION: &str = "toml";
 
 /// A content root written into a temporary directory, removed when this is
 /// dropped.
@@ -124,6 +131,43 @@ impl ContentRoot {
         for file_name in file_names {
             fs::remove_file(blocks.join(file_name))?;
         }
+        Ok(self)
+    }
+
+    /// This root with every block declaration taken out of `blocks/`.
+    ///
+    /// **A root whose `blocks/` declares nothing is a refusal shape of its own.**
+    /// Registration refuses a source that declared nothing at all, and what that
+    /// refusal names is the root — no block and no field, because there is
+    /// neither. Built by emptying a copy of the shipped root rather than by
+    /// making a bare directory, so what a scenario reads is the refusal a mod
+    /// author gets from a root they broke rather than from a directory nobody
+    /// would point the client at.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `blocks/` cannot be read, if a removal fails, or if
+    /// the root declared nothing there to begin with — see this module's header
+    /// for why that is a failure rather than nothing happening.
+    pub fn declaring_no_blocks(self) -> Result<Self, Box<dyn Error>> {
+        empty(&self.path().join(BLOCK_DIRECTORY), BLOCK_DIRECTORY)?;
+        Ok(self)
+    }
+
+    /// This root with every HUD declaration taken out of `hud/`.
+    ///
+    /// A root declaring no HUD is a **valid** root, which is what makes this the
+    /// fixture for the one HUD scenario that is not about a refusal. The
+    /// directory is emptied and left in place: a root with no `hud/` at all is a
+    /// second thing, and a scenario about a root that declares no element would
+    /// then be about a directory that is not there.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `hud/` cannot be read, if a removal fails, or if the
+    /// root declared no HUD to begin with.
+    pub fn declaring_no_hud(self) -> Result<Self, Box<dyn Error>> {
+        empty(&self.path().join(HUD_DIRECTORY), HUD_DIRECTORY)?;
         Ok(self)
     }
 }
@@ -288,6 +332,94 @@ fn value_of(stated: &str, field: &str, file_name: &str) -> Result<String, Box<dy
     Ok(line
         .split_once(" = ")
         .map_or(line.clone(), |(_, value)| value.to_owned()))
+}
+
+/// Every declaration file directly under `directory`.
+///
+/// The search is one directory deep and reads the extension rather than the
+/// name, which is how both loaders decide what they are looking at — a fixture
+/// counting anything else would be counting files the client never reads.
+///
+/// # Errors
+///
+/// Returns an error if the directory cannot be read.
+pub fn declarations_in(directory: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let mut declared = Vec::new();
+    for entry in fs::read_dir(directory)? {
+        let found = entry?.path();
+        if found.extension() == Some(OsStr::new(DECLARATION_EXTENSION)) {
+            declared.push(found);
+        }
+    }
+    Ok(declared)
+}
+
+/// Takes every declaration out of `directory`, which the root names `named`.
+///
+/// # Errors
+///
+/// Returns an error if the directory cannot be read, if a removal fails, or if
+/// there was no declaration there to take out.
+fn empty(directory: &Path, named: &str) -> Result<(), Box<dyn Error>> {
+    let declared = declarations_in(directory)?;
+    if declared.is_empty() {
+        return Err(format!(
+            "this fixture has to take every declaration out of `{named}/` in a copy of the \
+             shipped content root, but the shipped root declares none there. What it would build \
+             is a root that never declared anything rather than one whose declarations were taken \
+             away, and the two are not the same claim"
+        )
+        .into());
+    }
+    for declaration in declared {
+        fs::remove_file(declaration)?;
+    }
+    Ok(())
+}
+
+/// Why the block registry refuses the content root at `root`, asked of the
+/// registry itself.
+///
+/// **The oracle a scenario about printed text is compared against.** The refusal
+/// a mod author reads has to carry this value's own words, and a test that spelled
+/// a parser's diagnostic out by hand would be asserting that parser's wording
+/// rather than that any of it reached the author.
+///
+/// # Errors
+///
+/// Returns an error if the root was accepted — a root that registers is not a
+/// root a refusal can be read from, and a scenario comparing printed text against
+/// nothing would be asserting nothing.
+pub fn block_refusal_over(root: &Path) -> Result<RegistryError, Box<dyn Error>> {
+    let mut registry = BlockRegistry::new();
+    match registry.apply(&TomlFileDefinitionSource::new(root.to_owned())) {
+        Ok(()) => Err(format!(
+            "this scenario needs the blocks declared under {} to be refused, and they registered \
+             instead. There is no refusal to compare the printed text against",
+            root.display()
+        )
+        .into()),
+        Err(refused) => Ok(refused),
+    }
+}
+
+/// Why the HUD loader refuses the content root at `root`, asked of the loader
+/// itself. The HUD half of [`block_refusal_over`], and it is here for the same
+/// reason.
+///
+/// # Errors
+///
+/// Returns an error if the root's HUD declarations were accepted.
+pub fn hud_refusal_over(root: &Path) -> Result<HudLoadError, Box<dyn Error>> {
+    match HudLayout::load(&TomlFileHudSource::new(root)) {
+        Ok(_) => Err(format!(
+            "this scenario needs the HUD declared under {} to be refused, and it loaded instead. \
+             There is no refusal to compare the printed text against",
+            root.display()
+        )
+        .into()),
+        Err(refused) => Ok(refused),
+    }
 }
 
 /// Copies every file and directory under `from` into `into`.

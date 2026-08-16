@@ -123,13 +123,15 @@ fn open_device(
         required_limits: wgpu::Limits::downlevel_defaults(),
         ..wgpu::DeviceDescriptor::default()
     };
-    let (device, queue) =
-        block_on(adapter.request_device(&descriptor)).map_err(|cause| Ending::Failed {
-            report: format!(
+    let (device, queue) = block_on(adapter.request_device(&descriptor)).map_err(|cause| {
+        Ending::failed_under(
+            &format!(
                 "the adapter `{named}` reported every capability this client needs and then would \
-                 not open a device: {cause}"
+                 not open a device"
             ),
-        })?;
+            &cause,
+        )
+    })?;
 
     let lost = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&lost);

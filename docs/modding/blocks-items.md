@@ -124,6 +124,24 @@ it was declared under (when the file's contents could be read far enough
 to find one), and the specific field at fault, where the failure is about
 one field rather than the file as a whole.
 
+**And all three reach your terminal**, which is the half of that promise
+worth showing rather than asserting. A `blocks/amber.toml` declaring
+`slid = true` where it meant `solid` is refused like this:
+
+```
+mycraft: the shipped content could not be read: content/base/blocks/amber.toml, block `example:amber`: TOML parse error at line 4, column 1
+  |
+4 | slid = true
+  | ^^^^
+unknown field `slid`, expected one of `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`
+```
+
+The layers read outermost first, separated by `: ` — the stage that
+failed, then the origin, then the parser's own diagnostic, kept whole
+with the caret still under the word it points at. Where the origin has no
+block name or no field to give, those parts are simply absent: nothing is
+guessed to fill the shape out.
+
 Two boundary cases worth knowing:
 
 - A content root that **exists** but declares **no blocks at all** is an

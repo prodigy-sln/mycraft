@@ -495,12 +495,13 @@ pub fn ending_after_saving(session: Option<&Session>, ending: Ending, save: &Pat
     }
     match session.map_or(Ok(()), |playing| playing.save(save)) {
         Ok(()) => ending,
-        Err(refused) => Ending::Failed {
-            report: format!(
-                "the world could not be saved to {path}: {refused}",
+        Err(refused) => Ending::failed_under(
+            &format!(
+                "the world could not be saved to {path}",
                 path = save.display()
             ),
-        },
+            &refused,
+        ),
     }
 }
 

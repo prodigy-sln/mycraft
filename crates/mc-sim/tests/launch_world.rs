@@ -24,7 +24,7 @@ use mc_world::persistence::{Acceptance, requirements, save_world};
 
 use support::launch::{
     EVERY_DECLARED_CELL, MARKER, MARKER_CELL, a_world_to_launch_into, against_generated, answered,
-    generated_with_the_marker, held_at, recorded_player, save_path,
+    beneath, generated_with_the_marker, held_at, recorded_player, save_path,
 };
 use support::{NOTHING, TestResult, block_at};
 
@@ -89,8 +89,28 @@ fn a_launch_with_no_save_plays_the_world_the_generator_makes() -> TestResult {
     Ok(())
 }
 
+/// **This asserts structure, not what a person reads, and the difference is the
+/// point.** What it holds the launch to is the shape of the refusal: this layer
+/// names the file, because this is the level that knows where the file is; it
+/// does not restate the reason, because a message quoting its own source has
+/// that source read out twice by anything that walks the chain; and it carries
+/// the reason as its source, because that is now the only thing keeping the
+/// reason reachable at all.
+///
+/// **What a turned-away player actually reads is witnessed in the client's own
+/// reporting, deliberately not here.** Two reasons, and both are binding. This
+/// crate may not resolve the crate that renders a refusal, in any dependency
+/// kind — so the text cannot be produced here at all. And the alternative,
+/// walking `source()` here and asserting the string it would join into, is a
+/// second renderer asserted against its own output: it would claim a guarantee
+/// about a terminal while reaching no printing whatsoever, which is exactly the
+/// shape of test that once stayed green for years over a client that printed one
+/// sentence. A test that read as though it witnessed a refusal a player sees
+/// would hand the next reader that same false confidence, in a crate where
+/// nothing could catch it.
 #[test]
-fn a_launch_with_a_save_it_cannot_read_refuses_naming_the_file_and_the_reason() -> TestResult {
+fn a_launch_with_a_save_it_cannot_read_refuses_naming_the_file_and_carrying_the_reason()
+-> TestResult {
     let (registry, _, directory) = a_world_to_launch_into()?;
     let save = save_path(&directory);
     written(&save, NOT_A_SAVE)?;
@@ -104,12 +124,17 @@ fn a_launch_with_a_save_it_cannot_read_refuses_naming_the_file_and_the_reason() 
         (
             answer.contains(&save.display().to_string()),
             answer.contains(&reason),
+            beneath(&launched),
             launched.is_ok()
         ),
-        (true, true, false),
-        "a save that is there and cannot be read refuses the start, naming the file and \
-         saying what was wrong — `{reason}` — rather than generating a new world over it. \
-         The launch answered: {answer}"
+        (true, false, reason.clone(), false),
+        "a save that is there and cannot be read refuses the start rather than generating a new \
+         world over it, and the refusal splits the two things a player needs across the two \
+         levels that know them. This level knows where the file is and says so. It does not \
+         restate `{reason}`, which the level beneath it says — a message quoting its own source \
+         has that source read out twice by anything that walks the chain. And it carries that \
+         level rather than dropping it, which is now the only thing keeping the reason reachable \
+         at all. The launch answered: {answer}"
     );
     Ok(())
 }

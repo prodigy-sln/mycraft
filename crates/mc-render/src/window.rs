@@ -26,6 +26,9 @@
 //! `mc-sim` in any dependency kind, so the wrap is a function of the count it is
 //! handed. That also makes it testable without the simulation existing.
 
+use std::error::Error;
+use std::io::{self, Write};
+
 use crate::surface::{FatalReason, StartupError, SurfaceSize};
 
 /// What the window told the client, in the renderer's own vocabulary.
@@ -166,20 +169,118 @@ pub const fn window_event_action(event: &WindowEventKind) -> LoopAction {
 
 /// How the client's run ended.
 ///
-/// The one place the three endings meet, so `main` reports and returns and
-/// decides nothing. A closed window is the only one that is not a failure.
-/// The three the scenarios name, and one for everything else. `Failed` carries
-/// text rather than a type because the things that reach it are the *client's*
-/// failures — a window that would not open, content that is not there — and this
-/// crate cannot name them. Keeping it here anyway is what leaves the client with
-/// no exit-status decision of its own.
+/// The one place the three endings meet, so `main` chooses a sink and returns a
+/// status and decides nothing else. A closed window is the only one that is not
+/// a failure. The three the scenarios name, and one for everything else.
+/// `Failed` carries text rather than a type because the things that reach it are
+/// the *client's* failures — a window that would not open, content that is not
+/// there — and this crate cannot name them. Keeping it here anyway is what leaves
+/// the client with neither an exit-status nor a wording decision of its own.
+///
+/// `Failed` is `#[non_exhaustive]` so that no crate outside this one can write
+/// the struct literal. The report a player reads is then reachable only through
+/// the three constructors below, each of which renders the whole chain — which
+/// makes "every reported failure is rendered" a property the compiler holds
+/// rather than a rule every future call site has to remember.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ending {
     Closed,
     Startup(StartupError),
     Frame(FatalReason),
-    Failed { report: String },
+    #[non_exhaustive]
+    Failed {
+        report: String,
+    },
 }
+
+impl Ending {
+    /// `failure` and everything beneath it, then `guidance` where the site has
+    /// any.
+    ///
+    /// A way out is not a cause: it says what to do rather than what happened,
+    /// so it is said after the whole chain and never inside it. `guidance` is
+    /// empty where there is nothing to add, and carries its own separator where
+    /// there is.
+    #[must_use]
+    pub fn failed(failure: &dyn Error, guidance: &str) -> Self {
+        Self::Failed {
+            report: format!("{rendered}{guidance}", rendered = rendered(failure)),
+        }
+    }
+
+    /// A sentence the site knows and the failure does not, then `failure` and
+    /// everything beneath it — the same joiner, one layer up.
+    #[must_use]
+    pub fn failed_under(context: &str, failure: &dyn Error) -> Self {
+        Self::Failed {
+            report: format!("{context}{BENEATH}{rendered}", rendered = rendered(failure)),
+        }
+    }
+
+    /// A refusal with nothing beneath it.
+    ///
+    /// `&'static str` and not `&str`, and that is the load-bearing detail: a
+    /// literal cannot be a `format!`, so this door cannot be the one a
+    /// hand-composed report walks through.
+    #[must_use]
+    pub fn stated(sentence: &'static str) -> Self {
+        Self::Failed {
+            report: sentence.to_owned(),
+        }
+    }
+}
+
+/// `failure` and every failure beneath it, outermost first, joined with `": "`.
+///
+/// Depth-general, and that is what it is for: a content refusal is two layers
+/// and a save refusal is three, so "print one more level" is right for the first
+/// and wrong for the second. A layer whose own message spans several lines — a
+/// parser's caret diagnostic, say — is rendered whole, because the line it points
+/// at and the marker under it mean nothing folded onto one line. A failure with
+/// nothing beneath it renders as its own message, with no separator and no empty
+/// layer after it.
+#[must_use]
+pub fn rendered(failure: &dyn Error) -> String {
+    let mut said = failure.to_string();
+    let mut beneath = failure.source();
+    while let Some(cause) = beneath {
+        said.push_str(BENEATH);
+        said.push_str(&cause.to_string());
+        beneath = cause.source();
+    }
+    said
+}
+
+/// Says how the run ended, for every ending that is not the player closing the
+/// window, to `sink`.
+///
+/// The text is written unmodified after the prefix — no re-indentation of the
+/// lines a multi-line layer brings with it. Rewriting them to align under the
+/// prefix would make what is printed differ from the block a person copies into
+/// a search, and from the block the documentation quotes.
+///
+/// # Errors
+///
+/// Returns whatever `sink` refuses the bytes with.
+pub fn report(ending: &Ending, sink: &mut dyn Write) -> io::Result<()> {
+    let said = match ending {
+        // The one ending that is not a failure, and the one that says nothing:
+        // a player who quit is not told they quit.
+        Ending::Closed => return Ok(()),
+        Ending::Startup(failure) => rendered(failure),
+        Ending::Frame(reason) => {
+            format!("the run stopped because the graphics device was lost ({reason:?})")
+        }
+        Ending::Failed { report } => report.clone(),
+    };
+    writeln!(sink, "{SPOKEN_BY}{said}")
+}
+
+/// What every line this client says about itself opens with.
+const SPOKEN_BY: &str = "mycraft: ";
+
+/// What every layer of a report is joined to the one beneath it with.
+const BENEATH: &str = ": ";
 
 /// The status the shell is told, for a run that ended in `ending`.
 ///

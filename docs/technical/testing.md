@@ -2008,3 +2008,75 @@ second pass accepts only new findings of Major or higher, which would give never
 weaker review than the ones already read. A supplementary result is added to the first, and the
 combination is marginally weaker than one review over the whole set, since no single reviewer held
 all of it. Say so rather than presenting the two as equivalent.
+
+### A printing path needs a scan and a subprocess, and neither alone is enough
+
+The client used to flatten a typed failure with `.to_string()` and print its
+outermost sentence. Every test that asked the failure *value* stayed green,
+including one that walked the `source()` chain by hand and asserted against its
+own walk — a test that reached no printing at all, while claiming in its own doc
+comment that "a person running the client is told both". That is the shape to
+recognise: an assertion about a **presentation** guarantee, made somewhere the
+presentation is never produced.
+
+Three instruments now cover that path, and each sees something the others
+cannot.
+
+**The unit tests grade the rendering.** A chain is asserted at **three** levels,
+not two, because a two-level chain is rendered identically by a walk that takes
+one `source()` hop and stops. Three is the shortest chain that separates a full
+walk from a single hop. The whole rendered string is compared rather than
+searched, because a text that merely *contains* the right words cannot tell a
+clean rendering from one that appended a separator to an empty layer — which is
+also why the no-cause scenario compares the whole string and not a prefix.
+
+**A source scan grades what may exist.** It reports any production file under
+`crates/mc-client/src` that turns a failure into text itself, with no exemption
+list, and reports an **enumerated verdict** rather than an absence: a scan that
+can no longer look answers "I read nothing" rather than "I found nothing". Its
+positive-control fixture commits *every* needle, because a needle no fixture
+ever commits is one nobody has watched match anything, and a mistyped one
+reports a clean scan forever. On its first run it reported three sites the
+planning documents said could not exist.
+
+**A subprocess grades what actually happens.** The scan cannot see a report that
+is never *reached*. Deleting the `report` call from `main` entirely, and
+separately pointing it at stdout, each leave the scan **green** and are caught
+only by a test that spawns the built binary and reads its real streams. That is
+the same hole `tools/voxforge/tests/binary.rs` exists for. It is cheap here
+because the missing-content-root refusal is decided before any device is opened,
+so no GPU and no display server are involved, and it is located through
+`CARGO_BIN_EXE_mc-client` rather than by a harness guessing a path.
+
+**What the three still do not cover.** The way-out sentence that tells a player
+to pass `--load-changed-blocks` reaches them through exactly one production
+line, and that line runs inside a redraw needing a device and a window.
+Replacing its argument with an empty string leaves the entire suite green. The
+other construction site cannot emit the sentence at all — every failure reaching
+it carries an empty way out — so mutating *that* one is a semantically identical
+program, and its green result would look like evidence while being none. It was
+deliberately not run. The supply is held by the guidance parameter being
+non-optional and by the constructor door making a third site impossible, not by
+a test.
+
+### A documentation guard needs its subject to be an artefact, not a convention
+
+`docs/modding/` quotes the refusal a mod author reads. A guard compares each
+quoted block against text from a **real run** over the same declaration, so the
+page and the terminal cannot drift apart.
+
+What makes it hold is that a quoted refusal is recognised **by the artefact's
+own shape** — a fenced block whose first line begins `mycraft: `, which is what
+the reporting writes — rather than by a marker an author has to remember. There
+is no convention to fall out of step with, and a page that stops quoting a
+refusal changes the verdict to "none found" instead of passing silently. The
+verdict is enumerated for the usual reason: agreement, a mismatch carrying
+*both* sides, and nothing-found are three different answers, and a scan that
+read no page fails outright rather than choosing one.
+
+Two consequences worth knowing before editing those pages. A block must match a
+produced refusal **whole**, including the caret diagnostic's interior
+indentation, so leading whitespace is significant and an indented block is not
+recognised at all. And a `toml` version bump restyles that diagnostic, which
+reddens the guard — that is the guard working, not a flake, and the blast radius
+is two pages and one test.

@@ -41,7 +41,7 @@ use mc_render::snapshot::{ScenePhase, TerrainSnapshot};
 use mc_render::surface::{
     FrameAction, ResizeAction, SurfaceErrorKind, SurfaceSize, resize_action, surface_error_action,
 };
-use mc_render::window::Ending;
+use mc_render::window::{Ending, rendered};
 
 use crate::gpu_startup::Gpu;
 use crate::launch::{PreparationHandle, collect};
@@ -166,9 +166,7 @@ impl App {
             return None;
         }
         if let Err(failure) = self.collect_preparation(session) {
-            return Some(Ending::Failed {
-                report: failure.to_string(),
-            });
+            return Some(Ending::failed(&failure, &failure.way_out()));
         }
         self.exchange_remesh(session);
         self.present(session)
@@ -187,7 +185,7 @@ impl App {
     fn exchange_remesh(&mut self, session: &mut Session) {
         match self.remesher.as_mut().and_then(Remesher::collect) {
             Some(Ok(scene)) => self.show(scene),
-            Some(Err(failure)) => self.report_remesh(&failure.to_string()),
+            Some(Err(failure)) => self.report_remesh(&rendered(&failure)),
             None => {}
         }
         self.submit_remesh(session);
@@ -214,7 +212,7 @@ impl App {
     /// same trade the failed batch above makes.
     fn show(&mut self, scene: Arc<SceneGeometry>) {
         if let Err(failure) = self.renderer.upload_scene(&self.gpu.queue, &scene) {
-            self.report_remesh(&failure.to_string());
+            self.report_remesh(&rendered(&failure));
             return;
         }
         self.phase = ScenePhase::Ready(scene);
@@ -430,7 +428,7 @@ impl App {
     /// States a frame failure once, however many frames it goes on to affect.
     fn report(&mut self, failure: FrameError) {
         if self.reported != Some(failure) {
-            eprintln!("mycraft: a frame was dropped: {failure}");
+            eprintln!("mycraft: a frame was dropped: {}", rendered(&failure));
             self.reported = Some(failure);
         }
     }
@@ -460,10 +458,14 @@ impl App {
     /// **It never ends the run**, which is the opposite of what a failed
     /// preparation does and deliberately so: preparation has no previous picture
     /// to fall back on, and a re-mesh has the one it drew a moment ago.
-    fn report_remesh(&mut self, failure: &str) {
-        if self.reported_remesh.as_deref() != Some(failure) {
-            eprintln!("mycraft: an edit could not be shown: {failure}");
-            self.reported_remesh = Some(failure.to_owned());
+    /// `reason` is text the renderer already produced, not a failure: both
+    /// callers hand it `rendered(..)`. Naming it after the value it carries
+    /// rather than after the value it came from is what keeps it out of the
+    /// guard that watches for an unrendered failure being interpolated.
+    fn report_remesh(&mut self, reason: &str) {
+        if self.reported_remesh.as_deref() != Some(reason) {
+            eprintln!("mycraft: an edit could not be shown: {reason}");
+            self.reported_remesh = Some(reason.to_owned());
         }
     }
 }

@@ -122,18 +122,39 @@ declaration in it or none of them — there is no partial load, and one bad file
 does not cost you just that file. A failure leaves the registry exactly as it
 was.
 
-**A content failure stops the launch.** The client exits without opening a
-window and prints a line beginning `mycraft:` on standard error. There is no
-error screen, no safe mode, and no starting-anyway-without-it: a window that
-opened with your block silently missing would tell you nothing.
+**A content failure stops the launch**, and the client says why on standard
+error, in text beginning `mycraft: `. There is no error screen, no safe mode,
+and no starting-anyway-without-it: a window that opened with your block silently
+missing would tell you nothing.
 
-**What that line says today is less than the engine knows.** Every refusal below
-is constructed naming the file it came from, the block name it was declared
-under and the field at fault — but the client prints only the outermost sentence
-of it, so a bad block file reports `mycraft: the shipped content could not be
-read` and stops there. Until it prints the whole chain, the practical advice is
-the unsatisfying one: **change one file at a time**, so the file you last
-touched is the file at fault.
+**Where it stops depends on what is wrong.** A content root that is not there at
+all is noticed before anything is opened, so the client exits without a window.
+A declaration the loader *refuses* is collected at the first frame, so you may
+see a window appear and close again. Either way the refusal is on your terminal
+when the process ends.
+
+**The refusal names the file, the declaration and the field.** Put
+`slid = true` in `blocks/amber.toml` — a typo for `solid` — and this is what you
+read:
+
+```
+mycraft: the shipped content could not be read: content/base/blocks/amber.toml, block `example:amber`: TOML parse error at line 4, column 1
+  |
+4 | slid = true
+  | ^^^^
+unknown field `slid`, expected one of `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`
+```
+
+Read it outermost first: what failed, then which file and which block, then the
+parser pointing at the line. That is one edit, in one named file, with the
+accepted spellings listed. You do not need to change one file at a time to find
+out which one is at fault, and you do not need to read any Rust.
+
+**Where a part is missing, nothing is invented in its place.** Two files
+claiming one name names both files and no field, because no single field is
+wrong. A file that is not TOML at all names the file and the parser's reason and
+no block, because there was never a declaration to read a name out of. A
+`blocks/` directory that declares nothing names the directory.
 
 Four ways to get it wrong, all of them refusals rather than surprises later:
 

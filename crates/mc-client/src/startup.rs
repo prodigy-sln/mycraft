@@ -133,17 +133,18 @@ pub enum PreparationError {
     /// are one answer, and two variants for it would be two things a reader has
     /// to tell apart where nothing constructs the second.
     ///
-    /// **The message a player is shown for a save whose blocks have changed is
-    /// this one**, and it is the whole user interface the decision has in this
-    /// build: it has to name every changed block and say exactly what to pass to
-    /// load anyway. The refusal underneath already names the file and every
-    /// block; what is added here is the sentence that says what to do about it.
+    /// **The sentence a player whose blocks have changed needs is not in this
+    /// message, and it used to be.** It is asked for separately, through
+    /// [`way_out`](Self::way_out), and said after the whole chain rather than
+    /// wrapped around the front of it. A way out is not a cause: a report is a
+    /// failure and every failure under it, so a message appending advice to its
+    /// own source strands that advice at the top of the report — before the
+    /// refusal it answers — and has the source read out twice besides.
     ///
-    /// **The way out is offered only where it is one.** A save refused for a
-    /// block the registry does not hold, or for bytes that are not a save, is
-    /// not something the flag can load — telling a player to pass it there would
-    /// send them round the same refusal a second time.
-    #[error("{0}{way_out}", way_out = way_out_of(.0))]
+    /// Transparent, because this level knows nothing the launch does not. The
+    /// text a player reads is unchanged to the byte on the one path that offers
+    /// a way out, leading `". "` included.
+    #[error(transparent)]
     Launch(#[from] LaunchError),
     #[error(
         "the content registers no solid block, so a player would have nothing to place; the \
@@ -152,6 +153,28 @@ pub enum PreparationError {
     NothingToPlace,
     #[error("the thread preparing the replay ended without producing a scene or an error")]
     WorkerLost,
+}
+
+impl PreparationError {
+    /// What to tell a player beyond what this refusal already says — the way out
+    /// where there is one, and the empty string where there is not.
+    ///
+    /// **A way out is not a link in the causal chain**, which is why it is asked
+    /// for separately rather than carried in a message. A cause says what
+    /// happened; `--load-changed-blocks` says what to do about it, so it belongs
+    /// after the whole chain rather than at the top of it, where a message
+    /// wrapping its own source would strand it before the refusal it answers.
+    ///
+    /// The sentence itself is unchanged and still spelled in exactly one place,
+    /// so the parse that accepts the flag and the refusal that advertises it
+    /// cannot disagree.
+    #[must_use]
+    pub fn way_out(&self) -> String {
+        match self {
+            Self::Launch(failure) => way_out_of(failure),
+            _ => String::new(),
+        }
+    }
 }
 
 /// The content directory the client reads, checked to exist before anything is

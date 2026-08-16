@@ -1090,3 +1090,51 @@ reading the standard correctly would find the justification void and delete the 
 
 **Revisit when** a mod becomes a loader-controlled unit. Escalate sooner if any work gives content a
 further way to retain state across invocations.
+
+## ADR-023 — A reported failure renders through one seam in `mc-render`, and construction is closed to three doors
+
+**Status**: Accepted · **Date**: 2026-08-16
+
+**Context.** A client refusal used to be composed at each call site by flattening a typed failure
+with `.to_string()` and printing its outermost sentence — every layer beneath the top one was
+discarded, so a mod author saw "the shipped content could not be read" and nothing else. Fixing the
+text at each site would leave the same shape: as many places to get it right as there are call sites,
+and no way to state that all of them do.
+
+**Decision.** One function walks an error's `source()` chain and renders it outermost-first, joined
+by `": "`; one function writes the rendered text to a caller-supplied sink. Both live in
+`mc-render::window`, beside the ending-to-exit-code mapping they now match: `mc-client` is excluded
+from the coverage denominator wholesale, so reporting composed there is reporting nothing measures,
+which is how the original defect survived unnoticed. The reported variant of the run's ending is
+`#[non_exhaustive]`, so no crate outside `mc-render` can write its struct literal, and the enum
+exposes exactly three constructors — one for a failure plus guidance on what to do about it, one for
+a failure prefixed with a context sentence the failure itself does not know, and one for a sentence
+with nothing beneath it. Every call site in `mc-client` goes through one of the three; none composes
+report text by hand.
+
+**Consequences.** After this change, a failure that never reaches the renderer, or reaches it through
+a hand-built string, does not compile — the property does not depend on a scan noticing a new site
+that forgot to use it. A companion source scan still runs, because the compiler only closes the
+*composition* hole: a call site can still build its context sentence by interpolating a failure's
+text into a differently-named binding and handing that string to the context parameter, which is a
+narrower, naming-convention-shaped hole the scan is left to catch. Guidance ("what to do about it")
+travels with the call rather than with the failure's type, so a future construction site could in
+principle omit it silently; nothing but the parameter being non-optional and the three-door
+constructor set holds against that today.
+
+**Rejected.**
+
+- **Composing the report in `mc-client` itself** (a new module or its existing `lib.rs`). Shortest
+  diff, but it lands the one thing this change exists to make observable inside the crate the
+  coverage gate does not measure at all — the same blindness that let the original defect ship.
+- **A chain-walking primitive in `mc-core`, with the ending's constructors left in `mc-render`.**
+  Layering purity — a chain walk depending on nothing else — at the cost of splitting one concept
+  across two crates for a walk that has exactly one caller and no reason yet to be shared further.
+- **A private newtype payload (`Failed { report: Report }`) instead of `#[non_exhaustive]` on the
+  variant.** Equal strength, larger diff: every site reading the ending changes shape, not just its
+  construction, to close a door a struct-level attribute already closes.
+- **Leaving construction open and relying on the source scan alone.** The scan's criterion is
+  necessarily a spelling — a needle it looks for — so a differently-spelled composition site escapes
+  it by construction. Closing composition at the type level turns the central property from "scanned
+  for" into "does not compile", and leaves the scan to guard only the narrower hole neither door nor
+  scan closes alone.

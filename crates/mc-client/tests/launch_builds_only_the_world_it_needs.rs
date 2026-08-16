@@ -65,6 +65,7 @@ use mc_client::launch::{PreparedLaunch, prepare_launch};
 use mc_client::startup::PreparationError;
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
+use mc_render::window::Ending;
 use mc_sim::replay::ReplayWorld;
 use mc_world::content::TomlFileDefinitionSource;
 use mc_world::persistence::{Acceptance, SavedPlayer};
@@ -153,7 +154,7 @@ fn a_launch_with_no_save_refuses_naming_the_block_the_generator_could_not_place(
 
     let launched = prepare_launch(root.path(), &where_no_save_is(&nowhere), ACCEPTING);
 
-    let answer = refusal(&launched);
+    let answer = refusal(&launched)?;
     assert_eq!(
         (answer.contains(&refused_generation), launched.is_ok()),
         (true, false),
@@ -250,13 +251,24 @@ fn quads_in(launched: &Launched, origin: [i32; 3]) -> Result<Option<u32>, String
         .map(|record| record.quad_count))
 }
 
-/// The refusal a launch gave, rendered — or what it did instead of refusing.
+/// The refusal a launch gave, as a player reads it — or what it did instead of
+/// refusing.
 ///
-/// This is the text a player is shown: the client turns a failed preparation into
-/// an ending carrying exactly this string, and the binary prints it.
-fn refusal(launched: &Launched) -> String {
+/// **Taken through the door the client goes through, not composed here.** The
+/// block the generator could not place is named a layer below the sentence
+/// saying why a world was being built at all, so a helper reading the outermost
+/// sentence alone would be asking whether a name survived a journey it never
+/// took. Going through [`Ending::failed`] and the shipped reporting rather than
+/// assembling the same pieces is what makes this a reader of that decision
+/// instead of a second copy of it.
+///
+/// # Errors
+///
+/// Returns an error if the sink refuses the bytes, which a `Vec` does not, or if
+/// what was written is not text.
+fn refusal(launched: &Launched) -> Result<String, Box<dyn Error>> {
     match launched {
-        Ok(_) => "it prepared a launch".to_owned(),
-        Err(turned_away) => turned_away.to_string(),
+        Ok(_) => Ok("it prepared a launch".to_owned()),
+        Err(turned_away) => support::reported(&Ending::failed(turned_away, &turned_away.way_out())),
     }
 }

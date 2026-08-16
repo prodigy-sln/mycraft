@@ -1036,6 +1036,67 @@ drift from it. Because `mc-render` and `mc-sim` may not resolve each
 other, every test needing both lives in `crates/mc-client/tests/`; the
 committed goldens still live under `crates/mc-render/goldens/`.
 
+## The reporting seam: how a failure becomes text a person reads
+
+**One renderer, one sink, and three doors.** `mc-render/src/window.rs` holds
+`rendered(&dyn Error) -> String`, which is a failure's own message followed by
+`": "` and the message of every failure beneath it in the `source()` walk,
+outermost first; and `report(&Ending, &mut dyn Write)`, which writes
+`"mycraft: "`, that text unmodified, and a line break. `Ending::Failed` is
+`#[non_exhaustive]`, so no crate outside `mc-render` can write the struct
+literal — the only ways to build a reported failure are `Ending::failed`,
+`Ending::failed_under` and `Ending::stated`, and each renders the whole chain.
+
+**It lives beside the endings rather than in `main`, and the reason is
+coverage.** ADR-013 excludes `mc-client` from the coverage denominator
+wholesale. Reporting written there is reporting nothing measures, which is
+exactly how the defect this seam replaced survived: the client flattened a
+typed failure with `.to_string()`, printed the outermost sentence, and every
+test that asked the *value* stayed green while a mod author read one generic
+line. `exit_code` already sat in `window.rs` for the same argument; rendering is
+the other half of it.
+
+**A message never states its own cause.** Under a full chain walk, a variant
+whose own `Display` interpolates its source has that source read out twice — so
+`LaunchError::Load` names the save and no longer the reason, `LaunchError::WorldGen`
+names the stage and no longer the block, and `PreparationError::Launch` is
+transparent. What a player reads is unchanged to the byte on those paths: the
+`": "` joiner moved out of the format strings and into the renderer. A refusal
+that gains a layer, like a generated world reaching a malformed id, gains it
+because that layer was being dropped before.
+
+**A way out is not a cause.** `--load-changed-blocks` says what to do rather
+than what happened, so `PreparationError::way_out()` supplies it separately and
+`Ending::failed` appends it *after* the whole chain. Wrapping it around the
+front, which is what a `Display` suffix does, strands the advice ahead of the
+refusal it answers.
+
+**What the guards forbid, and what they do not.** A source scan over
+`crates/mc-client/src` reports any production file naming `Ending::Failed`,
+`.to_string()`, or an error interpolated under the bindings `{failure}`,
+`{cause}` or `{refused}`, with **no exemption list** — an exemption list is how
+the original defect survived. The first two needles plus `#[non_exhaustive]`
+carry the real invariant: a reported failure cannot be composed in `mc-client`
+at all. The last three are a naming-convention guard over a narrow residual
+hole, since a site interpolating an error under some other binding name escapes
+them. That hole is real and it is written down rather than papered over.
+
+The scan cannot see a report that is never *reached*, so a second test runs the
+shipped binary as a subprocess and asserts what it actually writes. The two are
+halves of one claim and neither is sufficient alone.
+
+**One deviation, recorded rather than smoothed over.** The reported ending goes
+through a caller-supplied `&mut dyn Write`, and `main.rs` is the only place that
+names `std::io::stderr()`. But four **non-fatal notices** in the library still
+write to the process error stream directly with `eprintln!`:
+`app.rs`'s dropped-frame, unshowable-edit and swatch notices, and `events.rs`'s
+cursor-release notice. None of them ends a run and none goes through `report`,
+which is why the reporting guards do not cover them — they are a stream
+question rather than a rendering one. It does mean nothing can capture,
+redirect or silence them, and a library naming a stream is not the shape the
+sink parameter exists to establish. The spec that next touches client output
+should route them through a sink too.
+
 ## Mechanically enforced invariants
 
 Several facts about these designs are asserted by tests that walk real

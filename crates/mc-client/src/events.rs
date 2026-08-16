@@ -33,7 +33,9 @@
 use std::sync::Arc;
 
 use mc_render::surface::SurfaceSize;
-use mc_render::window::{CaptureState, Ending, LoopAction, WindowEventKind, window_event_action};
+use mc_render::window::{
+    CaptureState, Ending, LoopAction, WindowEventKind, rendered, window_event_action,
+};
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -66,9 +68,10 @@ pub fn run(gpu: Gpu, preparation: PreparationHandle) -> Ending {
     let event_loop = match EventLoop::new() {
         Ok(event_loop) => event_loop,
         Err(failure) => {
-            return failed(&format!(
-                "no event loop could be created, so there is no window to draw in: {failure}"
-            ));
+            return Ending::failed_under(
+                "no event loop could be created, so there is no window to draw in",
+                &failure,
+            );
         }
     };
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -82,7 +85,7 @@ pub fn run(gpu: Gpu, preparation: PreparationHandle) -> Ending {
         ending: None,
     };
     if let Err(failure) = event_loop.run_app(&mut client) {
-        return failed(&format!("the event loop stopped: {failure}"));
+        return Ending::failed_under("the event loop stopped", &failure);
     }
     ending_after_saving(
         client.session.as_ref(),
@@ -159,13 +162,11 @@ impl Client {
         let window = Arc::new(
             event_loop
                 .create_window(window_attributes())
-                .map_err(|failure| failed(&format!("no window could be opened: {failure}")))?,
+                .map_err(|failure| Ending::failed_under("no window could be opened", &failure))?,
         );
         let size = size_of(&window);
         let surface = create_surface(&gpu.instance, Arc::clone(&window)).map_err(|failure| {
-            failed(&format!(
-                "no surface could be made for the window: {failure}"
-            ))
+            Ending::failed_under("no surface could be made for the window", &failure)
         })?;
 
         // Built here, before the app, because building it is what asks the
@@ -176,7 +177,7 @@ impl Client {
         })));
         self.window = Some(window);
         App::new(gpu, surface, size, preparation)
-            .map_err(|failure| failed(&format!("the client could not be built: {failure}")))
+            .map_err(|failure| Ending::failed_under("the client could not be built", &failure))
     }
 
     /// The device and the worker preparing the launch, each of which is handed on
@@ -185,11 +186,11 @@ impl Client {
         let gpu = self
             .gpu
             .take()
-            .ok_or_else(|| failed("the device was already handed to a window"))?;
+            .ok_or_else(|| Ending::stated("the device was already handed to a window"))?;
         let preparation = self
             .preparation
             .take()
-            .ok_or_else(|| failed("the launch was already handed to a window"))?;
+            .ok_or_else(|| Ending::stated("the launch was already handed to a window"))?;
         Ok((gpu, preparation))
     }
 
@@ -216,14 +217,6 @@ impl Client {
     fn stop(&mut self, event_loop: &ActiveEventLoop, ending: Ending) {
         self.ending.get_or_insert(ending);
         event_loop.exit();
-    }
-}
-
-/// An ending carrying `report`, for the failures that are the client's own rather
-/// than a startup verdict or a lost device.
-fn failed(report: &str) -> Ending {
-    Ending::Failed {
-        report: report.to_owned(),
     }
 }
 
@@ -400,7 +393,10 @@ impl PointerPlatform for WindowPointer {
     /// line even though there is nothing further this client can do about it.
     fn release(&mut self) {
         if let Err(failure) = self.window.set_cursor_grab(CursorGrabMode::None) {
-            eprintln!("mycraft: the cursor could not be released: {failure}");
+            eprintln!(
+                "mycraft: the cursor could not be released: {}",
+                rendered(&failure)
+            );
         }
     }
 

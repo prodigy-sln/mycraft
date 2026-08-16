@@ -1,15 +1,23 @@
-//! The binary: warn about the palette, run the client, return what the ending
-//! says.
+//! The binary: warn about the palette, run the client, hand the ending a stream
+//! to be said on, return the status it says.
+//!
+//! **How a failure reads is not decided here, and that is deliberate.** A refusal
+//! is the only thing a mod author with a broken content file ever gets, and this
+//! crate is excluded from the coverage denominator wholesale — text composed here
+//! is text nothing measures. So the wording, the chain walk and the prefix all
+//! live beside the endings in `mc_render::window`, where a test can call them,
+//! and what is left here is the choice of `stderr` and nothing else.
 //!
 //! Everything it runs lives in the library beside it, so the tests that shoot the
 //! goldens import the same startup path this does — see `lib.rs` for why that
 //! matters more than it looks.
 
+use std::io;
 use std::process::ExitCode;
 
 use mc_client::{events, gpu_startup, launch, startup};
 
-use mc_render::window::{Ending, exit_code};
+use mc_render::window::{Ending, exit_code, report};
 
 /// What the player is told before the window opens.
 ///
@@ -27,7 +35,9 @@ mycraft: the block textures in this build are placeholders — stone and dirt dr
 fn main() -> ExitCode {
     println!("{PALETTE_NOTICE}");
     let ending = run();
-    report(&ending);
+    // A client that cannot write to its own error stream has nowhere left to say
+    // so, and the status the shell reads is the same either way.
+    let _written = report(&ending, &mut io::stderr());
     ExitCode::from(exit_code(&ending))
 }
 
@@ -39,11 +49,7 @@ fn main() -> ExitCode {
 fn run() -> Ending {
     let root = match startup::content_root() {
         Ok(root) => root,
-        Err(failure) => {
-            return Ending::Failed {
-                report: failure.to_string(),
-            };
-        }
+        Err(failure) => return Ending::failed(&failure, &failure.way_out()),
     };
     // The command line is read here rather than where its answer is spent, so
     // that the one place this process looks at its own arguments is the one
@@ -59,18 +65,5 @@ fn run() -> Ending {
     match gpu_startup::open() {
         Ok(gpu) => events::run(gpu, preparation),
         Err(ending) => ending,
-    }
-}
-
-/// Says how the run ended, for every ending that is not simply the player closing
-/// the window.
-fn report(ending: &Ending) {
-    match ending {
-        Ending::Closed => {}
-        Ending::Startup(failure) => eprintln!("mycraft: {failure}"),
-        Ending::Frame(reason) => {
-            eprintln!("mycraft: the run stopped because the graphics device was lost ({reason:?})");
-        }
-        Ending::Failed { report } => eprintln!("mycraft: {report}"),
     }
 }

@@ -63,6 +63,7 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 
 use mc_core::block::BlockRegistry;
+use mc_render::window::{Ending, report};
 use mc_world::content::TomlFileDefinitionSource;
 
 /// The replay's assembled scene and the texture layers its blocks resolved to, as
@@ -151,4 +152,47 @@ pub fn prepare() -> Result<RenderInput, Box<dyn Error>> {
 /// generated, meshed, packed or assembled.
 pub fn prepare_scene() -> Result<PreparedScene, Box<dyn Error>> {
     Ok(mc_client::startup::prepare_scene(&content_root()?)?)
+}
+
+/// What a run ending in `ending` writes to the error stream, captured whole.
+///
+/// **Captured from the shipped reporting rather than composed here.** A refusal
+/// is the only thing a mod author with a broken file ever gets, and a suite that
+/// rendered one of its own would agree with itself while the client printed a
+/// single sentence — which is exactly the state these scenarios exist to leave.
+///
+/// # Errors
+///
+/// Returns an error if the sink refuses the bytes, which a `Vec` does not, or if
+/// what was written is not text.
+pub fn reported(ending: &Ending) -> Result<String, Box<dyn Error>> {
+    let mut sink = Vec::new();
+    report(ending, &mut sink)?;
+    Ok(String::from_utf8(sink)?)
+}
+
+/// What the client writes when preparing a scene from the content root at `root`
+/// is refused.
+///
+/// The seam a refusal is observable at without a GPU or a display server: the
+/// client's own preparation produces the failure, the shipped reporting turns it
+/// into text, and the text is what a person reads.
+///
+/// # Errors
+///
+/// Returns an error if the root was accepted. A fixture whose declaration was
+/// taken is not a fixture a refusal can be read from, and a test searching an
+/// empty string for what it should contain would be reporting the fixture rather
+/// than the printing.
+pub fn refusal_printed_over(root: &Path) -> Result<String, Box<dyn Error>> {
+    match mc_client::startup::prepare_scene(root) {
+        Ok(_) => Err(format!(
+            "this scenario needs the content root at {} to refuse the run, and it prepared a \
+             scene instead. There is no refusal to read, so every word this asks for would be \
+             missing for a reason that has nothing to do with what is printed",
+            root.display()
+        )
+        .into()),
+        Err(refused) => reported(&Ending::failed(&refused, "")),
+    }
 }
