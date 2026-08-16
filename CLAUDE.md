@@ -1,3 +1,7 @@
+---
+spec-disposal: archive
+retention-days: 365
+---
 # MyCraft
 
 A voxel sandbox whose entire game layer — blocks, items, tools, crafting, NPCs, quests and
@@ -49,18 +53,29 @@ downgrade only with explicit user confirmation.
    `docs/` via `docs/INDEX.md` routing. Future concepts live in
    `specs/active/` and `product/roadmap.md`, never in `docs/`.
 
-   **The spec that builds a capability documents it for everyone the
-   capability reaches — that is part of its definition of done, not a
-   follow-up and never a separate issue.** Three audiences, and a spec
-   addresses each one it touches: the **engine reader** (as-built technical
-   record), the **mod author** (how to write it — files, shape, fields with
-   their bounds, what a refusal looks like, a worked example that runs), and
-   the **player** (what changed that they can see). An audience a spec does
-   not touch is addressed by saying so in one line, never by silence —
-   silence is indistinguishable from an omission, which is how a capability
-   ships that nobody outside this repository can use. Documentation written
-   one increment later is written by someone reconstructing intent, and it
-   shows.
+   **The spec that implements something documents it properly for all three
+   audiences — that is part of its definition of done, not a follow-up and
+   never a separate issue.** The audiences are the **engine reader**, the
+   **mod author**, and the **player**, and *properly* means each one can act
+   on it without reading the code:
+
+   - **Mod author** — how to write it. Where the files live, the shape of a
+     declaration, every field with its type and its bound, what a refusal
+     looks like and how to read it, what a fault does, and a complete worked
+     example that runs. A reference that lists names without showing a
+     working example is not documentation.
+   - **Player** — what is different when they play. What they can now see,
+     build, break or reach, and how to get to it.
+   - **Engine reader** — the as-built record: how it works, why it is shaped
+     that way, and what a future change must not break.
+
+   **"Not applicable to that audience" is not an answer and does not close
+   this.** A spec with genuinely nothing for the player is infrastructure,
+   and infrastructure does not get to declare itself finished — the
+   obligation transfers, in writing, to the spec that first exposes it, named
+   in that spec's own definition of done before this one closes. Documentation
+   written an increment later is written by someone reconstructing intent, and
+   it shows.
 4. **Gates are deterministic.** `scripts/sdd-gate.*` must exit 0 at every
    phase end, before validation, and before completion.
 5. **Out of Scope is binding.** Unspecced work is recorded, not built.
@@ -94,11 +109,23 @@ downgrade only with explicit user confirmation.
 
 ## Prospect Settings
 
-- `spec-disposal: delete` — the spec folder is removed by `/sdd-complete` on the
-  feature branch before it merges, so `main`'s tree never carries it. There is no
-  approval wait: a PASS validation plus a green gate is the merge condition.
-  Set `archive` (+ `retention: [days]`, default 180) to instead move the folder to
-  `specs/archive/YYYY/` and prune expired ones there.
+- `spec-disposal: archive`, `retention-days: 365` (see this file's frontmatter,
+  which is authoritative) — `/sdd-complete` moves the spec folder to
+  `specs/archive/YYYY/` on the feature branch before it merges, and prunes
+  archived folders older than the retention window. There is no approval wait: a
+  PASS validation plus a green gate is the merge condition. Setting `delete`
+  instead removes the folder outright, so `main`'s tree never carries it.
+
+  **The archive is history, not documentation, and it is not a place to defer
+  consolidation to.** `docs/` remains the only as-built record and Key Principle
+  3 is unchanged: a capability is documented for every audience it reaches, as
+  part of the spec's definition of done. "It is in the archive" is never a reason
+  to leave something out of `docs/` — a reader edits a test file or reaches for
+  the modding guide, and neither of those goes looking through a folder of
+  superseded specs. What archiving buys is recovery of *reasoning* that was
+  otherwise destroyed at merge — a scenario's wording, a task's rationale, a
+  test-map entry recording why a mutation missed — not a second home for
+  anything a reader will actually need.
 
 ## Standards
 
