@@ -69,13 +69,17 @@ downgrade only with explicit user confirmation.
    - **Engine reader** — the as-built record: how it works, why it is shaped
      that way, and what a future change must not break.
 
-   **"Not applicable to that audience" is not an answer and does not close
-   this.** A spec with genuinely nothing for the player is infrastructure,
-   and infrastructure does not get to declare itself finished — the
-   obligation transfers, in writing, to the spec that first exposes it, named
-   in that spec's own definition of done before this one closes. Documentation
-   written an increment later is written by someone reconstructing intent, and
-   it shows.
+   **Documentation is owed the moment something is implemented, even when
+   nobody can use it yet.** Both "not applicable to that audience" and "there
+   is nothing anyone can do with this yet" are refused. What exists is
+   documented now, while the person who built it still knows why it is shaped
+   that way, what it refuses, and what the numbers mean. Walking back over it
+   an increment later means reconstructing intent from code, and what gets
+   reconstructed is missing precisely the parts nobody thought to write down —
+   that is how a gap becomes permanent. Documenting at the moment of
+   implementation is what makes the documentation living rather than
+   archaeological. Only a surface that genuinely does not exist yet belongs to
+   a later spec, and its absence is stated plainly rather than left silent.
 4. **Gates are deterministic.** `scripts/sdd-gate.*` must exit 0 at every
    phase end, before validation, and before completion.
 5. **Out of Scope is binding.** Unspecced work is recorded, not built.
