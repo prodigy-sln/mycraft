@@ -41,8 +41,9 @@ frustrating and want the game itself to be the moddable surface, not a thing mod
    is incomplete and the API gets fixed — not the base game special-cased.
 6. **State in Rust, behaviour in script**: Runtime state lives in the ECS; Luau holds only
    behaviour. This is what makes hot reload lose nothing.
-7. **A bad mod must never take down the server**: Sandbox, instruction budget, memory cap, and
-   per-callback fault isolation are non-negotiable, not hardening to add later.
+7. **A bad mod must never take down the server**: Sandbox, call-and-loop budget, memory cap, and
+   per-callback fault isolation are non-negotiable, not hardening to add later. The budget charges
+   calls and loop edges rather than instructions, which is what a content author sizes against.
 
 ## Success Metrics
 

@@ -195,8 +195,10 @@ Non-negotiable. Violating any of these is a Blocker, not a style note.
    hook is fixed in the API, never special-cased.
 2. **State in Rust, behaviour in script.** Runtime state lives in the ECS; Luau holds behaviour
    only. This is what makes hot reload lose nothing.
-3. **A bad mod never takes down the server.** Sandbox, instruction budget, memory cap, and
-   per-callback fault isolation are load-bearing, not later hardening.
+3. **A bad mod never takes down the server.** Sandbox, call-and-loop budget, memory cap, and
+   per-callback fault isolation are load-bearing, not later hardening. The budget charges calls
+   and loop edges, never instructions — a loop body of any size is free — so cost comes down by
+   batching calls rather than by shortening code.
 4. **The server is authoritative.** Client input is a request, never a fact. Anything a client
    claims is recomputed server-side.
 5. **Verification precedes the thing it verifies.** The capture harness lands before the renderer,
