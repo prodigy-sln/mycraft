@@ -57,8 +57,11 @@ in the meantime.
   at load time. Load-time code runs in a scratch VM during every hot-reload candidate build, so
   side effects there run at unpredictable moments.
 - **No state in Lua globals.** Runtime state belongs in the ECS via handles; mod-owned persistent
-  state is declared through `mycraft.state(...)` so it survives reload (ADR-004). A global counter
-  will silently reset and you will lose an afternoon to it.
+  state is intended to be declared through `mycraft.state(...)` so it survives reload (ADR-004).
+  A global counter will silently reset and you will lose an afternoon to it.
+  **`mycraft.state(...)` does not exist yet — nor does any other `mycraft.*` binding.** Nothing is
+  authored in Luau today; blocks and HUD elements are declared in the data files under
+  `content/base/`. The rule above is the shape to design toward, not an API you can call.
 - **Prefer declarative subscriptions to polling.** Register an event predicate and let Rust match
   it; do not scan the world every tick. This is the difference between a server that holds 32
   players and one that does not.
@@ -102,7 +105,16 @@ candidate specifically, because there is no reload yet to gate.
 
 You are running inside a 50 ms tick budget shared with 31 other players and the rest of the engine.
 
-- Every callback runs under an instruction budget. Exceeding it aborts the callback and marks the
-  mod degraded — it does not slow the server down, it stops your mod working.
-- Allocate sparingly in per-tick paths; table churn is the usual culprit.
-- Per-mod CPU time is measured and visible. Your mod's cost is attributable.
+- Every callback runs under a **call-and-loop budget** — **not** an instruction budget, and the
+  difference decides how you make something fit. It charges calls and loop edges, so a loop body of
+  any size is free, a thousand straight-line statements cost one, a call within script costs two and
+  a call into the host costs one. **Cost comes down by batching calls, never by shortening code.**
+  Exceeding it aborts the callback and the abort latches, so a protected call cannot swallow it — it
+  does not slow the server down, it stops your mod working. Measured on a 16³ pass: 4,369 bare,
+  8,465 with one host call per cell, 12,561 with one script call per cell, the last aborting under
+  the shipped budget of 10,000. See `docs/modding/script-limits.md`.
+- Allocate sparingly in per-tick paths; table churn is the usual culprit. Memory is capped per
+  invocation as a delta above what the state already held, and exceeding it aborts the same way.
+- **Not built yet:** per-mod CPU accounting. Cost is not attributable to a mod today — a fault
+  raised while the host itself is short of memory names nobody, deliberately, rather than blaming
+  whoever happened to be running.
