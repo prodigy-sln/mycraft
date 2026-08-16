@@ -340,8 +340,9 @@ to notice.
 1. **The base game is a mod.** Zero hardcoded block, item, recipe, NPC, or quest
    definitions in Rust. If a stage wants one, the fix goes in the scripting API.
 2. **State in Rust, behaviour in script.** State held in Lua breaks hot reload.
-3. **A bad mod never takes down the server.** Sandbox, instruction budget,
-   memory cap, per-callback fault isolation.
+3. **A bad mod never takes down the server.** Sandbox, call-and-loop budget
+   (it charges calls and loop edges, never instructions), memory cap,
+   per-callback fault isolation.
 4. **The server is authoritative.** Client input is a request, never a fact.
 5. **Verification precedes the thing it verifies.** Harness before renderer,
    bots before multiplayer, adversarial suite before public servers. If a stage
