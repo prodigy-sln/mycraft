@@ -3,12 +3,16 @@
 Everything here is content, not engine code: today that means data files read
 through a well-defined loading contract, with no privileged engine access.
 `content/base/` is the "vanilla" game and is a mod like any other (ADR-005).
-**Luau arrives with MVP 2** and will progressively take over authoring — see
-"MVP 1 today vs. MVP 2" below for exactly what that changes and what it does
-not.
+**The Luau host is built; authoring in Luau is not.** The sandbox, its limits and
+its fault vocabulary are final and enforced, and there is no `mycraft.*` binding of
+any kind to reach them with — so every definition here is still a data file. See
+"MVP 1 today vs. MVP 2" below for exactly what changes when that binding lands and
+what does not.
 
-API reference: `docs/modding/` (block authoring: `docs/modding/blocks-items.md`).
-Host-side rules, once the scripting host exists: `crates/mc-script/CLAUDE.md`.
+Authoring starts at `docs/modding/README.md`, which routes to the contract for each
+kind of file; block authoring itself is `docs/modding/blocks-items.md`. The scripting
+host exists now — its author-facing side is the four `docs/modding/script-*.md` pages,
+and its host-side rules are `crates/mc-script/CLAUDE.md`.
 
 ## The rule that makes this work
 
@@ -110,9 +114,13 @@ You are running inside a 50 ms tick budget shared with 31 other players and the 
   any size is free, a thousand straight-line statements cost one, a call within script costs two and
   a call into the host costs one. **Cost comes down by batching calls, never by shortening code.**
   Exceeding it aborts the callback and the abort latches, so a protected call cannot swallow it — it
-  does not slow the server down, it stops your mod working. Measured on a 16³ pass: 4,369 bare,
-  8,465 with one host call per cell, 12,561 with one script call per cell, the last aborting under
-  the shipped budget of 10,000. See `docs/modding/script-limits.md`.
+  does not slow the server down, it stops your mod working. Measured on a 16³ pass — 4,096 cells —
+  4,369 bare, 8,465 with one host call per cell, 12,561 with one call within script per cell: so
+  roughly one, two and three ticks a cell, and the code is the same length in all three. **The
+  shipped budget is 1,000,000**, which all three of those fit inside comfortably; what it is sized
+  against is the largest chunk evaluation that cannot be sliced, since a callback over budget has
+  the queue to go to and a chunk has nowhere. See `docs/modding/script-limits.md` for the
+  arithmetic and for how to size a slice against it.
 - Allocate sparingly in per-tick paths; table churn is the usual culprit. Memory is capped per
   invocation as a delta above what the state already held, and exceeding it aborts the same way.
 - **Not built yet:** per-mod CPU accounting. Cost is not attributable to a mod today — a fault

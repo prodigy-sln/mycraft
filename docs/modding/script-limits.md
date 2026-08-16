@@ -73,9 +73,11 @@ Measured on a 16³ pass — 4,096 cells:
 | One host call per cell | 8,465 |
 | One call to a Luau helper per cell | 12,561 |
 
-Roughly one, two and three ticks a cell. The third of those aborts under a
-budget of 10,000 while the first two do not, and the code is the same length in
-all three.
+Roughly one, two and three ticks a cell, and **the code is the same length in
+all three** — which is the point of the measurement. All three fit inside the
+shipped 1,000,000 with room to spare; hold the same three against a budget of
+10,000 and the third aborts while the first two do not. Same volume, same
+algorithm, one more call per cell.
 
 **Cost is reduced by batching calls, never by shortening code.** Sizing a
 workload against how much code it is, rather than against how many calls it
