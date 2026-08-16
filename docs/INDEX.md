@@ -61,7 +61,7 @@ the Routing Guide below is where future destinations are declared.
 
 | File | Purpose | Sources |
 |------|---------|---------|
-| gameplay.md | Player-facing controls and movement feel: WASD walking, mouse look, jump, cursor capture; what is on screen (crosshair, held-block swatch) and the F3 debug overlay; saving on quit and resuming on relaunch — drawn as saved from the first frame, not only walkable as saved — and what a player sees and can do when a save can't be loaded outright | SPEC-005, SPEC-009, SPEC-010, SPEC-012 |
+| gameplay.md | Player-facing controls and movement feel: WASD walking, mouse look, jump, cursor capture; what is on screen (crosshair, held-block swatch) and the F3 debug overlay; saving on quit and resuming on relaunch — drawn as saved from the first frame, not only walkable as saved — what a player sees and can do when a save can't be loaded outright, and that the scripting host is machinery a player never meets, nothing on screen being scripted | SPEC-005, SPEC-009, SPEC-010, SPEC-012, SPEC-014 |
 
 ### ops/
 

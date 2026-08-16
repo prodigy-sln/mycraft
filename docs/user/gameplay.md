@@ -99,6 +99,17 @@ all, or leave it off and the game keeps refusing until you either restore the mo
 the flag. A block that only *looks* different — a retextured mod, with nothing about how it behaves
 changed — never triggers this at all; that world loads normally, without asking.
 
+## Mods and scripting
+
+**Nothing you can see is scripted, and nothing in the game reaches the scripting host.** The engine
+now carries one — a sandboxed place for mod code to run, with limits on how long it may run and how
+much memory it may use — but it is machinery only: no block, no behaviour and no content anywhere in
+the game is defined in script. The blocks you break and place, and the crosshair and swatch on your
+screen, are declared in the game's own content data files exactly as they were before, and the
+running game never calls into the scripting host at all. So nothing about how the game plays,
+launches, saves or looks changed with it, and there is nothing here for a player to turn on, try or
+configure.
+
 ## What this does not cover yet
 
 This is walking, looking, jumping and saving on a fixed, already-generated world. It does not
