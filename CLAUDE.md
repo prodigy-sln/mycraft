@@ -85,6 +85,19 @@ downgrade only with explicit user confirmation.
 5. **Out of Scope is binding.** Unspecced work is recorded, not built.
 6. **Phases resume from disk.** After spec or tasks approval, `/clear` is
    safe and recommended — no phase depends on conversation history.
+7. **Every spec delivers something a stakeholder can actually use.** At
+   least one capability a **player**, **mod author** or **server operator**
+   can exercise for themselves — named in the spec, with the stakeholder
+   named, and reachable by them without reading Rust. **Building the backend
+   and never giving anyone access to it is not a complete spec.** It is half
+   of one, and the missing half is where the design errors are: a surface
+   nobody has used is a surface nobody has found the gaps in, and the
+   documentation obligation in Principle 3 has nothing to bite on because
+   there is nothing a stakeholder can do. If a capability genuinely cannot
+   reach a stakeholder inside one spec, the spec is scoped wrongly — widen it
+   to include the thinnest path that reaches one, or merge it with the spec
+   that does. This is the vertical-slice rule with a test attached: name the
+   stakeholder, name the thing they can now do, or the spec is not done.
 
 ## Commands
 
