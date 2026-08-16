@@ -22,6 +22,13 @@ what to attach it to — and content has no path into it. Block definitions stil
 live in the data files under `content/base/`, which is where a block is declared
 and the only place one can be.
 
+**So if you came here to make something, this is the wrong page and `README.md`
+is the right one.** Authoring works today and it is data files: a block, a HUD
+element, a voxel model. `README.md` takes you from a clean checkout to a block of
+your own, visible in the game, in one file and one command. Come back here when
+you want to know what the ground will be like under Luau — none of which you
+need in order to write content now.
+
 The authoring surface arrives in two steps, and both are additions behind what
 is written here rather than changes to it. **Defining blocks in Luau** comes
 first and retires the data-file loader. **Attaching behaviour to a subject** —
@@ -72,12 +79,46 @@ end
 ```
 
 Follow-up work is **queued, never entered inline**, so a cascade converts into
-queue length rather than into call depth. Each entry is read raw — the field,
-each slot and both identity strings — and an entry that is not two strings is
-**passed over silently**. Nothing is fabricated in its place, and nothing is
-reported to you either: a misspelled `componant` key is work that quietly never
-runs. Check the spelling of a `follow_up` entry by hand, because the host will
-not.
+queue length rather than into call depth.
+
+### The returned value, field by field
+
+This is the whole contract between your callback and the engine. Everything in
+it is read **raw** — no metatable of yours is ever consulted — so `follow_up`
+cannot be supplied through an `__index`, and the host cannot be made to run your
+code while it reads.
+
+| What | Type | Bound | If it is anything else |
+|---|---|---|---|
+| the return value | any | — | anything that is not a table ends the invocation with no follow-up. Returning nothing is normal and is not a failure. |
+| `follow_up` | table | up to the pending bound, counted across every requester | a missing or non-table `follow_up` means no follow-up work. No signal. |
+| each slot of `follow_up` | table | slots `1..n`, contiguous from 1 | a slot that is not a table is skipped. No signal. |
+| `subject` | string | non-empty by convention; the host stores it without checking | a slot the host cannot read a string out of is skipped. No signal. |
+| `component` | string | same | same. |
+
+Only the array part is read, from slot 1 upwards, so a `follow_up` table keyed
+by anything other than `1, 2, 3, …` is invisible — and a hole in the middle ends
+the list early rather than skipping past it.
+
+**Every malformed shape above is passed over silently, and you get nothing back
+saying so.** Nothing is fabricated in its place — the host will not guess at an
+attachment you did not name — but nothing is reported either, so a misspelled
+`componant` key is work that quietly never runs, and the symptom is a mod that
+does nothing rather than a mod that complains. Until that has a diagnostic,
+**print what you are about to request while you are developing** and check it
+against what actually ran:
+
+```lua
+return function()
+    local next_up = { subject = "stone-furnace", component = "vent" }
+    print(("requesting %s / %s"):format(next_up.subject, next_up.component))
+    return { follow_up = { next_up } }
+end
+```
+
+If that line appears and the vent's own callback never runs, the entry was
+malformed or its target was quarantined — those are the two silent cases, and
+they are the first two things to check.
 
 ## The reachable surface, exactly
 
@@ -169,14 +210,33 @@ returns `false`, and the `print` that follows still reaches the host.
 A host constructed without configuration runs these. A server operator can
 raise or lower any of them; these are the values that apply when nobody does.
 
-| Limit | Default | What it aborts |
-|---|---|---|
-| Call-and-loop budget | 1,000,000 ticks | One entry into script — a chunk evaluation or one callback invocation. |
-| Memory cap | 256 KiB | One entry that adds more than this **above the baseline it started from**. |
-| Memory backstop | 16 MiB | The whole script state, enforced by the allocator rather than by the interrupt. |
-| Fault threshold | 3 | Consecutive faults on one attachment before it stops being invoked. |
-| Round bound | 64 | Invocations one dispatch round performs before the rest waits for the next round. |
-| Pending bound | 256 | Entries of follow-up work that may be waiting at once; work past it is refused and named. |
+| Limit | Default | What exceeding it does | What you do about it |
+|---|---|---|---|
+| Call-and-loop budget | 1,000,000 ticks | Aborts one entry into script — a chunk evaluation or one callback invocation — with *call and loop budget exhausted*. | Make fewer calls, or slice the work across invocations. Shortening the code does nothing; see the next section. |
+| Memory cap | 256 KiB | Aborts one entry that adds more than this **above the baseline it started from**, with *allocation refused*. | Hold less at once. Build into one buffer you reuse rather than growing a table per invocation. |
+| Memory backstop | 16 MiB | The ceiling the whole state may reach, allocator-enforced. Approaching it stops faults naming anybody — see host memory pressure below. | Retain less across invocations. This is the limit your *previous* invocations spend, not this one. |
+| Fault threshold | 3 | Consecutive faults on one attachment stop it being invoked at all. | Fix the callback and re-attach it, which clears the quarantine. |
+| Round bound | 64 | Invocations one round performs before the rest waits for the next round; the overflow is reported as *cascade deferred*. | Nothing — deferred work runs, and one deferral per round is what a healthy long cascade looks like. |
+| Pending bound | 256 | Entries of follow-up work that may be waiting at once. Work past it is **refused and named**, and never runs. | Request less fan-out per invocation. A refusal is work you lost, not work that waited. |
+
+Every one of these is a non-zero value — none can be configured to zero or to
+"unlimited", so there is no setting under which a limit is off. The two memory
+figures are also constrained against each other: the backstop must leave room
+above the state's own baseline for a whole memory cap, and a host configured
+otherwise **refuses to start** rather than running with every fault blamed on
+its own configuration:
+
+```text
+the scripting host could not start: the absolute memory backstop of 524288 bytes
+leaves no room for one invocation: the state holds 385952 bytes before any
+content runs, and each invocation may add 262144
+```
+
+The three byte counts are that host's own — the middle one is what its state
+weighed before any content ran, so it moves with the backend rather than being a
+figure to memorise. This is an operator's error rather than an author's, but it
+is the one message meaning *the host never came up*: no chunk of yours ran, and
+nothing you wrote is implicated.
 
 Chunk evaluation is budgeted like everything else. There is no unbudgeted path
 from the engine into script, and a chunk whose top level never returns is
@@ -216,6 +276,59 @@ workload against how much code it is, rather than against how many calls it
 makes, is wrong by the size of every loop body in it. One call passing a batch
 beats N calls passing one item, and it is the same advice binding overhead
 already gives — it turns out to govern the budget too.
+
+### Working out whether a workload fits
+
+Count three things and add them. Nothing else in your code costs anything.
+
+1. **Loop edges** — one per iteration of every loop, however long its body.
+2. **Calls within script** — two each, one for the call and one for the return.
+3. **Calls into the host** — one each.
+
+Check the rules against the measured table above rather than taking them on
+trust. All three rows are `4,096 × ticks-per-cell + 273`, where 273 is the
+loop's own setup and the enclosing call — a constant that stops mattering at any
+size worth counting:
+
+| The pass does this | Per cell | Predicted | Measured |
+|---|---|---|---|
+| Nothing but the loop | 1 edge | 4,369 | 4,369 |
+| One host call per cell | 1 edge + 1 call | 8,465 | 8,465 |
+| One Luau helper call per cell | 1 edge + 2 | 12,561 | 12,561 |
+
+So a pass over a 64³ volume — 262,144 cells — costs:
+
+```text
+one host call per cell     262,144 × 2 + 273  =    524,561   fits
+one script call per cell   262,144 × 3 + 273  =    786,705   fits
+both                       262,144 × 4 + 273  =  1,048,849   ABORTED
+```
+
+Note what changed and what did not. The volume is identical, the algorithm is
+identical, and the file is a line or two longer. What moved it over the line was
+one extra call per cell. Hoisting that helper's work out of the loop — one call
+passing all 262,144 cells rather than 262,144 calls passing one — costs **two
+ticks in total** instead of 524,288, and the body it runs is free either way.
+
+As one formula, for a pass over `N` cells:
+
+```text
+ticks ≈ 273 + N × (1 + host_calls_per_cell + 2 × script_calls_per_cell)
+```
+
+**Read it backwards to size a slice**: divide the budget by the per-cell cost
+and that is the most cells one invocation may visit. A callback that visits a
+cell, calls a helper of its own and makes one host call from inside it costs
+four ticks a cell, so it may visit 250,000 cells; inline the helper and the same
+budget buys 500,000; batch the host call so it happens once for the whole pass
+and it buys 1,000,000, because all that is left is the loop.
+
+Two things this makes obvious that the rule alone does not. **Whatever happens
+inside the body is free** — validating a value, building a string, ten
+statements or one — so shortening a body moves no number in this section. And
+**the 273 is the only fixed cost**, so splitting a job into more, smaller
+invocations costs 273 ticks apiece and nothing else. Slicing is cheap; calling
+is what is not.
 
 ## Two rules that sit next to each other
 
@@ -276,7 +389,34 @@ re-enter the budget indefinitely, and it is also why:
 So: **build, then swap — never mutate in place.** Construct the replacement in
 a local, and assign it in one statement once it is complete. A structure
 assembled field by field is a structure an abort can leave inconsistent, with
-nothing of yours able to repair it.
+nothing of yours able to repair it:
+
+```lua
+local settings = { fuel = 0, output = nil, stage = "idle" }
+
+return function(reading)
+    -- WRONG. An abort between any two of these leaves `settings` describing a
+    -- state the mod was never in, and the next invocation reads it as if it
+    -- were true. No cleanup of yours runs to undo it.
+    settings.stage = "smelting"
+    settings.fuel = settings.fuel - burn_cost(reading)   -- may be aborted here
+    settings.output = smelted(reading)
+
+    -- RIGHT. Everything an abort could interrupt happens to a local nobody
+    -- else can see. The one assignment that publishes it either happens whole
+    -- or does not happen at all.
+    local next_settings = {
+        stage = "smelting",
+        fuel = settings.fuel - burn_cost(reading),
+        output = smelted(reading),
+    }
+    settings = next_settings
+end
+```
+
+The same rule is why a `pcall` around the wrong half buys nothing: the handler
+you were counting on is a script frame, and after the latch no script frame
+runs.
 
 The latch clears at the start of the next entry, so the abort is a property of
 the invocation that caused it, not of your mod forever.
@@ -314,6 +454,143 @@ Deferral and refusal are deliberately different kinds. A **deferred** cascade
 runs next round and loses nothing; a **refused** one never runs at all. A
 well-behaved terminating cascade emits one deferral per round before it
 finishes, which is noise precisely because nothing was lost.
+
+### How a fault reads
+
+Every fault renders in one grammar. Everything in square brackets appears only
+when the fault has it:
+
+```text
+<origin>[, subject `S`][, component `C`][, line N][, refused `S`/`C`]: <kind>: <cause>
+```
+
+`<origin>` has four shapes and all four occur:
+
+| Shape | When you see it |
+|---|---|
+| ``chunk `NAME`, round N`` | a callback failed — the chunk is the one that *defined* it, not the one dispatching |
+| ``chunk `NAME`` | a chunk failed while being evaluated, before any attachment exists |
+| `round N` | nothing in anybody's file went wrong: a cascade fault, or one the host raised about its own condition |
+| `unattributed` | the fault can place itself nowhere at all |
+
+A fault that could not attribute itself says so rather than rendering a gap,
+because a gap is what you would misread as a locator that got lost.
+
+### Causing each fault, and what you will read
+
+Every kind below is one you can cause. The chunk is named `furnace.luau` and the
+attachment is `base:furnace` / `base:on_tick` throughout.
+
+**Compilation failed** — the chunk does not parse. Nothing is attached, so there
+is no attachment to name, and the line is the one the parser stopped on:
+
+```lua
+local heat = 0
+return function()
+    return heat +
+end
+```
+```text
+chunk `furnace.luau`, line 3: compilation failed: Expected identifier when parsing expression, got 'end'
+```
+
+**Script error** — your callback raised, whether by `error(...)` or by an
+ordinary mistake. This is the one you will read most often:
+
+```lua
+return function()
+    error("the furnace is jammed", 0)
+end
+```
+```text
+chunk `furnace.luau`, round 2, subject `base:furnace`, component `base:on_tick`: script error: the furnace is jammed
+```
+
+**Note the `0`, and note what is missing.** A raise from inside a callback comes
+back to the host through a protected call as an ordinary value, so it is
+rendered exactly as script left it — with **no line field at all**, and with no
+location stripped out of the front of it. A bare `error("the furnace is
+jammed")` therefore reports the backend's own position marker spliced onto the
+front of your message, `[string "furnace.luau"]:2: `, and it stays there because
+there is no `line` field for it to be lifted into. Pass `0` as the second
+argument when you want the cause to be exactly your text.
+
+That is the reverse of a chunk-level fault, where the location *is* parsed out
+and reported as the `line` field — which is why the compilation example above
+carries `line 3` and this one carries no line.
+
+**Call and loop budget exhausted** — the invocation never returned inside its
+budget. Note the cause: the host says only that a limit was passed, because at
+that point no script frame is running to say anything more:
+
+```lua
+return function()
+    while true do end
+end
+```
+```text
+chunk `furnace.luau`, round 2, subject `base:furnace`, component `base:on_tick`: call and loop budget exhausted: script exceeded a limit the host enforces
+```
+
+**Allocation refused** — the invocation held more than one entry may. The cause
+here is composed by the host, because the underlying error carries no message at
+all; the first number is the cap, the second is what was in use when you were
+stopped, so you can tell "slightly too much" from "far too much":
+
+```lua
+return function()
+    local kept = {}
+    while true do
+        kept[#kept + 1] = buffer.create(4096)
+    end
+end
+```
+```text
+chunk `furnace.luau`, round 2, subject `base:furnace`, component `base:on_tick`: allocation refused: script allocated more than the 262144 bytes one invocation may hold above the memory it started with; 648432 bytes were in use when it was stopped
+```
+
+**The two numbers are in different frames, and reading them as one pair is the
+mistake to avoid.** The first is a **delta** — what this invocation was allowed
+to add above the memory the state already held on its way in. The second is an
+**absolute** — the whole state's script memory at the moment the interrupt
+stopped you, everything anybody has retained included. So the second is always
+much the larger, and it is not "how much you asked for": under the shipped cap it
+cannot even come out below the state's own baseline of roughly 386 KB plus the
+262,144 you were allowed. The second figure is whatever that particular run
+measured; what you compare against the cap is the *difference* between the two.
+
+If the host also could not collect it afterwards, the same cause ends `, and the
+host could not collect it afterwards` — which is about the host's condition
+rather than yours, and is what the next invocation runs into.
+
+**Cascade deferred** — your follow-up work did not fit this round. It names the
+round and no chunk, because nothing in anybody's file went wrong. Nothing is
+lost and there is nothing to fix:
+
+```text
+round 4, subject `base:furnace`, component `base:on_tick`: cascade deferred: the round reached its invocation bound with follow-up work still waiting; it runs next round
+```
+
+**Cascade refused** — the pending queue was full, so the work never ran. This is
+the only fault naming two attachments: the one that asked, and the one that was
+turned away:
+
+```text
+round 4, subject `base:furnace`, component `base:on_tick`, refused `base:vent`/`base:on_tick`: cascade refused: the pending queue was full, so this follow-up work was not admitted and will not run
+```
+
+**Host memory pressure** — the state had no room for your whole allowance before
+you began. It names **no chunk, no subject and no component**, deliberately, and
+it does not count against you:
+
+```text
+round 7: host memory pressure: the state had no room for this invocation's whole memory allowance before it began, so this failure may not be the running attachment's own
+```
+
+Reading that one on your own callback means the problem is the state rather than
+your code — possibly your own retention from earlier invocations, possibly
+somebody else's. It is the one fault where the right response is to look at what
+is being *kept*, not at what just ran.
 
 ## Quarantine, as an author meets it
 
@@ -365,3 +642,76 @@ The cost is stated rather than hidden, and it is two-sided:
 
 That is the price of not keeping a ledger of retained bytes per attachment. It
 is worth knowing while you write a mod that keeps things.
+
+## A complete example
+
+Everything above in one chunk. It is a furnace that smelts a queue too big for
+one budget, hands off to a vent when it finishes, and is written so that no
+abort can leave it inconsistent.
+
+```lua
+-- furnace.luau
+--
+-- Evaluated once. Everything it needs lives in locals, because the global
+-- environment is frozen and an assignment to it aborts the chunk.
+
+local PER_INVOCATION = 4096          -- one slice, sized against the budget below
+local VENT = { subject = "base:furnace", component = "base:vent" }
+
+local queue = {}                     -- retained across invocations, on purpose
+local cursor = 1
+
+for index = 1, 40000 do              -- 40,000 loop edges, one per iteration
+    queue[index] = index             -- the body is free, however long it gets
+end
+
+return function()
+    local last = math.min(cursor + PER_INVOCATION - 1, #queue)
+
+    -- Build the slice's result in a local. Nothing published half-done.
+    local smelted = {}
+    for index = cursor, last do
+        smelted[#smelted + 1] = queue[index] * 2
+    end
+
+    -- One publish, one statement. An abort either happened before this line or
+    -- after it; there is no state in between for anyone to read.
+    cursor = last + 1
+
+    if cursor > #queue then
+        print(("furnace finished %d items"):format(#queue))
+        return { follow_up = { VENT } }
+    end
+
+    -- More to do: ask for ourselves again rather than looping past the budget.
+    return { follow_up = { { subject = "base:furnace", component = "base:on_tick" } } }
+end
+```
+
+**What it costs.** The chunk's own loop is 40,000 edges plus the fixed 273, so
+evaluation costs about 40,300 ticks against a budget of 1,000,000 — comfortable,
+and it is the one part that cannot be sliced, which is why the budget is sized
+for chunk evaluation rather than for callbacks. Each invocation is 4,096 loop
+edges plus a handful of calls — `math.min`, and on the last one `print` and
+`format`. The `#queue` lengths and the arithmetic cost nothing at all. Call it
+4,400 ticks, 0.4 % of the budget; ten invocations finish the job.
+
+**What it holds.** `queue` is 40,000 numbers retained in a closure upvalue for
+the whole life of the mod. That is the construction the host cannot bound per
+attachment, used deliberately and kept as small as the job needs — and it is why
+the last thing this callback should do is keep `smelted` too. It does not: each
+slice's result goes out of scope when the invocation returns.
+
+**What you would see if it went wrong.** Raise the slice to 400,000 and the
+invocation still fits, because loop edges are cheap. Call a helper of your own
+per item instead, and it costs three ticks an item rather than one — the change
+that actually matters. Drop the `cursor = last + 1` line and the mod smelts the
+same slice forever, faulting nothing and finishing never, which is the failure
+shape no limit here catches for you.
+
+**What it cannot do.** Nothing in this chunk reaches the game. `queue` holds
+numbers because there is no way to ask for a block, a position or an entity, and
+`follow_up` names attachments the engine already knows about rather than
+anything the script created. That is the honest edge of this page: the shape of
+a chunk, its cost, its faults and its limits are all real and all final — the
+values it works on are what a later increment adds.
