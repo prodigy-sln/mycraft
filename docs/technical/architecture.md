@@ -865,8 +865,9 @@ Four smaller shapes, each load-bearing:
 ## The scripting host: what is Rust-side, what is behind the backend adapter
 
 `mc-script` holds the sandboxed Luau state, the callbacks content registers, and
-everything that bounds what content may do inside it (`modding/sandbox.md` is
-the authoring contract). Its position on the crate map is the first thing worth
+everything that bounds what content may do inside it (`modding/script-writing.md`
+and the three `script-*` pages beside it are the author-facing side of this).
+Its position on the crate map is the first thing worth
 recording, because it is unusual: **`mc-script` resolves `mlua` and no workspace
 crate at all**, and **nothing in `crates/` depends on `mc-script`**. The host is
 exercised solely by its own tests and by the hostile-mod harness. Two absences

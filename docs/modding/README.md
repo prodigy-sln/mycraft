@@ -181,7 +181,16 @@ is machinery that has been built and measured and that no author can yet use.
 The blocks and HUD elements above are the whole of what can be authored, and
 they are data files, exactly as this page describes them.
 
-`sandbox.md` documents that environment: what a script will be able to reach and
-what stops it, every limit with its number, and what a failure looks like. It is
-worth reading before you write Luau and it will not help you write content
-today — **this page and the three references above are where authoring lives.**
+Four pages document that environment, one question each. None of them will help
+you write content today — **this page and the three references above are where
+authoring lives** — and all four describe ground that is already final, so
+nothing in them changes when a binding arrives on top of it.
+
+| To find out | Read |
+|---|---|
+| How a chunk is shaped, what it returns, and the two rules you write it under | `script-writing.md` |
+| Which globals it can reach, and what the environment refuses | `script-surface.md` |
+| What it may spend, and how to tell in advance whether a workload fits | `script-limits.md` |
+| What a failure says, whose fault it is, and when a callback stops being called | `script-faults.md` |
+
+Start at `script-writing.md`; the other three assume it.
