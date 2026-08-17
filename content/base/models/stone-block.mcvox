@@ -1,0 +1,349 @@
+# A stone block: noisy rock pattern.
+schema = 1
+name   = "base:stone"
+scale  = 16
+size   = [16, 16, 16]
+origin = [8, 0, 8]
+slice  = "y"
+
+[palette]
+"s" = "base:stone"
+"S" = "base:stone_dark"
+"m" = "base:stone_light"
+
+[[layers]]
+y = 0
+grid = """
+ssSmsmmsmSssssSs
+sSSssSsmssSsSmss
+sSsmsssssssmsmss
+ssssssssssssSsss
+ssssSssSsSssSsss
+sSSssSsssssmssSs
+sSsmsssssssssmms
+sSssmssssSssssss
+ssssSsssssssSSss
+SsssssmmssssssSS
+smsmmmssSSSssSss
+sssssmssssssssSs
+mmssmmsSsmssmssm
+ssssSSsssmssmmss
+sSssSSsssSsSsSss
+ssSmsmmsmSssssSs
+"""
+
+[[layers]]
+y = 1
+grid = """
+smmSmssSSSssssms
+SSsssmSsmsssssSs
+sssSSmssmsmmSsss
+SssmsSssssssmmSs
+ssSssSssmmssssss
+sssssSmsssssssSs
+ssmsSsmSssmSssss
+sssmssSssmsSsmms
+sssssSsssssSSsms
+SmssssssSsssmsss
+mssssssSmssmssSs
+ssSSssmsssSmsssm
+SssssSsssmsSssss
+sssmsSSssssssSms
+smssmSssSSssmSss
+ssmmsmssssssssss
+"""
+
+[[layers]]
+y = 2
+grid = """
+ssssSSsSmmssssss
+ssSsmmssssssSmSs
+sSsssSmSssssmSss
+sSsSsssSsssssmss
+sSsmssmsmsSsssss
+SssSsssssssSmsSm
+SsmmssssssmssSss
+sssmsssssmssSSss
+msssmsssssssssss
+SSsSsmSmmsSsSsss
+SssssssSSsmssSss
+SsSssSsssSssssSs
+sSssssssssssSsss
+ssSmssSSSsSSsSms
+sssmssssmsmsSsSs
+ssSmsSssssssmsss
+"""
+
+[[layers]]
+y = 3
+grid = """
+sssSsssssmsssmss
+ssssssSSssSssssS
+sssmSssssssSmsSs
+ssssssssSsssssss
+sssSsSsssssssssS
+smsssSSmssssmmss
+sSsssSssSSssmsss
+ssssmssSmssssssS
+ssSsSsssssSsSsss
+SssSsmsSmsssssss
+smsSmsssssSmsssm
+ssSsssssSsSssSms
+SsmsSmSmssmsmSsS
+sSssSsSssmSmsSss
+ssssmsSmsmssSssm
+smsssSssSsssssSs
+"""
+
+[[layers]]
+y = 4
+grid = """
+ssmsssssSsssssss
+mssssmsssssmSSSs
+sssssssmSsssssss
+sssSmSssssssssSS
+ssmmssSSsmssssss
+ssSssssssssmssSS
+SmmssSsSssSmSsss
+mssssmmmSSsmSsss
+mSsSsSssSmsssmsm
+sssSssssSmSmsmss
+SSssSmssmsSsssss
+smssSSsmsSmSSsss
+msSssmSSsssSsSss
+SsmsssSsssssSmsS
+sssSssssssSssSSs
+smSmssmSssmsssss
+"""
+
+[[layers]]
+y = 5
+grid = """
+sSsssmssmsssssss
+ssssmsSSsssssssS
+smssSSssssSsSsss
+SmsSsssssmSsSSsS
+SSSsSssmSsssSsss
+SsSSsSssmSsmssSs
+SsssSsmsSsmssssS
+mssssSSssssssmsm
+mssssssssssssmss
+ssssmsSsmsssssss
+ssssmSsSssssssss
+sSSsmsssmmssSsss
+ssmssmsmsmSsssss
+ssssssssssssssSs
+SssSssssssssmsss
+sssssSssmssmsmSs
+"""
+
+[[layers]]
+y = 6
+grid = """
+sssSmsSSsmssSsms
+sSssSmSSSsssSsss
+SmssmSsmssmssSSs
+sssssssssssSSssS
+smssssssssssSsss
+mmSssSssSssSssss
+sSmSssmssmSsSSsS
+mssSsmsssmmsmssm
+ssssSSSssssmsmSS
+SsSssssSSssSSsss
+SssmsssssmSSsSss
+msSssmssssSsssss
+sssmsssssmsssSsS
+ssSsssssSsssmssS
+ssssSsSssssSsSsS
+smsSmsssmSsmsmms
+"""
+
+[[layers]]
+y = 7
+grid = """
+ssSsmsSsssssssss
+sSssssmssssssmss
+ssssSmsssmssssSs
+SSssssSsssssSmss
+ssssSsmmssssSmSs
+smSSsSsssSmsSsss
+SssmsssmSmmsSsss
+SsmsssmSmSssmsss
+sssssSSsssmsssss
+ssmsmssmssssssss
+sSssssssmsssSmss
+msmsmssmssSsSsss
+ssmssSsmsSsmSSss
+sssssmmmsSsSsSss
+ssSsSsSssmmmmsss
+ssssSssSssmssSSs
+"""
+
+[[layers]]
+y = 8
+grid = """
+sSssssSssmssSSSs
+SssssSsssssssSss
+sssSSssSssssssms
+SsSsssmSSmssSSss
+msSSssmmSssmssss
+mSmmSSssssssSsss
+sSSssSsssSSssSss
+sSmmSSmssSSsssSs
+sssmssSsssmSsSmS
+sSsssssSssSssssS
+ssmmsssSssssssmm
+SsmmsSsssSSmssss
+smmSSSSssssSSsms
+ssssSsssSmSssSss
+SsssSSsssssssssm
+sSsmmssssssmSsms
+"""
+
+[[layers]]
+y = 9
+grid = """
+smssmmssSsssmsss
+mmmsSsmsssSsssss
+smssmssssssSssss
+msssssssSssSsSss
+sSssssssmsssSsss
+SmssSSSmsssssmsS
+sSsssmssssssssss
+SssssSsmssmssmsS
+smSmsssmmsSssssm
+ssSsssSSSsssmsSm
+ssssSsmsssssmsss
+SssssmsSssSsSssS
+SSssssmsmsssSsms
+smSSmsSsmssSssSs
+ssmSSssssSmmmsss
+ssmssssssSSsSsss
+"""
+
+[[layers]]
+y = 10
+grid = """
+ssssssSsmssssmss
+sSmmSSsssSmsssss
+sSSssssssSSssSSs
+sSSmsssSSsssssss
+ssssssSsssSmssss
+sSSsssSSssssssss
+mSsssssSsSSSSSss
+sssssSsSssSsssss
+mssssmmssssSsssm
+SSssssssssssssss
+Smsmmsssssssssms
+SsSSsssSsSSssmsS
+mmsssmsssssssSms
+ssssmsssmsssSmss
+ssSssSssmssSSSss
+smssSmSssSssssms
+"""
+
+[[layers]]
+y = 11
+grid = """
+sssssSssssSsSsss
+msmsssSsSsSssssm
+sSssssSSsSssssmS
+smSsssSsSSsssSss
+sssssssSssssmsSs
+sssmsssssssSsSss
+sssmsSssSssSssss
+sSSsssmSmSmsSmss
+smssssmmSssssSss
+sSsmsssmsmssssss
+sSmssssssssmssss
+ssssssmsmSssssSS
+sssmssSssmssssSs
+sSssmsssSssSssSs
+SsssSsssssSsmssm
+sSsmSssmsSsmssSs
+"""
+
+[[layers]]
+y = 12
+grid = """
+sssmsSmSsmmSssss
+sSsmsmmssssmsssm
+sSssmssmsmsssSss
+sssssmssSmssmsss
+ssssSsSmsSssssms
+sSssSsmmmSmsmsmm
+mSSssssssSmsSsSS
+sssssmSsSmsSsmss
+sssmsmssssmssSss
+SsssSSsssssSSSsS
+ssSssSsSsssssmss
+Ssssssssssssmssm
+smsssSsssssssssm
+smssSsssmssmSsSS
+smSssmssSsssssss
+ssSmSssmSsssssSs
+"""
+
+[[layers]]
+y = 13
+grid = """
+sSsssSmssSmsmsSs
+ssmsmsssssssssss
+ssssssssssmmsSsS
+msSsSssSsmSsssss
+ssSSssssssssssSm
+SssssmsssssSssss
+sSsssmsSmssmSsSs
+ssssssmsssSsSsss
+sssssSSssmssssms
+smsSSmSssSSsSsss
+sssSmmssssmSmsss
+mssSssmmsssmssss
+smsssSssssSsSsss
+smmsssmsmsSssSss
+mssSmmSmSsSSSsms
+sssssSsSsSmsSsss
+"""
+
+[[layers]]
+y = 14
+grid = """
+ssmssssmmsSmmsss
+ssssSSssmssssSss
+SsSsSssSssssssSs
+sSSSSssSSssSSsss
+sSSmmsmsmsssssSs
+ssssmssmSssssssS
+ssssssssSssSsSsm
+ssmsSsSmmsssmssS
+mSsSSsSsSmsmsSSs
+SSSSssssSmssssss
+smssmssSsmmsmssS
+ssmsssssssmmmSsm
+ssssssssssssmssS
+msssssSSsmmsmmss
+mssSssssSSSssmSs
+sssssssSsmsssSss
+"""
+
+[[layers]]
+y = 15
+grid = """
+ssSmsmmsmSssssSs
+ssSssssmmmsSmmss
+sssssssSmSssssss
+sSSssSmsssmsssss
+smssssmsSsSssmss
+sSsSSsssmssmssSs
+ssssmsmSSmsSssss
+ssmSsSSssmsssSss
+smsSmsSsssSSssss
+SsmsssmSssSmsmsS
+sssSssssmsssmsSs
+ssssssssssssssss
+msSSSssssssssssm
+sssssmSmmmssSsms
+sssmsssssssmssss
+ssSmsmmsmSssssSs
+"""
+
