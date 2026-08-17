@@ -47,7 +47,7 @@ fn main() -> ExitCode {
 /// The device is opened **before** the window: a machine that cannot draw this
 /// gets a message and a status, never a window that opens and then shows nothing.
 fn run() -> Ending {
-    let root = match startup::content_root() {
+    let root = match startup::shipped_content() {
         Ok(root) => root,
         Err(failure) => return Ending::failed(&failure, &failure.way_out()),
     };

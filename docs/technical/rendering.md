@@ -416,19 +416,32 @@ One 16×16 RGBA8 layer per texture key, in a `Rgba8UnormSrgb` array texture.
 An atlas is not an alternative here — layers give no bleeding, working mipmaps,
 and a single block texture that can hot-reload without rebuilding everything.
 
-**Layer indices are assigned in lexicographic order of the texture key** — never
-insertion, registry-id or hash order. Layer indices sit inside packed vertices,
-so the committed goldens depend on this ordering and nothing else pins it.
+**Layer indices are stated by whoever read the content, and honoured here.** A layer index sits
+inside every packed vertex, so the committed goldens depend on the assignment and nothing else pins
+it — which is exactly why the renderer does not work one out. `TextureLayers::stated` takes the
+assignment as given and checks it against no sort: checking would be the same derivation written a
+second time and would refuse precisely the assignments the mechanism exists to accept.
+`TextureLayers::resolve`, which does assign lexicographically over a key set, survives as a test
+convenience and has no production caller. `technical/architecture.md` §"The layer assignment is
+stated, not derived" holds the reasoning and is not repeated here.
 
-**The set that order is applied to is every block the content registers, never the set a particular
+**The set the assignment covers is every block the content registers, never the set a particular
 world's quads happen to reference.** `BlockRegistry::texture_keys()` (`mc-core`) declares it, reading
-each definition's `texture` field and never its `name`; `layers_of(&registry)` (`mc-client`) is the
-only place `TextureLayers::resolve` is called, and it takes a registry, not a world, so it cannot be
-handed one. No expression in the tree derives a layer index from a world — a save cannot move one
-because nothing can, which is stronger than any single test guarding the property. The shipped root
-declares four blocks, all with `texture` equal to `name`: `base:dirt`, `base:grass` and `base:stone`
-sort before `base:water`, so water appends at layer 3 and the other three keep 0/1/2 — the fact every
-committed golden's layer indices depend on.
+each definition's `texture` field and never its `name`, and `mc_sim::content::resolved_from` is the
+only place a shipped assignment is built — it takes a registry, not a world, so it cannot be handed
+one. No expression in the tree derives a layer index from a world: a save cannot move one because
+nothing can, which is stronger than any single test guarding the property. The order the simulation
+assigns today is lexicographic, and that is an implementation detail rather than a contract — nothing
+downstream may reproduce it. The shipped root declares four blocks, all with `texture` equal to
+`name`: `base:dirt`, `base:grass` and `base:stone` sort before `base:water`, so water appends at layer
+3 and the other three keep 0/1/2 — the fact every committed golden's layer indices depend on.
+
+**A block whose declared `texture` is not its own name is refused at packing time rather than drawn
+from another block's layer**, because the entry is selected by the block's *name* today while the
+assignment is keyed by the declared `texture`. The two agree only because every shipped block declares
+them identically. That gap and its two call sites are recorded in `technical/architecture.md`
+§"Making an edit visible: the remesh transport"; `modding/blocks-items.md` states the consequence in
+an author's own terms.
 
 The `Srgb` in the format is load-bearing: a texel is decoded to linear on sample
 and the sRGB colour target encodes it back on write, so the byte a capture reads

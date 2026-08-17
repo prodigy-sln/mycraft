@@ -16,21 +16,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use mc_core::block::{BlockRegistry, RegistryError};
-use mc_core::hud::source::InMemoryHudSource;
-use mc_core::hud::{HudLayout, HudLoadError, HudOrigin};
+use mc_core::hud::{HudLayout, HudLoadError};
 use mc_render::geometry::scene::{SceneError, SceneGeometry};
 use mc_render::geometry::{GeometryError, SectionOrigin, build_section_geometry};
 use mc_render::gpu::RendererError;
 use mc_render::texture::TextureLayers;
+use mc_sim::content::{ContentError, LoadedContent};
 use mc_sim::persistence::LaunchError;
 use mc_sim::replay::{PrepareError, ReplayWorld, SectionQuads, WorldGenError, mesh_all};
-use mc_world::content::{TomlFileDefinitionSource, TomlFileHudSource};
 use mc_world::persistence::{Acceptance, LoadError};
 use thiserror::Error;
 
-/// Where the shipped content is looked for, relative to the directory the client
-/// was started in.
-const CONTENT_ROOT: [&str; 2] = ["content", "base"];
+use crate::content::ContentView;
 
 /// What a player types to load a save whose blocks are no longer what they were.
 ///
@@ -177,20 +174,33 @@ impl PreparationError {
     }
 }
 
-/// The content directory the client reads, checked to exist before anything is
+/// The content directory this run reads, checked to exist before anything is
 /// started that would fail on it later.
+///
+/// **The directory is the simulation's to resolve**, not this crate's: a client
+/// that works out for itself where content lives is a client that can go on to
+/// read it. This asks and translates the answer into the failure a player sees.
 ///
 /// # Errors
 ///
 /// Returns [`PreparationError::NoContentRoot`] naming the path when it is not
 /// there, which is the failure somebody running the binary from the wrong
 /// directory gets — and it names the directory rather than a missing block.
-pub fn content_root() -> Result<PathBuf, PreparationError> {
-    let root = CONTENT_ROOT.iter().collect::<PathBuf>();
-    if root.is_dir() {
-        Ok(root)
-    } else {
-        Err(PreparationError::NoContentRoot { root })
+pub fn shipped_content() -> Result<PathBuf, PreparationError> {
+    mc_sim::content::shipped_directory().map_err(|root| PreparationError::NoContentRoot { root })
+}
+
+impl From<ContentError> for PreparationError {
+    /// **Flattened rather than carried whole.** A caller matching on "the blocks
+    /// were refused" keeps matching now that something else is what reads them,
+    /// and the refusal a player sees is the reader's own rather than a wrapper
+    /// around it. A third variant here would be a second name for a failure that
+    /// already had one.
+    fn from(error: ContentError) -> Self {
+        match error {
+            ContentError::Blocks(refusal) => Self::Content(refusal),
+            ContentError::Hud(refusal) => Self::Hud(refusal),
+        }
     }
 }
 
@@ -254,7 +264,7 @@ fn refused_only_for_changed_blocks(failure: &LaunchError) -> bool {
 /// launches. It runs on the calling thread, which is what lets a caller decide
 /// with `rayon` how many workers mesh the world.
 ///
-/// `root` is a parameter rather than [`content_root`]'s answer because that answer
+/// `root` is a parameter rather than [`shipped_content`]'s answer because that answer
 /// is relative to the process's working directory: the binary starts in the
 /// repository root and a test binary does not.
 ///
@@ -263,17 +273,18 @@ fn refused_only_for_changed_blocks(failure: &LaunchError) -> bool {
 /// Returns [`PreparationError`] for any step that could not complete. A failed
 /// mesh fails the replay: half a world is not a picture anybody should be shown.
 pub fn prepare_scene(root: &Path) -> Result<PreparedScene, PreparationError> {
-    let mut registry = BlockRegistry::new();
-    registry.apply(&TomlFileDefinitionSource::new(root.to_owned()))?;
-
-    // Read from the same root and refused the same way, because a crosshair the
-    // content declares is content exactly as a block is. A fault here fails the
-    // preparation rather than being noted and skipped: see `PreparationError::Hud`.
-    let hud = HudLayout::load(&TomlFileHudSource::new(root))?;
+    // Asked of the simulation, which is what reads a content root. A fault here
+    // fails the preparation rather than being noted and skipped: see
+    // `PreparationError::Hud`.
+    let LoadedContent {
+        registry,
+        hud,
+        resolved,
+    } = mc_sim::content::load(root)?;
 
     let world = ReplayWorld::generate(mc_sim::REPLAY_SEED, &registry)?;
     let meshed = mesh_all(&world, &registry)?;
-    let layers = layers_of(&registry);
+    let layers = ContentView::of(&resolved).into_layers();
 
     Ok(PreparedScene {
         scene: scene_of(&meshed, &layers)?,
@@ -319,23 +330,6 @@ pub fn scene_of(
     Ok(SceneGeometry::assemble(geometry)?)
 }
 
-/// The layers every registered block's texture key resolves to.
-///
-/// **The one place the key set is chosen, and it takes no world — it cannot be
-/// given one.** A layer index is assigned positionally over the sorted keys and
-/// then travels inside every packed vertex, so a set derived from the blocks a
-/// particular world happens to draw would make every layer index depend on that
-/// world: a save that broke the last stone out of existence would renumber the
-/// array texture, invisibly, because no golden frame is shot after a resume. That
-/// is a worse defect than any it could fix, and asking the registry is what makes
-/// it unspellable rather than guarded against.
-///
-/// Both preparation paths call this, so the geometry a player is handed and the
-/// geometry a golden is shot from are packed against layers that cannot differ.
-pub(crate) fn layers_of(registry: &BlockRegistry) -> TextureLayers {
-    TextureLayers::resolve(&registry.texture_keys())
-}
-
 /// A scene holding nothing, which is what the frame path draws from until the
 /// worker above lands.
 ///
@@ -349,13 +343,13 @@ pub fn empty_scene() -> Arc<SceneGeometry> {
 /// What the frame path composes until the worker above lands: the HUD of a
 /// client that has not read its content yet.
 ///
-/// **Built through the loader rather than constructed**, and that is not
-/// ceremony. [`HudLayout::load`] is the only door into a layout precisely so
-/// that no engine can put an element into one from Rust; a `Default` here would
-/// be a second door, and the invariant that the base game holds no privilege a
-/// mod lacks would then rest on nobody using it. A source declaring nothing is a
-/// valid, empty answer, which is the one place HUD loading diverges from block
-/// registration.
+/// **Built through the loader rather than constructed**, and asked for rather
+/// than built here. Loading a layout is the simulation's, on the same terms as
+/// reading a content root: a client that can construct one has a door into a
+/// layout of its own, and the reason there is only one such door is that no
+/// engine may put an element into a layout from Rust. A source declaring nothing
+/// is a valid, empty answer, which is the one place HUD loading diverges from
+/// block registration.
 ///
 /// # Errors
 ///
@@ -367,8 +361,5 @@ pub fn empty_scene() -> Arc<SceneGeometry> {
 ///
 /// [`SetupError::FormatVanished`]: crate::surface_setup::SetupError::FormatVanished
 pub fn empty_hud() -> Result<Arc<HudLayout>, HudLoadError> {
-    Ok(Arc::new(HudLayout::load(&InMemoryHudSource::new(
-        HudOrigin::new("a client that has not read its content yet"),
-        Vec::new(),
-    ))?))
+    Ok(Arc::new(mc_sim::content::hud_before_content_is_read()?))
 }

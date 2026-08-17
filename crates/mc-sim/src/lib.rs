@@ -8,6 +8,7 @@
 //! other.
 
 pub mod camera;
+pub mod content;
 pub mod persistence;
 pub mod player;
 pub mod replay;

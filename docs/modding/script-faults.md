@@ -5,9 +5,9 @@ each kind, when an attachment stops being invoked, and why some failures name
 nobody at all. **Who it is for:** anyone holding a fault and wanting to know
 whose problem it is.
 
-Nothing can be authored in Luau today — see `script-writing.md` for what that
-means and where authoring actually lives. The fault vocabulary below is built
-and final.
+**A block declaration that will not compile, raises, or exceeds a limit produces
+one of the faults below**, which the loader turns into a refusal naming the file
+you can open — see `blocks-items.md` for how to read one.
 
 ## What a fault tells you
 

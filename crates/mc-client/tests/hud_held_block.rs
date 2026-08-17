@@ -60,7 +60,7 @@ use mc_render::texture::TextureLayers;
 use mc_sim::action::default_held_block;
 use mc_sim::replay::simulation_for;
 use mc_testkit::frame::gpu::CaptureContext;
-use mc_world::content::TomlFileDefinitionSource;
+use mc_world::content::LuauFileDefinitionSource;
 
 use input::InputHarness;
 use support::content;
@@ -87,8 +87,8 @@ const CROSSHAIR_DECLARATIONS: [&str; 2] = ["crosshair-horizontal.toml", "crossha
 /// `zz-dirt` and the first solid block is a different one. Nothing else about
 /// the root changes: the same four blocks register, the same world generates,
 /// and the same texture keys occupy the same layers.
-const HELD_FIRST: &str = "dirt.toml";
-const HELD_LAST: &str = "zz-dirt.toml";
+const HELD_FIRST: &str = "dirt.luau";
+const HELD_LAST: &str = "zz-dirt.luau";
 
 /// Where the indicator's fill lands, derived in this file's header.
 const INDICATOR_FILL: Rect = Rect {
@@ -381,7 +381,7 @@ fn holding(root: &Path, showing: Option<TextureKey>) -> Result<HudFrame, Box<dyn
 /// solid block at all.
 fn held_by(root: &Path) -> Result<BlockName, Box<dyn Error>> {
     let mut registry = BlockRegistry::new();
-    registry.apply(&TomlFileDefinitionSource::new(root.to_owned()))?;
+    registry.apply(&LuauFileDefinitionSource::new(root.to_owned()))?;
     first_solid(&registry)
 }
 

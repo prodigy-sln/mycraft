@@ -6,5 +6,6 @@
 //! the scripting host's graph.
 
 pub mod block;
+pub mod content;
 pub mod hud;
 pub mod id;

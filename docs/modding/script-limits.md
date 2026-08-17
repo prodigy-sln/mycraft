@@ -4,9 +4,10 @@
 budget actually counts, and how to work out before you write it whether a
 workload fits. **Who it is for:** anyone sizing a job against the host.
 
-Nothing can be authored in Luau today — see `script-writing.md` for what that
-means and where authoring actually lives. The numbers below are what the host
-enforces now.
+**Block declarations are Luau and are charged against these limits**, so a
+declaration that computes what it declares is spending the budget below. See
+`blocks-items.md` for the separate bounds a *content root* carries — how many
+declarations, how large a file, how long a declared value.
 
 Two of these limits are what you plan around; the rest you meet only when
 something has gone wrong, and `script-faults.md` is where that is read.

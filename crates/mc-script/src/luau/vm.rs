@@ -30,6 +30,7 @@
 //! metatable and plants a name every later chunk reads.
 
 use std::cell::RefCell;
+use std::num::NonZeroUsize;
 use std::rc::Rc;
 
 use mlua::{Error, Function, Lua, MultiValue, Value, VmState};
@@ -37,9 +38,10 @@ use mlua::{Error, Function, Lua, MultiValue, Value, VmState};
 use crate::fault::FaultKind;
 use crate::luau::guard::{Guard, Latch};
 use crate::luau::handle::{IsolationUnit, ScriptFunction, ScriptTable};
+use crate::luau::print_sink::PrintSink;
 use crate::luau::trampoline::{self, Returned};
 use crate::luau::{env, translate};
-use crate::value::ScriptValue;
+use crate::value::{FieldNames, ScriptValue};
 use crate::{Attachment, ChunkName, ComponentName, HostError, SubjectName};
 
 /// How a guarded entry into script ended, before the host attributes it.
@@ -110,7 +112,7 @@ const PRESSURED: &str = concat!(
 pub(crate) struct Vm {
     lua: Lua,
     guard: Guard,
-    printed: Rc<RefCell<Vec<String>>>,
+    printed: Rc<RefCell<PrintSink>>,
     /// The one script-side protected call every callback is invoked through.
     trampoline: Function,
     /// Which state this is, stamped onto every handle taken out of it.
@@ -136,9 +138,13 @@ pub(crate) struct Memory {
 impl Vm {
     /// A state with the denied names removed, the host's `print` installed, the
     /// sandbox closed over both, the interrupt armed and the allocator capped.
-    pub(crate) fn new(denied: &[&str], memory: Memory) -> Result<Self, HostError> {
+    pub(crate) fn new(
+        denied: &[&str],
+        memory: Memory,
+        retained_print_bytes: NonZeroUsize,
+    ) -> Result<Self, HostError> {
         let lua = Lua::new();
-        let printed = Rc::new(RefCell::new(Vec::new()));
+        let printed = Rc::new(RefCell::new(PrintSink::new(retained_print_bytes)));
         let guard = Guard::new();
         let trampoline = prepare(&lua, denied, &printed, &guard).map_err(HostError::backend)?;
 
@@ -297,6 +303,51 @@ impl Vm {
         }
     }
 
+    /// The keys a script table holds, without running any script to find them.
+    ///
+    /// **Raw, and against a different metamethod than [`Self::read_field`].** A
+    /// named read is exposed to `__index`; an enumeration is exposed to `__iter`,
+    /// `__pairs` and `__len`. `Table::pairs` walks the table itself rather than
+    /// asking it how to be walked, which is what keeps a mod's code off the
+    /// host's schedule here — verified rather than assumed: a table whose
+    /// `__len` reports zero still enumerates every key it holds, which is the
+    /// half that is actually reachable, since `Table::len` *does* consult the
+    /// metamethod and would report a full declaration as carrying nothing.
+    ///
+    /// **The bound binds inside the walk.** Filling a vector and measuring it
+    /// afterwards has already made the allocation the bound exists to refuse, so
+    /// the walk stops at the first key past `most` and carries none of them back.
+    ///
+    /// A key that is not a string is rendered by the same rendering `print`
+    /// uses, never skipped: a table may be keyed by anything, and a key nobody
+    /// intended to write is exactly the one an unrecognised-field check must
+    /// still see.
+    pub(crate) fn field_names(&self, table: &ScriptTable, most: NonZeroUsize) -> FieldNames {
+        let allowed = most.get();
+        // One past the allowance and no further: enough to tell "exactly the
+        // allowance" from "more than it", and never the whole of a table the
+        // bound exists to refuse.
+        let walked: Result<Vec<String>, Error> = table
+            .handle()
+            .pairs::<Value, Value>()
+            .take(allowed.saturating_add(1))
+            .map(|pair| pair.map(|(key, _)| translate::render(&key)))
+            .collect();
+        // Converting a key to `Value` cannot fail, so an error here is the walk
+        // itself giving up. Reporting the table as over the bound refuses the
+        // declaration, where handing back the keys gathered so far would accept
+        // it while having quietly lost the rest — and a lost key is precisely
+        // the typo this enumeration exists to catch.
+        let Ok(mut names) = walked else {
+            return FieldNames::MoreThanAllowed { allowed };
+        };
+        if names.len() > allowed {
+            return FieldNames::MoreThanAllowed { allowed };
+        }
+        names.sort();
+        FieldNames::Enumerated(names)
+    }
+
     /// The follow-up work a callback's return value asks for.
     ///
     /// A callback requests work by returning a table with a `follow_up` field
@@ -323,7 +374,12 @@ impl Vm {
 
     /// The lines content has printed since the host last collected them.
     pub(crate) fn take_printed(&self) -> Vec<String> {
-        self.printed.borrow_mut().drain(..).collect()
+        self.printed.borrow_mut().drain()
+    }
+
+    /// How many printed lines the host was handed and did not keep.
+    pub(crate) fn dropped_print_lines(&self) -> u64 {
+        self.printed.borrow().dropped()
     }
 
     /// Compiles and runs one chunk under a whole fresh budget.
@@ -358,7 +414,7 @@ impl Vm {
 fn prepare(
     lua: &Lua,
     denied: &[&str],
-    printed: &Rc<RefCell<Vec<String>>>,
+    printed: &Rc<RefCell<PrintSink>>,
     guard: &Guard,
 ) -> mlua::Result<Function> {
     install_print(lua, printed)?;
@@ -373,11 +429,11 @@ fn prepare(
 }
 
 /// Installs the only `print` a chunk can reach.
-fn install_print(lua: &Lua, printed: &Rc<RefCell<Vec<String>>>) -> mlua::Result<()> {
+fn install_print(lua: &Lua, printed: &Rc<RefCell<PrintSink>>) -> mlua::Result<()> {
     let sink = Rc::clone(printed);
     let print = lua.create_function(move |_, arguments: MultiValue| {
         let rendered = translate::render_all(&arguments.into_iter().collect::<Vec<_>>());
-        sink.borrow_mut().push(rendered);
+        sink.borrow_mut().record(rendered);
         Ok(())
     })?;
     lua.globals().set("print", print)

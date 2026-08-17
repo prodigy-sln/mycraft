@@ -17,6 +17,7 @@
 //! | fault threshold | 3 | Three consecutive faults, the count reset by a success. |
 //! | round bound | 64 | Invocations one round may perform. |
 //! | pending bound | 256 | Four rounds' worth of queued work at that round bound. |
+//! | retained print output | 256 KiB | Bytes of script output one host keeps, over its whole life. The same figure as the per-entry memory cap **on purpose**: the host-side copy of what content printed cannot then outgrow the allowance the chunk had to build it in, which is the only thing in reach that ties this number to something rather than to taste. It is stated as its own literal all the same — computed from the cap it would follow the cap wherever it went and bound nothing. |
 //!
 //! The budget counts calls and loop edges and not instructions — the interrupt
 //! is emitted at seven opcodes, so a loop body of any size is free, a host call
@@ -33,7 +34,7 @@
 //! host, because an expectation sourced from the code under test agrees with
 //! whatever that code happens to say.
 //!
-//! **Naming four limits stops covering the fifth, silently.** Two of the six
+//! **Naming four limits stops covering the fifth, silently.** Three of the seven
 //! arrived after the first four were settled, and they are the two most likely
 //! to be wrong. So the expectation is built as a whole `HostLimits` **with no
 //! `..` in it**: a seventh limit added later leaves this file unable to build,
@@ -67,6 +68,14 @@ const DOCUMENTED_ROUND_BOUND: u32 = 64;
 /// Entries of follow-up work that may be waiting at once.
 const DOCUMENTED_PENDING_BOUND: u32 = 256;
 
+/// Bytes of script output one host retains over its whole life.
+///
+/// Every `print` hands the host a string it keeps, and until the block loader
+/// there was no production path by which content could reach that buffer at
+/// all. A chunk can afford half a million such calls inside its budget, so what
+/// is retained is bounded here or nowhere.
+const DOCUMENTED_RETAINED_PRINT_BYTES: usize = 256 * 1024;
+
 /// The ceiling stated for `round_bound × call_and_loop_budget`.
 ///
 /// Written here as its own number so that the host's declaration of it is
@@ -86,7 +95,7 @@ const NEVER_RETURNS: &str = "return function()\n\twhile true do end\nend\n";
 /// by a budget of ten, and a host that shipped one would look identical.
 const A_LOAD_THE_SHIPPED_BUDGET_MUST_ADMIT: i64 = 900_000;
 
-/// The six documented values, as one record.
+/// The seven documented values, as one record.
 ///
 /// **The absence of `..` is the point.** Spelling every field is what makes a
 /// limit added later a build failure here instead of a limit nothing asserts.
@@ -104,6 +113,8 @@ fn documented_limits() -> Result<HostLimits, Box<dyn Error>> {
             .ok_or("the documented round bound must not be zero")?,
         pending_bound: NonZeroU32::new(DOCUMENTED_PENDING_BOUND)
             .ok_or("the documented pending bound must not be zero")?,
+        retained_print_bytes: NonZeroUsize::new(DOCUMENTED_RETAINED_PRINT_BYTES)
+            .ok_or("the documented retained-output bound must not be zero")?,
     })
 }
 
@@ -215,10 +226,10 @@ fn a_host_given_no_configuration_reports_every_limit_at_the_value_documented_for
     assert_eq!(
         *host.limits(),
         documented_limits()?,
-        "these six numbers are what bounds a server nobody configured, and every other test in \
+        "these seven numbers are what bounds a server nobody configured, and every other test in \
          this crate replaces the one it is about with a test-sized value — so nothing else here \
          constrains them. The comparison is over the whole record rather than over a few named \
-         fields: two of the six were added after the other four were settled, and a test naming \
+         fields: three of the seven were added after the other four were settled, and a test naming \
          four would have stopped covering exactly those two without saying so. The expected \
          values are written in this file rather than read back from the host, because an \
          expectation taken from the code under test agrees with a budget of one as readily as \

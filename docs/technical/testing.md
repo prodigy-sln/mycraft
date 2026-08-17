@@ -143,6 +143,22 @@ test files and the adaptation touched **four**: the fifth reached the changed fu
 helper that does not call it. Confirm each named site actually needs the edit before making it — an
 unnecessary adaptation is churn inside exactly the span nothing is gating.
 
+**The same lint bit twice more, in two phases running, and what it cost the second time is the part
+worth keeping: one defect looked like three.** The green commit passed all 1,039 workspace tests and
+failed the gate on `clippy::excessive_nesting` — two `for` + `if` blocks — taking two further stages
+down with it, because the crate would not compile and the GPU-free stage builds on it. **Read a
+multi-stage gate failure for one cause before reading it as several.**
+
+**Two lint findings that pull against each other, and one that pulls with the requirement.** The
+wrapped form `rustfmt` wants for a long chained predicate reintroduces exactly the nesting
+`clippy::excessive_nesting` has just rejected, so the two constraints are unsatisfiable in place and
+**extraction into a named function is the only move that satisfies both** — the refactor is not
+cosmetic. The other direction happened one phase later: bounding a walk with `take(allowed + 1)`
+before collecting is both what the lint wanted and what **makes a bound bind before the allocation
+instead of after it**, so the lint and the requirement asked for one shape. Neither is a general rule
+about lints; together they are the reason a lint finding is worth reading for what it implies about
+the design rather than silenced at the narrowest scope that goes green.
+
 ### Complexity thresholds
 
 `clippy.toml` makes `code-quality.md` §2 machine-enforceable rather than reviewer-enforced:
@@ -2080,3 +2096,331 @@ indentation, so leading whitespace is significant and an indented block is not
 recognised at all. And a `toml` version bump restyles that diagnostic, which
 reddens the guard — that is the guard working, not a flake, and the blast radius
 is two pages and one test.
+
+**That parser-bump warning is now true of the HUD half alone.** A block
+declaration is no longer parsed by anything: it is a chunk the scripting host
+evaluates, and what a page quotes for one is a refusal MyCraft writes itself —
+origin, block, field, cause. It moves when this project decides it moves, and
+never underneath it. The narrowing is stated rather than dropped because whoever
+next meets a red here needs to know which half a dependency can reach.
+
+**The dependency runs page-follows-run, not run-follows-page**, and it is the
+first thing to know before extending the guard: it asserts that *every refusal a
+page quotes is one the run prints*, so **quoting a refusal the run does not
+produce fails the guard rather than covering it.** Each new quotation needs a
+matching fixture in the guard's own run first, which is why the coverage gap
+cannot be closed by editing a page. The run is also not free — each fixture is a
+whole content root copied and a whole preparation refused, and the set is built
+once per test in that binary — so a set of fourteen wants building once and
+sharing rather than growing one `shipped_copy()` call at a time.
+
+**A substring assertion cannot see rendering, and that is how a malformed refusal
+shipped.** The declared-text bound's own test asks whether both quantities are
+*mentioned* in the cause, which is equally true of a message carrying eighteen
+stray spaces from a line continuation that never landed. Bringing that refusal
+under this guard needed no new assertion at all: the page became the oracle, and
+the comparison is line for line. **Where a test checks that a message mentions
+the right things, the guard that checks it reads properly is a different
+instrument.**
+
+### An ordering fixture must falsify collation order, not creation order
+
+A scenario asking that registration order follow **sorted file names** needs a
+fixture where the sort can be wrong. The obvious pair — two files created in one
+order and named in the other — does not supply one on this platform, and the
+reason is measured rather than reasoned. **`read_dir` on NTFS returns entries in
+the filesystem's own case-insensitive name order**, verified on two volumes, so
+creation order is not observable at all and a lowercase pair arrives *already
+sorted*. A loader that never sorts passes.
+
+The discriminator is a third file named `_cobalt.luau`: `_` sorts **after** every
+letter under NTFS collation and **before** every lowercase letter under the byte
+ordering any plausible Rust sort uses, so the two orders disagree and the sort
+becomes falsifiable. **The general rule outlives the case: on this platform an
+ordering fixture must be built to falsify *collation* order, and a `_`-prefixed
+name is the cheapest thing that does it.**
+
+This one survived a full scenario audit and died on contact with the filesystem.
+That is the point rather than an embarrassment — **an audit cannot see shape any
+more than a count can**, which is the constraint the testing standard records as
+held by whoever builds the fixture and by a reviewer reading it.
+
+### A retirement's surface is measured by building, not by grepping for the type
+
+Retiring a reader means finding everything that reached it. A count of **22 lines
+across 11 files** naming the type was made by search and was exactly right. It
+was also incomplete about what mattered: **six further test files reached the
+deleted reader through the two preparation entry points and named no type at
+all**, so no search for the type could have found them — five were found by
+reading, and one only by the build.
+
+**The compiler found them and nothing else could have.** They go red at the
+moment the construction moves, which is precisely the moment somebody is trying
+to tell a wiring defect from a content defect, so meeting them by surprise is
+expensive. Build `--all-targets` before believing a retirement inventory.
+
+The general form: **a count can be accurate about what it counted and silent
+about what governs.** A search sees names; a retirement is about reachability.
+
+### Run a phase's verification instrument where its answer is still attributable
+
+The golden-frame suites were run **twice** during one spec: once after the content
+construction moved out of the client, and again after the layer assignment
+changed. Both were 10/10 across five suites.
+
+**Run once at the end and the two possible defects are indistinguishable.** A
+difference at the first point is a wiring defect in the move; a difference at the
+second is the layer assignment. The first clean run is what licenses reading the
+second as being about the assignment alone, so **both runs together are what make
+either one mean anything**, and neither is redundant.
+
+This is verification-precedes-the-thing-it-verifies applied *inside* a phase,
+which is finer-grained than any task breakdown asks for. Two corollaries:
+
+- **A clean result at an attributable moment is evidence about that change, not
+  an absence of news**, and is reported as such rather than omitted for having
+  nothing to say.
+- The instrument saying the comparison can still fail is the mismatch detector
+  passing beside them. A golden suite with no live mismatch control reports
+  agreement and inability to disagree identically.
+
+### Green on arrival and inert are different things, and only a mutation tells them apart
+
+Seven scenarios across one spec were green the moment their phase opened, because
+an earlier phase had already established what they assert. **"Green on arrival"
+reads as weakness and usually is not what is true.** Each one is either a control
+— it reddens when a later change breaks the property — or an inert scenario
+riding along, and *no amount of reading separates the two*.
+
+A mutation does. Flipping a default constant reddened the scenario asserting the
+documented defaults, which is the measurement that it is a control. Making a
+loader *skip* a non-file entry rather than refuse it reddened the one scenario
+that had looked most inert, and that is what makes the refusal binding rather
+than decorative. Three phases running produced the same result.
+
+So the discipline is: **record which scenarios opened green, and mutate against
+each one before calling it a control.** Recording the count and leaving it there
+is how a genuinely inert scenario survives, and how a genuine control gets
+deleted by somebody tidying up.
+
+The other half is knowing when *not* to strengthen. A scenario green on arrival
+whose only available strengthening would re-prove a neighbouring scenario's
+property **through the same code path** is left alone: that is a second witness
+that witnesses nothing.
+
+### A guard that names a specific dependency silently narrows as the set it guards grows
+
+A dependency-graph guard asserted that the registry-contract crate reaches no
+`toml`, on the reasoning that a declaration format's parser belongs to the loader
+and nowhere else. **The day block declarations became Luau chunks, `toml` stopped
+being how block declarations arrive** — so the guard went on passing while the
+property it exists to protect had gone unguarded for the new way in. Its
+companion assertion was worse off: naming only `toml`, it could no longer tell a
+loader that reads block declarations from one that has stopped reading them at
+all.
+
+This is the structural-invariant failure already recorded above — *a test
+asserting only an absence goes green forever the day the thing it guarded against
+is quietly removed* — **in its sharper form: the thing was not removed, it was
+replaced by something the guard cannot see.** An absence assertion cannot notice
+that the world grew a second way to violate it.
+
+Two repairs, and the second is the one that lasts:
+
+- Name **both** ways in **both** assertions, so the pair control each other: a
+  mistyped needle now fails the loader half rather than passing the contract half
+  in silence.
+- **Name the constant for what it actually guards.** It is the HUD format's
+  parser now, not "the declaration format's". A constant keeping an outdated name
+  is how a guard drifts from its purpose **without anyone editing a line of it**,
+  and it is what lets the next reader conclude the guard still means what its name
+  says.
+
+**The general rule:** a guard that enumerates specific dependencies silently
+narrows whenever the set of things it guards against grows, and nothing about it
+goes red to say so. Whenever a format, a backend or a vendor is *added* beside an
+existing one rather than replacing it, every absence guard naming the old one is
+already out of date. Re-read them at that moment, because no later moment will
+prompt you to.
+
+It was found while *verifying* the guard rather than while changing it: the task
+asked only that both its assertions still hold, and they did.
+
+### A bare-spelling needle cannot tell a door from a variable, and that is the design
+
+The scan that keeps the client's own sources free of content doors uses **bare
+spellings** as needles — a call, two constructors and a resolver name. Measured:
+a local **variable** named after the resolver fails the scan, and it is not a
+door at all.
+
+**That false positive is the cost of a scan that admits no exemption, and the
+trade is deliberate.** The alternative is a needle with a carve-out — matching
+only some spellings, exempting a file, exempting a path. A carve-out is where the
+next breach lives: it is the thing somebody widens by one line when their case
+looks equally harmless, and nothing goes red when they do. **If an exemption
+seems necessary, that is a signal a door was left behind rather than a licence to
+write one.**
+
+So whoever meets it: **it is working, and the fix is to rename your variable, not
+to narrow the needle.** Two carve-outs do exist and are the only two — doc
+comments are stripped, so prose *about* a door is not a use of it, and sibling
+`*_test.rs` files are skipped. Each removes a category that cannot be a door,
+rather than a case that happens to be inconvenient.
+
+The same argument decided a production name: a function on the far side of the
+seam was called `shipped_directory` rather than the resolver's old name,
+**because reusing that name would have put the needle straight back into the
+client at the call site.** The test author raised it as a binding interface
+decision before any implementation was written, which is where it was cheapest to
+settle.
+
+The residual the scan does **not** close is recorded in its own doc comment:
+somebody adding a *second* door — a new public registration call — bypasses any
+text scan. The instrument that would catch that is a dependency-closure guard,
+and where one binary hosts both halves such a guard cannot pass, so it belongs to
+the spec that separates them. **A guard green exactly when the rule is broken is
+inverted rather than weak.**
+
+### An accidental safety property has no guard of its own
+
+A fixture helper turned out to be **self-falsifying**: pointing the HUD helper at
+the block extension fails loudly rather than emptying nothing and passing, so a
+silent mis-retarget cannot happen there. That is a stronger answer than the
+by-hand verification it had been given, and it was measured rather than reasoned
+— the pairing was mis-set by hand and the reading reddened with the "root that
+never declared anything" refusal, by name.
+
+**But nobody designed it.** The refusal it rests on exists for an unrelated
+reason — the module's rule that removing a declaration which was never there is a
+failure rather than a no-op — and the safety falls out of that rule as a side
+effect.
+
+**So the rule that changes it is free to change.** A later helper that took an
+extension and tolerated finding nothing would remove the property **with nothing
+going red**, because no test asserts the property and the rule it depends on was
+never written down as load-bearing for anything else.
+
+The general form: **an accidental safety property has no guard of its own.** It
+is not a weaker version of a designed one — it is a property with no owner, which
+will be traded away the first time somebody has a good reason to change the rule
+underneath it. **The only defence available is to write the dependency down where
+the rule lives**, so whoever changes the rule meets the consequence rather than
+discovering it. Asserting the property directly is the better move wherever it
+can be done; where it cannot, the note is what there is — and it belongs beside
+the constant somebody about to edit a spelling is already looking at, not on the
+function.
+
+### The tell is that you are about to write a literal
+
+Four times in one spec somebody was about to write down a value whose correctness
+depended on what a **different** component produces, and going to look first
+would have cost one command. Three times nobody looked.
+
+- A **count** copied into a task file — 22 lines naming a retired type. The
+  number was right and measured the wrong surface; the build found six more files
+  a search could not.
+- A **safety claim** written into a phase note — that a fixture could not be
+  mis-retargeted. True, and true for a reason nobody had checked, which is exactly
+  why it can be removed silently.
+- A **refusal string** about to be pasted onto a modding page. Checking what the
+  guard's run actually produces found that the dependency runs the other way:
+  quoting a refusal the run does not print **fails** the guard rather than
+  covering it.
+- An **issue identifier** somebody was told to cite without being handed it.
+  Refused rather than guessed, because a wrong tracker reference in an archived
+  record is worse than a missing one — a missing one is visibly missing.
+
+**"Verify your premises" is not actionable**, because every premise looks like a
+fact from the inside and there is no moment at which the advice fires. The
+trigger that can actually be noticed is narrower:
+
+> **You are about to write a literal.** A literal is a value you are asserting
+> some *other* component produces — a count, a rendered string, an identifier, a
+> claim about behaviour elsewhere. That is the one situation where going to look
+> costs a single command, and not looking costs a red guard, a wrong pointer, or a
+> page documenting a message nothing writes.
+
+The corollary is what makes it cheap: **the check is against the producer, not
+against your reasoning.** Run the thing, read what it emitted, paste that. Every
+one of the four above was recoverable in one command from the right source.
+
+### A bound that follows another bound bounds nothing
+
+The bound on retained script output happens to equal the per-entry memory cap,
+and it is written as **its own literal** rather than derived from it. The two
+answer to different pressures, so a derived value moves silently the day the
+other moves for its own reasons — and a bound that follows another bound bounds
+nothing. Where two numbers agree by coincidence rather than by argument, write
+both.
+
+### The mechanical edit is where test-file ownership looks most like ceremony
+
+**"The implementation context never edits test files" has no mechanical-change
+exemption**, and the rule looks most like ceremony exactly when the edit is
+boring — which is when it is easiest to breach and hardest to notice. The
+concrete reason it is not ceremony: splitting a fixture module's single extension
+constant into two halves can **silently retarget half the fixtures with nothing
+failing**. Verify such a split after the fact rather than assuming it, because
+the untouched half must still be reading what it was reading.
+
+**The explicit-staging ban stopped being theoretical in the same span, and the
+circumstance is the instructive part.** The implementation ran `cargo fmt
+--check`, found a formatting slip in its *own* previously committed diff, and
+fixing it meant committing — **while the test author had eleven files uncommitted
+in the same working tree**, mid-way through a retirement. Explicit paths are the
+only reason those commits carried the two source files they were about and none
+of the author's in-flight work.
+
+- **The accident arrived during ordinary work, not during anything anybody would
+  have called risky.** A formatting fix is the least dangerous commit there is,
+  which is exactly why a sweep would have gone unnoticed — and the separation it
+  would have destroyed is the TDD sequence's.
+- **Checking format before every commit rather than only at the gate is what
+  surfaced it at all.** The gate would have caught the slip later, in a run where
+  it would have looked like somebody else's problem — and by then the sweep, had
+  there been one, would already have happened.
+
+### An absence is closed by a variant, not by a second accessor
+
+A record that may have been truncated and a record that was always short read
+identically unless something forces the distinction. Two accessors — the lines,
+and how many were dropped — make the distinction **available**. They do not make
+it **unmissable**: a caller may read the record and never ask whether it is
+whole, and that is the same absence-reads-as-presence failure the pair was added
+to close.
+
+**A variant cannot be read without naming which of the two answers you are
+holding.** A struct of `kept` and `dropped` still lets a caller write `.kept` and
+never ask — the available-but-not-taken shape one layer further in. That is the
+difference between hard to ignore and impossible to ignore, and it is why the
+loader's boundary carries one enum rather than two accessors.
+
+**The free result is the concrete argument for a type-level fix over a flag.**
+Three existing readings elsewhere in the suite asserted that *nothing* was
+printed. Changing the return type made each of them compare against the whole
+variant, so **every one now also rejects a record the host had stopped keeping** —
+a defect none of them could previously reach. One change closed a hole and
+strengthened three unrelated assertions.
+
+This belongs to the project's most-recorded failure family, and every previous
+instance was likewise *a value somebody could have consulted and did not*: an
+empty cause reading as a cause never populated, an absent reviewer reading as a
+clean one, a scan that can no longer look reading as a scan that found nothing.
+
+### Some fixtures are slow because the question is about size
+
+Three content roots of 4 096 declarations cost roughly six seconds each — writing
+four thousand files on NTFS and evaluating four thousand chunks. That is past the
+one-second guidance for an integration test, and **no smaller fixture answers a
+question about how many files a directory may hold.** The bound is the subject;
+shrinking the fixture changes the subject. Recorded rather than waived silently,
+with the crate's whole suite at about sixteen seconds for scale.
+
+The accompanying measurement is worth keeping because the methodology nearly went
+wrong. Worst-case memory for that root — every table handle held, no interim
+collection forced — peaked at **2,105,960 bytes** against a 16 MiB backstop. The
+first attempt read the figure every 512 chunks, which **forces a collection the
+real loader never performs** and flatters the number; the figure above is a single
+read at the end. **The decisive evidence is the production run completing at
+all**, because the backstop is enforced by the allocator on raw usage, so
+finishing is itself proof that raw peak never reached it.

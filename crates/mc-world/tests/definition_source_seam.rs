@@ -1,8 +1,11 @@
 //! The registry is populated through a port, and the port has two
 //! implementations that agree.
 //!
-//! This is the test that keeps the seam honest. MVP 2 replaces the file reader
-//! with a scripting host, and the whole bet is that the registry does not notice.
+//! This is the test that keeps the seam honest. The file reader is a scripting
+//! host now, and the whole bet was that the registry would not notice — the
+//! definitions below are the ones this file compared before the swap, moved into
+//! the language a declaration is written in and otherwise untouched, so what a
+//! reader hands the registry is held to the same value it was held to then.
 //! Both fixtures below are therefore written out **by hand**: building the
 //! in-memory one by draining the file reader would make this assert that a value
 //! equals itself, and the seam would be asserted rather than tested.
@@ -15,7 +18,7 @@ use common::{TestResult, content_root};
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
 use mc_core::id::{BlockName, TextureKey};
-use mc_world::content::TomlFileDefinitionSource;
+use mc_world::content::LuauFileDefinitionSource;
 use tempfile::TempDir;
 
 /// The three blocks, written as a mod author would write them.
@@ -35,12 +38,12 @@ use tempfile::TempDir;
 /// Each is declared *away from* the meaning an absent key carries, which is the
 /// half that matters: a reader that read `breakable` as absent-means-false would
 /// still agree with a hand-written `false`.
-const AIR_TOML: &str =
-    "name = \"base:air\"\ntexture = \"base:air\"\nsolid = false\nreplaceable = true\n";
-const STONE_TOML: &str =
-    "name = \"base:stone\"\ntexture = \"base:stone\"\nsolid = true\nbreaks_into = \"base:air\"\n";
-const GRASS_TOML: &str =
-    "name = \"base:grass\"\ntexture = \"base:grass_top\"\nsolid = true\nbreakable = false\n";
+const AIR_DECLARATION: &str = "return {\n\tname = 'base:air',\n\ttexture = 'base:air',\n\tsolid = false,\n\treplaceable = \
+     true,\n}\n";
+const STONE_DECLARATION: &str = "return {\n\tname = 'base:stone',\n\ttexture = 'base:stone',\n\tsolid = true,\n\tbreaks_into = \
+     'base:air',\n}\n";
+const GRASS_DECLARATION: &str = "return {\n\tname = 'base:grass',\n\ttexture = 'base:grass_top',\n\tsolid = true,\n\tbreakable = \
+     false,\n}\n";
 
 /// The three names both registries are asked about, in declaration order.
 const DECLARED: [&str; 3] = ["base:air", "base:stone", "base:grass"];
@@ -135,14 +138,14 @@ fn definitions_held_in_memory_register_exactly_as_the_same_definitions_in_files_
     let root = content_root(
         &directory,
         &[
-            ("air.toml", AIR_TOML.to_owned()),
-            ("stone.toml", STONE_TOML.to_owned()),
-            ("grass.toml", GRASS_TOML.to_owned()),
+            ("air.luau", AIR_DECLARATION.to_owned()),
+            ("stone.luau", STONE_DECLARATION.to_owned()),
+            ("grass.luau", GRASS_DECLARATION.to_owned()),
         ],
     )?;
 
     let mut from_files = BlockRegistry::new();
-    from_files.apply(&TomlFileDefinitionSource::new(&root))?;
+    from_files.apply(&LuauFileDefinitionSource::new(&root))?;
     let mut from_memory = BlockRegistry::new();
     from_memory.apply(&hand_written_source()?)?;
 

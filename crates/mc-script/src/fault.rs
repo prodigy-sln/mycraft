@@ -46,7 +46,20 @@ pub enum FaultKind {
 
 impl FaultKind {
     /// How this kind reads in a rendered fault.
-    fn as_str(self) -> &'static str {
+    ///
+    /// **Public because a caller that composes its own message needs these
+    /// words rather than a second spelling of them.** A fault spliced into a
+    /// refusal that already renders its own location would state the location
+    /// twice, so the composing caller reads [`kind`](ScriptFault::kind),
+    /// [`line`](ScriptFault::line) and [`cause`](ScriptFault::cause) instead of
+    /// the whole `Display`. Handing it only the typed kind and letting it
+    /// invent the wording would put a copy of these strings in every such
+    /// caller, to drift from this one silently.
+    ///
+    /// These words reach mod authors verbatim, so they are a documented
+    /// contract and not an internal rendering.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::BudgetExhausted => "call and loop budget exhausted",
             Self::Allocation => "allocation refused",

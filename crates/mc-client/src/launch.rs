@@ -34,13 +34,14 @@ use mc_core::id::BlockName;
 use mc_render::geometry::scene::SceneGeometry;
 use mc_render::texture::TextureLayers;
 use mc_sim::action::default_held_block;
+use mc_sim::content::LoadedContent;
 use mc_sim::persistence::simulation_at_launch;
 use mc_sim::replay::SectionQuads;
 use mc_sim::simulation::Simulation;
-use mc_world::content::{TomlFileDefinitionSource, TomlFileHudSource};
 use mc_world::persistence::Acceptance;
 
-use crate::startup::{PreparationError, layers_of, scene_of};
+use crate::content::ContentView;
+use crate::startup::{PreparationError, scene_of};
 
 /// Where the client keeps its save, relative to the directory it was started in
 /// — the same convention the content root follows.
@@ -91,7 +92,7 @@ pub type PreparationHandle = JoinHandle<Result<PreparedLaunch, PreparationError>
 /// Where this client keeps its save.
 ///
 /// **Not checked for existence**, unlike
-/// [`content_root`](crate::startup::content_root), and the asymmetry is the
+/// [`shipped_content`](crate::startup::shipped_content), and the asymmetry is the
 /// point: content that is not there is somebody running the binary from the wrong
 /// directory, and a save that is not there is a first launch.
 #[must_use]
@@ -184,12 +185,14 @@ pub fn prepare_launch(
     save: &Path,
     accepting: Acceptance,
 ) -> Result<PreparedLaunch, PreparationError> {
-    let mut registry = BlockRegistry::new();
-    registry.apply(&TomlFileDefinitionSource::new(root.to_owned()))?;
-
-    // Read from the same root and refused the same way, because a crosshair the
-    // content declares is content exactly as a block is.
-    let hud = HudLayout::load(&TomlFileHudSource::new(root))?;
+    // Asked of the simulation, which is what reads a content root. The HUD comes
+    // back with it because a crosshair the content declares is content exactly
+    // as a block is, and the two are refused together.
+    let LoadedContent {
+        registry,
+        hud,
+        resolved,
+    } = mc_sim::content::load(root)?;
 
     let registry = Arc::new(registry);
     let (simulation, holding) =
@@ -199,7 +202,7 @@ pub fn prepare_launch(
     // Asked of the registry and never of what was just meshed: a layer index
     // rides inside every packed vertex, so a key set read off the played world
     // would let a save renumber the array texture.
-    let layers = layers_of(&registry);
+    let layers = ContentView::of(&resolved).into_layers();
 
     Ok(PreparedLaunch {
         scene: scene_of(&meshed, &layers)?,

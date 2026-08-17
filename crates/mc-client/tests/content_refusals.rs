@@ -10,7 +10,7 @@
 //!
 //! **Not every part is there every time, and that is the contract.** A duplicate
 //! name is about two files and no field; an empty `blocks/` is about the root and
-//! neither; a file that is not TOML at all has no field to read a name out of. So
+//! neither; a file that never compiles has no field to read a name out of. So
 //! three of the six ask for the absence of a part as firmly as the others ask for
 //! its presence — a refusal inventing a block name it does not know would be the
 //! same defect pointing the other way.
@@ -42,14 +42,14 @@ use support::{TestResult, content};
 /// Distinctive on purpose: it is the needle a refusal that genuinely names the
 /// declaration it could not accept has to carry, and no message that merely says
 /// the content could not be read can hold it by accident.
-const REFUSED_FILE: &str = "amber.toml";
+const REFUSED_FILE: &str = "amber.luau";
 
 /// A second file declaring the same block as the first.
 ///
-/// It sorts *before* `amber.toml`, so a refusal about the pair names this one as
+/// It sorts *before* `amber.luau`, so a refusal about the pair names this one as
 /// the first declaration and that one as the second — which is only well defined
 /// because a content root is read in file-name order.
-const SECOND_FILE: &str = "amber-copy.toml";
+const SECOND_FILE: &str = "amber-copy.luau";
 
 /// The name a well-formed declaration below gives itself.
 ///
@@ -71,20 +71,26 @@ const NAME_FIELD: &str = "name";
 
 /// A declaration well formed apart from the name it gives itself.
 const NAMED_WRONGLY: &str =
-    "name = \"example:amber:top\"\ntexture = \"example:amber\"\nsolid = true\n";
+    "return {\n\tname = 'example:amber:top',\n\ttexture = 'example:amber',\n\tsolid = true,\n}\n";
 
 /// A declaration whose three well-formed fields sit beside one nobody
 /// recognises.
-const CARRYING_AN_UNRECOGNISED_FIELD: &str =
-    "name = \"example:amber\"\ntexture = \"example:amber\"\nsolid = true\nslid = true\n";
+const CARRYING_AN_UNRECOGNISED_FIELD: &str = "return {\n\tname = 'example:amber',\n\ttexture = 'example:amber',\n\tsolid = true,\n\tslid = \
+     true,\n}\n";
 
 /// A declaration with nothing wrong with it, written twice so that what is wrong
 /// is the pair rather than either one of them.
-const WELL_FORMED: &str = "name = \"example:amber\"\ntexture = \"example:amber\"\nsolid = true\n";
+const WELL_FORMED: &str =
+    "return {\n\tname = 'example:amber',\n\ttexture = 'example:amber',\n\tsolid = true,\n}\n";
 
-/// A file that is not TOML at all, so there is no field to read a name out of and
-/// the whole file is what is wrong.
-const NOT_TOML: &str = "this is not toml at all\n";
+/// A file that is not a chunk at all, so nothing ever returns a table and there
+/// is no field to read a name out of: the whole file is what is wrong.
+///
+/// It is broken as *syntax* rather than by returning the wrong thing, so what
+/// reaches the author is the compiler's own complaint carried out through the
+/// loader — which is the case where a fixture is least able to guess the wording
+/// and most needs to read it off the run.
+const NOT_A_CHUNK: &str = "this is not a chunk at all\n";
 
 /// How a refusal spells the block it is about, and how it spells the field.
 ///
@@ -139,10 +145,10 @@ fn a_block_carrying_an_unrecognised_field_is_refused_naming_that_field() -> Test
             said.as_str(),
         ),
         (true, true, true, whole.as_str()),
-        "which slot carries the field name is not the author's business and is not asked here: a \
-         parser that refuses a field nobody recognises names it inside its own diagnostic and \
-         leaves the typed field empty. What is asked is that the file, the block and the word \
-         `{UNRECOGNISED_FIELD}` all reach the person who typed it"
+        "which slot carries the field name is not the author's business and is not asked here — \
+         it moved when the reader did, from inside a parser's own diagnostic to the typed field \
+         beside it, and neither is a fact a mod author has any use for. What is asked is that the \
+         file, the block and the word `{UNRECOGNISED_FIELD}` all reach the person who typed it"
     );
     Ok(())
 }
@@ -196,10 +202,10 @@ fn a_root_declaring_no_block_at_all_is_refused_naming_the_root_and_nothing_else(
 }
 
 #[test]
-fn a_block_file_that_is_not_toml_is_refused_naming_the_file_and_the_reason() -> TestResult {
-    let root = content::shipped_copy()?.declaring_block(REFUSED_FILE, NOT_TOML)?;
+fn a_block_file_that_will_not_compile_is_refused_naming_the_file_and_the_reason() -> TestResult {
+    let root = content::shipped_copy()?.declaring_block(REFUSED_FILE, NOT_A_CHUNK)?;
     let refused = content::block_refusal_over(root.path())?;
-    let reason = parser_reason_in(&refused)?;
+    let reason = stated_reason_in(&refused)?;
     let whole = everything_written_for(&refused);
 
     let said = support::refusal_printed_over(root.path())?;
@@ -213,10 +219,10 @@ fn a_block_file_that_is_not_toml_is_refused_naming_the_file_and_the_reason() -> 
             said.as_str(),
         ),
         (true, true, false, false, whole.as_str()),
-        "the reason comes from the parser rather than from this file: a test spelling a \
-         diagnostic out by hand would be asserting the parser's wording rather than that any of \
-         it reached the author. A file that is not TOML has no field to read a name out of, so \
-         the whole file is what is named and no block and no field are"
+        "the reason comes from the run rather than from this file: a test spelling a compiler's \
+         complaint out by hand would be asserting that wording rather than that any of it reached \
+         the author. A file that never compiles returned no table, so there is no name to read out \
+         of it — the whole file is what is named, and no block and no field are"
     );
     Ok(())
 }
@@ -224,7 +230,7 @@ fn a_block_file_that_is_not_toml_is_refused_naming_the_file_and_the_reason() -> 
 #[test]
 fn a_missing_content_root_is_refused_naming_the_directory_that_was_looked_for() -> TestResult {
     let looked_for = Path::new("content").join("base").display().to_string();
-    let refused = match mc_client::startup::content_root() {
+    let refused = match mc_client::startup::shipped_content() {
         Ok(found) => return Err(no_refusal_from(&found.display().to_string())),
         Err(refused) => refused,
     };
@@ -246,7 +252,7 @@ fn a_missing_content_root_is_refused_naming_the_directory_that_was_looked_for() 
 #[test]
 fn the_shipped_content_registers_one_block_for_each_declaration_and_says_nothing() -> TestResult {
     let root = support::content_root()?;
-    let declared = content::declarations_in(&root.join(content::BLOCK_DIRECTORY))?.len();
+    let declared = content::block_declarations_in(&root.join(content::BLOCK_DIRECTORY))?.len();
 
     let prepared = mc_client::startup::prepare_scene(&root);
     let (registered, said) = match &prepared {
@@ -284,24 +290,23 @@ fn declaration_path(file_name: &str) -> String {
         .to_string()
 }
 
-/// The reason the parser gave, read out of `refused` rather than spelled here.
+/// The reason the run gave, read out of `refused` rather than spelled here.
 ///
 /// # Errors
 ///
-/// Returns an error if the refusal is not about a declaration the parser could
-/// not read, or if it carries no reason — in either case the scenario has no
-/// parser's reason to look for, and searching for an empty one would find it
-/// everywhere.
-fn parser_reason_in(refused: &RegistryError) -> Result<String, Box<dyn Error>> {
+/// Returns an error if the refusal is not about a declaration that could not be
+/// read, or if it carries no reason — in either case the scenario has no reason
+/// to look for, and searching for an empty one would find it everywhere.
+fn stated_reason_in(refused: &RegistryError) -> Result<String, Box<dyn Error>> {
     let RegistryError::Source(DefinitionSourceError::Malformed(fault)) = refused else {
         return Err(format!(
-            "this scenario needs a declaration the parser could not read, and what was refused \
+            "this scenario needs a declaration that could not be read, and what was refused \
              was: {refused}"
         )
         .into());
     };
     if fault.cause.is_empty() {
-        return Err("the parser refused the declaration and gave no reason for it".into());
+        return Err("the declaration was refused and no reason was given for it".into());
     }
     Ok(fault.cause.clone())
 }

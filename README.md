@@ -38,9 +38,12 @@ teal, grass draws tan. That is deliberate: this increment asks textures to be de
 distinguishable, never plausible, and correcting a colour per block name would be block content
 hardcoded in Rust, which is the one thing the base game may not be. Real artwork ships as content.
 
-Blocks are already content, though — `content/base/blocks/*.toml`, loaded at runtime through a
-`DefinitionSource` port with no public way to register a definition from Rust. MVP 2 swaps that
-loader for a Luau-backed source; the registry contract does not change. See
+Blocks are content, and as of MVP 2 they are **content written in Luau** — `content/base/blocks/*.luau`,
+each a chunk the sandboxed scripting host evaluates, loaded through a `DefinitionSource` port with no
+public way to register a definition from Rust. The registry contract did not change with the swap:
+same six fields, same refusals, same saves. Behaviour is not scriptable yet — a declaration says what
+a block *is* and calls nothing the engine provides. Writing one is
+[`docs/modding/README.md`](docs/modding/README.md); the full contract is
 [`docs/modding/blocks-items.md`](docs/modding/blocks-items.md).
 
 ## Build and run

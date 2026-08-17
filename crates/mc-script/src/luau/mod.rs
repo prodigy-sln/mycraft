@@ -39,6 +39,7 @@
 pub(crate) mod env;
 pub(crate) mod guard;
 pub(crate) mod handle;
+pub(crate) mod print_sink;
 pub(crate) mod trampoline;
 pub(crate) mod translate;
 pub(crate) mod vm;

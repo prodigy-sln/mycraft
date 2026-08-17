@@ -28,7 +28,7 @@ use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 use mc_sim::player::PlayerState;
 use mc_sim::replay::{CameraPose, ReplayWorld};
-use mc_world::content::TomlFileDefinitionSource;
+use mc_world::content::LuauFileDefinitionSource;
 use mc_world::section::Contents;
 
 /// The error type every replay test propagates with `?`.
@@ -107,7 +107,7 @@ pub fn repository_root() -> Result<PathBuf, Box<dyn Error>> {
 pub fn content_registry() -> Result<BlockRegistry, Box<dyn Error>> {
     let root = repository_root()?.join("content").join("base");
     let mut registry = BlockRegistry::new();
-    registry.apply(&TomlFileDefinitionSource::new(root))?;
+    registry.apply(&LuauFileDefinitionSource::new(root))?;
     Ok(registry)
 }
 

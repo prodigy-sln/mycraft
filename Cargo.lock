@@ -1362,7 +1362,6 @@ name = "mc-script"
 version = "0.1.0"
 dependencies = [
  "mlua",
- "serde_json",
  "tempfile",
 ]
 
@@ -1402,6 +1401,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "mc-core",
+ "mc-script",
  "postcard",
  "proptest",
  "serde",

@@ -109,6 +109,21 @@ impl SectionGeometry {
         ])
     }
 
+    /// The array-texture layer the `vertex_index`-th emitted corner draws
+    /// from, or `None` past the last one.
+    ///
+    /// **The only way to read a packed layer back from outside this crate**, and
+    /// it exists so that the property "the stated assignment is honoured" can be
+    /// asserted where the index actually lands rather than one step before it. A
+    /// reading that asked the layer table what it holds would leave the packer
+    /// free to derive an index of its own, which is exactly the failure the
+    /// property is about; and decoding the bit layout at the caller would be a
+    /// second copy of the packing decision, free to drift from the first.
+    #[must_use]
+    pub fn layer_at(&self, vertex_index: usize) -> Option<u16> {
+        self.vertices.get(vertex_index).map(|vertex| vertex.layer)
+    }
+
     /// How many quads this section emitted.
     #[must_use]
     pub const fn quad_count(&self) -> usize {

@@ -8,29 +8,27 @@ The three pages beside this one answer the rest: `script-surface.md` for what a
 script may reach, `script-limits.md` for what it may spend, and
 `script-faults.md` for what a failure says.
 
-## Nothing can be authored in Luau today
+## What is authored in Luau today, and what is not
 
-The engine carries a sandboxed Luau host — a place mod code will run, budgeted
-and memory-capped and isolated — and **there is no `mycraft.*` binding of any
-kind**: no block, world, entity or registry access, and no script-callable way
-to declare a component, give it a name, or attach it to a subject. That surface
-is Rust — the engine evaluates a chunk, takes the value it returns, and decides
-what to attach it to — and content has no path into it.
+**Blocks are.** A block declaration is a Luau chunk that returns a table, read
+through the host this page describes — so everything below about how a chunk is
+shaped, what it costs and how it fails is already true of content you can write
+now. `blocks-items.md` is that contract and `README.md` walks you through your
+first one.
 
-**If you came here to make something, `README.md` is the page you want.**
-Authoring works today and it is data files: a block, a HUD element, a voxel
-model. It takes you from an empty file to something on screen.
+**Behaviour is not.** There is still **no `mycraft.*` binding of any kind**: no
+block, world, entity or registry access, and no script-callable way to declare a
+component, give it a name, or attach it to a subject. A declaration returns a
+table; it calls nothing the engine provides. Deciding what to do with a returned
+value is Rust's, and content has no path into it.
 
-So why read this at all? Because the shape of a chunk, its cost, its faults and
-its limits are real and final now, and a binding is added *behind* them rather
-than instead of them. Settling them first is what makes a capability judged
-against enforcement that already exists rather than hardened afterwards. None of
-it will move to accommodate a binding.
-
-The authoring surface arrives in two steps. **Defining blocks in Luau** comes
-first and retires the data-file loader. **Attaching behaviour to a subject** —
-the thing every limit is charged against — comes after it, in the same
-milestone.
+So a declaration is a chunk that **computes a value**, and the sections below are
+what it may spend doing so. The parts about *attachment* — a callback registered
+against a subject, invoked on an event — describe machinery that is built and
+measured and that no author can yet reach. They are here because the shape of a
+chunk, its cost, its faults and its limits are final now, and a binding is added
+*behind* them rather than instead of them. None of it will move to accommodate
+one.
 
 ## The shape of a script
 

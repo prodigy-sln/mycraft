@@ -53,7 +53,7 @@ use mc_core::id::BlockName;
 use mc_render::geometry::scene::SceneGeometry;
 use mc_sim::replay::ReplayWorld;
 use mc_world::column::SECTIONS_PER_COLUMN;
-use mc_world::content::TomlFileDefinitionSource;
+use mc_world::content::LuauFileDefinitionSource;
 use mc_world::persistence::{Acceptance, SavedPlayer, load_world, save_world};
 use mc_world::section::Contents;
 use mc_world::world::{VoxelWorld, WorldPos};
@@ -193,7 +193,7 @@ pub fn resumed(
     holding: impl FnOnce(&BlockRegistry) -> Result<VoxelWorld, Box<dyn Error>>,
 ) -> Result<AResumedWorld, Box<dyn Error>> {
     let mut registry = BlockRegistry::new();
-    registry.apply(&TomlFileDefinitionSource::new(root.to_owned()))?;
+    registry.apply(&LuauFileDefinitionSource::new(root.to_owned()))?;
     let written = holding(&registry)?;
     let resumed = AResumedWorld {
         directory: TempDir::new()?,

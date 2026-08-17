@@ -1,4 +1,12 @@
-//! The crate every other crate depends on must not inherit a file-format parser.
+//! The crate every other crate depends on must not inherit a way of reading a
+//! declaration.
+//!
+//! **There are two of those now and there used to be one.** A block declaration
+//! is a chunk a scripting host evaluates and a HUD declaration is a document a
+//! parser reads, so a guard naming only the parser would have gone on passing
+//! while saying nothing at all about the way block definitions actually arrive.
+//! Both are named below, and the crate owning the registry contract must reach
+//! neither.
 //!
 //! The question is about the *resolved* graph, not the manifest: a parser reached
 //! through three intermediaries is still a parser, and a `[dev-dependencies]`
@@ -25,8 +33,15 @@ const CONTRACT_CRATE: &str = "mc-core";
 /// The crate that owns the reader turning a content root into definitions.
 const LOADER_CRATE: &str = "mc-world";
 
-/// The definition-file parser. It belongs to the loader and to nothing else.
-const PARSER: &str = "toml";
+/// How a HUD declaration is read, and how a block declaration is.
+///
+/// Both belong to the loader and to nothing else. The parser is named as the HUD
+/// format's rather than as "the declaration format's", because block
+/// declarations stopped being a document the day they became a chunk — and a
+/// constant still calling it the definition-file parser would have this guard
+/// passing for a reason that is no longer true.
+const HUD_PARSER: &str = "toml";
+const DECLARATION_EVALUATOR: &str = "mlua";
 
 /// A dependency the contract crate genuinely has, so that a walk which resolved
 /// nothing cannot pass the check below by finding nothing.
@@ -112,18 +127,23 @@ fn resolved_closure<'a>(
 }
 
 #[test]
-fn the_crate_owning_the_registry_contract_resolves_no_definition_file_parser() -> TestResult {
+fn the_crate_owning_the_registry_contract_reads_no_declaration_in_either_way() -> TestResult {
     let metadata = resolved_metadata()?;
     let closure = resolved_closure(CONTRACT_CRATE, &metadata)?;
 
     assert!(
         closure.contains(CONTRACT_KNOWN_DEPENDENCY),
-        "the walk resolved nothing recognisable, so the check below would be vacuous: {closure:?}"
+        "the walk resolved nothing recognisable, so the checks below would be vacuous: {closure:?}"
     );
-    assert!(
-        !closure.contains(PARSER),
-        "the registry contract must not know what a definition file is spelled in, \
-         but its resolved graph reaches `{PARSER}`: {closure:?}"
+    assert_eq!(
+        (
+            closure.contains(HUD_PARSER),
+            closure.contains(DECLARATION_EVALUATOR)
+        ),
+        (false, false),
+        "the registry contract must not know what a declaration is written in — neither the \
+         document a HUD is nor the chunk a block is — and its resolved graph reaches one of \
+         them: {closure:?}"
     );
     Ok(())
 }
@@ -132,15 +152,25 @@ fn the_crate_owning_the_registry_contract_resolves_no_definition_file_parser() -
 /// The day someone deletes the loader and hard-codes definitions in Rust — the
 /// exact regression this feature exists to prevent — `mc-core` would still be
 /// parser-free and the scenario above would still pass, cheerfully, forever.
+///
+/// **Both are asked for, and the evaluator is the half that would go missing.**
+/// The loader kept resolving the parser through the swap because the HUD format
+/// did not change, so the parser alone can no longer tell a loader that reads
+/// block declarations from one that has stopped.
 #[test]
-fn the_crate_owning_the_content_loader_does_resolve_a_definition_file_parser() -> TestResult {
+fn the_crate_owning_the_content_loader_reads_declarations_in_both_ways() -> TestResult {
     let metadata = resolved_metadata()?;
     let closure = resolved_closure(LOADER_CRATE, &metadata)?;
 
-    assert!(
-        closure.contains(PARSER),
-        "the loader is what reads definition files, so it must resolve `{PARSER}`; \
-         if it no longer does, definitions are coming from somewhere else: {closure:?}"
+    assert_eq!(
+        (
+            closure.contains(HUD_PARSER),
+            closure.contains(DECLARATION_EVALUATOR)
+        ),
+        (true, true),
+        "the loader is what reads declarations: a HUD through `{HUD_PARSER}` and a block through \
+         `{DECLARATION_EVALUATOR}`. If it no longer resolves one of them, declarations of that \
+         kind are coming from somewhere else: {closure:?}"
     );
     Ok(())
 }

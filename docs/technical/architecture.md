@@ -57,22 +57,34 @@ pub type DefinitionStream<'a> =
 
 Two implementations exist:
 
-- `mc_world::content::TomlFileDefinitionSource` — reads a content root's
-  `blocks/*.toml` files. The production loader for MVP 1.
+- `mc_world::content::LuauFileDefinitionSource` — reads a content root's
+  `blocks/*.luau` files, evaluating each through `ScriptHost`. The production
+  loader.
 - `mc_core::block::source::InMemoryDefinitionSource` — definitions held
   directly, in the order given. This is **production code**, not a test
   fixture: because no public `register` exists, it is the only
   programmatic way to build a registry at all, and its existence is what
   makes the port a real seam rather than an asserted one.
 
-**MVP 2 swaps the loader implementation for a Luau-backed
-`DefinitionSource`; the registry itself is untouched.** The port is shaped
-around the domain need ("hand me the definitions this source declares, and
-tell me where each one came from"), not around TOML's API: no `Path`,
-`File`, `PathBuf`, or `toml::` type appears anywhere in `mc-core`. An
-origin (`DefinitionOrigin`) is an opaque, human-readable label — it wraps a
-plain `String` — so a Luau chunk name is exactly as expressible as a file
-path, and `mc-core` never learns what kind of thing produced either one.
+**The loader implementation was swapped from TOML to Luau through this port and
+the registry was untouched** — which is the claim the port existed to make good,
+now measured rather than asserted. The port is shaped around the domain need
+("hand me the definitions this source declares, and tell me where each one came
+from"), not around any format's API: no `Path`, `File`, `PathBuf`, `toml::` or
+`mlua::` type appears anywhere in `mc-core`. An origin (`DefinitionOrigin`) is an
+opaque, human-readable label — it wraps a plain `String` — so a file path and a
+chunk name are equally expressible, and `mc-core` never learns what kind of thing
+produced either.
+
+**The strongest evidence the swap changed nothing it should not: a world saved
+against the TOML declarations loads against the Luau ones reporting no block as
+missing, changed or retextured.** `persistence/format.rs` folds a definition into
+two hashes — `DeclaredBehaviour` over `name`, `is_solid`, `replaceable`,
+`breakable`, `breaks_into`, and `DeclaredAppearance` over `name` and `texture` —
+and **deliberately excludes `origin`**, so a save does not depend on the path a
+definition was read from. That exclusion is what makes the comparison possible,
+and it is the one instrument in the swap that compares a whole resolved
+definition against an oracle computed before the swap existed.
 
 `apply` is **atomic by construction, not by discipline**. It runs a
 fallible validation pass that drains the source's stream into a staging
@@ -578,16 +590,33 @@ either. `splice` replaces sections **positionally**, matching each remeshed sect
 existing slot by `(column, section index)` — it never appends and never sorts — which is exactly what
 keeps `mesh_all`'s section ordering, a golden-frame dependency, from moving under an edit.
 
-**Texture layer assignment is not re-resolved on a remesh, and that no longer rests on which blocks a
-world happens to contain.** Layers are resolved once, at launch, from `layers_of(&registry)` — every
-block the content registers, never the meshed world's quads (`technical/rendering.md` §"Textures are
-array layers, never an atlas") — so an edit or a resumed save can add a block a world had none of
-without shifting anything already assigned. Re-resolving on every remesh is unnecessary rather than
-deferred: nothing about which blocks are registered changes mid-session in MVP 1. Hot-reloadable
-content reopens the question, and the failure mode if a quad ever named an unresolved key is a loud
-error at packing time (`GeometryError::UnresolvedTexture`) rather than a wrong texture — recorded
-against MVP 2 in `crates/mc-render/CLAUDE.md`, which is a separate gap: a quad is still matched to a
-key by the block's *name*, not through the registry.
+**Texture layer assignment is not re-resolved on a remesh, and it is no longer derived by whoever
+draws at all.** The assignment is **stated** by the simulation when it reads the content root and
+**honoured** by the client — see §"The layer assignment is stated, not derived" below for why that
+direction is the whole point. It covers every block the content registers, never the meshed world's
+quads (`technical/rendering.md` §"Textures are array layers, never an atlas"), so an edit or a
+resumed save can add a block a world had none of without shifting anything already assigned.
+Re-resolving on every remesh is unnecessary rather than deferred: nothing about which blocks are
+registered changes mid-session in MVP 2. Hot-reloadable content reopens the question, and the failure
+mode if a quad ever named an unresolved key is a loud error at packing time
+(`GeometryError::UnresolvedTexture`) rather than a wrong texture — which is a separate gap, recorded
+in `crates/mc-render/CLAUDE.md`: a quad is still matched to a key by the block's *name*, not through
+the registry.
+
+**That substitution lives in two places, and this record used to name only one.** `layer_for`
+(`crates/mc-render/src/geometry/mod.rs`) parses a quad's block name as a texture key, and
+`hud::held::held_swatch` (`crates/mc-render/src/hud/held.rs`) does the same for the held-block
+indicator. Both agree with the assignment — whose entries are keyed by each block's declared
+`texture` — only because every shipped block declares the two identically. **A declaration whose
+`texture` differs from its `name` therefore loads and then does not draw**, and because a failed
+remesh batch is logged and dropped rather than failing the run, an author sees their block simply not
+appear. `docs/modding/blocks-items.md` states that in an author's own terms rather than leaving it to
+be discovered, and both substitution sites are pinned by a test rather than by a comment — **a test
+that expires when the per-face texture work closes the gap, and whose red is the success signal**.
+**The layer index is nonetheless the only content-derived value inside a packed vertex**: a vertex is
+three section-local coordinates, a facing, the layer, and a scene section index assigned at assembly.
+So closing the gap is a change to how an entry is *selected*, in two call sites, and not to what a
+vertex carries.
 
 **A failed remesh batch is dropped and reported once — the opposite rule from scene preparation,
 deliberately.** Preparation fails the whole run if it cannot build a scene at all; a remesh that cannot
@@ -643,11 +672,13 @@ so a resume generates nothing at all, rather than generating a world, meshing it
 once a save turns up.
 
 Two of anything on the golden path is how images drift, so the split is answered structurally rather
-than by care: both doors share one mesher (`mesh_world`), one definition of the texture key set
-(`layers_of`, over the *registry* and never over a world) and one packer (`scene_of`), so the only
-thing that can differ between them is which world's blocks went in — and that equality is asserted
-byte for byte, over both the section table and the packed vertices, by
-`crates/mc-client/tests/launch_and_capture_agree.rs`.
+than by care: both doors share one mesher (`mesh_world`) and one packer (`scene_of`), and both build
+their `ContentView` from the same stated assignment rather than each calling one shared resolver — so
+the only thing that can differ between them is which world's blocks went in. `layers_of` used to be
+that shared resolver and is gone: the property its doc comment recorded, that the geometry a player is
+handed and the geometry a golden is shot from cannot differ, is now true by construction instead of by
+both paths calling one function. That equality is asserted byte for byte, over both the section table
+and the packed vertices, by `crates/mc-client/tests/launch_and_capture_agree.rs`.
 
 **`mc-client` gains wiring and one ending translation, and no policy.** `launch::save_path()` names
 where the save lives (relative to the working directory, mirroring `CONTENT_ROOT`'s own convention,
@@ -870,11 +901,19 @@ and the three `script-*` pages beside it are the author-facing side of this).
 Its position on the crate map is the first thing worth
 recording, because it is unusual: **`mc-script` resolves `mlua` and no workspace
 crate at all**, and **nothing in `crates/` depends on `mc-script`**. The host is
-exercised solely by its own tests and by the hostile-mod harness. Two absences
-follow from that and are deliberate rather than pending: there is no
-`DefinitionSource` adapter backed by script — the registry seam above is
-untouched — and there is no per-mod CPU accounting, because accounting needs a
-tick to attribute against and no tick calls into this crate.
+exercised solely by its own tests and by the hostile-mod harness. **`mc-world` now resolves it**, for the block loader, and that is the only
+workspace edge into this crate. The dependency is confined to
+`crates/mc-world/src/content/` exactly as `toml` is, and the direction is what
+keeps `mc-script` ignorant of what a block is: putting the loader *inside*
+`mc-script` would have required it to depend on `mc-core` and to learn the
+domain, which is precisely what its opaque `SubjectName`/`ComponentName` design
+exists to refuse. **`mlua` must never reach `mc-world`.** The vendor's blast
+radius is `crates/mc-script/src/luau/` plus `HostLimits`, and that is what a
+future change may not break.
+
+One absence remains and is deliberate rather than pending: there is no per-mod
+CPU accounting, because accounting needs a tick to attribute against and no tick
+calls into this crate.
 
 **The backend is nameable in `crates/mc-script/src/luau/` and nowhere else.**
 Everything outside that directory speaks in the crate's own vocabulary —
@@ -986,6 +1025,245 @@ convention:** `crates/mc-script/src/lib.rs` carries a crate-root
 composes with the inherited workspace lints. Its scope stops at the library and
 its sibling unit-test modules — `technical/testing.md` has what that leaves
 uncovered and what reaches it instead.
+
+## Block declarations in Luau: the loader, its bounds, and the seam it sits behind
+
+`mc_world::content::LuauFileDefinitionSource` is the second implementation of
+`DefinitionSource` and the one the game runs on. It splits in two, along a line
+where the halves change for different reasons: `luau_source.rs` decides **which
+entries under a content root are declarations and how they are read**, and
+`luau_declaration.rs` decides **what a declaration must say**. A new field or a
+changed default is a change to the second; a change to which files count is a
+change to the first. The second is the Luau counterpart of `raw.rs`, which does
+the same job for the HUD's TOML.
+
+### Evaluation is an entry into script and is guarded like one
+
+Every declaration goes through `ScriptHost::evaluate` **at the shipped limits** —
+the call-and-loop budget, the per-entry memory cap, the sandbox and the frozen
+environment. None of that machinery is written in the loader, and that is the
+point: a loader that read a file and ran it round the side of the host would
+satisfy every requirement about fields and would hang the server on the first
+declaration that looped.
+
+Because the host's guard is all-unwanted by nature — every one of its scenarios
+asserts a refusal — **the thing that stops a host configured with an absurdly
+small budget passing all of them is the requirement that a well-formed
+declaration registers**, which must therefore run against the shipped limits and
+never a test-sized host. Measured: replacing the loader's host with a
+100,000-tick one left all nine guard tests green and reddened only that one.
+
+**One host per read, and no handle outlives its file.** `definitions` takes
+`&self` while `evaluate` takes `&mut self`, so the source cannot hold a host.
+Holding one behind interior mutability would make two overlapping streams a
+re-entrant borrow, which panics — and a panic on a path content reaches is what
+`mc-script`'s own invariants forbid. So a host is built inside the call, used for
+every file, and dropped before the call returns: the failure is unexpressible
+rather than avoided.
+
+**4,096 declarations through one script state was verified before anything was
+built on it.** Peak memory, holding every returned table handle and forcing no
+collection, was 2,105,960 bytes against the 16 MiB backstop — about 12.5%. The
+production path completing at all is the decisive evidence, because the backstop
+is enforced by the allocator on raw usage.
+
+### The raw key enumeration, and the metamethod it actually meets
+
+`ScriptHost::field_names(&self, table, most) -> FieldNames` answers *which keys
+does this table hold*, raw. It exists because `deny_unknown_fields` was TOML's:
+**a host that can read a named field but cannot ask what fields exist can never
+tell a typo from an absence**, so a misspelled `replacable` would become the
+silently-lost declaration the documentation promises it is not.
+
+Four properties are load-bearing.
+
+**Raw — and the metamethod at risk is not the obvious one.** `read_field` is
+already defended against `__index`. An *enumeration* meets `__iter`, `__pairs`
+and `__len`. Measured on this toolchain: `mlua`'s `Table::pairs` is **already
+raw** against `__iter` and `__pairs` — a script-side `for k in t do` sees the
+metamethod's list while `Table::pairs` sees the table's own keys — but
+**`Table::len` honours `__len`**, answering 0 for a table holding three keys
+behind a `__len` that returns zero.
+
+**That is the reachable defect and it is a silent total failure.** A host that
+sized its enumeration with `len()` would report *every* declaration as carrying
+no fields at all: it would refuse nothing, lose every typo, and be
+indistinguishable from a table that genuinely was empty. The enumeration is
+written the way it is for that reason, not because a metamethod exists in the
+abstract. **Anyone simplifying this by reaching for a length reintroduces it, and
+the suite stays green** — the only test that can see it is the one asserting that
+a `__len` reporting nothing does not hide what a table holds.
+
+**Bounded inside the walk, with the bound as a parameter.** The walk stops one
+key past the allowance rather than filling a vector and measuring it afterwards,
+because measuring afterwards has already made the allocation the bound exists to
+refuse. The bound is a parameter because `mc-script` may not learn a
+block-specific number.
+
+**Total over key types, and sorted here rather than at the caller.** A key that
+is not a string is rendered by the same rendering `print` uses, never skipped — a
+skipped key would make "an unrecognised field is refused" a promise holding only
+for the key types somebody thought of. And Lua leaves hash-part order
+unspecified, so the state's order carries **no information at all**; returning it
+would hand a caller noise to render into a refusal nobody can quote, and
+`documented_refusals.rs` compares a quoted refusal against a real run **line for
+line**.
+
+### The four content-root bounds, and why their order is fixed
+
+None of these existed while the format was TOML, because a parser and a
+filesystem supplied the practical limits.
+
+| Bound | Value | Why it exists |
+|---|---|---|
+| declarations per root | 4,096 | a directory listing is a content-controlled allocation |
+| declaration file size | 256 KiB | read into memory in full before evaluation |
+| declared text length | 256 **characters** | bounds what a `BlockDefinition` retains — three strings across a whole root |
+| field names per declaration | 64 | the enumeration copies every key name out of the script state |
+
+**The check order is asserted, not incidental.** The count is taken **before any
+entry is asked anything**, so a root of 4,097 files is refused from the length of
+the listing rather than four thousand filesystem calls later. A file's size is
+taken from its directory entry **before it is opened**, so an oversized file is
+refused on its size rather than on whatever its text turned out to say — a true
+statement about the wrong problem sends an author to edit a file that was never
+going to be read.
+
+**Characters, not bytes**, because the documentation says characters and bytes
+would refuse a non-ASCII id at a different length than the page states. That
+distinction is only catchable from the *accepting* side: 257 ASCII characters are
+257 bytes, so both measures agree wherever the value is refused.
+
+**One bound cannot state its observed quantity, and that is the design working
+rather than an omission.** The field-count refusal names the bound alone, because
+the enumeration stops one key past the allowance and so never learns how many
+keys the declaration really held — learning it would mean performing the
+allocation the bound exists to prevent. Every other bound states both quantities,
+so a reader can tell "slightly over" from "far over".
+
+**Script output the host retains is bounded too, and it truncates rather than
+refuses** — a chunk that printed too much is not a malformed declaration. The
+allowance is a `HostLimits` field so an operator can read and set it; it covers
+one host's whole life rather than one entry, because a content root is read
+through a single host; reaching it stops recording rather than dropping the
+oldest, since the first line a chunk printed is what locates a failed load; and
+**what was not kept is counted**, because "the mod printed nothing" and "the host
+stopped keeping it" are different facts. That count travels with the lines rather
+than beside them, so nothing can read the record without meeting it.
+
+### The chunk name and the origin are deliberately different
+
+`ScriptHost::evaluate(name, source)` is handed the file's **name alone**
+(`amber.luau`), and the `DefinitionOrigin` is built by the loader from the whole
+path. That split is what makes the requirement falsifiable at all: a loader
+passing the full path as the chunk name would make the two coincide, and every
+assertion that a refusal points at a path a person can open would become two
+copies of one decision agreeing with each other. The host is handed a label and
+never opens anything, so what it can report back is the label it was given.
+
+### The simulation loads content; the client receives it resolved
+
+`docs/planning/client-server-split.md` is the binding reasoning and is not
+re-derived here. The rule: **the client never evaluates anything any other
+participant, the server included, must agree with.** A content set is the
+sharpest case there is, because a texture layer index rides inside every packed
+vertex, so one block a participant does not share shifts every index after it and
+the world is textured wrong with no error anywhere.
+
+**What moved is the construction, not the loader.** `mc_sim::content` is where a
+content root becomes a registry and a HUD. `LuauFileDefinitionSource` and
+`TomlFileHudSource` stay in `mc-world`, `mc-script` keeps its
+no-workspace-crate-depends-on-it property in the direction that matters, no crate
+moved, and `mc-client` gained no dependency. `prepare_launch`, `prepare_scene`
+and `scene_of` keep their names and their place, because the golden frames are
+shot through them and the exit criterion is decided there. What left them is the
+construction: the definition source, the HUD source, the registry they were
+applied to, and the resolution of the content directory itself.
+
+**Four chokepoints are watched in the client's own sources, and they are
+chokepoints rather than type names** — renaming a source does not rename the
+door. `registry.apply(` is the only way to populate a registry at all;
+`HudLayout::load` is the only door into a layout; `BlockRegistry::new` catches a
+client that builds an empty registry to fill by some other route; and
+`content_root` catches a client that resolves the content directory for itself
+even if it never reads it. The last of those is why the simulation's resolver is
+named `shipped_directory`: a needle that admits no exemption is worth its cost,
+and the alternative is a needle with a carve-out, which is where the next breach
+lives.
+
+**Two residues, stated rather than hidden.** `PreparedScene` and `PreparedLaunch`
+still hand the client a whole `Arc<BlockRegistry>`, carrying the rules by which a
+world is mutated as well as the fields a client draws with, because in this
+arrangement the client binary *is* the server. And the source scan is the weaker
+instrument: somebody adding a *second* door — a new public registration call —
+bypasses it, and no text scan closes that. The instrument that would is a
+dependency-closure guard, which **cannot pass while one binary hosts both
+halves** — a binary's closure is the union of everything inside it — and is
+therefore the composition-root spec's exit criterion rather than something this
+arrangement can assert. A guard green exactly when the rule is broken is inverted
+rather than weak.
+
+### What crosses the seam, and what deliberately does not
+
+`mc_core::content::ResolvedContent` is the value. It lives in `mc-core` and not
+in `mc-sim` because `mc-render` has to be able to accept a stated assignment while
+never naming the simulation — putting it in `mc-sim` would have made the renderer
+reach for a crate the dependency rules forbid it — and because it is a content
+primitive with no I/O, which is what `mc-core` is for.
+
+It carries each block's **name**, its **texture key** and its **solidity**, in
+registration order, plus the **layer assignment**. It carries none of
+`replaceable`, `breakable` or `breaks_into`: those are the rules by which a world
+is *mutated*, the simulation recomputes every one of them, and a client holding
+them would be holding rules it may not apply. **That absence is asserted by
+discrimination rather than by inspection** — two content roots differing in
+nothing but those three resolve to values that compare equal, while two differing
+in a `texture` and a `solid` resolve to values that differ in both — because a
+type that simply has no such field cannot fail a test about not having one, and
+neither direction alone is sufficient.
+
+There is **no identity, digest or hash of the content set**, and its absence is a
+decision. With one process nothing can disagree, so nothing could falsify such a
+field, and a test that cannot fail reads as evidence and is not. It becomes
+falsifiable the moment a second participant exists. That is the exact opposite of
+the layer assignment below, which is here precisely because its consumer exists
+today.
+
+### The layer assignment is stated, not derived
+
+**A layer index rides inside every packed vertex.** Derived as a key's position in
+a sorted key set — which is what the client used to do — inserting one block
+renumbers every index after it and the whole world is textured wrong: silently,
+with no error anywhere, and not localised to the block that caused it. That is not
+a networking concern. It is a live defect on hot reload, in one process, today.
+
+So `mc_sim::content::resolved_from` states key-to-layer pairs when it reads the
+root, and `mc_client::content::ContentView` honours them through
+`TextureLayers::stated`. **Nothing on the receiving side checks the assignment
+against a sort**, because checking would be the same derivation written a second
+time and would refuse exactly the assignments the mechanism exists to accept. The
+order the simulation happens to assign is lexicographic today, and that is an
+implementation detail rather than a contract — nothing downstream may derive it,
+which is what shipping the assignment buys.
+
+`ContentView` is built from the resolved value and reads nothing else: no
+registry, no path, no scripting host. That is the single property distinguishing
+this seam from a rename, and the two failures it rules out are worth naming
+because each would leave every scenario about content green while nothing had been
+cut — a resolved value that is a newtype over the registry, and a view that reaches
+back through one. `ContentView::is_solid` has **no production caller yet**: the
+mesher still culls against the `BlockRegistry` that is still travelling, which is
+the residue above, and this is what it reads once the registry stops travelling.
+
+**The wiring is not behaviourally falsifiable in this arrangement, and that is
+measured rather than suspected.** Restoring the production derivation left every
+behavioural test green — both readings of what the value carries, the view's own,
+all four of the assignment's, and both golden suites — because a client that
+honours and one that derives answer identically for every content root that can be
+built today, and permuting the assignment permutes the array texture's fill in the
+same breath so the pictures are unchanged. **Only the source scan reddens.** It
+becomes falsifiable the moment an assignment is appended rather than renumbered,
+which is hot reload's, and the scan can be retired then.
 
 ## The pure/GPU seam inside `mc-render`
 
@@ -1102,14 +1380,33 @@ should route them through a sink too.
 Several facts about these designs are asserted by tests that walk real
 structure, not by convention:
 
-- **`toml` is absent from `mc-core`'s entire resolved dependency graph.**
-  A test walks `cargo metadata`'s resolved graph breadth-first from the
-  `mc-core` node and fails if `toml` appears anywhere in it — including
-  transitively. The same test also asserts the **positive control** that
-  `mc-world`'s resolved graph *does* reach `toml`: without that second
-  assertion, the check would still pass, vacuously, the day someone
-  deleted the loader and hardcoded block definitions into `mc-core`
-  directly — exactly the regression this structure exists to prevent.
+- **Neither `toml` nor `mlua` is anywhere in `mc-core`'s resolved
+  dependency graph**, and `mc-world`'s reaches **both**. A test walks
+  `cargo metadata`'s resolved graph breadth-first from each node and
+  fails if a needle appears where it must not, including transitively.
+  The two assertions are each other's positive control: the day somebody
+  deletes the loader and hardcodes block definitions into `mc-core`
+  directly — exactly the regression this structure exists to prevent —
+  `mc-core` would still be parser-free and an absence-only check would
+  pass cheerfully forever.
+
+  **Both needles are named because one stopped being sufficient, and this
+  is the general lesson rather than a detail of this guard.** The check
+  originally named `toml` alone, on the reasoning that a declaration
+  format's parser belongs to the loader and nowhere else. The day block
+  declarations became Luau chunks, `toml` stopped being how block
+  declarations arrive — so the guard went on passing while the property
+  it protects had gone unguarded for the new way in, and its companion
+  assertion could no longer tell a loader that reads block declarations
+  from one that has stopped reading them at all. **A guard that
+  enumerates specific dependencies silently narrows whenever the set of
+  things it guards against grows, and nothing about it goes red to say
+  so.** Whenever a format, a backend or a vendor is *added* beside an
+  existing one rather than replacing it, every absence guard naming the
+  old one is already out of date. The constant is named for the **HUD
+  format's** parser for the same reason: a constant that keeps an
+  outdated name is how a guard drifts from its purpose without anyone
+  editing a line of it.
 - **No Rust source outside test code contains a `base:`-namespaced block
   name literal.** A source scan reads every `crates/*/src/**/*.rs` file
   except the sibling `*_test.rs` unit files, and fails if any of the four
@@ -1165,28 +1462,57 @@ structure, not by convention:
 - **Nothing in `crates/` resolves `tools/voxforge`, in any dependency
   kind.** A test walks every `crates/mc-*` package's resolved dependency
   closure and fails if `voxforge` appears anywhere in it, carrying the
-  same positive control as the `mc-core`/`toml` walk above: it also
+  same positive control as the `mc-core` needle walk above: it also
   asserts that a dependency each inspected crate genuinely has *is*
   present, so a walk that silently resolved nothing does not pass
   vacuously. `tools/` — home to `voxforge` and, per ADR-009, developer
   tooling generally — may depend inward on `crates/`; the reverse never
   holds.
-- **`mc-client`'s resolved closure excludes `mc-script`, in every dependency
-  kind.** The client is untrusted code running on a player's machine and the
-  scripting host is the server's enforcement of what a mod may do; an edge
-  between them — through any intermediary, dev-dependencies included — would put
-  the enforcement inside the thing it enforces against. The walk reads `cargo
-  metadata`'s `resolve.nodes[].deps`, which is cargo's own resolution with every
-  kind already folded in, rather than a manifest (direct edges only) or
-  `Cargo.lock` (every workspace member, which would make the assertion vacuously
-  false). It returns an **enumerated verdict** rather than a boolean, so
-  "the host is absent from the metadata altogether" and "the client does not
-  reach it" cannot be reported the same way — a renamed or removed crate reddens
-  for free. Two controls sit beside it: the same walk over doctored metadata
-  with the host removed must *refuse*, and the same walk must report a
-  dependency the client genuinely has (`winit`) as present, because the walk
-  seeds itself with its own root and would otherwise report a closure having
-  followed no edge at all.
+- **`mc-client` reaches `mc-script` today, and that is a residue of one binary
+  hosting both halves rather than a property anybody wants.** The guard that once
+  forbade it — the client's resolved closure excluding the scripting host in
+  every dependency kind, with positive controls proving the walk could see — has
+  been retired, and the reasoning printed here for its retirement was wrong. It
+  said the client "has to know what blocks exist, and it learns that by
+  evaluating the same block declarations the server evaluates", and that a client
+  which cannot reach the host cannot draw the world. **That is a non-sequitur.**
+  The client needs *resolved definitions*. It has never needed the evaluator, and
+  nothing about drawing a world requires a VM in the binary that draws it.
+
+  **The rule, which is binding and is recorded with its reasoning in
+  `docs/planning/client-server-split.md`: the client never evaluates anything any
+  other participant, the server included, must agree with.** A content set is the
+  sharpest case there is. A texture layer index rides inside every packed vertex,
+  so one block a participant does not share shifts every index after it and the
+  entire world is textured wrong — silently, with no error anywhere, and not
+  localised to the disputed block. Passing that test makes client evaluation
+  *permissible*, never obligatory: performance and isolation rules bind
+  independently, which is why neighbour-dependent block appearance is still
+  refused despite passing it.
+
+  **Why the guard was nonetheless unassertable, which is the part worth keeping.**
+  A binary's dependency closure is the union of the closures of everything inside
+  it, and in singleplayer the client binary *is* the server. Whichever crate loads
+  content sits inside it. The only arrangement in which that test passes today is
+  the one where the client sources content itself — so the guard was green exactly
+  when the rule was broken, which is inverted rather than weak. The binding
+  constraint is not crate topology but the fact that `mc-client` is the
+  composition root, and that is a choice rather than a law. **Restoring the guard
+  is the exit criterion of the spec that moves the root**, which is a better job
+  for it than guarding, and it is not something an intermediate spec can assert.
+
+  **What still carries the security weight is Invariant 4, unchanged: the server
+  is authoritative, and anything a client claims is recomputed server-side.** Nor
+  does any of this bear on where a *player* aimed — re-deriving that on the
+  server is what a competitive shooter needs, and MyCraft is not one. The
+  `mlua`-containment guard below is a different guard about a different property
+  and stands exactly as it was.
+
+  A reader arriving with the question *"should the client evaluate content?"*
+  should find this paragraph rather than silence. **No.** It receives content
+  already resolved, and the boundary that matters is agreement — what every
+  participant must hold the same value for — as much as it is authority over
+  world state.
 - **`mlua` is nameable under `crates/mc-script/src/luau/` and nowhere else**,
   asserted by a text guard over both the crate's `src/` and its `tests/` roots.
   `tests/` is scanned because the hostile-mod harness is the code most likely to

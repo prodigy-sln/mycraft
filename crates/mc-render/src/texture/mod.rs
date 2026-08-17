@@ -1,12 +1,26 @@
-//! Which array-texture layer a texture key resolves to.
+//! Which array-texture layer a texture key occupies.
 //!
-//! Layer indices are assigned in **lexicographic order of the texture key**, and
-//! that is a decision rather than an accident of the container. A layer index
-//! travels inside a packed vertex and therefore inside every golden frame, so
-//! insertion order, registry-id order or hash order would each make the goldens
-//! depend on something nothing in the project pins. A `BTreeMap` keyed by the
-//! key itself makes the order structural: there is no comparator here that could
-//! disagree with the assignment.
+//! **The assignment is stated where the content is read, and honoured here.**
+//! [`TextureLayers::stated`] is the production path: it takes the layer each key
+//! occupies as given and checks it against nothing, because checking would be a
+//! derivation written a second time and would refuse exactly the assignments the
+//! arrangement exists to accept. [`TextureLayers::resolve`], which does hand out
+//! indices in lexicographic order of the key, survives as a convenience for tests
+//! that need *an* assignment rather than a particular one — it has no production
+//! caller.
+//!
+//! **A layer index travels inside a packed vertex and therefore inside every
+//! golden frame.** That used to be the argument for the sort being a decision
+//! rather than an accident of the container; it is now the argument for the
+//! *assignment* having to be stable. A renderer that worked its own out from a
+//! key set would renumber every index after any block it and the content's reader
+//! disagreed about — silently, with no error anywhere, and not localised to the
+//! block they disagreed about. `docs/technical/architecture.md` §"The layer
+//! assignment is stated, not derived" holds the reasoning.
+//!
+//! A `BTreeMap` keyed by the key itself is still what backs both constructors, so
+//! iteration order is structural and no comparator here can disagree with what it
+//! was handed.
 //!
 //! The array texture itself arrives with the GPU layer. What lives here is the
 //! two questions that can be answered without one: which layer a key occupies,
@@ -27,6 +41,12 @@ pub struct TextureLayers {
 
 impl TextureLayers {
     /// Assigns one layer to each of `keys`, in lexicographic order.
+    ///
+    /// **No production caller, and that is stated here rather than left for a
+    /// reviewer to notice.** What ships is [`stated`](Self::stated); this is for
+    /// tests that need *an* assignment rather than a particular one. Reaching for
+    /// it on a path a frame is drawn through is the derivation the seam exists to
+    /// remove.
     #[must_use]
     pub fn resolve(keys: &BTreeSet<TextureKey>) -> Self {
         let layers = keys
@@ -37,7 +57,27 @@ impl TextureLayers {
         Self { layers }
     }
 
-    /// The layer `key` occupies, or `None` when it was never resolved.
+    /// Layers exactly as `assignment` states them.
+    ///
+    /// **Honouring an answer rather than reproducing a decision**, which is the
+    /// difference between this and [`resolve`](Self::resolve). A layer index
+    /// rides inside every packed vertex, so a renderer that worked its own out
+    /// from a key set would renumber every index after any block it and the
+    /// content's reader disagreed about — silently, with no error anywhere, and
+    /// not localised to the block they disagreed about.
+    ///
+    /// Nothing here checks the assignment against a sort. Checking would be the
+    /// same derivation written twice and would refuse exactly the assignments
+    /// this exists to accept.
+    #[must_use]
+    pub fn stated(assignment: impl IntoIterator<Item = (TextureKey, u16)>) -> Self {
+        Self {
+            layers: assignment.into_iter().collect(),
+        }
+    }
+
+    /// The layer `key` occupies, or `None` where the assignment names none for
+    /// it.
     #[must_use]
     pub fn layer_of(&self, key: &TextureKey) -> Option<u16> {
         self.layers.get(key).copied()

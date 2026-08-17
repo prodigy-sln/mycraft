@@ -85,7 +85,12 @@ about the intent.)
 `build_section_geometry` matches a quad's `BlockName` against a `TextureKey` **by identical
 spelling**. The registry is the real authority for which texture a block draws, and the builder's
 signature passes no registry, so the match is a coincidence that holds only because every
-`content/base/blocks/*.toml` happens to declare `texture` equal to `name`.
+`content/base/blocks/*` happens to declare `texture` equal to `name`.
+
+**There are two such sites, not one.** `hud::held::held_swatch` (`src/hud/held.rs`) resolves the
+held-block indicator by parsing the block's own name as a texture key, on exactly the same
+coincidence. Whoever closes this gap must find both — one fixed and one left would show a block
+drawing correctly in the world while its indicator draws nothing, which reads as a HUD bug.
 
 Deferred deliberately for MVP 1, on two grounds: the spec contemplates the failure (FR-1.1-S5), and
 the failure mode is `UnresolvedTexture` naming the block — loud, never a wrong picture. Nothing

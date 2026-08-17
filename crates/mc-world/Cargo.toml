@@ -8,6 +8,13 @@ repository.workspace = true
 
 [dependencies]
 mc-core = { workspace = true }
+# Confined to src/content/, which is the only place a block declaration is read.
+# **`mlua` must never appear in this manifest.** The scripting host is the port
+# and this crate names only its types — `ScriptHost`, `ScriptValue`,
+# `ScriptTable`, `ScriptFault`, `FaultKind`, `HostLimits` — so the blast radius
+# of replacing the VM stays inside mc-script. Rust's extern-crate rules are what
+# make that structural rather than a rule somebody remembers.
+mc-script = { workspace = true }
 # Confined to src/content/. The dependency-graph invariant asserts mechanically
 # that this never reaches mc-core, because MVP 2 replaces the format wholesale.
 toml = { workspace = true }

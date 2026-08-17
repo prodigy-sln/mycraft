@@ -67,7 +67,7 @@ use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 use mc_render::window::Ending;
 use mc_sim::replay::ReplayWorld;
-use mc_world::content::TomlFileDefinitionSource;
+use mc_world::content::LuauFileDefinitionSource;
 use mc_world::persistence::{Acceptance, SavedPlayer};
 use mc_world::world::{VoxelWorld, WorldPos};
 use tempfile::TempDir;
@@ -94,9 +94,9 @@ const RECORDED_PLAYER: SavedPlayer = SavedPlayer {
 /// declaring one of those would be a root the generator could still partly build
 /// a world from, and "the generator cannot run here" would stop being true.
 const BEACON: &str = "fixture:beacon";
-const BEACON_DECLARATION_FILE: &str = "zz-beacon.toml";
+const BEACON_DECLARATION_FILE: &str = "zz-beacon.luau";
 const BEACON_DECLARATION: &str =
-    "name = \"fixture:beacon\"\ntexture = \"fixture:beacon\"\nsolid = true\n";
+    "return {\n\tname = 'fixture:beacon',\n\ttexture = 'fixture:beacon',\n\tsolid = true,\n}\n";
 
 /// The files the shipped root declares the generator's own blocks in.
 ///
@@ -106,7 +106,7 @@ const BEACON_DECLARATION: &str =
 /// of at the first block it places — which is still a refusal, but one about a
 /// different block than the one this fixture means.
 const THE_GENERATORS_DECLARATIONS: [&str; 4] =
-    ["dirt.toml", "grass.toml", "stone.toml", "water.toml"];
+    ["dirt.luau", "grass.luau", "stone.luau", "water.luau"];
 
 /// Where the beacon stands in the world only the save holds: chunk column (1, 1),
 /// sixteen blocks above the highest surface the generator produces anywhere.
@@ -206,7 +206,7 @@ fn a_root_the_generator_cannot_build_a_world_from() -> Result<ContentRoot, Box<d
 /// world out of it after all.
 fn why_this_root_cannot_generate(path: &Path) -> Result<String, Box<dyn Error>> {
     let mut registry = BlockRegistry::new();
-    registry.apply(&TomlFileDefinitionSource::new(path.to_owned()))?;
+    registry.apply(&LuauFileDefinitionSource::new(path.to_owned()))?;
     match ReplayWorld::generate(mc_sim::REPLAY_SEED, &registry) {
         Ok(_) => Err(
             "this fixture's content root generates a replay world after all, so a \

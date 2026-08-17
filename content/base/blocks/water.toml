@@ -1,4 +1,0 @@
-name = "base:water"
-texture = "base:water"
-solid = false
-replaceable = true

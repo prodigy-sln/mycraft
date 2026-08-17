@@ -47,7 +47,7 @@ use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 use mc_render::window::Ending;
 use mc_sim::replay::{ReplayWorld, WorldGenError};
-use mc_world::content::TomlFileDefinitionSource;
+use mc_world::content::LuauFileDefinitionSource;
 use mc_world::persistence::{Acceptance, LoadError, SavedPlayer, load_world, save_world};
 use mc_world::section::SectionError;
 use mc_world::world::{VoxelWorld, WorldPos};
@@ -92,9 +92,9 @@ const NOT_A_SAVE: &[u8] = b"this file is not a save";
 /// Deliberately not one of the four the generator places: a root declaring one
 /// of those is a root the generator can still partly build a world from, and
 /// "no world can be generated here" would stop being true of it.
-const BEACON_FILE: &str = "zz-beacon.toml";
+const BEACON_FILE: &str = "zz-beacon.luau";
 const BEACON_DECLARATION: &str =
-    "name = \"fixture:beacon\"\ntexture = \"fixture:beacon\"\nsolid = true\n";
+    "return {\n\tname = 'fixture:beacon',\n\ttexture = 'fixture:beacon',\n\tsolid = true,\n}\n";
 
 /// The files the shipped root declares the generator's own blocks in.
 ///
@@ -102,7 +102,7 @@ const BEACON_DECLARATION: &str =
 /// instead of at the first block placed, which is still a refusal but about a
 /// different block than the one the fixture means.
 const THE_GENERATORS_DECLARATIONS: [&str; 4] =
-    ["dirt.toml", "grass.toml", "stone.toml", "water.toml"];
+    ["dirt.luau", "grass.luau", "stone.luau", "water.luau"];
 
 /// The block this save holds, and which is declared differently by the time the
 /// save is read again.
@@ -385,7 +385,7 @@ fn a_root_no_world_can_be_generated_from() -> Result<content::ContentRoot, Box<d
 /// Returns an error if the root cannot be read or does not register.
 fn registry_over(root: &Path) -> Result<BlockRegistry, Box<dyn Error>> {
     let mut registry = BlockRegistry::new();
-    registry.apply(&TomlFileDefinitionSource::new(root.to_owned()))?;
+    registry.apply(&LuauFileDefinitionSource::new(root.to_owned()))?;
     Ok(registry)
 }
 

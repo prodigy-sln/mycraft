@@ -32,11 +32,26 @@
 //! # Compared against a real run, never against a second copy
 //!
 //! The texts a quoted block is matched against come from the client's own
-//! preparation, over the two declarations these pages are written about: a block
-//! declaration carrying a field nobody recognises, and a HUD declaration stating an
-//! extent of zero. Both are rendered through the shipped reporting. A guard that
-//! spelled the expected refusal out here would be comparing the documentation
-//! against a third copy of somebody's belief about the program.
+//! preparation, over the three declarations these pages are written about: a block
+//! declaration carrying a field nobody recognises, one stating a value longer than
+//! a declaration may state, and a HUD declaration stating an extent of zero. All
+//! three are rendered through the shipped reporting. A guard that spelled the
+//! expected refusal out here would be comparing the documentation against a third
+//! copy of somebody's belief about the program.
+//!
+//! **The third arrived because a substring check cannot see rendering.** The
+//! declared-text refusal shipped with a line continuation that never landed, so a
+//! mod author read a message with a hole punched through it, and the test that
+//! covers that bound asks only whether both quantities are *mentioned* — which is
+//! true of a well-formed message and a malformed one alike. Quoting the refusal on
+//! a page puts it under the comparison below, which is line for line, and needs no
+//! assertion of its own: the page is the oracle.
+//!
+//! **A mod author can trip roughly fourteen refusals and the pages quote three of
+//! them.** That gap is real and is filed rather than closed here: expanding this
+//! run twelve-fold is the change that introduces defects at the moment there is
+//! least appetite to look for them, and the quoting and the prose want writing
+//! together rather than one retrofitted onto the other.
 //!
 //! # Two normalisations, both stated rather than assumed
 //!
@@ -51,13 +66,21 @@
 //!   another, and a page can only carry one of the two. Everything else — the caret
 //!   diagnostic's own indentation included — is compared exactly, line for line.
 //!
-//! # A dependency bump reddens this, and that is the guard working
+//! # A dependency bump reddens the HUD half of this, and that is the guard working
 //!
-//! The refusal for an unrecognised field is the TOML parser's five-line caret
+//! The HUD declaration's refusal ends in the TOML parser's five-line caret
 //! diagnostic, quoted verbatim in the pages this reads. A minor version bump of that
 //! parser restyles the diagnostic and this guard goes red — **diagnose that as the
 //! dependency moving under the documentation, never as a flake.** The blast radius
 //! is the pages that quote it and this file.
+//!
+//! **That is now true of the HUD half alone.** A block declaration is no longer
+//! parsed by anything: it is a chunk the scripting host evaluates, and what a page
+//! quotes for one carrying a field nobody recognises is a refusal MyCraft writes
+//! itself — origin, block, field, cause. It moves when this project decides it
+//! moves, and never underneath it. The narrowing is stated rather than dropped
+//! because whoever next meets a red here needs to know which half a parser can
+//! reach.
 
 mod support;
 
@@ -90,7 +113,7 @@ const PAGES: [&str; 2] = ["docs", "modding"];
 const SHIPPED_ROOT: [&str; 2] = ["content", "base"];
 
 /// The block declaration file the pages are written about.
-const BLOCK_FILE: &str = "amber.toml";
+const BLOCK_FILE: &str = "amber.luau";
 
 /// A field no loader recognises, spelled close enough to a real one to be the typo
 /// a mod author actually makes.
@@ -102,8 +125,30 @@ const STALE_FIELD: &str = "slidey";
 
 /// A block declaration whose three well-formed fields sit beside one nobody
 /// recognises.
-const CARRYING_AN_UNRECOGNISED_FIELD: &str =
-    "name = \"example:amber\"\ntexture = \"example:amber\"\nsolid = true\nslid = true\n";
+///
+/// A chunk that returns a table, because that is what a declaration is now. It
+/// is written with single quotes for the same reason every other Luau fixture in
+/// this suite is: a declaration inside a Rust string literal with every escape
+/// doubled is unreadable at exactly the moment somebody has to read it.
+const CARRYING_AN_UNRECOGNISED_FIELD: &str = "return {\n\tname = 'example:amber',\n\ttexture = 'example:amber',\n\tsolid = true,\n\tslid = \
+     true,\n}\n";
+
+/// The namespace every declaration in this file gives its ids, and how many
+/// characters of it that is.
+///
+/// The length is measured off the text rather than written down, so the
+/// arithmetic below stays right if the namespace is ever renamed.
+const NAMESPACE: &str = "example:";
+
+/// How many characters of declared text a declaration may state, and the length
+/// the fixture below states.
+///
+/// Written here rather than read from the loader, which is the whole point: an
+/// expectation derived from the value under test agrees with it whatever it
+/// becomes. One past the bound is the smallest fixture that trips it, and the
+/// smallest is what keeps the refusal a page has to quote readable.
+const CHARACTERS_A_DECLARATION_MAY_STATE: usize = 256;
+const ONE_CHARACTER_PAST_THE_BOUND: usize = CHARACTERS_A_DECLARATION_MAY_STATE + 1;
 
 /// The HUD declaration file the pages are written about.
 const HUD_FILE: &str = "malformed-readout.toml";
@@ -235,14 +280,50 @@ fn pages_quoting_the_printed_refusals_verbatim_agree_and_their_other_blocks_are_
     Ok(())
 }
 
-/// The refusals the client writes for the two declarations these pages are about,
-/// each as a person running from their own game directory reads it.
+/// A block declaration stating a texture key one character longer than a
+/// declared value may be.
+///
+/// **The overlong value is `texture` and not `name`, and that is a decision
+/// about the page rather than about the loader.** Both fields are checked by one
+/// bound through one rendering, so either trips the same refusal down the same
+/// path; what differs is what the refusal then quotes back. A declaration whose
+/// *name* is 257 characters is refused naming itself, so the line a page has to
+/// carry holds a 257-character block id — unreadable, and it teaches a mod
+/// author nothing that the count in the cause does not already say. With the
+/// texture overlong the block still names itself `example:amber` and the whole
+/// refusal fits on a line somebody can read.
+///
+/// The value is assembled by the chunk rather than written out, which a
+/// declaration may do because a declaration is code that ran. That keeps this
+/// fixture legible and keeps the arithmetic — a namespace plus a run of
+/// characters, one past the bound — visible instead of buried in a literal
+/// nobody would count.
+fn stating_a_texture_past_the_bound() -> String {
+    let padding = ONE_CHARACTER_PAST_THE_BOUND - NAMESPACE.chars().count();
+    format!(
+        "return {{\n\
+         \tname = 'example:amber',\n\
+         \ttexture = '{NAMESPACE}' .. string.rep('q', {padding}),\n\
+         \tsolid = true,\n\
+         }}\n"
+    )
+}
+
+/// The refusals the client writes for the three declarations these pages are
+/// about, each as a person running from their own game directory reads it.
+///
+/// **Three roots and not one**, because each is refused whole: a root carrying
+/// two mistakes is refused for whichever the loader reaches first, and the
+/// second refusal would be one no run ever prints.
 fn printed_refusals() -> Result<Vec<String>, Box<dyn Error>> {
     let blocks =
         content::shipped_copy()?.declaring_block(BLOCK_FILE, CARRYING_AN_UNRECOGNISED_FIELD)?;
+    let overlong = content::shipped_copy()?
+        .declaring_block(BLOCK_FILE, &stating_a_texture_past_the_bound())?;
     let hud = content::shipped_with(HUD_FILE, REFUSED_HUD_DECLARATION)?;
     Ok(vec![
         as_read_from_a_game_directory(&blocks)?,
+        as_read_from_a_game_directory(&overlong)?,
         as_read_from_a_game_directory(&hud)?,
     ])
 }

@@ -29,6 +29,9 @@ pub mod app;
 /// Which key asks for what. Private, and re-exported through [`session`]:
 /// nothing outside this crate may ask the table what a key means.
 mod bindings;
+
+/// What the client draws and meshes from, built from the content it was handed.
+pub mod content;
 /// The window and the event loop, and the only module that may name `winit`.
 pub mod events;
 /// Adapter facts, the startup verdict, and opening a device.

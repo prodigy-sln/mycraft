@@ -1,13 +1,15 @@
 # content/ — the game, as content
 
-Everything here is content, not engine code: today that means data files read
-through a well-defined loading contract, with no privileged engine access.
-`content/base/` is the "vanilla" game and is a mod like any other (ADR-005).
-**The Luau host is built; authoring in Luau is not.** The sandbox, its limits and
-its fault vocabulary are final and enforced, and there is no `mycraft.*` binding of
-any kind to reach them with — so every definition here is still a data file. See
-"MVP 1 today vs. MVP 2" below for exactly what changes when that binding lands and
-what does not.
+Everything here is content, not engine code, read through a well-defined loading
+contract with no privileged engine access. `content/base/` is the "vanilla" game
+and is a mod like any other (ADR-005).
+
+**Blocks are declared in Luau; the HUD and the tooling formats are data files.**
+A block declaration is a chunk that returns a table, evaluated inside the
+sandboxed host under its call-and-loop budget and memory cap — so a declaration
+may compute what it declares. What is *not* authored in Luau is **behaviour**:
+there is no `mycraft.*` binding of any kind, so a declaration returns a value and
+calls nothing the engine provides.
 
 Authoring starts at `docs/modding/README.md`, which routes to the contract for each
 kind of file; block authoring itself is `docs/modding/blocks-items.md`. The scripting
@@ -23,59 +25,56 @@ second-class. The base game's job is to prove the contract is complete.
 
 Concretely: zero hardcoded block, item, recipe, NPC, biome, or quest
 definitions in Rust. If you find yourself adding one, the change belongs in
-the loader's public contract (`DefinitionSource` for blocks today;
-`mc-script` bindings once Luau lands), never inline in engine code.
+the loader's public contract (`DefinitionSource` for blocks; `mc-script`
+bindings once behaviour lands), never inline in engine code.
 
-## MVP 1 today vs. MVP 2
+## What is declared here today
 
-**Today, block definitions are TOML data files**, one block per file, under
-`content/<mod>/blocks/<block>.toml`. The full authoring contract — required
-fields, the namespaced-id rule, all-or-nothing loading, how failures are
-reported — is documented in `docs/modding/blocks-items.md`; it is not repeated
-here. Items, recipes, NPCs, biomes, quests, and dialogue have no defined
-format yet — MVP 1 ships blocks only.
+**Block declarations are Luau**, one block per file, under
+`content/<mod>/blocks/<block>.luau`. The full contract — the six fields, the
+namespaced-id rule, all-or-nothing loading, how a refusal reads, and the four
+bounds a content root carries — is `docs/modding/blocks-items.md` and is not
+repeated here. HUD elements remain TOML under `content/<mod>/hud/`; voxel models
+and materials are tooling formats that reach no player. Items, recipes, NPCs,
+biomes, quests and dialogue have no format at all yet.
 
 Blocks are read through `DefinitionSource`, a Rust trait (`mc_core::block::source`)
-that the engine consumes without ever learning whether a definition came from
-a file, a script, or anything else. **MVP 2 replaces the TOML file reader with
-a Luau-backed implementation of the same trait — it does not touch the
-registry the definitions end up in.** A block author who learns the contract
-in `docs/modding/blocks-items.md` today does not need to relearn it once Luau
-arrives; what changes is only the file extension and the authoring language,
-not what a block *is* or how it gets validated.
+that the engine consumes without ever learning whether a definition came from a
+file, a script, or anything else. **The swap from a TOML reader to a Luau one
+went through that trait and did not touch the registry the definitions end up
+in** — which is why the contract a block author learned did not change with the
+language.
 
-The guidance below — string IDs, declarative definitions, NPC styles, mod
-`tests/`, the performance budget — describes **MVP 2's Luau-scripted world**.
-None of it applies to MVP 1's TOML block files, which have no behaviour,
-no load-time code, and no tests of their own beyond what the engine's loader
-enforces. It is kept here, not deleted, because it is still the intended
-shape of authoring once Luau lands and there is no better place to record it
-in the meantime.
+The guidance below — declarative definitions, NPC styles, mod `tests/`, the
+performance budget — describes the **behaviour** layer, which does not exist
+yet. It is kept here because it is the intended shape of authoring once
+components land, and there is no better place to record it meanwhile. What it
+says about **string IDs is already true** of every declaration in this tree.
 
-## Authoring rules (MVP 2, Luau)
+## Authoring rules (behaviour, not yet reachable)
 
 - **String IDs, always namespaced**: `"base:stone"`, `"yourmod:thing"`. Never assume a numeric ID
   is stable across runs — it is assigned at registry build and remapped when the mod set changes.
-  (This part is already true today: MVP 1's TOML `name` field follows the identical rule.)
+  (Already true: a block declaration's `name` field follows the identical rule.)
 - **Definitions are declarative; behaviour is functions inside them.** Do not perform side effects
   at load time. Load-time code runs in a scratch VM during every hot-reload candidate build, so
   side effects there run at unpredictable moments.
 - **No state in Lua globals.** Runtime state belongs in the ECS via handles; mod-owned persistent
   state is intended to be declared through `mycraft.state(...)` so it survives reload (ADR-004).
   A global counter will silently reset and you will lose an afternoon to it.
-  **`mycraft.state(...)` does not exist yet — nor does any other `mycraft.*` binding.** Nothing is
-  authored in Luau today; blocks and HUD elements are declared in the data files under
-  `content/base/`. The rule above is the shape to design toward, not an API you can call.
+  **`mycraft.state(...)` does not exist yet — nor does any other `mycraft.*` binding.** A block
+  declaration returns a table and calls nothing the engine provides. The rule above is the shape
+  to design toward, not an API you can call.
 - **Prefer declarative subscriptions to polling.** Register an event predicate and let Rust match
   it; do not scan the world every tick. This is the difference between a server that holds 32
   players and one that does not.
 - **Use Luau types.** Gradual typing is why Luau was chosen over LuaJIT — annotate public functions
   and definition tables. Type errors caught at reload beat crashes at 2am.
 - Files stay small and grouped by domain (`blocks/`, `items/`, `recipes/`, `npcs/`, `biomes/`,
-  `quests/`, `dialogue/`). One concept per file. (MVP 1's `blocks/` directory already follows this;
-  the other domain directories arrive with their respective definition kinds.)
+  `quests/`, `dialogue/`). One concept per file. (`blocks/` already follows this — one declaration
+  per `.luau` file; the other domain directories arrive with their respective definition kinds.)
 
-## NPCs (MVP 2, Luau)
+## NPCs (behaviour, not yet reachable)
 
 Two styles, both fully scripted — pick by scale:
 
@@ -88,7 +87,7 @@ Respect the LOD contract: an NPC's brain may run at 20 Hz, at 2 Hz, or not at al
 player proximity. Never assume a fixed tick rate, and never accumulate time by counting brain
 invocations.
 
-## Testing (MVP 2, Luau)
+## Testing (behaviour, not yet reachable)
 
 Every mod carries a `tests/` directory. **These run on every hot-reload candidate before the swap**
 — a mod whose tests fail never reaches the live world. That makes them a safety mechanism, not a
@@ -99,13 +98,19 @@ formality:
 - Assert quest stage transitions fire on their trigger events
 - Assert `on_reload` migrations preserve state across a version change
 
-MVP 1's TOML block files have no `tests/` directory of their own — the
-engine's content-root loader is what enforces their correctness (rejecting
-missing fields, unknown fields, bad namespacing, and duplicate names; see
-`docs/modding/blocks-items.md`), and it runs on every load, not on a reload
-candidate specifically, because there is no reload yet to gate.
+Block declarations have no `tests/` directory of their own — the engine's
+content-root loader is what enforces their correctness (refusing missing fields,
+unrecognised fields, bad namespacing, duplicate names, and every content-supplied
+quantity past its bound; see `docs/modding/blocks-items.md`), and it runs on
+every load, not on a reload candidate specifically, because there is no reload
+yet to gate.
 
-## Performance (MVP 2, Luau)
+A declaration is Luau and so it *could* carry a test of its own one day. It does
+not yet, and the reason is the same one the rest of this section is about: there
+is no `mycraft.*` binding for a declaration to call, so there is nothing for a
+mod-authored test to assert against beyond what the loader already refuses.
+
+## Performance (behaviour, not yet reachable)
 
 You are running inside a 50 ms tick budget shared with 31 other players and the rest of the engine.
 

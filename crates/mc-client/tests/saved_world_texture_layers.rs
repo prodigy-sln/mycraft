@@ -121,9 +121,9 @@ const WHERE_THE_ONE_BLOCK_STANDS: (u32, u32, u32) = (8, 40, 8);
 /// last and the block a client holds — the first solid one in registration order —
 /// does not move.
 const BEACON: &str = "fixture:beacon";
-const BEACON_DECLARATION_FILE: &str = "zz-beacon.toml";
+const BEACON_DECLARATION_FILE: &str = "zz-beacon.luau";
 const BEACON_DECLARATION: &str =
-    "name = \"fixture:beacon\"\ntexture = \"fixture:beacon\"\nsolid = true\n";
+    "return {\n\tname = 'fixture:beacon',\n\ttexture = 'fixture:beacon',\n\tsolid = true,\n}\n";
 
 /// Where the beacon stands in the world only the save holds: chunk column (1, 1),
 /// sixteen blocks above the highest surface the generator produces anywhere, so it is

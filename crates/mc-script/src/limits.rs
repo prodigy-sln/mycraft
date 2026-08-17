@@ -61,6 +61,19 @@ pub struct HostLimits {
     /// Work that cannot be admitted is refused and named, never silently
     /// dropped.
     pub pending_bound: NonZeroU32,
+    /// How many bytes of what content prints the host keeps, over its whole
+    /// life.
+    ///
+    /// **Its whole life, not one entry into script**: collecting what a chunk
+    /// printed does not hand the allowance back. A content root is read through
+    /// a single host, so an allowance that reset on each collection would bound
+    /// one declaration and nothing at all across four thousand of them.
+    ///
+    /// Reaching it stops recording rather than dropping the oldest — the first
+    /// line a chunk printed is what locates a failed load, and the millionth is
+    /// not — and what was not kept is counted, because "the mod printed nothing"
+    /// and "the host stopped keeping it" are different facts.
+    pub retained_print_bytes: NonZeroUsize,
 }
 
 /// The shipped defaults, in the units their fields carry.
@@ -106,6 +119,19 @@ const DEFAULT_FAULT_THRESHOLD: u32 = 3;
 const DEFAULT_ROUND_BOUND: u32 = 64;
 /// Four rounds' worth of queued work at the round bound above.
 const DEFAULT_PENDING_BOUND: u32 = 256;
+/// The same size as the per-entry memory cap, and deliberately so: the host-side
+/// copy of what a chunk printed then cannot outgrow the allowance the chunk had
+/// to build it in.
+///
+/// **Written as its own literal rather than computed from that cap, because a
+/// bound that follows another bound bounds nothing.** The two answer to
+/// different pressures — one to what a callback legitimately needs, this one to
+/// how much of a failed load's story is worth keeping — and the day the cap
+/// moves for its own reasons a derived value would move silently with it, having
+/// never been a decision anybody made. It is a record for whoever is reading a
+/// failed load, so it is sized to hold a chunk's opening rather than its whole
+/// output.
+const DEFAULT_RETAINED_PRINT_BYTES: usize = 256 * 1024;
 
 /// The ceiling stated for `round_bound × call_and_loop_budget`, in interrupt
 /// ticks.
@@ -139,6 +165,8 @@ impl Default for HostLimits {
             fault_threshold: NonZeroU32::new(DEFAULT_FAULT_THRESHOLD).unwrap_or(NonZeroU32::MIN),
             round_bound: NonZeroU32::new(DEFAULT_ROUND_BOUND).unwrap_or(NonZeroU32::MIN),
             pending_bound: NonZeroU32::new(DEFAULT_PENDING_BOUND).unwrap_or(NonZeroU32::MIN),
+            retained_print_bytes: NonZeroUsize::new(DEFAULT_RETAINED_PRINT_BYTES)
+                .unwrap_or(NonZeroUsize::MIN),
         }
     }
 }

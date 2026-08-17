@@ -4,8 +4,9 @@
 gone, and why the environment refuses to be written to. **Who it is for:**
 anyone writing Luau who wants to know what is there before reaching for it.
 
-Nothing can be authored in Luau today — see `script-writing.md` for what that
-means and where authoring actually lives. What follows is the surface as built.
+**Block declarations are Luau and run inside this surface** — see
+`blocks-items.md` for what a declaration states and `README.md` for writing your
+first one. What follows is the whole of what a chunk can reach.
 
 Every chunk is evaluated inside one sandboxed Luau state, closed before any
 content runs. The base game has no privileged path into it: this is the whole of

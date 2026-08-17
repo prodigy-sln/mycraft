@@ -42,7 +42,7 @@ pub use fault::{FaultKind, ScriptFault, ScriptOrigin};
 pub use host::{HostError, ScriptHost};
 pub use limits::{HostLimits, PROVISIONAL_ROUND_BUDGET_CEILING};
 pub use luau::handle::{IsolationUnit, ScriptFunction, ScriptTable};
-pub use value::ScriptValue;
+pub use value::{FieldNames, ScriptValue};
 
 /// The identity of something a callback can be attached to.
 ///

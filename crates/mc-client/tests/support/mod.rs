@@ -64,7 +64,7 @@ use std::path::{Path, PathBuf};
 
 use mc_core::block::BlockRegistry;
 use mc_render::window::{Ending, report};
-use mc_world::content::TomlFileDefinitionSource;
+use mc_world::content::LuauFileDefinitionSource;
 
 /// The replay's assembled scene and the texture layers its blocks resolved to, as
 /// the client's own startup defines them.
@@ -122,7 +122,7 @@ pub fn content_root() -> Result<PathBuf, Box<dyn Error>> {
 /// Returns an error if the content root cannot be read or does not apply.
 pub fn content_registry() -> Result<BlockRegistry, Box<dyn Error>> {
     let mut registry = BlockRegistry::new();
-    registry.apply(&TomlFileDefinitionSource::new(content_root()?))?;
+    registry.apply(&LuauFileDefinitionSource::new(content_root()?))?;
     Ok(registry)
 }
 

@@ -23,3 +23,4 @@ A planning document should:
 | File | Topic | Issues |
 |------|-------|--------|
 | city-generation.md | City generation as a partition: feasibility, infinite-height buildings, layered streets and transit, lighting | PRO-935 |
+| client-server-split.md | What the client is allowed to evaluate: the agreement test, the three tiers, texture packs, and where the composition root belongs | PRO-917 |

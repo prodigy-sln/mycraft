@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use mc_core::block::{BlockRegistry, RegistryError};
 use mc_core::hud::{HudLayout, HudLoadError};
-use mc_world::content::{TomlFileDefinitionSource, TomlFileHudSource};
+use mc_world::content::{LuauFileDefinitionSource, TomlFileHudSource};
 use tempfile::TempDir;
 
 use super::content_root;
@@ -33,8 +33,30 @@ pub const HUD_DIRECTORY: &str = "hud";
 /// The subdirectory of a content root that block definitions live in.
 pub const BLOCK_DIRECTORY: &str = "blocks";
 
-/// The extension a declaration is written with, in either directory.
-pub const DECLARATION_EXTENSION: &str = "toml";
+/// The extension a block declaration is written with, and the one a HUD
+/// declaration is written with.
+///
+/// **Two constants where there was one, and that split is a trap rather than
+/// tidying.** A single constant served both directories for as long as both were
+/// spelled the same way, and the day block declarations became Luau an edit of it
+/// would have retargeted every HUD fixture in this module at the same moment —
+/// silently, because a HUD fixture that stops finding its declarations reports a
+/// root that never declared one rather than a fixture that went looking for the
+/// wrong thing. The two are separate because they answer to separate decisions:
+/// blocks are declared in the language a mod author writes, and the HUD format is
+/// deliberately untouched by that change.
+///
+/// **The silent version of that mistake is structurally impossible here, and
+/// keeping it impossible is a decision rather than luck.** [`empty`] refuses a
+/// directory that declared nothing to begin with — the rule this module's header
+/// states, that removing a declaration which was never there is a failure rather
+/// than a no-op — so a `declaring_no_hud` handed the block extension finds no
+/// declaration and says so, loudly, instead of emptying nothing and passing. The
+/// pairing is therefore checked by the fixture that uses it and not only by
+/// whoever edits these two lines. A future helper that took an extension and
+/// tolerated finding nothing would give that up without anything going red.
+pub const BLOCK_DECLARATION_EXTENSION: &str = "luau";
+pub const HUD_DECLARATION_EXTENSION: &str = "toml";
 
 /// A content root written into a temporary directory, removed when this is
 /// dropped.
@@ -134,6 +156,46 @@ impl ContentRoot {
         Ok(self)
     }
 
+    /// This root with every block declaration but the one whose file is named
+    /// `stem` taken out of `blocks/`.
+    ///
+    /// **The file's extension is deliberately not part of what this asks for.**
+    /// Which extension a block declaration is written with is exactly what is
+    /// changing under these fixtures, and a helper naming one would have to be
+    /// rewritten at the moment of the swap — which is the moment a fixture is
+    /// least likely to be looked at and most likely to retarget a scenario
+    /// silently. What a scenario about the block a client holds is really about
+    /// is which declarations are left, not what they are spelled in.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `blocks/` cannot be read, if a removal fails, if the
+    /// root declares no file named `stem`, or if it declares nothing else — a
+    /// root that only ever declared one block is not a root the others were
+    /// taken out of, and a scenario about what the remaining declaration cannot
+    /// do would be about a root nobody stripped.
+    pub fn declaring_only_the_block_file_named(self, stem: &str) -> Result<Self, Box<dyn Error>> {
+        let blocks = self.path().join(BLOCK_DIRECTORY);
+        let (kept, withdrawn): (Vec<PathBuf>, Vec<PathBuf>) = entries_in(&blocks)?
+            .into_iter()
+            .partition(|declared| declared.file_stem() == Some(OsStr::new(stem)));
+        if kept.is_empty() || withdrawn.is_empty() {
+            return Err(format!(
+                "this fixture has to leave `{BLOCK_DIRECTORY}/{stem}` alone in a copy of the \
+                 shipped content root and take every other declaration out, and the root it was \
+                 given kept {kept:?} and would remove {withdrawn:?}. What it would build is a root \
+                 that never declared the others, or one that does not declare `{stem}` at all, and \
+                 a scenario about what the one remaining declaration cannot do would be about \
+                 neither"
+            )
+            .into());
+        }
+        for declared in withdrawn {
+            fs::remove_file(declared)?;
+        }
+        Ok(self)
+    }
+
     /// This root with every block declaration taken out of `blocks/`.
     ///
     /// **A root whose `blocks/` declares nothing is a refusal shape of its own.**
@@ -150,7 +212,11 @@ impl ContentRoot {
     /// the root declared nothing there to begin with — see this module's header
     /// for why that is a failure rather than nothing happening.
     pub fn declaring_no_blocks(self) -> Result<Self, Box<dyn Error>> {
-        empty(&self.path().join(BLOCK_DIRECTORY), BLOCK_DIRECTORY)?;
+        empty(
+            &self.path().join(BLOCK_DIRECTORY),
+            BLOCK_DIRECTORY,
+            BLOCK_DECLARATION_EXTENSION,
+        )?;
         Ok(self)
     }
 
@@ -167,7 +233,11 @@ impl ContentRoot {
     /// Returns an error if `hud/` cannot be read, if a removal fails, or if the
     /// root declared no HUD to begin with.
     pub fn declaring_no_hud(self) -> Result<Self, Box<dyn Error>> {
-        empty(&self.path().join(HUD_DIRECTORY), HUD_DIRECTORY)?;
+        empty(
+            &self.path().join(HUD_DIRECTORY),
+            HUD_DIRECTORY,
+            HUD_DECLARATION_EXTENSION,
+        )?;
         Ok(self)
     }
 }
@@ -334,34 +404,60 @@ fn value_of(stated: &str, field: &str, file_name: &str) -> Result<String, Box<dy
         .map_or(line.clone(), |(_, value)| value.to_owned()))
 }
 
-/// Every declaration file directly under `directory`.
-///
-/// The search is one directory deep and reads the extension rather than the
-/// name, which is how both loaders decide what they are looking at — a fixture
-/// counting anything else would be counting files the client never reads.
+/// Every entry directly under `directory`, whatever it is called.
 ///
 /// # Errors
 ///
 /// Returns an error if the directory cannot be read.
-pub fn declarations_in(directory: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+fn entries_in(directory: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir(directory)? {
+        found.push(entry?.path());
+    }
+    Ok(found)
+}
+
+/// Every block declaration directly under `directory`.
+///
+/// # Errors
+///
+/// Returns an error if the directory cannot be read.
+pub fn block_declarations_in(directory: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+    declarations_in(directory, BLOCK_DECLARATION_EXTENSION)
+}
+
+/// Every declaration file directly under `directory` written with `extension`.
+///
+/// The search is one directory deep and reads the extension rather than the
+/// name, which is how both loaders decide what they are looking at — a fixture
+/// counting anything else would be counting files the client never reads. The
+/// extension is a parameter rather than a constant read here, so that every
+/// caller states which of the two directories it is talking about at the point
+/// it asks.
+///
+/// # Errors
+///
+/// Returns an error if the directory cannot be read.
+fn declarations_in(directory: &Path, extension: &str) -> Result<Vec<PathBuf>, Box<dyn Error>> {
     let mut declared = Vec::new();
     for entry in fs::read_dir(directory)? {
         let found = entry?.path();
-        if found.extension() == Some(OsStr::new(DECLARATION_EXTENSION)) {
+        if found.extension() == Some(OsStr::new(extension)) {
             declared.push(found);
         }
     }
     Ok(declared)
 }
 
-/// Takes every declaration out of `directory`, which the root names `named`.
+/// Takes every declaration written with `extension` out of `directory`, which
+/// the root names `named`.
 ///
 /// # Errors
 ///
 /// Returns an error if the directory cannot be read, if a removal fails, or if
 /// there was no declaration there to take out.
-fn empty(directory: &Path, named: &str) -> Result<(), Box<dyn Error>> {
-    let declared = declarations_in(directory)?;
+fn empty(directory: &Path, named: &str, extension: &str) -> Result<(), Box<dyn Error>> {
+    let declared = declarations_in(directory, extension)?;
     if declared.is_empty() {
         return Err(format!(
             "this fixture has to take every declaration out of `{named}/` in a copy of the \
@@ -392,7 +488,7 @@ fn empty(directory: &Path, named: &str) -> Result<(), Box<dyn Error>> {
 /// nothing would be asserting nothing.
 pub fn block_refusal_over(root: &Path) -> Result<RegistryError, Box<dyn Error>> {
     let mut registry = BlockRegistry::new();
-    match registry.apply(&TomlFileDefinitionSource::new(root.to_owned())) {
+    match registry.apply(&LuauFileDefinitionSource::new(root.to_owned())) {
         Ok(()) => Err(format!(
             "this scenario needs the blocks declared under {} to be refused, and they registered \
              instead. There is no refusal to compare the printed text against",

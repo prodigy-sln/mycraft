@@ -40,7 +40,7 @@ use mc_client::launch::save_path;
 use mc_client::startup::{PreparationError, PreparedScene, prepare_scene};
 use mc_core::block::BlockRegistry;
 use mc_render::geometry::scene::SceneGeometry;
-use mc_world::content::TomlFileDefinitionSource;
+use mc_world::content::LuauFileDefinitionSource;
 use mc_world::persistence::{Acceptance, LoadError, load_world};
 use tempfile::TempDir;
 
@@ -92,7 +92,7 @@ fn an_unreadable_save_leaves_a_capture_shot_from_the_generated_worlds_geometry()
 /// registry that would have refused a perfectly good save.
 fn the_shipped_registry(root: &Path) -> Result<BlockRegistry, Box<dyn Error>> {
     let mut registry = BlockRegistry::new();
-    registry.apply(&TomlFileDefinitionSource::new(root.to_owned()))?;
+    registry.apply(&LuauFileDefinitionSource::new(root.to_owned()))?;
     Ok(registry)
 }
 

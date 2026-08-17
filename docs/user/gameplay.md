@@ -103,14 +103,22 @@ changed — never triggers this at all; that world loads normally, without askin
 
 ## Mods and scripting
 
-**Nothing you can see is scripted, and nothing in the game reaches the scripting host.** The engine
-now carries one — a sandboxed place for mod code to run, with limits on how long it may run and how
-much memory it may use — but it is machinery only: no block, no behaviour and no content anywhere in
-the game is defined in script. The blocks you break and place, and the crosshair and swatch on your
-screen, are declared in the game's own content data files exactly as they were before, and the
-running game never calls into the scripting host at all. So nothing about how the game plays,
-launches, saves or looks changed with it, and there is nothing here for a player to turn on, try or
-configure.
+**Every block you break and place is now defined in a script, and nothing about playing the game
+changed because of it.** Dirt, grass, stone and water are declared in the game's own Luau files under
+`content/base/blocks/`, and the game runs those files when it starts. Same four blocks, same terrain,
+same block in your hand, same saves — **a world you saved before this change still loads, unchanged,
+and looks the same.** If you could see a difference, something would be wrong.
+
+What that buys is who can add one: a block is now written in the same language the rest of the game
+layer will be written in, so somebody can add a block of their own without touching the engine. If
+you want to try it, `docs/modding/README.md` walks from an empty file to a block in your hand.
+
+**Behaviour is still not scripted.** Nothing reacts, ticks or runs code while you play — a
+declaration says what a block *is* and then it is finished. The scripting host that runs those
+declarations is sandboxed, with limits on how long a file may run and how much memory it may use, so a
+mod file that loops forever or eats memory is refused by name instead of hanging the game. The
+crosshair and swatch on your screen are still content data files rather than script. There is nothing
+here for a player to turn on, try or configure beyond adding content of your own.
 
 **If the game will not start, it now tells you what it could not read.** The
 blocks and the on-screen crosshair come from content files, and a broken one

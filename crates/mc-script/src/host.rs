@@ -1,6 +1,7 @@
 //! The host: what the engine holds, and the only way into script.
 
 use std::fmt;
+use std::num::NonZeroUsize;
 
 use crate::Attachment;
 use crate::dispatch::{DispatchReport, Registry};
@@ -8,7 +9,7 @@ use crate::fault::{FaultKind, ScriptFault, ScriptOrigin};
 use crate::limits::HostLimits;
 use crate::luau::handle::{ScriptFunction, ScriptTable};
 use crate::luau::vm::{Memory, Outcome, Vm};
-use crate::value::ScriptValue;
+use crate::value::{FieldNames, ScriptValue};
 
 /// The host could not be built. Never a script fault: nothing content does
 /// produces one of these, and everything content does produces a
@@ -178,7 +179,7 @@ impl ScriptHost {
             backstop: limits.memory_backstop.get(),
         };
         Ok(Self {
-            vm: Vm::new(&Self::DENIED_GLOBALS, memory)?,
+            vm: Vm::new(&Self::DENIED_GLOBALS, memory, limits.retained_print_bytes)?,
             limits,
             printed: Vec::new(),
             registry: Registry::default(),
@@ -229,6 +230,28 @@ impl ScriptHost {
         self.vm.read_field(table, field)
     }
 
+    /// Which fields a script-supplied table holds, without invoking script.
+    ///
+    /// The other half of [`Self::read_field`], and the half a caller needs to
+    /// tell a **typo from an absence**: a host that can read `solid` but cannot
+    /// ask what fields exist has no way to distinguish a declaration that left a
+    /// field out from one that misspelled it, so a misspelling becomes a
+    /// silently lost declaration.
+    ///
+    /// Enumeration meets `__iter`, `__pairs` and `__len` rather than the
+    /// `__index` a named read meets, and it consults none of them. The names
+    /// come back **sorted lexicographically** — see [`FieldNames`] for why that
+    /// happens here rather than at the caller.
+    ///
+    /// `most` bounds what this will copy out, and it is a parameter because the
+    /// number is the caller's policy: this crate holds no opinion about how many
+    /// fields any particular kind of declaration may carry. A table holding more
+    /// answers [`FieldNames::MoreThanAllowed`] without carrying any of them, so
+    /// the bound is reached before the allocation rather than after it.
+    pub fn field_names(&self, table: &ScriptTable, most: NonZeroUsize) -> FieldNames {
+        self.vm.field_names(table, most)
+    }
+
     /// What the script state holds once everything unreachable has been
     /// collected.
     ///
@@ -258,6 +281,18 @@ impl ScriptHost {
     /// and whoever routes this to a log inherits both.
     pub fn printed(&self) -> &[String] {
         &self.printed
+    }
+
+    /// How many printed lines the host was handed and did not keep.
+    ///
+    /// Reported rather than left to be inferred from a short record, because
+    /// [`printed`](Self::printed) alone cannot tell "the mod printed nothing"
+    /// from "the host stopped keeping what the mod printed" — and a record that
+    /// cannot tell those apart is an absence that reads as agreement. Counted
+    /// over the host's whole life, on the same terms as the allowance in
+    /// [`HostLimits::retained_print_bytes`].
+    pub fn dropped_print_lines(&self) -> u64 {
+        self.vm.dropped_print_lines()
     }
 
     /// Evaluates a chunk in its own frozen environment, under a budget.

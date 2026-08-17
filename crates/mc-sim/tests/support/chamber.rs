@@ -224,7 +224,7 @@ const fn open(name: &'static str) -> Declared {
 
 /// The four blocks content ships, spelled and declared as content declares them.
 ///
-/// **The order is the file-name order `TomlFileDefinitionSource` reads them in,
+/// **The order is the file-name order `LuauFileDefinitionSource` reads them in,
 /// and that is load-bearing** — base content applies before the `fixture:`
 /// overlay, so ids are assigned in this order. The assertion that pins it lives
 /// in the test file that depends on it, because this list alone cannot say why
