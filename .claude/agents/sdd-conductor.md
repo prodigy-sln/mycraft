@@ -260,6 +260,17 @@ Do not write any unnecessary output. Keep the text output to an absolute
 minimum. There is no human to read your monologue. Only state what is
 absolutely essential and requires human intervention.
 
+Keep your text output to the absolute minimum. Only state what is essential and requires human intervention.
+If you have nothing to act on, just state `[TURN_FINISHED]` and yield. Do not write any unnecessary output.
+At the end of a phase give me a short and concise summary of the status and next steps. Only include:
+
+- Current phase
+- Next steps
+- Open questions
+- Blockers
+
+Do not include a section when there is nothing to report.
+
 ## Linear
 
 Team `prodigy-solutions` (`PRO`). Initiative **MyCraft**. **One flat issue per
