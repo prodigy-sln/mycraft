@@ -10,6 +10,25 @@ describes built behaviour, nothing in it is binding, and a spec that lands
 supersedes it. It exists so that deep pre-spec analysis has a home in the tree
 instead of living only in an issue tracker.
 
+**Issue-tracker references, by audience.** A page written for a **mod author
+or a player** names no issue. That reader has no way to open one, so the
+reference means nothing to them the day it is written and dangles the day the
+issue closes — and unlike a missing reference, a dangling one is not visibly
+missing. State the substance instead: what is true today, what an author
+should do about it, and that something better is coming.
+
+A page written for an **engine reader** may name one, **provided the reference
+stays supplementary to substance that stands without it.** That reader is a
+contributor with the tracker open, and stripping the references would delete
+the only findable record of several real gaps. But the clause is the whole
+rule: *"see PRO-000"* rots into meaninglessness the day the issue closes,
+while *"X is true because Y, tracked as PRO-000"* still tells the reader
+everything they need after the link is dead. A tracker reference is never the
+substance.
+
+`docs/planning/` is exempt from both, per the paragraph above — naming the
+issues a design elaborates is most of what those documents are for.
+
 Consolidation updates this file: add the source identifier to the Sources
 column of every updated file, and register newly created files.
 

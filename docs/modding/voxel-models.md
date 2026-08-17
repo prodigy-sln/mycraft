@@ -294,6 +294,9 @@ failure: a pre-existing output path is left byte-identical.
   server-side only.
 - **No editing verbs.** `fill_box`, `mirror`, `translate` and similar do
   not exist; you edit the grid text directly.
-- **No `.vox` import or export.** Interchange with MagicaVoxel or vengi
-  is tracked separately (PRO-910) and is not part of this format.
+- **No `.vox` import or export.** Interchange with MagicaVoxel or vengi is
+  deliberately not part of this format — it is a separate piece of work with
+  its own trade-offs, and folding it in here would tie this format's shape to
+  another tool's. Author in the grid text for now; if interchange lands it
+  will read and write these files rather than replace them.
 - **No procedural generation, morphology or image-to-voxel carving.**

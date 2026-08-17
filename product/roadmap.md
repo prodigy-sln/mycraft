@@ -115,8 +115,9 @@ it before a run starts.
 | Priority | Feature | Issue | Status |
 |----------|---------|-------|--------|
 | P0 | Composition model and API surface policy land in the standards — *a docs commit, not a spec* | PRO-928, PRO-924 | Todo |
-| P0 | Luau host, sandbox, hostile-mod harness — *verification precedes the thing it verifies* | PRO-916 | Todo |
-| P0 | Blocks defined in Luau — pure loader swap, TOML retired — *the base game is a mod* | PRO-917 | Todo |
+| P0 | Luau host, sandbox, hostile-mod harness — *verification precedes the thing it verifies* | PRO-916 | **Done** |
+| P0 | A content refusal names the file, the declaration and the field — *fix a typo in one edit* | PRO-939 | **Done** |
+| P0 | Blocks defined in Luau — pure loader swap, TOML retired — *the base game is a mod* | PRO-917 | **Done** |
 | P0 | Hot reload — *edit a block while playing* | PRO-918 | Todo |
 | P0 | Solid, drawn, occludes and targetable split, plus swimmable and density — *you can see water and swim in it* | PRO-904 | Todo |
 | P0 | Texture resolution through the registry, and per-face keys — *grass gets dirt sides* | PRO-902, PRO-914 | Todo |
