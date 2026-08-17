@@ -54,7 +54,6 @@ mod handed;
 
 use std::error::Error;
 use std::path::Path;
-use std::sync::Arc;
 
 use mc_client::launch::{PreparedLaunch, prepare_launch};
 use mc_client::startup::{PreparationError, scene_of};
@@ -266,7 +265,6 @@ struct Handed {
     simulation: Simulation,
     meshed: Vec<SectionQuads>,
     layers: TextureLayers,
-    registry: Arc<BlockRegistry>,
     scene: SceneGeometry,
 }
 
@@ -279,7 +277,6 @@ impl Handed {
             simulation: prepared.simulation,
             meshed: prepared.meshed,
             layers: prepared.layers,
-            registry: prepared.registry,
             scene: prepared.scene,
         }
     }
@@ -312,7 +309,7 @@ impl Handed {
     /// what a tick that marked nothing produces.
     fn hand_over(&mut self) -> Result<(), Box<dyn Error>> {
         if let Some(work) = self.simulation.take_remesh_work() {
-            splice(&mut self.meshed, remesh(&work, &self.registry)?)?;
+            splice(&mut self.meshed, remesh(&work)?)?;
         }
         self.scene = scene_of(&self.meshed, &self.layers)?;
         Ok(())

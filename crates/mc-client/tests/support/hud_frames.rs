@@ -96,6 +96,18 @@ pub fn hud_of(root: &Path) -> Result<HudFrame, Box<dyn Error>> {
     })
 }
 
+/// A HUD composed from a layout somebody else already read, holding nothing.
+///
+/// **For the layout a *reload* published, which is not a layout this module may
+/// read for itself.** It is the value the simulation handed the client, and a
+/// frame drawn from a second read of the same root would be a frame of a client
+/// that never took the reload up — the two would agree by construction while the
+/// publication carried nothing at all.
+#[must_use]
+pub fn hud_published(layout: Arc<HudLayout>) -> HudFrame {
+    HudFrame { layout, held: None }
+}
+
 /// The HUD the declarations under `root` compose, holding the block a client
 /// reading `root` would hold.
 ///

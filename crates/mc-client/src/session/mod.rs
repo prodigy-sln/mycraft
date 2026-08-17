@@ -21,6 +21,16 @@
 //! attempt follows a refusal, when the walk stops, and what is left when nothing
 //! was granted are decisions, and a port that took them would put them back on the
 //! side of the seam no test can reach.
+//!
+//! **What a content change becomes is `reload`'s**, a *child* module because it
+//! writes the held block back into a field this type owns. **The keyboard and
+//! mouse vocabulary this file decides in is `vocabulary`'s**, for the opposite
+//! reason: a vocabulary is not a decision, and it needs nothing this type owns.
+
+pub mod reload;
+mod vocabulary;
+
+pub use vocabulary::{KeyKind, MouseButtonKind};
 
 use std::fmt;
 use std::path::Path;
@@ -66,45 +76,6 @@ pub enum PointerAsk {
     Grab(CaptureState),
     Release,
     CursorVisible(bool),
-}
-
-/// One key of the keyboard, in the vocabulary the session decides in.
-///
-/// The same shape as `WindowEventKind`, and for the same reason: the catch-all
-/// absorbs every key code the client cannot tell apart, so the window library
-/// growing key codes between versions changes nothing on this side of the seam.
-///
-/// Named `KeyKind` rather than `Key` because the window library has a `Key` of
-/// its own and the adapter imports both.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyKind {
-    W,
-    S,
-    A,
-    D,
-    Space,
-    /// The two function keys a debug overlay is conventionally reached by. Each
-    /// is told apart because either may be *bound* to the toggle, and a key the
-    /// client cannot tell apart is a key nothing can be bound to.
-    F3,
-    F7,
-    Escape,
-    Other,
-}
-
-/// One button of the mouse, in the vocabulary the session decides in.
-///
-/// The same shape as [`KeyKind`] and for the same reason: the catch-all absorbs
-/// every button the client cannot tell apart, so the window library growing
-/// buttons between versions changes nothing on this side of the seam.
-///
-/// Named `MouseButtonKind` rather than `MouseButton` because the window library
-/// has a `MouseButton` of its own and the adapter imports both.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MouseButtonKind {
-    Left,
-    Right,
-    Other,
 }
 
 /// The keys this client answers to, and what each of them asks for.
@@ -158,6 +129,10 @@ pub struct Session {
     /// loading screen is not something they are still asking for when the world
     /// appears.
     pending_action: Option<ActionIntent>,
+    /// The content root being watched, once a run has one, and what the last
+    /// boundary did about it.
+    reload: Option<mc_sim::reload::ContentReload>,
+    reload_report: Option<reload::ReloadReport>,
     /// Which key asks for what, as this run was started with.
     bindings: Bindings,
     /// The client's own debug overlay: whether it is being shown, and how long
@@ -197,6 +172,8 @@ impl Session {
             simulation: None,
             holding: None,
             pending_action: None,
+            reload: None,
+            reload_report: None,
             bindings,
             overlay: DebugOverlay::default(),
             pointer,
@@ -347,11 +324,28 @@ impl Session {
     /// making and a request they made once.
     pub fn tick(&mut self) -> Option<EditReport> {
         let action = self.pending_action.take();
-        let simulation = self.simulation.as_mut()?;
-        simulation.advance(TickIntent {
-            movement: self.input.take_intent(),
-            action,
-        })
+        let edited = self.advanced(action);
+        // After the tick has been published, so a candidate is taken up between
+        // two ticks and never during one.
+        self.cross_reload_boundary();
+        edited
+    }
+
+    /// One tick of the simulation under everything accumulated, or nothing where
+    /// there is no simulation to advance.
+    ///
+    /// **The accumulator is drained only when there is something to spend it
+    /// on**, which is the property [`tick`](Self::tick)'s own note is about: keys
+    /// held and pointer motion made while the world was still generating are the
+    /// player's input all the same.
+    fn advanced(&mut self, action: Option<ActionIntent>) -> Option<EditReport> {
+        // Asked before the accumulator is touched, so the drain below happens only
+        // where there is something to spend it on.
+        self.simulation.is_some().then_some(())?;
+        let movement = self.input.take_intent();
+        self.simulation
+            .as_mut()?
+            .advance(TickIntent { movement, action })
     }
 
     /// What has to be re-meshed for the edits made so far to be seen, or nothing

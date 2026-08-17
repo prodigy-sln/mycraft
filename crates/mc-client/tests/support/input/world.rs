@@ -32,11 +32,12 @@ use std::sync::Arc;
 
 use glam::Vec3;
 use mc_core::block::source::InMemoryDefinitionSource;
-use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::block::{BlockDefinition, BlockId, BlockRegistry, DefinitionOrigin};
+use mc_core::content::{LayerAssignment, ResolvedBlock, ResolvedContent};
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::action::default_held_block;
 use mc_sim::player::PlayerState;
-use mc_sim::simulation::Simulation;
+use mc_sim::simulation::{PublishedContent, Simulation};
 use mc_sim::world::World;
 use mc_world::world::{VoxelWorld, WorldPos};
 
@@ -94,6 +95,7 @@ pub fn ground_plane() -> Result<(Simulation, BlockName), Box<dyn Error>> {
     }
     let holding = default_held_block(&registry)
         .ok_or("the driven client's declared registry holds no solid block to place")?;
+    let content = published_content(&registry)?;
     Ok((
         Simulation::new(
             PlayerState {
@@ -104,8 +106,44 @@ pub fn ground_plane() -> Result<(Simulation, BlockName), Box<dyn Error>> {
                 on_ground: true,
             },
             World::new(blocks, registry)?,
+            content,
         ),
         holding,
+    ))
+}
+
+/// The content a simulation over `registry` publishes at launch.
+///
+/// **The reader's own share, written out again rather than asked of
+/// `mc_sim::content::load`.** That door reads a content root, and this fixture's
+/// blocks are declared in memory — so there is no root to read. The layers are
+/// the ones a session that has spent nothing hands out, because a launch has
+/// spent nothing, and the HUD is a client's own empty one: this fixture declares
+/// no element, which is a valid answer rather than a missing one.
+///
+/// The same few lines appear in `support/persistence.rs` and in
+/// `support/mod.rs`, and the duplication is the `#[path]` fixture layout's price:
+/// these modules are reached by path so that a binary need not pull in every
+/// other fixture, which is exactly what stops them sharing one.
+///
+/// # Errors
+///
+/// Returns an error if a registered id cannot be read back, if the layers do not
+/// fit a session's budget, or if an empty HUD source is refused.
+fn published_content(registry: &BlockRegistry) -> Result<PublishedContent, Box<dyn Error>> {
+    let mut blocks = Vec::new();
+    for position in 0..registry.registered_count() {
+        let declared = registry.definition(BlockId::from_raw(u32::try_from(position)?))?;
+        blocks.push(ResolvedBlock {
+            name: declared.name.clone(),
+            texture: declared.texture.clone(),
+            is_solid: declared.is_solid,
+        });
+    }
+    let layers = LayerAssignment::none().appending(&registry.texture_keys())?;
+    Ok(PublishedContent::first(
+        ResolvedContent::stating(blocks, layers),
+        mc_sim::content::hud_before_content_is_read()?,
     ))
 }
 

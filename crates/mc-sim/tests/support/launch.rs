@@ -20,15 +20,15 @@ use std::sync::Arc;
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
 use mc_core::id::{BlockName, TextureKey};
-use mc_sim::persistence::LaunchError;
+use mc_sim::persistence::{LaunchError, Launching};
 use mc_sim::player::{BlockPos, PlayerState};
 use mc_sim::replay::ReplayWorld;
 use mc_sim::simulation::Simulation;
-use mc_world::persistence::SavedPlayer;
+use mc_world::persistence::{Acceptance, SavedPlayer};
 use mc_world::world::{VoxelWorld, WorldPos};
 use tempfile::TempDir;
 
-use super::{FOOTPRINT, content_registry, described, replay_world};
+use super::{FOOTPRINT, content_registry, described, published_content, replay_world};
 
 /// The block a save holds where the generated world holds nothing.
 ///
@@ -90,6 +90,30 @@ pub fn registry_with_the_marker() -> Result<BlockRegistry, Box<dyn Error>> {
         })],
     ))?;
     Ok(registry)
+}
+
+/// Everything a launch over `registry` needs beyond where its save is.
+///
+/// **The acceptance is a parameter and the content is not.** Whether a save whose
+/// blocks have changed is loaded anyway is the question several scenarios here are
+/// about, so it is stated at the call; the content a launch publishes is what
+/// `registry` resolves to on the layers a session that has spent nothing hands
+/// out, which is a fact about a launch rather than a decision.
+///
+/// # Errors
+///
+/// Returns an error if a registered id cannot be read back, or if the layers do
+/// not fit a session's budget.
+pub fn launching(
+    registry: &Arc<BlockRegistry>,
+    accepting: Acceptance,
+) -> Result<Launching, Box<dyn Error>> {
+    Ok(Launching {
+        seed: mc_sim::REPLAY_SEED,
+        registry: Arc::clone(registry),
+        content: published_content(registry)?,
+        accepting,
+    })
 }
 
 /// The registry, the generated world and the directory a launch's save lives

@@ -15,6 +15,9 @@
 mod hud_toml_source;
 mod luau_declaration;
 mod luau_source;
+/// Whether a content root has changed, behind a port, with the one file that
+/// names a filesystem-watching vendor behind that.
+pub mod watch;
 
 pub use hud_toml_source::TomlFileHudSource;
 pub use luau_source::{LuauFileDefinitionSource, Printed};

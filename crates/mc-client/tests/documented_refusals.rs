@@ -53,6 +53,31 @@
 //! least appetite to look for them, and the quoting and the prose want writing
 //! together rather than one retrofitted onto the other.
 //!
+//! # The four a reload puts in front of an author, added with the reload page
+//!
+//! Four more are produced for `docs/modding/hot-reload.md`, on the rule the page was
+//! written to: **a refusal an author meets by making an ordinary mistake is quoted
+//! and held; one they meet because their filesystem is unusual is described.** They
+//! are a saved typo, a deleted declaration the running world still holds, a root
+//! that declares nothing solid, and a session out of texture layers. A root that
+//! cannot be watched at all and a builder thread that died are neither ordinary nor
+//! an authoring mistake, so the page states them in prose and this recogniser
+//! deliberately passes over them.
+//!
+//! **They are produced through a running client rather than through a door**, because
+//! a reload refusal only exists while a simulation is running: a watch reports a
+//! change, a boundary collects the attempt, and the words come out of
+//! `Session::take_reload_report`. The producing half of this file now lives in
+//! `support/printed_refusals.rs`, and every part of the line it composes is
+//! production's own — the sentence above the chain included, since
+//! `mc_client::session::reload::CONTENT_NOT_TAKEN_UP` is declared where a test can
+//! ask for it. **A scan stood in for that constant for one commit** and is recorded
+//! in that module's header rather than kept: an instrument that exists because a
+//! string had two homes retires when it has one.
+//!
+//! **Seven or eight of fourteen rather than three, and the filed gap above stands
+//! for the rest.**
+//!
 //! # Two normalisations, both stated rather than assumed
 //!
 //! - **The fixture root becomes the shipped one.** A refusal names the declaration
@@ -82,6 +107,18 @@
 //! because whoever next meets a red here needs to know which half a parser can
 //! reach.
 
+#[path = "support/input/mod.rs"]
+mod input;
+#[path = "support/printed_refusals.rs"]
+mod printed_refusals;
+#[path = "support/reload.rs"]
+mod reload;
+#[path = "support/reload_content.rs"]
+mod reload_content;
+#[path = "support/reload_watch.rs"]
+mod reload_watch;
+#[path = "support/reload_world.rs"]
+mod reload_world;
 mod support;
 
 use std::cmp::Reverse;
@@ -90,7 +127,8 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use support::{TestResult, content};
+use printed_refusals::{UNRECOGNISED_FIELD, normalised, printed_refusals};
+use support::TestResult;
 
 /// The first thing the reporting writes, and therefore the whole of the
 /// recogniser: a quoted refusal is a fenced block whose first line begins here.
@@ -105,58 +143,9 @@ const PAGE_EXTENSION: &str = "md";
 /// The directory of pages a mod author reads, below the repository root.
 const PAGES: [&str; 2] = ["docs", "modding"];
 
-/// The root a person running the client from their game directory is given, and
-/// therefore the root a quoted refusal names.
-///
-/// Assembled from its two components rather than written as one string, so it
-/// spells itself the way the platform running this spells a path.
-const SHIPPED_ROOT: [&str; 2] = ["content", "base"];
-
-/// The block declaration file the pages are written about.
-const BLOCK_FILE: &str = "amber.luau";
-
-/// A field no loader recognises, spelled close enough to a real one to be the typo
-/// a mod author actually makes.
-const UNRECOGNISED_FIELD: &str = "slid";
-
 /// The same typo, one letter further from anything the loader knows — what a page
 /// left quoting a field name that has moved on would carry.
 const STALE_FIELD: &str = "slidey";
-
-/// A block declaration whose three well-formed fields sit beside one nobody
-/// recognises.
-///
-/// A chunk that returns a table, because that is what a declaration is now. It
-/// is written with single quotes for the same reason every other Luau fixture in
-/// this suite is: a declaration inside a Rust string literal with every escape
-/// doubled is unreadable at exactly the moment somebody has to read it.
-const CARRYING_AN_UNRECOGNISED_FIELD: &str = "return {\n\tname = 'example:amber',\n\ttexture = 'example:amber',\n\tsolid = true,\n\tslid = \
-     true,\n}\n";
-
-/// The namespace every declaration in this file gives its ids, and how many
-/// characters of it that is.
-///
-/// The length is measured off the text rather than written down, so the
-/// arithmetic below stays right if the namespace is ever renamed.
-const NAMESPACE: &str = "example:";
-
-/// How many characters of declared text a declaration may state, and the length
-/// the fixture below states.
-///
-/// Written here rather than read from the loader, which is the whole point: an
-/// expectation derived from the value under test agrees with it whatever it
-/// becomes. One past the bound is the smallest fixture that trips it, and the
-/// smallest is what keeps the refusal a page has to quote readable.
-const CHARACTERS_A_DECLARATION_MAY_STATE: usize = 256;
-const ONE_CHARACTER_PAST_THE_BOUND: usize = CHARACTERS_A_DECLARATION_MAY_STATE + 1;
-
-/// The HUD declaration file the pages are written about.
-const HUD_FILE: &str = "malformed-readout.toml";
-
-/// A HUD declaration every other field of which is well formed, stating an extent
-/// of zero.
-const REFUSED_HUD_DECLARATION: &str = "name = \"example:malformed-readout\"\nanchor = \"center\"\nsize = [0, 4]\ndraw = \"fill\"\n\
-     color = \"#FFFFFFFF\"\n";
 
 /// What the scan came to.
 ///
@@ -184,8 +173,8 @@ fn every_refusal_the_modding_pages_quote_is_a_refusal_the_client_prints() -> Tes
         Verdict::EveryQuotedRefusalIsTheRefusalPrinted,
         "a page quoting a refusal the client does not write sends a mod author looking for text \
          that will never reach their terminal, and a page quoting none leaves the all-or-nothing \
-         promise with nothing showing it kept. What the client writes today, for the two \
-         declarations these pages are about, is:\n\n{}\n",
+         promise with nothing showing it kept. What the client writes today, for the eight roots \
+         and runs these pages are about, is:\n\n{}\n",
         printed.join("\n\n")
     );
     Ok(())
@@ -278,80 +267,6 @@ fn pages_quoting_the_printed_refusals_verbatim_agree_and_their_other_blocks_are_
          somebody deletes the guard instead of the drift"
     );
     Ok(())
-}
-
-/// A block declaration stating a texture key one character longer than a
-/// declared value may be.
-///
-/// **The overlong value is `texture` and not `name`, and that is a decision
-/// about the page rather than about the loader.** Both fields are checked by one
-/// bound through one rendering, so either trips the same refusal down the same
-/// path; what differs is what the refusal then quotes back. A declaration whose
-/// *name* is 257 characters is refused naming itself, so the line a page has to
-/// carry holds a 257-character block id — unreadable, and it teaches a mod
-/// author nothing that the count in the cause does not already say. With the
-/// texture overlong the block still names itself `example:amber` and the whole
-/// refusal fits on a line somebody can read.
-///
-/// The value is assembled by the chunk rather than written out, which a
-/// declaration may do because a declaration is code that ran. That keeps this
-/// fixture legible and keeps the arithmetic — a namespace plus a run of
-/// characters, one past the bound — visible instead of buried in a literal
-/// nobody would count.
-fn stating_a_texture_past_the_bound() -> String {
-    let padding = ONE_CHARACTER_PAST_THE_BOUND - NAMESPACE.chars().count();
-    format!(
-        "return {{\n\
-         \tname = 'example:amber',\n\
-         \ttexture = '{NAMESPACE}' .. string.rep('q', {padding}),\n\
-         \tsolid = true,\n\
-         }}\n"
-    )
-}
-
-/// The refusals the client writes for the three declarations these pages are
-/// about, each as a person running from their own game directory reads it.
-///
-/// **Three roots and not one**, because each is refused whole: a root carrying
-/// two mistakes is refused for whichever the loader reaches first, and the
-/// second refusal would be one no run ever prints.
-fn printed_refusals() -> Result<Vec<String>, Box<dyn Error>> {
-    let blocks =
-        content::shipped_copy()?.declaring_block(BLOCK_FILE, CARRYING_AN_UNRECOGNISED_FIELD)?;
-    let overlong = content::shipped_copy()?
-        .declaring_block(BLOCK_FILE, &stating_a_texture_past_the_bound())?;
-    let hud = content::shipped_with(HUD_FILE, REFUSED_HUD_DECLARATION)?;
-    Ok(vec![
-        as_read_from_a_game_directory(&blocks)?,
-        as_read_from_a_game_directory(&overlong)?,
-        as_read_from_a_game_directory(&hud)?,
-    ])
-}
-
-/// What the client writes for the content root at `root`, with the fixture's own
-/// temporary path rewritten to the root a person runs against.
-///
-/// # Errors
-///
-/// Returns an error if the root was accepted, or if what was written does not name
-/// the fixture root — in which case the rewrite below would be a silent no-op and
-/// the text compared against the pages would be one no page could ever carry.
-fn as_read_from_a_game_directory(root: &content::ContentRoot) -> Result<String, Box<dyn Error>> {
-    let printed = support::refusal_printed_over(root.path())?;
-    let fixture = root.path().display().to_string();
-    if !printed.contains(&fixture) {
-        return Err(format!(
-            "this guard has to rewrite the fixture root out of the refusal before comparing it \
-             with a page, and what was written does not name the root it was given. Comparing it \
-             unchanged would hold every page to text naming a directory that exists for a \
-             hundred milliseconds. What was written was:\n{printed}"
-        )
-        .into());
-    }
-    let shipped: PathBuf = SHIPPED_ROOT.iter().collect();
-    Ok(normalised(
-        &printed.replace(&fixture, &shipped.display().to_string()),
-    ))
 }
 
 /// The first of the printed refusals — the one about a block declaration.
@@ -490,21 +405,6 @@ fn quoted_refusals_in(page: &str) -> Vec<String> {
 /// Whether a line opens or closes a fenced block.
 fn is_fence(line: &str) -> bool {
     line.trim_start().starts_with(FENCE)
-}
-
-/// A text in the one spelling both sides of a comparison are held to: no trailing
-/// whitespace on any line, no blank lines at the end, and path separators written
-/// the same way on every platform.
-///
-/// Leading whitespace is left alone, because the caret diagnostic's own indentation
-/// is part of what a page has to get right.
-fn normalised(text: &str) -> String {
-    text.lines()
-        .map(str::trim_end)
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim_end()
-        .replace('\\', "/")
 }
 
 /// A page quoting the printed refusal with one field renamed, written under

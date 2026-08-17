@@ -42,13 +42,25 @@ use mc_render::surface::{
     FrameAction, ResizeAction, SurfaceErrorKind, SurfaceSize, resize_action, surface_error_action,
 };
 use mc_render::window::{Ending, rendered};
+use mc_sim::reload::watching_shipped_content;
+
+mod reload;
 
 use crate::gpu_startup::Gpu;
 use crate::launch::{PreparationHandle, collect};
 use crate::remesh::{Remesher, Retained};
 use crate::session::Session;
+use crate::session::reload::Remeshing;
 use crate::startup::{PreparationError, empty_hud, empty_scene};
 use crate::surface_setup::{SetupError, chosen_format, color_format, configuration_for};
+
+/// What a player is told when the re-mesh worker has gone.
+///
+/// **Said rather than swallowed**: no edit will be drawn for the rest of the run, and
+/// a world that silently stops showing what a player breaks is the worst outcome the
+/// re-mesh path has.
+const WORKER_GONE: &str = "the worker that draws your edits has stopped; \
+                           edits will not be shown for the rest of this run";
 
 /// The label the frame's command encoder carries in a driver capture.
 const ENCODER_LABEL: &str = "mycraft frame";
@@ -100,6 +112,8 @@ pub struct App {
     /// recurs every frame for as long as that block is held, which is the whole
     /// run.
     reported_swatch: Option<String>,
+    /// The last content refusal printed, so a recurring one is said once.
+    reported_reload: Option<String>,
 }
 
 impl App {
@@ -142,6 +156,7 @@ impl App {
             reported: None,
             reported_remesh: None,
             reported_swatch: None,
+            reported_reload: None,
         })
     }
 
@@ -183,10 +198,21 @@ impl App {
     /// This is the frame path's entire share of an edit: one upload of a scene
     /// somebody else assembled.
     fn exchange_remesh(&mut self, session: &mut Session) {
-        match self.remesher.as_mut().and_then(Remesher::collect) {
-            Some(Ok(scene)) => self.show(scene),
-            Some(Err(failure)) => self.report_remesh(&rendered(&failure)),
-            None => {}
+        // Computed before the match, because `show` needs `self` while the collect
+        // needs the worker out of it.
+        let collected = self
+            .remesher
+            .as_mut()
+            .map(|remesher| session.collect_remesh(remesher));
+        match collected {
+            Some(Remeshing::Show(scene)) => self.show(scene),
+            Some(Remeshing::Report(failure)) => self.report_remesh(&rendered(&failure)),
+            // Said through the same dedup a re-mesh fault uses: it recurs every frame
+            // and it is the one absence waiting will not repair.
+            Some(Remeshing::WorkerGone) => self.report_remesh(WORKER_GONE),
+            // A discarded batch's sections went back inside the collect, so there
+            // is nothing here to remember and nothing to forget.
+            Some(Remeshing::Discarded | Remeshing::NothingYet) | None => {}
         }
         self.submit_remesh(session);
     }
@@ -243,6 +269,13 @@ impl App {
         self.draw(&view, session);
         self.gpu.queue.present(acquired);
         session.tick();
+        // After the tick, because the tick is what crosses the reload boundary.
+        if let Err(refused) = self.take_up_reloaded_content(session) {
+            return Some(Ending::failed_under(
+                "the reloaded content could not be drawn",
+                &refused,
+            ));
+        }
         None
     }
 
@@ -393,20 +426,31 @@ impl App {
             return Ok(());
         };
         let prepared = collect(handle)?;
+        // The serial the launch published under, so the worker's first batch is
+        // judged against the content it was actually meshed with.
+        let serving = prepared.simulation.content().serial;
 
         self.renderer
             .upload_textures(&self.gpu.queue, &prepared.layers)?;
         let scene = Arc::new(prepared.scene);
         self.renderer.upload_scene(&self.gpu.queue, &scene)?;
         session.attach_simulation(prepared.simulation, prepared.holding);
-        // The meshed sections, the layers and the registry are handed to the
-        // worker rather than kept here: they are what a re-mesh works on, and a
-        // copy on each side would be a second answer waiting to disagree.
-        self.remesher = Some(Remesher::spawn(Retained {
-            meshed: prepared.meshed,
-            layers: prepared.layers,
-            registry: prepared.registry,
-        }));
+        // What makes the whole reload path reachable by the person it is for: the
+        // root the launch was prepared from goes under watch, and the session
+        // crosses its boundaries from the next tick on. Attached after the
+        // simulation because a boundary needs one.
+        session.attach_reload(watching_shipped_content(prepared.root));
+        // The meshed sections and the layers are handed to the worker rather than
+        // kept here: they are what a re-mesh works on, and a copy on each side
+        // would be a second answer waiting to disagree. No registry — a batch
+        // carries the one its own world was resolved against.
+        self.remesher = Some(Remesher::spawn(
+            Retained {
+                meshed: prepared.meshed,
+                layers: prepared.layers,
+            },
+            serving,
+        ));
         // The HUD arrives with the scene because it was read from the same
         // content root, on the same worker. Until this moment the frame path
         // composed a layout declaring nothing, which is what a client that has

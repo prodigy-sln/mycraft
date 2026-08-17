@@ -1138,3 +1138,82 @@ constructor set holds against that today.
   it by construction. Closing composition at the type level turns the central property from "scanned
   for" into "does not compile", and leaves the scan to guard only the narrower hole neither door nor
   scan closes alone.
+
+## ADR-024 — Array-texture layers are appended within a session and never renumbered
+
+**Status**: Accepted · **Date**: 2026-08-17
+
+**Context.** Hot reload replaces the block registry whole while the game is running. The layer each
+texture key occupies in the array texture is stated by whoever read the content, and **a layer index
+sits inside every packed vertex** — so the renderer is holding, at the moment of a swap, geometry
+whose texture selection is already committed. A reload therefore has to decide what happens to an
+assignment that has been handed out.
+
+**Decision.** A reload **appends** assignments for keys the session has not seen and changes none it
+has. A key that stops being declared keeps its layer and its texels for the rest of the session:
+retired, but not reclaimed. The bound is 256, which is not a preference but the width of the packed
+vertex's layer field, declared once in `mc-core` and asserted against `mc-render`'s own capacity at
+compile time. A candidate needing more than the session has left is refused whole, and the refusal
+names the counts. Relaunching reclaims the difference, which is exactly `spent − live`.
+
+The append operation returns a new assignment rather than mutating one, so a partial append is not
+merely unchecked — **it cannot be written.** That is load-bearing and easy to destroy: a future
+refactor to `&mut self` would remove the property while every test stayed green, because the
+greedy-but-still-refusing mutation leaves the caller an `Err` either way.
+
+**Consequences.** A session that renames a texture key repeatedly can exhaust 256 layers while
+declaring a handful, and its way out is a relaunch. Appending writes one layer's texels but the write
+path iterates every live entry, so the cost of a reload's upload is proportional to the live set
+rather than to what changed. A mod author's edit to `texture` is accepted and invisible for an
+unrelated reason — the layer a block draws from is selected by its *name* today — and that limitation
+is stated in `modding/hot-reload.md` rather than papered over.
+
+**Rejected.**
+
+- **Renumbering the assignment on every reload**, deriving it lexicographically over whatever the new
+  content declares. Simplest to state and the reason it fails is decisive: a key inserted anywhere but
+  last shifts every key after it, and every packed vertex the renderer holds then draws from another
+  block's texture until the whole world has been re-meshed and re-uploaded. Not a transient artefact —
+  a wrong picture with no error, lasting as long as any un-re-meshed section does.
+- **Reclaiming retired layers by compaction.** Compaction *is* renumbering, with the same consequence
+  and a harder-to-reason-about trigger.
+- **Widening the packed vertex's layer field.** Moves a contract that two crates agree on today, costs
+  bandwidth in the hottest buffer in the renderer, and buys headroom against a limit no authoring
+  workflow reaches. The session-lifetime bound is the honest constraint and a relaunch is the honest
+  answer to it.
+- **A second "geometry serial" so that a reload changing nothing geometric does not supersede a batch
+  in flight.** Deferred rather than rejected on principle: it costs one batch, and that batch can only
+  re-mesh sections which were dirty anyway.
+
+## ADR-025 — A reload candidate that stops declaring a block the world holds is refused whole
+
+**Status**: Accepted · **Date**: 2026-08-17
+
+**Context.** A reload takes content read while a world is live. That world's cells hold blocks by
+name, and a candidate is free to stop declaring one — most often because deleting a file is how an
+author tidies up. Something has to happen to the cells holding it.
+
+**Decision.** The candidate is **refused whole**, before anything is published, and the refusal names
+every such block ascending. The content already serving goes on serving; nothing is half-applied and
+nothing accumulates. The check runs inside the world's own write door, which resolves the new solidity
+before writing either view, so a refusal returns with the world exactly as it was rather than
+partially updated.
+
+**Consequences.** An author who wants a declaration gone breaks the blocks first, or puts the file
+back. The refusal is one of the two a reload adds beyond the loader's own — the other being content
+that registers no solid block — and both are quoted for authors in `modding/hot-reload.md`. It also
+means a reload cannot corrupt a world into a state the save format would refuse, which matters because
+the save path already refuses a missing name for the same reason: the two now agree rather than
+disagreeing at the worst possible moment.
+
+**Rejected.**
+
+- **Replacing the orphaned cells with air.** Deletes a player's build silently on a file save. The
+  worst property a reload can have is doing something irreversible that nobody asked for.
+- **Substituting a placeholder block.** Same objection one step softer, plus it invents an engine-side
+  block definition, which invariant 1 forbids outright.
+- **Accepting the candidate and leaving the cells holding an unregistered name.** Every read of those
+  cells then has to answer for a name no registry knows, which pushes a refusal into the tick path —
+  the one place this project will not put one.
+- **Warning and accepting.** A warning nobody reads is an acceptance, and the state it accepts is the
+  one the previous option describes.

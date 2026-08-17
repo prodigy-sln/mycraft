@@ -29,15 +29,16 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use mc_core::block::BlockRegistry;
+use mc_core::content::LayerAssignment;
 use mc_core::hud::HudLayout;
 use mc_core::id::BlockName;
 use mc_render::geometry::scene::SceneGeometry;
 use mc_render::texture::TextureLayers;
 use mc_sim::action::default_held_block;
 use mc_sim::content::LoadedContent;
-use mc_sim::persistence::simulation_at_launch;
+use mc_sim::persistence::{Launching, simulation_at_launch};
 use mc_sim::replay::SectionQuads;
-use mc_sim::simulation::Simulation;
+use mc_sim::simulation::{PublishedContent, Simulation};
 use mc_world::persistence::Acceptance;
 
 use crate::content::ContentView;
@@ -76,6 +77,12 @@ const SAVE_PATH: [&str; 2] = ["saves", "world.mcw"];
 /// something the frame path may decide.
 #[derive(Debug)]
 pub struct PreparedLaunch {
+    /// The content root this launch was prepared from, so the run can watch it.
+    ///
+    /// **Handed back rather than kept by whoever spawned the preparation.** The
+    /// root a client watches must be the root it is playing, and the only place
+    /// those are the same value by construction is here.
+    pub root: PathBuf,
     pub scene: SceneGeometry,
     pub layers: TextureLayers,
     pub meshed: Vec<SectionQuads>,
@@ -116,16 +123,12 @@ pub fn save_path() -> PathBuf {
 /// and [`PreparationError::NothingToPlace`] when the content registers no solid
 /// block for a player to place.
 pub fn simulation_to_play(
-    seed: u64,
-    registry: Arc<BlockRegistry>,
     save: &Path,
-    accepting: Acceptance,
+    launching: Launching,
 ) -> Result<(Simulation, BlockName), PreparationError> {
-    let holding = default_held_block(&registry).ok_or(PreparationError::NothingToPlace)?;
-    Ok((
-        simulation_at_launch(save, seed, registry, accepting)?,
-        holding,
-    ))
+    let holding =
+        default_held_block(&launching.registry).ok_or(PreparationError::NothingToPlace)?;
+    Ok((simulation_at_launch(save, launching)?, holding))
 }
 
 /// Starts preparing a launch on a worker, and hands back the handle to collect it
@@ -188,29 +191,42 @@ pub fn prepare_launch(
     // Asked of the simulation, which is what reads a content root. The HUD comes
     // back with it because a crosshair the content declares is content exactly
     // as a block is, and the two are refused together.
+    // A launch has spent no layers, which is a fact rather than a decision, and
+    // passing it here is what makes the property visible at the call.
     let LoadedContent {
         registry,
         hud,
         resolved,
-    } = mc_sim::content::load(root)?;
+    } = mc_sim::content::load(root, &LayerAssignment::none())?;
 
     let registry = Arc::new(registry);
-    let (simulation, holding) =
-        simulation_to_play(mc_sim::REPLAY_SEED, Arc::clone(&registry), save, accepting)?;
-
-    let meshed = simulation.world().mesh()?;
     // Asked of the registry and never of what was just meshed: a layer index
     // rides inside every packed vertex, so a key set read off the played world
     // would let a save renumber the array texture.
     let layers = ContentView::of(&resolved).into_layers();
+    let content = PublishedContent::first(resolved, hud);
+    let hud = Arc::clone(&content.hud);
+
+    let (simulation, holding) = simulation_to_play(
+        save,
+        Launching {
+            seed: mc_sim::REPLAY_SEED,
+            registry: Arc::clone(&registry),
+            content,
+            accepting,
+        },
+    )?;
+
+    let meshed = simulation.world().mesh()?;
 
     Ok(PreparedLaunch {
+        root: root.to_path_buf(),
         scene: scene_of(&meshed, &layers)?,
         layers,
         meshed,
         simulation,
         holding,
         registry,
-        hud: Arc::new(hud),
+        hud,
     })
 }

@@ -28,6 +28,15 @@ postcard = { workspace = true }
 # Section storage is the first thing in this crate to refuse anything of its
 # own; until now every failure it reported belonged to mc-core.
 thiserror = { workspace = true }
+# Confined to src/content/watch/notify_watch.rs, which is the only file in this
+# workspace that may name either. The litmus test the engine record states: if
+# `notify` disappeared tomorrow, one file changes. `ContentWatch` and
+# `ContentChanges` name no vendor type, so everything above the port — the
+# relevance rule, the coalescing, every scenario about what a save begins — is
+# reachable through an in-memory double. The debouncer is also the only clock on
+# the content path; the simulation reads none.
+notify = { workspace = true }
+notify-debouncer-full = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

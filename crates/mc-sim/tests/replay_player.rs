@@ -35,7 +35,9 @@ use mc_sim::replay::{
 };
 use mc_sim::simulation::{SimSnapshot, Simulation};
 
-use support::{TestResult, content_registry, exactly_player, replay_world, surface_height};
+use support::{
+    TestResult, content_registry, exactly_player, published_content, replay_world, surface_height,
+};
 
 /// How far two figures this feature calls equal may differ, in blocks or in
 /// radians.
@@ -82,7 +84,7 @@ const TURN_DEGREES: f32 = 30.0;
 fn replay() -> Result<(ReplayWorld, Simulation), Box<dyn Error>> {
     let registry = Arc::new(content_registry()?);
     let world = replay_world(&registry)?;
-    let simulation = simulation_for(&world, Arc::clone(&registry))?;
+    let simulation = simulation_for(&world, Arc::clone(&registry), published_content(&registry)?)?;
     Ok((world, simulation))
 }
 

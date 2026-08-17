@@ -38,11 +38,18 @@ use std::fmt;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
+use glam::Vec3;
+
+use mc_core::content::{ContentSerial, ResolvedContent};
+use mc_core::hud::HudLayout;
+use mc_core::id::BlockName;
 
 use crate::camera::CameraPose;
+use crate::content::LoadedContent;
 use crate::player::{PlayerState, advance_player, eye_pose};
+use crate::reload::ReloadRefusal;
 use crate::world::action::{EditReport, TickIntent, resolve};
-use crate::world::{RemeshWork, World};
+use crate::world::{Clearing, RemeshWork, SectionKey, World, clearing, reload};
 
 /// What the simulation publishes: which tick it is at, where the camera is, and
 /// everything it knows about the player.
@@ -56,9 +63,62 @@ pub struct SimSnapshot {
 /// The tick a simulation publishes before any intent has been submitted.
 const FIRST_TICK: u32 = 0;
 
+/// The content a reader draws with, and which accepted set it is.
+///
+/// **A second published value beside the snapshot, not a field inside it.**
+/// `SimSnapshot` is `Copy` and holds plain values, and nothing needs the
+/// correlation: a re-mesh batch carries its own serial, and a reader that wants
+/// the content asks for it.
+#[derive(Debug)]
+pub struct PublishedContent {
+    pub serial: ContentSerial,
+    pub resolved: ResolvedContent,
+    /// The HUD the same root declared.
+    ///
+    /// **It travels because it is refused with the blocks**, so applying one and
+    /// not the other is the partial application invariant 7 calls a Blocker.
+    pub hud: Arc<HudLayout>,
+}
+
+impl PublishedContent {
+    /// The content a launch publishes, under the first serial.
+    #[must_use]
+    pub fn first(resolved: ResolvedContent, hud: HudLayout) -> Self {
+        Self {
+            serial: ContentSerial::FIRST,
+            resolved,
+            hud: Arc::new(hud),
+        }
+    }
+}
+
+/// What taking up a candidate settled, for whoever holds the answers it
+/// replaces.
+///
+/// No `Eq`, because [`Clearing`] carries a position and `Vec3` has none.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Accepted {
+    /// The serial the accepted content was published under.
+    pub serial: ContentSerial,
+    /// What the swap did about a player the new solidity left inside a block.
+    ///
+    /// Travels out with the rest so it can reach the one place that prints for a
+    /// person: a verdict computed and dropped satisfies nothing.
+    pub clearing: Clearing,
+    /// The block a client holds under the content now serving.
+    ///
+    /// **Re-derived and not preserved**: it is a policy over the registry rather
+    /// than something the player accumulated, and re-deriving it is what lets a
+    /// block a mod author has just declared be one they can go and place.
+    pub holding: BlockName,
+}
+
 /// The simulation's own state, and the snapshot it publishes.
 pub struct Simulation {
     published: ArcSwap<SimSnapshot>,
+    /// The content a reader draws with, replaced whole when a candidate is
+    /// accepted. A reader observes it by asking rather than by being told.
+    content: ArcSwap<PublishedContent>,
     player: PlayerState,
     /// The world a tick resolves the player's motion against, and edits.
     ///
@@ -70,23 +130,37 @@ pub struct Simulation {
 }
 
 impl Simulation {
-    /// A simulation of `world`, with the player at `spawn` and its first
-    /// snapshot already published.
+    /// A simulation of `world` serving `content`, with the player at `spawn` and
+    /// its first snapshot already published.
     ///
     /// The spawn's own snapshot exists before any intent is submitted, because
     /// the state before the first tick is a state a reader can be shown — the
     /// frame drawn while nothing has been asked for yet is drawn from it.
+    ///
+    /// `content` is taken at construction so that a simulation is never in a
+    /// state where it has a world and nothing to draw it with.
     #[must_use]
-    pub fn new(spawn: PlayerState, world: World) -> Self {
+    pub fn new(spawn: PlayerState, world: World, content: PublishedContent) -> Self {
         Self {
             published: ArcSwap::from_pointee(SimSnapshot {
                 tick: FIRST_TICK,
                 camera: eye_pose(&spawn),
                 player: spawn,
             }),
+            content: ArcSwap::from_pointee(content),
             player: spawn,
             world,
         }
+    }
+
+    /// The content a reader draws with, and which accepted set it is.
+    ///
+    /// **Observed by asking, never by being told.** A reader that has not looked
+    /// since the last accept goes on seeing what it last observed, which is what
+    /// keeps this an arrangement rather than a callback.
+    #[must_use]
+    pub fn content(&self) -> Arc<PublishedContent> {
+        self.content.load_full()
     }
 
     /// Advances one tick under `intent` and publishes the result.
@@ -119,6 +193,62 @@ impl Simulation {
         report
     }
 
+    /// Takes up `candidate` as the content this simulation serves.
+    ///
+    /// **The seam splits where the borrow does.** Admission and the swap need
+    /// only the world and are [`world::reload`](crate::world::reload)'s, a child
+    /// of the module owning the write privilege; what needs the player is here.
+    ///
+    /// Called after [`advance`](Self::advance) has published its tick, so the
+    /// change is in force from the next one. `pub(crate)` because the door a
+    /// driver goes through is [`crate::reload::adopt_at_tick_boundary`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReloadRefusal`] with this simulation exactly as it was.
+    pub(crate) fn adopt(&mut self, candidate: LoadedContent) -> Result<Accepted, ReloadRefusal> {
+        let LoadedContent {
+            registry,
+            hud,
+            resolved,
+        } = candidate;
+        // Admission first, so a refusal returns before anything is published and
+        // the content a reader holds is untouched by construction.
+        let adopted = reload::adopt_candidate(&mut self.world, Arc::new(registry))?;
+        let clearing = self.clear_the_player();
+        let serial = self.content().serial.next();
+        self.content.store(Arc::new(PublishedContent {
+            serial,
+            resolved,
+            hud: Arc::new(hud),
+        }));
+        Ok(Accepted {
+            serial,
+            holding: adopted.holding,
+            clearing,
+        })
+    }
+
+    /// Moves the player clear of a cell the candidate made solid, if any did.
+    ///
+    /// Run against the solidity the candidate produced, so it is called after the
+    /// world has adopted and never on the refusal path — a player a refused
+    /// candidate would have trapped is not trapped.
+    ///
+    /// **The velocity goes on any move**, not only an upward one: a cleared player
+    /// has been teleported, and one rule is better than one per direction.
+    ///
+    /// The world's extent travels with its solidity because the search needs both:
+    /// a cell past the extent is unknown, and `is_solid` cannot say so.
+    fn clear_the_player(&mut self) -> Clearing {
+        let clearing = clearing::cleared(self.player.position, &self.world, self.world.extent());
+        if let Clearing::MovedTo(feet) = clearing {
+            self.player.position = feet;
+            self.player.velocity = Vec3::ZERO;
+        }
+        clearing
+    }
+
     /// What has to be re-meshed for this simulation's edits to be seen, or
     /// nothing when there have been none since it was last asked.
     ///
@@ -126,7 +256,17 @@ impl Simulation {
     /// re-mesh run on a thread of its own without pinning the tick behind it —
     /// the same property the session that owns this simulation already has.
     pub fn take_remesh_work(&mut self) -> Option<RemeshWork> {
-        self.world.take_remesh_work()
+        let serial = self.content().serial;
+        self.world.take_remesh_work(serial)
+    }
+
+    /// Records `keys` as needing to be meshed again.
+    ///
+    /// The one caller is a batch discarded for having been meshed against content
+    /// that stopped serving; without this those sections stay stale for the rest
+    /// of the run.
+    pub fn mark_for_remesh(&mut self, keys: Vec<SectionKey>) {
+        self.world.mark_for_remesh(keys);
     }
 
     /// Whatever was published most recently.

@@ -19,7 +19,6 @@
 //! re-mesh drops the batch and keeps the picture it already had. Neither of these
 //! runs on the tick thread or the frame thread.
 
-use mc_core::block::BlockRegistry;
 use mc_world::column::ColumnCoordinate;
 use thiserror::Error;
 
@@ -51,13 +50,10 @@ pub enum SpliceError {
 ///
 /// Returns [`PrepareError::Mesh`] naming the first section that could not be
 /// meshed.
-pub fn remesh(
-    work: &RemeshWork,
-    registry: &BlockRegistry,
-) -> Result<Vec<SectionQuads>, PrepareError> {
+pub fn remesh(work: &RemeshWork) -> Result<Vec<SectionQuads>, PrepareError> {
     work.keys()
         .filter_map(|key| section_work(work, key))
-        .map(|section| mesh_one(&section, registry))
+        .map(|section| mesh_one(&section, work.registry()))
         .collect()
 }
 

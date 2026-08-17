@@ -62,8 +62,10 @@ pub mod swatch;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
-use mc_core::block::BlockRegistry;
+use mc_core::block::{BlockId, BlockRegistry};
+use mc_core::content::{LayerAssignment, ResolvedBlock, ResolvedContent};
 use mc_render::window::{Ending, report};
+use mc_sim::simulation::PublishedContent;
 use mc_world::content::LuauFileDefinitionSource;
 
 /// The replay's assembled scene and the texture layers its blocks resolved to, as
@@ -124,6 +126,42 @@ pub fn content_registry() -> Result<BlockRegistry, Box<dyn Error>> {
     let mut registry = BlockRegistry::new();
     registry.apply(&LuauFileDefinitionSource::new(content_root()?))?;
     Ok(registry)
+}
+
+/// The content a simulation built over `registry` publishes at launch.
+///
+/// **Assembled here rather than asked of `mc_sim::content::load`, and that is a
+/// second derivation on purpose.** `load` reads a content root; the worlds these
+/// fixtures drive are declared over registries assembled in memory, so there is
+/// no root to read. Writing the reader's own share out again — name, texture key
+/// and solidity, and nothing by which a world is mutated — makes this an
+/// independent statement of what a participant that only draws receives, which is
+/// what a scenario comparing the two needs.
+///
+/// The layers are the ones a session that has spent nothing hands out, because a
+/// launch has spent nothing. The HUD is the one a client that has read no
+/// declarations draws: these fixtures declare no HUD, and an empty layout is a
+/// valid answer rather than a missing one.
+///
+/// # Errors
+///
+/// Returns an error if a registered id cannot be read back, if the layers do not
+/// fit a session's budget, or if an empty HUD source is refused.
+pub fn published_content(registry: &BlockRegistry) -> Result<PublishedContent, Box<dyn Error>> {
+    let mut blocks = Vec::new();
+    for position in 0..registry.registered_count() {
+        let definition = registry.definition(BlockId::from_raw(u32::try_from(position)?))?;
+        blocks.push(ResolvedBlock {
+            name: definition.name.clone(),
+            texture: definition.texture.clone(),
+            is_solid: definition.is_solid,
+        });
+    }
+    let layers = LayerAssignment::none().appending(&registry.texture_keys())?;
+    Ok(PublishedContent::first(
+        ResolvedContent::stating(blocks, layers),
+        mc_sim::content::hud_before_content_is_read()?,
+    ))
 }
 
 /// The render input the replay world produces, prepared from scratch.

@@ -29,6 +29,9 @@
 //! below whose subject *is* that substitution states the two differently, on
 //! purpose.
 
+#[path = "support/staged_layers.rs"]
+mod staged_layers;
+
 use std::error::Error;
 
 use mc_client::content::ContentView;
@@ -38,6 +41,8 @@ use mc_render::geometry::{GeometryError, SectionGeometry, SectionOrigin, build_s
 use mc_render::hud::{HeldSwatch, held_swatch};
 use mc_render::texture::TextureLayers;
 use mc_world::mesh::{Facing, PlaneExtent, PlanePos, Quad};
+
+use staged_layers::assigned;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -78,6 +83,11 @@ const ITS_DECLARED_KEY: &str = "example:quartz";
 /// A block beside it whose key *is* its own name, so that a reading about the
 /// first one is not satisfied by an answer given to everything.
 const PLAINLY_KEYED_BLOCK: &str = "example:jade";
+
+/// The layers those two keys hold, and they are deliberately not their sorted
+/// positions: `example:jade` sorts ahead of `example:quartz` and holds the higher
+/// layer, which is a session that met the substituted block's key first.
+const SUBSTITUTED_ASSIGNMENT: [(&str, u16); 2] = [(ITS_DECLARED_KEY, 0), (PLAINLY_KEYED_BLOCK, 1)];
 
 /// What packing a run of quads came to.
 ///
@@ -212,11 +222,7 @@ fn stating(
             is_solid: true,
         });
     }
-    let mut assignment = Vec::new();
-    for (key, layer) in layers {
-        assignment.push((TextureKey::parse(key)?, *layer));
-    }
-    Ok(ResolvedContent::stating(stated, assignment))
+    Ok(ResolvedContent::stating(stated, assigned(layers)?))
 }
 
 /// Resolved content whose first block declares a texture key that is not its own
@@ -239,10 +245,7 @@ fn substituting() -> Result<ResolvedContent, Box<dyn Error>> {
                 is_solid: true,
             },
         ],
-        vec![
-            (TextureKey::parse(ITS_DECLARED_KEY)?, 0),
-            (TextureKey::parse(PLAINLY_KEYED_BLOCK)?, 1),
-        ],
+        assigned(&SUBSTITUTED_ASSIGNMENT)?,
     ))
 }
 

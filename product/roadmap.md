@@ -118,10 +118,12 @@ it before a run starts.
 | P0 | Luau host, sandbox, hostile-mod harness — *verification precedes the thing it verifies* | PRO-916 | **Done** |
 | P0 | A content refusal names the file, the declaration and the field — *fix a typo in one edit* | PRO-939 | **Done** |
 | P0 | Blocks defined in Luau — pure loader swap, TOML retired — *the base game is a mod* | PRO-917 | **Done** |
-| P0 | Hot reload — *edit a block while playing* | PRO-918 | Todo |
+| P0 | Hot reload — *edit a block while playing* | PRO-918 | **In progress** |
+| P0 | The composition root moves to `mc-server`, and the registry stops travelling to the client — *the split becomes structural instead of a comment* | PRO-944 | Todo |
 | P0 | Solid, drawn, occludes and targetable split, plus swimmable and density — *you can see water and swim in it* | PRO-904 | Todo |
-| P0 | Texture resolution through the registry, and per-face keys — *grass gets dirt sides* | PRO-902, PRO-914 | Todo |
-| P0 | Base block textures authored as content — *proper textures* | PRO-869 | Blocked on PRO-930 |
+| P0 | Where generated art comes from at build time — *a decision and an ADR amendment, not a spec* | PRO-930 | Todo — **gates all art below** |
+| P0 | The grass block looks like a grass block: per-face keys, baked art, real pixels from disk — *the world stops being teal* | PRO-947, PRO-902 | Blocked on PRO-930 |
+| P0 | The placeholder palette guarantees separation for blocks shipping no art | PRO-869 | Blocked on PRO-930 |
 | P0 | Components attach behaviour; grass spreads onto dirt — *the model proven, not just moved* | PRO-919 | Todo |
 | P0 | Break a block and hold it — *pick up what you took, place it again* | PRO-929 | Todo |
 
@@ -155,12 +157,30 @@ machinery at once, and it is visible.
 
 The last criterion subsumes MVP 1's, which is the point — every increment ends playable.
 
-**Known gap, unresolved.** Every spec above is mechanism; none ships new *content*. MVP 2 as
-listed ends with the same four blocks it started with, so "the base game is a mod" is only weakly
-tested — missing hooks are found by authoring real content, and four trivial blocks exercise almost
-nothing. A block-set spec belongs here; it needs two answers first, since **breaking a block to
-obtain it makes the reachable set equal to the generated set**: which blocks, and how a player gets
-one that worldgen never places.
+**Known gap, narrowed rather than closed.** Every mechanism spec above ships no new *content*, and
+MVP 2 still ends with the same four blocks it started with — so "the base game is a mod" stays
+weakly tested, because missing hooks are found by authoring real content and four trivial blocks
+exercise almost nothing. A block-set spec belongs here; it needs two answers first, since **breaking
+a block to obtain it makes the reachable set equal to the generated set**: which blocks, and how a
+player gets one that worldgen never places.
+
+What PRO-947 changes is narrower than that and worth stating precisely, because the two are easy to
+confuse: it ships real *art* for blocks that already exist, not new blocks. It is the first spec in
+this MVP a player can see at all — every one before it is invisible to them by design, and PRO-917's
+spec states "nothing a player can see changes" as an intended outcome rather than an omission. So it
+answers "the world is teal" and leaves "there are only four blocks" open.
+
+**PRO-930 gates every art spec, and it is a decision rather than work.** Generated assets are not
+committed — deterministic and free output is regenerated, nondeterministic or paid output is
+committed, and golden frames stay committed because they are evidence rather than assets. What is
+*not* settled is the mechanism, and it cannot be settled inside a spec that assumes an answer:
+VoxForge lives in `tools/`, SPEC-013 FR-9.1 forbids anything in `crates/` depending on `tools/`, and
+a `build.rs` that invokes VoxForge is exactly that dependency. The options are an explicit pre-build
+step, splitting VoxForge so its render core is a crate, or amending FR-9.1. Two things belong in
+whichever answer wins: a **manifest hash of the generated set**, so that a generator change fails
+loudly instead of shifting every golden and reading as a renderer regression, and a **gate stage
+that fails on a committed generated artifact**, because a `.gitignore` rule drifts back over time
+and a stage does not.
 
 **Deferred, recorded rather than dropped.** Per-cell state (PRO-911) and everything needing it —
 multi-cell instances and collision shapes (PRO-912), placement orientation (PRO-913). Tags

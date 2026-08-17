@@ -7,10 +7,10 @@
 //! does not have shifts every index after it and the whole world is textured
 //! wrong — silently, with no error anywhere.
 //!
-//! # Four spellings, and they are chokepoints rather than type names
+//! # Six spellings, and they are chokepoints rather than type names
 //!
 //! A guard whose needles were type names would go green the day somebody renamed
-//! a source, because renaming a source does not rename the door. What these four
+//! a source, because renaming a source does not rename the door. What these six
 //! name is where content actually gets in:
 //!
 //! - `registry.apply(` — the only way to put a definition into a block registry
@@ -21,6 +21,21 @@
 //!   a client building an empty one to fill by some other route.
 //! - `content_root` — where a content directory is resolved, which catches a
 //!   client that never reads content but still goes looking for it.
+//! - `NotifyContentWatch::watching` — where a content root comes to be *watched*.
+//!   A client that builds its own watcher decides for itself when content is read
+//!   again, which is the same decision as reading it, taken repeatedly.
+//! - `notify` — the vendor behind that watcher, in the one spelling every route
+//!   to it shares: the crate's own name, which `notify_debouncer_full` carries
+//!   too. `mc_sim::reload::watching_shipped_content` is the one door a client
+//!   goes through, and it is what makes both of these absent rather than exempt.
+//!
+//! **The watcher's half is weaker than the other four and it is worth knowing
+//! which way.** `mc-client` does not depend on `notify`, so `use notify::…` would
+//! not compile before it matched here — Rust's own extern-crate rules hold that
+//! half, exactly as `crates/mc-world/Cargo.toml` records for the crate that does
+//! depend on it. What these two needles add over the compiler is the manifest
+//! entry *plus* the use arriving together, and the adapter reached through
+//! `mc-world`'s re-export, which compiles perfectly well.
 //!
 //! **The scan wants no exemption at all.** If one ever seems to be needed, that
 //! is a door left behind rather than a licence to write the exemption: an
@@ -68,18 +83,20 @@ type TestResult = Result<(), Box<dyn Error>>;
 /// Where the client's own production sources live, relative to the crate root.
 const SOURCES: &str = "src";
 
-/// The four doors content is read through, as they are spelled.
-const DOORS: [&str; 4] = [
+/// The six doors content is read or watched through, as they are spelled.
+const DOORS: [&str; 6] = [
     "registry.apply(",
     "HudLayout::load",
     "BlockRegistry::new",
     "content_root",
+    "NotifyContentWatch::watching",
+    "notify",
 ];
 
 /// What a scan of the client's own sources came to.
 #[derive(Debug, PartialEq, Eq)]
 enum Verdict {
-    /// Every one of the four doors is unnamed in the client's own sources.
+    /// Every one of the six doors is unnamed in the client's own sources.
     EveryContentDoorIsUnnamed,
     /// These sources name these doors.
     DoorsNamed(Vec<String>),
@@ -325,10 +342,12 @@ fn a_source_naming_every_door(root: &Path) -> Result<String, Box<dyn Error>> {
     fs::create_dir_all(&sources)?;
     fs::write(
         sources.join("startup.rs"),
-        "let root = content_root()?;\n\
+        "use notify::RecursiveMode;\n\
+         let root = content_root()?;\n\
          let mut registry = BlockRegistry::new();\n\
          registry.apply(&source)?;\n\
-         let hud = HudLayout::load(&source)?;\n",
+         let hud = HudLayout::load(&source)?;\n\
+         let watch = NotifyContentWatch::watching(&root);\n",
     )?;
     Ok(format!("{SOURCES}/startup.rs"))
 }

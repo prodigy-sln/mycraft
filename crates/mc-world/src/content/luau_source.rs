@@ -47,10 +47,10 @@ use mc_script::{ScriptFault, ScriptHost, ScriptValue};
 use super::luau_declaration::checked_declaration;
 
 /// The subdirectory of a content root that block declarations live in.
-const BLOCKS_DIRECTORY: &str = "blocks";
+pub(super) const BLOCKS_DIRECTORY: &str = "blocks";
 
 /// The extension that makes a file under [`BLOCKS_DIRECTORY`] a declaration.
-const DECLARATION_EXTENSION: &str = "luau";
+pub(super) const DECLARATION_EXTENSION: &str = "luau";
 
 /// How many declarations one content root may hold.
 ///

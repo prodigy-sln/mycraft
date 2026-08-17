@@ -27,7 +27,9 @@ use glam::Vec3;
 use mc_sim::replay::{SCRIPT_TICKS, TickIndex, scripted_intent, simulation_for};
 
 use support::overlap::overlapping_voxels;
-use support::{LANDMARK, LANDMARK_TOP, TestResult, content_registry, replay_world};
+use support::{
+    LANDMARK, LANDMARK_TOP, TestResult, content_registry, published_content, replay_world,
+};
 
 /// How many published states the run is judged at: the spawn's own, and one per
 /// scripted tick.
@@ -57,7 +59,8 @@ fn no_tick_of_the_declared_replay_leaves_the_player_inside_a_solid_voxel() -> Te
     // adapter that resolved a name wrongly cannot make both sides wrong alike.
     let registry = Arc::new(content_registry()?);
     let world = replay_world(&registry)?;
-    let mut simulation = simulation_for(&world, Arc::clone(&registry))?;
+    let mut simulation =
+        simulation_for(&world, Arc::clone(&registry), published_content(&registry)?)?;
     let mut standing = vec![simulation.latest().player.position];
     let mut buried = Vec::new();
 

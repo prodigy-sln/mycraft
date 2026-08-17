@@ -89,9 +89,17 @@ invocations.
 
 ## Testing (behaviour, not yet reachable)
 
-Every mod carries a `tests/` directory. **These run on every hot-reload candidate before the swap**
-— a mod whose tests fail never reaches the live world. That makes them a safety mechanism, not a
-formality:
+Every mod is intended to carry a `tests/` directory, running on every hot-reload
+candidate before the swap so that a mod whose tests fail never reaches the live
+world. **That does not exist. What gates a reload candidate today is the loader's
+own all-or-nothing validation — the same gate that runs at launch** — plus the
+reload's own two checks: that every block the running world holds is still
+declared, and that the content still registers a solid block. A candidate failing
+any of them is refused whole and the running content goes on serving. See
+`docs/modding/hot-reload.md`.
+
+The intended shape, once there is a `mycraft.*` binding for a test to assert
+against:
 
 - Assert definitions exist with the expected properties after load
 - Assert recipes resolve and produce what they claim
@@ -101,9 +109,9 @@ formality:
 Block declarations have no `tests/` directory of their own — the engine's
 content-root loader is what enforces their correctness (refusing missing fields,
 unrecognised fields, bad namespacing, duplicate names, and every content-supplied
-quantity past its bound; see `docs/modding/blocks-items.md`), and it runs on
-every load, not on a reload candidate specifically, because there is no reload
-yet to gate.
+quantity past its bound; see `docs/modding/blocks-items.md`), and **that same
+loader is now what gates a reload candidate** — a declaration saved while the game
+is running goes through it before anything swaps.
 
 A declaration is Luau and so it *could* carry a test of its own one day. It does
 not yet, and the reason is the same one the rest of this section is about: there

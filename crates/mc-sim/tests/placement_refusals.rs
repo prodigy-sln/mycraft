@@ -56,7 +56,7 @@ use mc_sim::simulation::Simulation;
 use mc_world::column::COLUMN_HEIGHT;
 use mc_world::world::WorldPos;
 
-use support::chamber::{BlockChamber, UNBUILDABLE, at, differences};
+use support::chamber::{BlockChamber, UNBUILDABLE, at, differences, fixture_content};
 use support::{DIRT, NOTHING, STONE, TestResult};
 
 /// Every cell at which a run differs from the fixture as declared.
@@ -236,7 +236,7 @@ fn placing(
     block: &str,
 ) -> Result<Placement, Box<dyn Error>> {
     let declared = chamber.build()?;
-    let mut simulation = Simulation::new(player, chamber.build()?);
+    let mut simulation = Simulation::new(player, chamber.build()?, fixture_content()?);
     let report = simulation.advance(TickIntent {
         movement: MovementIntent::default(),
         action: Some(ActionIntent::Place {

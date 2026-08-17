@@ -42,7 +42,7 @@ use mc_sim::player::{MovementIntent, PlayerState};
 use mc_sim::simulation::Simulation;
 use mc_world::world::WorldPos;
 
-use support::chamber::{BlockChamber, at, differences};
+use support::chamber::{BlockChamber, at, differences, fixture_content};
 use support::{DIRT, NOTHING, STONE, TestResult};
 
 /// How many chunk columns the fixture world spans on each axis.
@@ -83,7 +83,7 @@ const A_QUARTER_TURN: f32 = std::f32::consts::FRAC_PI_2;
 #[test]
 fn a_break_in_the_same_tick_as_a_pitch_delta_reads_the_view_the_limit_left() -> TestResult {
     let chamber = two_candidates_overhead();
-    let mut simulation = Simulation::new(pitched_up(), chamber.build()?);
+    let mut simulation = Simulation::new(pitched_up(), chamber.build()?, fixture_content()?);
 
     simulation.advance(TickIntent {
         movement: MovementIntent {
@@ -112,7 +112,8 @@ fn a_break_in_the_same_tick_as_a_pitch_delta_reads_the_view_the_limit_left() -> 
 #[test]
 fn a_break_in_the_same_tick_as_a_yaw_delta_reaches_what_the_turn_brought_into_view() -> TestResult {
     let chamber = one_block_around_the_corner();
-    let mut simulation = Simulation::new(facing_empty_space(), chamber.build()?);
+    let mut simulation =
+        Simulation::new(facing_empty_space(), chamber.build()?, fixture_content()?);
 
     simulation.advance(TickIntent {
         movement: MovementIntent {

@@ -23,6 +23,30 @@ everything authoritative. `mc-render` reads what it publishes and never the othe
   and nothing may start to without a recorded decision — a wall clock is the easiest way to make a
   golden frame unreproducible.
 
+  **Hot reload needed one and the rule held. This is that recorded decision.** A
+  filesystem watcher has to wait out a settling window — an editor writes a file in
+  several syscalls, and reading it mid-write refuses a candidate the author never
+  saved. That clock is the debouncer's, it lives behind the `ContentWatch` port in
+  `mc-world`, and **`mc-sim` still reads none**: this crate is handed *changes*, and
+  a tick boundary asks the watcher whether any arrived rather than asking how long
+  ago. The window is declared in exactly one place, `mc-world`'s
+  `content/watch/mod.rs`, and a scan holds it there.
+
+- **The world has a second write door, and it is a child module for a reason.**
+  `World::write` is one edit; `World::adopt` is the whole registry replaced by
+  content read while the game was running. Both settle solidity before writing
+  either view, both carry no `pub` at all, and the reload admission that reaches
+  `adopt` is a *child* of `world` for exactly that reason — a sibling would have
+  forced `pub(crate)`, which is a much weaker claim. The dirty set is not one of the
+  three views that claim protects.
+
+- **Content is published through a second `ArcSwap` beside the snapshot**, carrying
+  a serial that increments on every accepted candidate. A re-mesh batch carries its
+  own serial and its own registry, so a batch cannot be meshed against a registry
+  other than the one its world was resolved against — that is unspellable rather
+  than checked — and whether a finished batch is stale is decided by the client at
+  collect time, where "serving now" is known.
+
 ## The scripted scene names blocks in Rust
 
 `src/replay/world.rs` names `base:grass`, `base:dirt`, `base:stone` and `base:water` — every block

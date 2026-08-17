@@ -24,10 +24,12 @@ pub mod volume;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
-use mc_core::block::BlockRegistry;
+use mc_core::block::{BlockId, BlockRegistry};
+use mc_core::content::{LayerAssignment, ResolvedBlock, ResolvedContent};
 use mc_core::id::BlockName;
 use mc_sim::player::PlayerState;
 use mc_sim::replay::{CameraPose, ReplayWorld};
+use mc_sim::simulation::PublishedContent;
 use mc_world::content::LuauFileDefinitionSource;
 use mc_world::section::Contents;
 
@@ -109,6 +111,40 @@ pub fn content_registry() -> Result<BlockRegistry, Box<dyn Error>> {
     let mut registry = BlockRegistry::new();
     registry.apply(&LuauFileDefinitionSource::new(root))?;
     Ok(registry)
+}
+
+/// The content a simulation over `registry` publishes at launch.
+///
+/// **The reader's own share, written out again rather than asked of
+/// `mc_sim::content::load`.** Some of the registries these fixtures build are
+/// assembled in memory, so there is no content root for that door to read — and
+/// writing out the three fields a participant that only draws receives makes this
+/// an independent statement of what crosses the seam rather than a second call to
+/// the thing that decides it.
+///
+/// The layers are the ones a session that has spent nothing hands out, because a
+/// launch has spent nothing. The HUD is a client's own empty layout: nothing here
+/// declares an element, and a source declaring nothing is a valid answer.
+///
+/// # Errors
+///
+/// Returns an error if a registered id cannot be read back, if the layers do not
+/// fit a session's budget, or if an empty HUD source is refused.
+pub fn published_content(registry: &BlockRegistry) -> Result<PublishedContent, Box<dyn Error>> {
+    let mut blocks = Vec::new();
+    for position in 0..registry.registered_count() {
+        let declared = registry.definition(BlockId::from_raw(u32::try_from(position)?))?;
+        blocks.push(ResolvedBlock {
+            name: declared.name.clone(),
+            texture: declared.texture.clone(),
+            is_solid: declared.is_solid,
+        });
+    }
+    let layers = LayerAssignment::none().appending(&registry.texture_keys())?;
+    Ok(PublishedContent::first(
+        ResolvedContent::stating(blocks, layers),
+        mc_sim::content::hud_before_content_is_read()?,
+    ))
 }
 
 /// The replay world, generated from the seed the declaration fixes.

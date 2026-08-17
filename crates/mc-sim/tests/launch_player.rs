@@ -27,8 +27,10 @@ use mc_sim::player::MovementIntent;
 use mc_sim::replay::simulation_for;
 use mc_world::persistence::{Acceptance, save_world};
 
-use support::launch::{a_world_to_launch_into, moving, placed, recorded_player, save_path, stood};
-use support::{TestResult, surface_height};
+use support::launch::{
+    a_world_to_launch_into, launching, moving, placed, recorded_player, save_path, stood,
+};
+use support::{TestResult, published_content, surface_height};
 
 /// See `launch_world.rs`: every save here is written against the registry it is
 /// read against, so the acceptance decides nothing.
@@ -66,8 +68,7 @@ fn a_launch_resuming_from_a_save_stands_the_player_where_the_save_recorded_them(
     let recorded = recorded_player();
     save_world(&save, generated.blocks(), recorded, &registry)?;
 
-    let launched =
-        simulation_at_launch(&save, mc_sim::REPLAY_SEED, Arc::clone(&registry), ACCEPTING);
+    let launched = simulation_at_launch(&save, launching(&registry, ACCEPTING)?);
 
     let [_, height, _] = recorded.position;
     assert_eq!(
@@ -99,8 +100,7 @@ fn a_launch_with_no_save_stands_the_player_at_the_height_the_heightmap_reports()
     let surface = surface_height(&generated, column_x, column_z)?;
     let derived = (surface + SPAWN_ABOVE_SURFACE) as f32;
 
-    let launched =
-        simulation_at_launch(&save, mc_sim::REPLAY_SEED, Arc::clone(&registry), ACCEPTING);
+    let launched = simulation_at_launch(&save, launching(&registry, ACCEPTING)?);
 
     assert_eq!(
         (stood(&launched), save.exists()),
@@ -118,15 +118,18 @@ fn a_launch_with_no_save_stands_the_player_at_the_height_the_heightmap_reports()
 fn a_player_saved_while_they_were_moving_resumes_at_rest() -> TestResult {
     let (registry, generated, directory) = a_world_to_launch_into()?;
     let save = save_path(&directory);
-    let mut playing = simulation_for(&generated, Arc::clone(&registry))?;
+    let mut playing = simulation_for(
+        &generated,
+        Arc::clone(&registry),
+        published_content(&registry)?,
+    )?;
     for _ in 0..FALLING_TICKS {
         playing.advance(MovementIntent::default());
     }
     let speed_when_saved = playing.latest().player.velocity.length();
     persistence::save(&playing, &save)?;
 
-    let launched =
-        simulation_at_launch(&save, mc_sim::REPLAY_SEED, Arc::clone(&registry), ACCEPTING);
+    let launched = simulation_at_launch(&save, launching(&registry, ACCEPTING)?);
 
     assert_eq!(
         (

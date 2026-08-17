@@ -32,5 +32,15 @@ thiserror = { workspace = true }
 # there. A mocked filesystem would assert nothing about the branch that matters.
 tempfile = { workspace = true }
 
+# `cargo nextest` neither runs nor builds a `harness = false` bench, which is what
+# keeps a wall-clock number out of the deterministic gate.
+criterion = { workspace = true }
+
+# `harness = false`: the target owns its own `main`, so the budget verdict can be
+# an exit code rather than a line of output somebody has to read.
+[[bench]]
+name = "reload"
+harness = false
+
 [lints]
 workspace = true

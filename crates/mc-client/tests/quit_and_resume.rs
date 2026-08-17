@@ -45,6 +45,7 @@ use mc_client::launch::simulation_to_play;
 use mc_core::block::BlockRegistry;
 use mc_render::window::Ending;
 use mc_sim::action::EditReport;
+use mc_sim::persistence::Launching;
 use mc_sim::player::{BlockPos, PlayerState};
 use mc_world::persistence::Acceptance;
 use tempfile::TempDir;
@@ -113,7 +114,7 @@ fn a_cell_broken_before_the_quit_holds_nothing_when_the_client_starts_again() ->
     playing.quit(Ending::Closed, &save);
     drop(playing);
 
-    let started_again = launch(&world, &save);
+    let started_again = launch(&world, &save)?;
 
     assert_eq!(
         (
@@ -147,7 +148,7 @@ fn a_block_placed_before_the_quit_is_still_there_when_the_client_starts_again() 
     playing.quit(Ending::Closed, &save);
     drop(playing);
 
-    let started_again = launch(&world, &save);
+    let started_again = launch(&world, &save)?;
 
     assert_eq!(
         (held_at(&started_again, PLACED_CELL), change(built)),
@@ -179,7 +180,7 @@ fn a_player_who_walked_before_the_quit_stands_there_when_the_client_starts_again
     playing.quit(Ending::Closed, &save);
     drop(playing);
 
-    let started_again = launch(&world, &save);
+    let started_again = launch(&world, &save)?;
 
     assert_eq!(
         (stood_at(&started_again), at(walked.position) == at(SPAWN)),
@@ -206,7 +207,7 @@ fn a_player_who_turned_before_the_quit_faces_that_way_when_the_client_starts_aga
     playing.quit(Ending::Closed, &save);
     drop(playing);
 
-    let started_again = launch(&world, &save);
+    let started_again = launch(&world, &save)?;
     let looked = (turned.yaw.to_bits(), turned.pitch.to_bits());
 
     assert_eq!(
@@ -254,13 +255,16 @@ fn a_client_playing(world: &AWorld) -> Result<InputHarness, Box<dyn Error>> {
 }
 
 /// What the client starts in the next time it is launched.
-fn launch(world: &AWorld, save: &std::path::Path) -> Launched {
-    simulation_to_play(
-        mc_sim::REPLAY_SEED,
-        Arc::clone(&world.registry),
+fn launch(world: &AWorld, save: &std::path::Path) -> Result<Launched, Box<dyn Error>> {
+    Ok(simulation_to_play(
         save,
-        ACCEPTING,
-    )
+        Launching {
+            seed: mc_sim::REPLAY_SEED,
+            registry: Arc::clone(&world.registry),
+            content: persistence::published_content(&world.registry)?,
+            accepting: ACCEPTING,
+        },
+    ))
 }
 
 /// The player as the last of `ticks` tick steps published them.

@@ -277,6 +277,20 @@ impl Section {
         self.palette.iter()
     }
 
+    /// Every distinct block at least one voxel still holds, in palette order.
+    ///
+    /// Unlike [`palette`](Self::palette), which keeps entries no voxel names any
+    /// more: a block broken out of every cell is not a block this section holds.
+    pub fn names_in_use(&self) -> impl Iterator<Item = &BlockName> {
+        self.palette
+            .surviving_entries()
+            .into_iter()
+            .filter_map(|position| match self.palette.contents_at(position) {
+                Some(Contents::Holds(name)) => Some(name),
+                Some(Contents::Empty) | None => None,
+            })
+    }
+
     /// How many bits one voxel's index occupies.
     pub fn index_width_bits(&self) -> u32 {
         self.indices.width_bits()

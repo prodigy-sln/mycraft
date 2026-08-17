@@ -296,8 +296,9 @@ impl Handed {
             prepared.world.blocks().clone(),
             Arc::clone(&prepared.registry),
         )?;
+        let content = support::published_content(&prepared.registry)?;
         Ok(Self {
-            simulation: Simulation::new(looking_down_from(feet), world),
+            simulation: Simulation::new(looking_down_from(feet), world, content),
             meshed: prepared.meshed,
             layers: prepared.layers,
             registry: prepared.registry,
@@ -322,7 +323,7 @@ impl Handed {
             action: Some(action),
         });
         if let Some(work) = self.simulation.take_remesh_work() {
-            splice(&mut self.meshed, remesh(&work, &self.registry)?)?;
+            splice(&mut self.meshed, remesh(&work)?)?;
         }
         self.scene = scene_of(&self.meshed, &self.layers)?;
         Ok(report)

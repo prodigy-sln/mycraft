@@ -46,7 +46,7 @@ use mc_sim::player::{MovementIntent, PlayerState};
 use mc_sim::simulation::Simulation;
 use mc_world::world::WorldPos;
 
-use support::chamber::{BlockChamber, at, differences};
+use support::chamber::{BlockChamber, at, differences, fixture_content};
 use support::{DIRT, NOTHING, STONE, TestResult};
 
 /// How many chunk columns the fixture world spans on each axis.
@@ -224,7 +224,7 @@ fn after_a_break(
     chamber: &BlockChamber,
     player: PlayerState,
 ) -> Result<Simulation, Box<dyn Error>> {
-    let mut simulation = Simulation::new(player, chamber.build()?);
+    let mut simulation = Simulation::new(player, chamber.build()?, fixture_content()?);
     simulation.advance(TickIntent {
         movement: MovementIntent::default(),
         action: Some(ActionIntent::Break),

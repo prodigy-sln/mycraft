@@ -11,6 +11,7 @@ pub mod camera;
 pub mod content;
 pub mod persistence;
 pub mod player;
+pub mod reload;
 pub mod replay;
 pub mod simulation;
 pub mod world;

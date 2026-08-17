@@ -348,7 +348,11 @@ Every block has exactly one texture key today — there is no per-face texture y
 
 ## What is not here yet
 
-Hot reload of declarations: a declaration is read once, at load. Per-cell state,
-callbacks and components. Worldgen in script. Reading a second content root. And
-`extends`, in every form — a declaration states its own six fields and inherits
-nothing.
+Per-cell state, callbacks and components. Worldgen in script. Reading a second
+content root. And `extends`, in every form — a declaration states its own six
+fields and inherits nothing.
+
+**Declarations now reload while the game is running.** Save a file in `blocks/` and
+the whole root is read again and taken up at the next tick boundary, or refused
+whole. Which edits are visible, which are accepted and invisible, what survives the
+swap and every refusal you can meet are on `hot-reload.md`.

@@ -80,7 +80,7 @@ use schedule::{
     SECTIONS_IN_THE_FOOTPRINT, SHORT_OF_THE_REACH, Schedule, Step, UNBUILDABLE_CELL, chamber,
     section, spawn, voxel,
 };
-use support::chamber::{BlockChamber, UNBREAKABLE, UNBUILDABLE, differences};
+use support::chamber::{BlockChamber, UNBREAKABLE, UNBUILDABLE, differences, fixture_content};
 use support::{NOTHING, STONE, TestResult, described};
 
 #[test]
@@ -190,7 +190,7 @@ struct Run {
 
 /// Drives the whole schedule through one simulation, one action per tick.
 fn run(schedule: &Schedule, chamber: &BlockChamber) -> Result<Run, Box<dyn Error>> {
-    let mut simulation = Simulation::new(spawn(), chamber.build()?);
+    let mut simulation = Simulation::new(spawn(), chamber.build()?, fixture_content()?);
     let mut answers = Vec::with_capacity(schedule.steps().len());
     for step in schedule.steps() {
         let movement = turned_onto(&simulation.latest(), step.aim());

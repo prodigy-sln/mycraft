@@ -40,12 +40,17 @@ use std::path::Path;
 use std::sync::Arc;
 
 use mc_client::events::{dispatch_device_event, dispatch_key, dispatch_window_event};
+use mc_client::remesh::Remesher;
+use mc_client::session::reload::{ReloadReport, Remeshing};
 use mc_client::session::{Bindings, PointerAsk, Session, ending_after_saving};
 use mc_core::id::BlockName;
 use mc_render::overlay::OverlayReadout;
 use mc_render::window::{CaptureState, Ending};
 use mc_sim::action::EditReport;
-use mc_sim::simulation::{SimSnapshot, Simulation};
+use mc_sim::content::LoadedContent;
+use mc_sim::reload::{ContentReload, ReloadRefusal};
+use mc_sim::simulation::{Accepted, PublishedContent, SimSnapshot, Simulation};
+use mc_sim::world::RemeshWork;
 use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
 use winit::keyboard::KeyCode;
 
@@ -121,6 +126,90 @@ impl InputHarness {
     /// build.
     pub fn play(&mut self, simulation: Simulation, holding: BlockName) {
         self.session.attach_simulation(simulation, holding);
+    }
+
+    /// Hands the client a candidate content set to take up.
+    ///
+    /// Forwarded, deciding nothing: whether the candidate is admitted, what the
+    /// swap replaces and which block the player is left holding are the client's
+    /// answers travelling back out, and a harness that judged any of them would
+    /// agree with itself while the client swapped nothing at all.
+    ///
+    /// `None` when there is no world yet, exactly as a tick step with nothing to
+    /// advance publishes nothing.
+    pub fn adopt(&mut self, candidate: LoadedContent) -> Option<Result<Accepted, ReloadRefusal>> {
+        self.session.adopt_content(candidate)
+    }
+
+    /// Hands the session the reload it drives at every tick boundary from now on.
+    ///
+    /// Forwarded, deciding nothing. **When an attempt begins, how many a burst of
+    /// changes becomes and what a refused one reports are the client's answers
+    /// travelling back out**, and a harness that drove the reload itself would be
+    /// the one thing left calling it — green for good while the client's own tick
+    /// stopped.
+    pub fn attach_reload(&mut self, reload: ContentReload) {
+        self.session.attach_reload(reload);
+    }
+
+    /// Whatever the last tick boundary made of a content change, taken once.
+    ///
+    /// Forwarded, deciding nothing, and take-once because that is the shape the
+    /// client's own report has: a scenario counting attempts has to be able to tell
+    /// a boundary that reported something from the one after it, and a reading that
+    /// left the report in place would count one attempt on every tick that
+    /// followed it.
+    pub fn take_reload_report(&mut self) -> Option<ReloadReport> {
+        self.session.take_reload_report()
+    }
+
+    /// What the client was left to mesh again, taken once.
+    ///
+    /// Forwarded, deciding nothing. **Which sections a reload left behind is the
+    /// client's answer travelling back out**, and the set is *taken* — so a
+    /// harness that remembered what it had handed over would report a batch the
+    /// client had already drained, and a scenario reading it would call that a
+    /// section marked twice.
+    pub fn take_remesh_work(&mut self) -> Option<RemeshWork> {
+        self.session.take_remesh_work()
+    }
+
+    /// What the client made of whatever the re-mesh worker has finished.
+    ///
+    /// Forwarded, deciding nothing. **There is deliberately no forward for putting
+    /// a section back**, and its absence is the point: what a discarded batch means
+    /// is the client's decision, and a harness offering the hand-back as a call of
+    /// its own is what lets a scenario about it make that call itself — green for
+    /// good while the frame path dropped the keys and left those sections stale for
+    /// the rest of the run.
+    pub fn collect_remesh(&mut self, remesher: &mut Remesher) -> Remeshing {
+        self.session.collect_remesh(remesher)
+    }
+
+    /// Whatever content the simulation is publishing, asked for rather than
+    /// pushed.
+    ///
+    /// Forwarded, deciding nothing. **A reader observes by asking**, which is
+    /// what makes a reader that has not looked since the last accepted candidate
+    /// go on seeing what it last observed — and a harness that remembered what it
+    /// had handed over would answer itself while the simulation published nothing
+    /// at all.
+    ///
+    /// `None` when there is no world yet, exactly as a tick step with nothing to
+    /// advance publishes nothing.
+    #[must_use]
+    pub fn content(&self) -> Option<Arc<PublishedContent>> {
+        self.session.content()
+    }
+
+    /// Whatever the simulation has published, without advancing anything.
+    ///
+    /// [`tick`](Self::tick) reports the same value after taking a step, which is
+    /// no use to a scenario about what a *swap* published: a step would move the
+    /// tick counter this is being read to compare.
+    #[must_use]
+    pub fn published(&self) -> Option<Arc<SimSnapshot>> {
+        self.session.latest()
     }
 
     /// What this run reports once whatever it was playing has been saved to

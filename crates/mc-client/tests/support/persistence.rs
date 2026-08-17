@@ -38,12 +38,13 @@ use std::sync::Arc;
 use glam::Vec3;
 use mc_client::startup::PreparationError;
 use mc_core::block::source::InMemoryDefinitionSource;
-use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::block::{BlockDefinition, BlockId, BlockRegistry, DefinitionOrigin};
+use mc_core::content::{LayerAssignment, ResolvedBlock, ResolvedContent};
 use mc_core::id::{BlockName, TextureKey};
 use mc_render::window::{Ending, report};
 use mc_sim::action::default_held_block;
 use mc_sim::player::{BlockPos, PlayerState};
-use mc_sim::simulation::Simulation;
+use mc_sim::simulation::{PublishedContent, Simulation};
 use mc_sim::world::World;
 use mc_world::persistence::{Acceptance, load_world};
 use mc_world::section::Contents;
@@ -205,6 +206,7 @@ pub fn standing_on_the_floor(
     let blocks = floor_world(&registry)?;
     let holding = default_held_block(&registry)
         .ok_or("this phase's registry declares no solid block to place")?;
+    let content = published_content(&registry)?;
     let world = World::new(blocks, registry)?;
     Ok((
         Simulation::new(
@@ -216,6 +218,7 @@ pub fn standing_on_the_floor(
                 on_ground: true,
             },
             world,
+            content,
         ),
         holding,
     ))
@@ -400,6 +403,44 @@ fn shown_to_a_player(turned_away: &PreparationError) -> String {
 /// gave instead.
 fn played(launched: &Launched) -> Result<&(Simulation, BlockName), String> {
     launched.as_ref().map_err(PreparationError::to_string)
+}
+
+/// The content a simulation over `registry` publishes at launch.
+///
+/// **The reader's own share, written out again rather than asked of
+/// `mc_sim::content::load`.** That door reads a content root and this phase's
+/// blocks are declared in memory, so there is no root to read. A launch has spent
+/// no layers, and a fixture declaring no HUD element gets a client's own empty
+/// layout — which is a valid answer rather than a missing one.
+///
+/// The same few lines appear in `support/input/world.rs` and in `support/mod.rs`.
+/// The duplication is the `#[path]` fixture layout's price: these modules are
+/// reached by path so a binary need not pull in every other fixture, and that is
+/// exactly what stops them sharing one.
+///
+/// `pub` because the four binaries that reach this module also need it for the
+/// content a `Launching` carries, and two of them declare no `mod support;` of
+/// their own.
+///
+/// # Errors
+///
+/// Returns an error if a registered id cannot be read back, if the layers do not
+/// fit a session's budget, or if an empty HUD source is refused.
+pub fn published_content(registry: &BlockRegistry) -> Result<PublishedContent, Box<dyn Error>> {
+    let mut blocks = Vec::new();
+    for position in 0..registry.registered_count() {
+        let declared = registry.definition(BlockId::from_raw(u32::try_from(position)?))?;
+        blocks.push(ResolvedBlock {
+            name: declared.name.clone(),
+            texture: declared.texture.clone(),
+            is_solid: declared.is_solid,
+        });
+    }
+    let layers = LayerAssignment::none().appending(&registry.texture_keys())?;
+    Ok(PublishedContent::first(
+        ResolvedContent::stating(blocks, layers),
+        mc_sim::content::hud_before_content_is_read()?,
+    ))
 }
 
 /// Every cell the declaration says the fixture world spans, y fastest.

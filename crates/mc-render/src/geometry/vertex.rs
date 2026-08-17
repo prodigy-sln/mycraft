@@ -24,6 +24,7 @@
 //! The coordinate bound is the section's, not the field's — five bits hold 31,
 //! and a corner at 20 is still a bug even though it fits.
 
+use mc_core::content::LAYERS_A_SESSION_MAY_ASSIGN;
 use mc_world::mesh::Facing;
 use mc_world::section::{Axis, SECTION_SIZE};
 use thiserror::Error;
@@ -62,6 +63,16 @@ const MAX_COORDINATE: u32 = SECTION_SIZE;
 /// layers plus one, and a second literal on that side would be a second place
 /// the packed field's width is written down.
 pub const MAX_LAYER: u32 = (1 << LAYER_BITS) - 1;
+
+/// The layer budget a content set is refused against must be the one this field
+/// can carry.
+///
+/// A check and not a redefinition: the width is declared above and the budget is
+/// declared in `mc-core`, beside the value whose layers it bounds, because the
+/// bound belongs to the content-to-renderer contract rather than to either side.
+/// This is what stops the sim-side refusal and the render-side capacity
+/// disagreeing.
+const _: () = assert!(MAX_LAYER as usize + 1 == LAYERS_A_SESSION_MAY_ASSIGN);
 
 /// The highest section index a scene holds. See `MAX_SECTIONS` in `scene`.
 const MAX_SECTION: u32 = (1 << SECTION_BITS) - 1;

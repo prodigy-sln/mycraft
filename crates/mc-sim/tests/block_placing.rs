@@ -48,7 +48,7 @@ use mc_sim::world::World;
 use mc_world::section::Contents;
 use mc_world::world::WorldPos;
 
-use support::chamber::{BlockChamber, at, differences};
+use support::chamber::{BlockChamber, at, differences, fixture_content};
 use support::{DIRT, NOTHING, STONE, TestResult, WATER, described};
 
 /// How many chunk columns the fixture world spans on each axis.
@@ -132,7 +132,7 @@ fn a_place_naming_a_block_that_is_not_solid_leaves_it_in_the_replaceable_cell_ab
 #[test]
 fn a_place_into_a_cell_holding_nothing_reports_it_as_replacing_nothing() -> TestResult {
     let chamber = one_block_on_the_floor();
-    let mut simulation = Simulation::new(aiming_down(), chamber.build()?);
+    let mut simulation = Simulation::new(aiming_down(), chamber.build()?, fixture_content()?);
 
     let report = simulation.advance(TickIntent {
         movement: MovementIntent::default(),
@@ -194,7 +194,7 @@ fn aiming_down() -> PlayerState {
 /// — the fall of one tick is resolved back onto the floor's own face — so the ray
 /// is cast from the declared eye and not from somewhere a tick of gravity left.
 fn after_a_place(chamber: &BlockChamber, block: &str) -> Result<Simulation, Box<dyn Error>> {
-    let mut simulation = Simulation::new(aiming_down(), chamber.build()?);
+    let mut simulation = Simulation::new(aiming_down(), chamber.build()?, fixture_content()?);
     simulation.advance(TickIntent {
         movement: MovementIntent::default(),
         action: Some(ActionIntent::Place {

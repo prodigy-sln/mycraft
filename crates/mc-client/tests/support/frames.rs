@@ -116,7 +116,11 @@ pub fn player_pose(
     world: &ReplayWorld,
     registry: &Arc<BlockRegistry>,
 ) -> Result<CameraPose, Box<dyn Error>> {
-    let mut simulation = simulation_for(world, Arc::clone(registry))?;
+    let mut simulation = simulation_for(
+        world,
+        Arc::clone(registry),
+        super::published_content(registry)?,
+    )?;
     for earlier in 0..tick {
         simulation.advance(scripted_intent(TickIndex::new(earlier)?));
     }

@@ -1265,6 +1265,245 @@ same breath so the pictures are unchanged. **Only the source scan reddens.** It
 becomes falsifiable the moment an assignment is appended rather than renumbered,
 which is hot reload's, and the scan can be retired then.
 
+## Hot reload: the seam from a saved file to a swapped registry
+
+A content root edited while the game is running reaches the world without a
+restart. Eight things happen and each of them is somewhere different on purpose.
+
+**1. The watcher, behind a port, in `mc-world`.** `ContentWatch` is a trait in
+`mc_world::content::watch`; `NotifyContentWatch` is its only adapter and the only
+place in the workspace that names `notify` or `notify-debouncer-full`. The port
+lives beside the other two content readers rather than beside the policy that
+consumes it, which is what keeps `mc-sim` free of a filesystem dependency —
+**and it is the Boundaries litmus test for this seam: if `notify` disappeared
+tomorrow, exactly one file changes.** `crates/mc-world/tests/` holds the manifest
+half structurally; the litmus sentence is prose because no scan states it.
+
+**2. Which saves count, derived rather than restated.** `declares_content(root,
+path)` answers yes for a file sitting *directly* inside `blocks/` with the block
+extension or directly inside `hud/` with the HUD extension — and it is built from
+the two loaders' own four constants rather than from a copy of them, so a loader
+that changes its directory or extension changes what is watched in the same edit.
+Editors write scratch files beside the file being edited; a rule that watched the
+directory would try to load them.
+
+**3. The settling window, declared once.** `SETTLING_WINDOW` is 150 ms and lives
+in `mc_world::content::watch`. A scan holds it to exactly one declaration —
+`crates/mc-world/tests/settling_window_declared_once.rs`, whose verdict is total so
+a vanished source directory reddens rather than reading as one declaration. **That
+scan does not cover the second instrument**: a window declared once and then handed
+to the debouncer as `Duration::ZERO` leaves it green, and the boundary assertion
+for that is separate.
+
+**4. The clock, and why `mc-sim`'s no-wall-clock rule survives.** A settling window
+is a duration, so something must read a clock. That clock is the debouncer's, it is
+behind the port, and `mc-sim` is handed *changes* — a tick boundary asks whether any
+arrived, never how long ago. Recorded in `crates/mc-sim/CLAUDE.md`, which is where
+that rule demands its exceptions be written down.
+
+**5. The candidate is built off the tick thread, through the existing content
+door.** `ContentReload` spawns a build that calls the same `mc_sim::content::load`
+a launch calls, with the serving layer assignment, and the tick boundary polls it.
+Nothing new reads a content root. The build is the expensive part and the whole
+reason a reload does not stall the game — instrumented by identity rather than
+duration, because every timing discriminator available here is a flake generator
+and a *blocking* collect is faster than a polling one.
+
+**6. The swap, at a tick boundary, all or nothing.** `Simulation::adopt` runs
+between two published ticks. Admission comes first, so a refusal returns before
+anything is published and the content a reader holds is untouched by construction:
+`World::adopt` resolves the new solidity *before* writing either view, and refuses a
+candidate that does not declare every block the world holds. **`adopt` is the
+world's second write door and it carries no `pub` at all** — the reload admission
+that reaches it is a *child* module of `world` for exactly that reason, because a
+sibling would have forced `pub(crate)`, which is a much weaker claim.
+
+**7. Content is published through a second `ArcSwap` beside the snapshot**, holding
+the resolved content, its HUD, and a `ContentSerial` that increments per accepted
+candidate. `SimSnapshot` stays `Copy` and holds no content; nothing needs the
+correlation, because a re-mesh batch carries its own serial.
+
+**8. What the client does with it.** The report the session hands the frame path
+carries the content now serving, the array-texture layers it states, and what the
+swap did about the player. Three properties are held by shape rather than by
+convention:
+
+- **A batch carries its registry, and staleness is decided on the client.**
+  `RemeshWork` holds the `Arc<BlockRegistry>` of the world that produced it, and
+  `Retained` has no registry at all — so meshing a batch against a registry other
+  than the one its world was resolved against is *unspellable* rather than checked.
+  Whether a finished batch is stale is decided at collect time against the serial
+  now serving, because that is the only place "serving now" is known; the worker is
+  told which layers are serving on the **same ordered channel** its batches travel,
+  which is what makes "told before it meshed anything with them" true of the next
+  batch without a handshake.
+- **A discarded batch's sections go back into the dirty set, inside the collect.**
+  `Session::collect_remesh` performs the hand-back itself and `mark_for_remesh` is
+  private, so there is no arm in the frame path where forgetting it is writable.
+  Dropping those keys would leave those sections stale for the rest of the run — a
+  wrong picture with no error anywhere. **Do not merge collecting with submitting**:
+  handed-back sections would go straight into flight and the property would vanish
+  into the call meant to prove it.
+- **A retired layer is spent but not live.** Layers are appended and never
+  renumbered within a session, because a layer index already rides inside packed
+  vertices the renderer holds. A key that stops being declared keeps its layer and
+  its texels for the session; the budget is spent by distinct keys ever seen, and
+  relaunching reclaims the difference.
+
+**A texture upload that fails after an accepted swap ends the run.** On the same
+grounds a launch's upload failure already does: the simulation would be serving
+content the device never received, which is a wrong picture with no error. The
+draw-on trade the re-mesh path takes for a *batch* is right there — a stale section
+is a stale picture of the same content — and wrong here, because the content itself
+has moved. **This governs the texture upload only:** a scene that will not pack
+after a reload is reported and drawn over, and that path is genuinely reachable,
+since a whole-world re-mesh can exceed the scene's quad bound.
+
+**Three assignments the frame path makes that nothing asserts through**, recorded
+because `App` needs a real window and nothing in this workspace constructs one:
+the published HUD layout reaching `App`'s own `hud` field, the clearing verdict
+becoming a line a person reads, and the layers being *retired* to the re-mesh worker
+after they are uploaded. Each is an assignment of a value that arrived, with covered
+halves either side, and each costs a diagnostic or one stale pack rather than a wrong
+picture of moved content — which is what separates them from the upload above, whose
+omission was measured at 234 of 234 green and is now compiler-held.
+
+**What a future change must not break.** The registry replaced whole rather than
+mutated in place; solidity resolved before either view is written; the reload
+admission staying a child module of `world`; `notify` named in one file; the
+settling window declared once; a batch carrying its own registry; and appended
+layers never renumbered. Each of the last four has an instrument; the first three
+are held by the module structure and by a header that says so.
+
+**Two things this seam deliberately does not have.** A geometry serial, so a reload
+that changes nothing geometric still supersedes a batch in flight — it costs one
+batch and can only re-mesh sections that were dirty anyway. And selective marking:
+a candidate that changes what is drawn marks *every* section of the world.
+
+### Where a reload puts a player it trapped, and the ground the search may consider
+
+`crates/mc-sim/src/world/clearing.rs` runs after `adopt`, against the solidity the
+accepted candidate produced, and only from the accepted path — so a refused candidate
+moves nobody because the code never runs. It answers an enumerated verdict rather than
+an absence: `Unneeded`, `MovedTo(feet)`, or `NoClearSpaceWithin { blocks }`, which is
+what lets "could not be cleared" travel out through `ReloadReport::Accepted` to the
+line a person reads.
+
+The search itself: **candidates are cell centres**, `(cx + 0.5, cy, cz + 0.5)`, so the
+0.6-wide box lies strictly inside one cell column and clearance is a question about the
+two cells the 1.8-tall box occupies rather than about four. The cube is
+`dx, dz ∈ [-8, 8]` with `dy ∈ [0, 8]`; **downward is absent from the candidate set
+rather than ranked last**, so "never downward" survives any future reordering. The
+order is `(dy, max(|dx|, |dz|), dz, dx)` ascending — `dy` first is what makes a sideways
+cell win over an upward one at the same distance, and the last two are a declared
+tie-break so two runs agree. Velocity is zeroed on any move, not only an upward one: a
+cleared player has been teleported. The cost, which a player notices, is their
+sub-block position; a player who needed no clearing is therefore not moved at all
+rather than moved to the middle of the cell they are already in.
+
+**A candidate is eligible only if every cell the box would cover is *known* and
+clear.** `is_solid` answers `false` past the edge of the loaded world — because nothing
+is there, not because it is clear — so a predicate of "not solid" alone reads outside
+the world as the nearest available ground. The reach is 8 blocks and the shipped
+footprint is 64 square, so any player trapped within 8 blocks of an edge had candidates
+outside the world, and in a wedge those were the nearest "clear" ones the ring order
+met: the player was put where nothing is solid, and fell out of the world. Reachable by
+walking to an edge and saving a solidity change.
+
+The world's extent therefore travels to `cleared` beside its solidity, named as the
+ground the search may consider, and eligibility is checked there and nowhere else. A
+negative coordinate names nothing the world holds; `Extent::contains` decides the rest.
+Knowing comes before clearance because "not solid" about a cell the world does not hold
+is not an answer about ground at all.
+
+**Both halves of that are load-bearing, and the helper's name overstates what it
+answers.** `mc_sim::world::inside_the_world` reads as a question about the world and
+decides only the *sign* — its doc says so, but the name is what a caller sees, and a
+caller who trusts `inside_the_world(cell).is_some()` to mean the world holds that cell
+has reintroduced this defect at the world's far edge, where out-of-world coordinates are
+positive and the sign refusal passes them all. The extent check is what covers that
+side. Renaming it touches every caller and is deferred; believing the name is what must
+not happen in the meantime.
+
+**Three shapes that were refused, with the reasons, because each looks cheaper.**
+
+- *Reading outside as solid.* A claim the world model does not have, in a value
+  collision, meshing and the physics all read — and it inverts the moment the world
+  streams, where an unloaded neighbour is unknown rather than solid and code that
+  learned to read `true` there refuses legitimate moves.
+- *Accepting that a reload can put a player off the map.* A silent, player-visible
+  failure of exactly the kind the seam exists to prevent.
+- *A second method on `Solidity`.* "Do you know this cell?" is a question about the
+  world's *shape*, and the fixture doubles that answer solidity for a hand-written set
+  of cells have no extent — they would have to invent an answer, which is the first
+  refusal one layer out. **A trait is defined by all of its implementors, not by its
+  best one.**
+
+**No new vocabulary.** A boundary wedge with no eligible candidate takes the same
+`NoClearSpaceWithin { blocks: 8 }` path a wedge in the middle of a lake takes: the
+reload stands, the player stays, and a person is told.
+
+**What a future change must not break.** The candidate set must stay free of downward
+offsets rather than merely ordering them last. The ring order is load-bearing and is
+what the paired positive control measures — a control expecting a destination four
+blocks along `+x` at Chebyshev distance 4 is reachable *only* under
+`(dy, max(|dx|, |dz|), dz, dx)`, so that control reddening means the order changed, not
+that the control is wrong. And the eligibility rule must never be satisfied by refusing
+everything: "outside is ineligible" implemented as "nothing is eligible" leaves the
+boundary scenario green, because a scenario asserting a refusal is vacuously satisfied
+by a search that finds nothing ever. That pair — a refusal scenario and a mandatory
+positive control in its own test function — is why both exist.
+
+**A fixture that traps a player near an edge is about the footprint, not about the
+search.** Any wedge fixture must hold the whole cube inside the world for its premise
+to be about clearance at all; the 32-block, two-column world the earlier clearing
+scenarios use follows that rule rather than working around it.
+
+### Two deferred observations about this seam, recorded rather than fixed
+
+**1. A removed `blocks/` directory is classified differently depending on how the root
+was spelled, and that asymmetry is a consequence of the repair's shape rather than an
+edge case.** The relevance rule compares the saved file's parent against the declared
+directory as written, and asks the filesystem only when that fails. Under an *absolute*
+root the written comparison succeeds without asking, so removing the directory itself
+still reports as content. Under a *relative* root there is nothing left to canonicalise,
+so it reports as nothing.
+
+Three clauses, because the first alone reads as a note about an edge case:
+
+- It exists **only** because the rule absorbs the root's spelling. Under the shape where
+  the adapter reports root-relative paths instead, both forms classify identically and
+  the question never arises.
+- **The shipped behaviour today is silence** — the worse of the two candidate
+  behaviours, since an emptied declaration directory is a refusal this spec grades and
+  a removed one now says nothing at all.
+- The issue that moves this watcher into `mc-sim` **removes the asymmetry and makes the
+  product decision**, and carries the lexical route: `Path::strip_prefix` compares
+  components and `Components` already drops `.` while keeping `..`, so both sides
+  normalise without touching the filesystem.
+
+An *emptied* directory works under either spelling, because its parent still exists.
+That is what the scenarios grade, and it is why this is deferred rather than a defect.
+
+**2. `SolidVoxels::is_solid` answers `false` for every position past the world's
+footprint, and that is unsound wherever it is consulted — not only in the clearing
+search.** Outside the loaded world is *unknown*, not empty. Collision, meshing and the
+physics all read the same answer.
+
+**In the clearing search it was a live defect and it is now closed**, because there
+the answer was acted on. The eligibility rule above is the repair: a candidate counts
+only if every cell the box would cover is known and clear, sited in the search alone,
+with `is_solid` unchanged.
+
+What is deferred is everywhere *else*. The footprint is fixed today and nothing else
+asks past it, so the unsoundness is unreachable outside the search; it becomes reachable
+the moment the world is streamed, and belongs to whichever spec does that. **The fix
+there is the same shape and not a change to `is_solid`:** teaching the world model to
+answer `true` off the edge would assert a fact it does not have, is read by three
+subsystems rather than one, and inverts under streaming — an unloaded neighbour is
+unknown, not solid, and code that learned to read `true` there would refuse legitimate
+moves.
+
 ## The pure/GPU seam inside `mc-render`
 
 `mc-render` has a default-on `gpu` Cargo feature. **`wgpu::` may be named

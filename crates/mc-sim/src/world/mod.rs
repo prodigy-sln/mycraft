@@ -16,17 +16,29 @@
 //! calling convention**. This type owns the store, the collision view and the
 //! registry both were resolved against; **nothing outside this module can write
 //! any of the three**, and the accessors that read them hand out shared borrows,
-//! which cannot; and exactly one function writes anything. There is no second
-//! place an edit can be made, and therefore no second place the two can be made
-//! to disagree.
+//! which cannot.
 //!
-//! **The visibility is load-bearing.** `World::write` carries no `pub` at all,
-//! so it is visible in this module and its descendants and nowhere else — and
-//! the action resolution that reaches it is a *child* module for exactly that
-//! reason. A sibling would have forced `write` to be `pub(crate)`, which is a
-//! different and much weaker claim.
+//! **Two functions write any of the three, and each settles solidity before it
+//! writes either view.** `write` is one edit; `adopt` is the whole registry
+//! replaced by content read while the game was running. The dirty set is not one
+//! of the three and never was, which is why the marking functions beside them —
+//! including a `pub` one — take nothing away from this claim.
+//! This header used to claim exactly one, and hot reload falsified it. What has
+//! not changed is what the claim was ever about: neither writes one view without
+//! the other, and neither writes anything it has not already resolved. A caller
+//! that swapped the registry and left the bitset to a later refresh would reopen
+//! the disagreement, and the overlap oracle could not see it — that oracle
+//! re-reads the world through the registry and would be agreeing with itself.
+//!
+//! **The visibility is load-bearing.** `write` and `adopt` carry no `pub` at
+//! all, so they are visible in this module and its descendants and nowhere else
+//! — and the action resolution and the reload admission that reach them are
+//! *child* modules for exactly that reason. A sibling would have forced either
+//! to be `pub(crate)`, which is a much weaker claim.
 
 pub(crate) mod action;
+pub(crate) mod clearing;
+pub(crate) mod reload;
 mod remesh;
 
 use std::collections::BTreeSet;
@@ -35,8 +47,8 @@ use std::sync::Arc;
 
 use mc_core::block::{BlockRegistry, RegistryError};
 use mc_core::id::BlockName;
-use mc_world::column::ColumnCoordinate;
-use mc_world::section::Contents;
+use mc_world::column::{ChunkColumn, ColumnCoordinate};
+use mc_world::section::{Contents, Section};
 use mc_world::world::{Extent, VoxelWorld, WorldError, WorldPos};
 
 use crate::player::{BlockPos, Solidity};
@@ -45,6 +57,7 @@ use crate::replay::prepare::{PrepareError, SectionQuads, mesh_world};
 
 use remesh::with_its_neighbours;
 
+pub use clearing::Clearing;
 pub use remesh::RemeshWork;
 
 /// Which section of which column an edit landed in.
@@ -120,6 +133,21 @@ impl World {
     #[must_use]
     pub fn registry(&self) -> &BlockRegistry {
         &self.registry
+    }
+
+    /// Every distinct block at least one cell still holds, ascending.
+    ///
+    /// All of them, in a declared order: the reload that reads this refuses a
+    /// content set for every block it stopped declaring rather than for
+    /// whichever was met first. [`SolidVoxels::resolve`] stops at the first and
+    /// is not the instrument.
+    #[must_use]
+    pub fn names_held(&self) -> BTreeSet<&BlockName> {
+        self.blocks
+            .columns()
+            .flat_map(ChunkColumn::sections)
+            .flat_map(Section::names_in_use)
+            .collect()
     }
 
     /// The blocks this world is made of.
@@ -231,6 +259,45 @@ impl World {
         Ok(())
     }
 
+    /// **The other place either view is written**, and there is no third.
+    ///
+    /// Replaces the registry and the solidity it implies together. Solidity is
+    /// settled first, exactly as [`write`](Self::write) settles it, so a
+    /// registry that does not know a name some cell holds refuses without having
+    /// changed anything. Leaving the bitset to a later refresh would reopen the
+    /// disagreement this module's header is about, and no oracle in the tree
+    /// could see it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RegistryError::UnknownName`] if the blocks hold a name
+    /// `registry` does not know, with this world untouched.
+    fn adopt(&mut self, registry: Arc<BlockRegistry>) -> Result<(), RegistryError> {
+        let solid = SolidVoxels::resolve(&self.blocks, &registry)?;
+        self.solid = solid;
+        self.registry = registry;
+        Ok(())
+    }
+
+    /// Records every section of this world as needing to be meshed again.
+    ///
+    /// A reload that changed what is drawn marks all of them: what this adds over
+    /// a selective rule is the empty sections, which mesh to no quads.
+    fn mark_every_section(&mut self) {
+        self.dirty.extend(
+            self.blocks
+                .columns()
+                .flat_map(|column| {
+                    let coordinate = column.coordinate();
+                    (0..column.sections().len()).map(move |index| SectionKey {
+                        column: coordinate,
+                        index,
+                    })
+                })
+                .collect::<Vec<_>>(),
+        );
+    }
+
     /// Records the section holding `at` and the six around it as needing to be
     /// meshed again.
     ///
@@ -294,3 +361,7 @@ pub(crate) fn inside_the_world(at: BlockPos) -> Option<WorldPos> {
         z: at.z.try_into().ok()?,
     })
 }
+
+#[cfg(test)]
+#[path = "mod_test.rs"]
+mod tests;

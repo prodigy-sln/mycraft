@@ -37,7 +37,7 @@ use mc_sim::world::World;
 use mc_world::world::{VoxelWorld, WorldPos};
 
 use support::chamber::{at, differences};
-use support::{DIRT, NOTHING, STONE, TestResult, content_registry};
+use support::{DIRT, NOTHING, STONE, TestResult, content_registry, published_content};
 
 /// Every cell at which a run differs from the world as declared.
 type Changes = Vec<(WorldPos, String, String)>;
@@ -102,7 +102,9 @@ fn a_place_naming_a_block_the_shipped_content_no_longer_declares_changes_nothing
 /// that did to the world compared with the same world as declared.
 fn placing(block: &str) -> Result<Placement, Box<dyn Error>> {
     let declared = floored_world()?;
-    let mut simulation = Simulation::new(looking_down_at_the_target(), floored_world()?);
+    let played = floored_world()?;
+    let content = published_content(played.registry())?;
+    let mut simulation = Simulation::new(looking_down_at_the_target(), played, content);
     let report = simulation.advance(TickIntent {
         movement: MovementIntent::default(),
         action: Some(ActionIntent::Place {

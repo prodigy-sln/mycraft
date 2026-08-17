@@ -39,7 +39,7 @@
 use std::error::Error;
 use std::fs;
 
-use mc_core::content::ResolvedContent;
+use mc_core::content::{LayerAssignment, ResolvedContent};
 use tempfile::TempDir;
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -109,8 +109,8 @@ fn two_roots_differing_only_in_how_a_world_is_mutated_resolve_the_same_client_co
     let plain = root_declaring(&PLAINLY)?;
     let mutated = root_declaring(&MUTATED_BY_OTHER_RULES)?;
 
-    let from_plain = mc_sim::content::load(plain.path())?.resolved;
-    let from_mutated = mc_sim::content::load(mutated.path())?.resolved;
+    let from_plain = mc_sim::content::load(plain.path(), &LayerAssignment::none())?.resolved;
+    let from_mutated = mc_sim::content::load(mutated.path(), &LayerAssignment::none())?.resolved;
 
     assert_eq!(
         (stated(&from_plain), from_plain),
@@ -131,8 +131,9 @@ fn two_roots_differing_in_a_texture_and_a_solidity_resolve_client_content_that_d
     let plain = root_declaring(&PLAINLY)?;
     let drawn_differently = root_declaring(&DRAWN_DIFFERENTLY)?;
 
-    let from_plain = mc_sim::content::load(plain.path())?.resolved;
-    let from_drawn_differently = mc_sim::content::load(drawn_differently.path())?.resolved;
+    let from_plain = mc_sim::content::load(plain.path(), &LayerAssignment::none())?.resolved;
+    let from_drawn_differently =
+        mc_sim::content::load(drawn_differently.path(), &LayerAssignment::none())?.resolved;
 
     assert_eq!(
         (stated(&from_plain), stated(&from_drawn_differently)),

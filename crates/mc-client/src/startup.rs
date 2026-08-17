@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use mc_core::block::{BlockRegistry, RegistryError};
+use mc_core::content::{LayerAssignment, LayerBudget};
 use mc_core::hud::{HudLayout, HudLoadError};
 use mc_render::geometry::scene::{SceneError, SceneGeometry};
 use mc_render::geometry::{GeometryError, SectionOrigin, build_section_geometry};
@@ -150,6 +151,16 @@ pub enum PreparationError {
     NothingToPlace,
     #[error("the thread preparing the replay ended without producing a scene or an error")]
     WorkerLost,
+    /// The content root needs more array-texture layers than a session has.
+    ///
+    /// Transparent for the same reason [`Launch`](Self::Launch) is: the sentence
+    /// naming the count, the bound and the way out is declared once, beside the
+    /// budget, and this level knows nothing to add to it. Unreachable from a
+    /// launch, which spends nothing and would need a root declaring more than
+    /// the budget's worth of texture keys — it is here because the type has to be
+    /// total over what the one content door can refuse.
+    #[error(transparent)]
+    Layers(#[from] LayerBudget),
 }
 
 impl PreparationError {
@@ -200,6 +211,7 @@ impl From<ContentError> for PreparationError {
         match error {
             ContentError::Blocks(refusal) => Self::Content(refusal),
             ContentError::Hud(refusal) => Self::Hud(refusal),
+            ContentError::Layers(refusal) => Self::Layers(refusal),
         }
     }
 }
@@ -280,7 +292,9 @@ pub fn prepare_scene(root: &Path) -> Result<PreparedScene, PreparationError> {
         registry,
         hud,
         resolved,
-    } = mc_sim::content::load(root)?;
+        // A capture has spent no layers either, and it must produce the same
+        // assignment a launch does — one door, one answer.
+    } = mc_sim::content::load(root, &LayerAssignment::none())?;
 
     let world = ReplayWorld::generate(mc_sim::REPLAY_SEED, &registry)?;
     let meshed = mesh_all(&world, &registry)?;
@@ -307,11 +321,14 @@ pub fn prepare_scene(root: &Path) -> Result<PreparedScene, PreparationError> {
 /// It touches no device, opens no window and spawns no thread, so what a scene
 /// is made of can be asserted with none of the three present.
 ///
-/// **The layers are a parameter and are never re-resolved here.** They are the
-/// registry's, resolved once when the run started, and the registry does not change
-/// mid-session — so a re-mesh splicing its sections into this list needs the same
-/// layers the rest of the scene was packed against, not a second opinion about
-/// them.
+/// **The layers are a parameter and are never re-resolved here**, and the reason
+/// has changed even though the rule has not. The registry *does* change
+/// mid-session now — hot reload replaces it whole — but a layer already assigned
+/// keeps its index for the run, because that index rides inside every packed
+/// vertex. So a re-mesh splicing its sections into this list still needs the same
+/// layers the rest of the scene was packed against, and a second opinion about
+/// them is now something that can genuinely exist rather than something that
+/// could not.
 ///
 /// # Errors
 ///

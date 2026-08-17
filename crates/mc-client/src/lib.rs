@@ -46,3 +46,6 @@ pub mod session;
 pub mod startup;
 /// Configuring a surface for the window it came from, and why one cannot be.
 pub mod surface_setup;
+/// The obligation to give the device a reload's layers before anything packs
+/// against them.
+pub mod upload;

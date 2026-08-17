@@ -42,6 +42,7 @@ use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::player::{BlockPos, Solidity};
+use mc_sim::simulation::PublishedContent;
 use mc_sim::world::World;
 use mc_world::section::Contents;
 use mc_world::world::{VoxelWorld, WorldPos};
@@ -293,6 +294,20 @@ pub fn fixture_registry() -> Result<Arc<BlockRegistry>, Box<dyn Error>> {
         ))?;
     }
     Ok(Arc::new(registry))
+}
+
+/// The content a simulation over [`fixture_registry`] publishes at launch.
+///
+/// Named beside the registry it resolves rather than derived at each call site,
+/// because a simulation built over these blocks and publishing content for
+/// somebody else's would be a fixture disagreeing with itself.
+///
+/// # Errors
+///
+/// Returns the refusal if the registry does not apply, if a registered id cannot
+/// be read back, or if the layers do not fit a session's budget.
+pub fn fixture_content() -> Result<PublishedContent, Box<dyn Error>> {
+    super::published_content(fixture_registry()?.as_ref())
 }
 
 /// One batch of definitions, ready for the source to yield.

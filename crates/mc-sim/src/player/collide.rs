@@ -233,12 +233,36 @@ pub fn on_ground(feet: Vec3, world: &dyn Solidity) -> bool {
 /// half the player.
 #[must_use]
 pub(crate) fn occupies(feet: Vec3, at: BlockPos) -> bool {
-    voxels(Aabb::around(feet)).any(|voxel| voxel == at)
+    covers(feet).any(|voxel| voxel == at)
+}
+
+/// Every voxel the box a player standing at `feet` would carry covers.
+///
+/// The cells [`overlaps_solid`] asks about, handed out rather than answered, for the
+/// one caller that has a second question about the same set: whether the world is
+/// loaded there at all. Built from [`Aabb::around`] and [`voxels`] like everything
+/// else here, so the box's shape and the half-open rule stay stated once.
+pub(crate) fn covers(feet: Vec3) -> impl Iterator<Item = BlockPos> {
+    voxels(Aabb::around(feet))
 }
 
 /// Whether any solid voxel lies inside `area`.
 fn overlaps(area: Aabb, world: &dyn Solidity) -> bool {
     voxels(area).any(|at| world.is_solid(at))
+}
+
+/// Whether the box a player standing at `feet` would carry overlaps anything solid.
+///
+/// **The one statement of that question outside the physics**, so the box's shape and
+/// the half-open rule are read here rather than restated. A second copy would be
+/// agreement between two copies of one decision.
+pub(crate) fn overlaps_solid(feet: Vec3, world: &dyn Solidity) -> bool {
+    overlaps(Aabb::around(feet), world)
+}
+
+/// The voxel a point lies in.
+pub(crate) fn cell_of(point: Vec3) -> BlockPos {
+    floor_voxel(point)
 }
 
 /// Every voxel `area` touches.

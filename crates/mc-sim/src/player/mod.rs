@@ -7,7 +7,7 @@
 //! could carry a position, a velocity or an absolute orientation, so a client
 //! cannot state where it is even by mistake.
 
-mod collide;
+pub(crate) mod collide;
 pub mod input;
 pub mod look;
 pub mod physics;

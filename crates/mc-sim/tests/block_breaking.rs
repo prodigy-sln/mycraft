@@ -55,7 +55,9 @@ use mc_sim::simulation::Simulation;
 use mc_world::section::Contents;
 use mc_world::world::WorldPos;
 
-use support::chamber::{BlockChamber, CRUMBLING, UNBREAKABLE, at, differences, fixture_registry};
+use support::chamber::{
+    BlockChamber, CRUMBLING, UNBREAKABLE, at, differences, fixture_content, fixture_registry,
+};
 use support::{DIRT, NOTHING, STONE, TestResult, WATER};
 
 /// How many chunk columns the fixture world spans on each axis.
@@ -169,7 +171,7 @@ fn a_break_against_a_block_whose_definition_names_no_residue_empties_its_cell() 
 fn a_break_against_a_block_whose_definition_names_no_residue_reports_the_cell_holding_nothing()
 -> TestResult {
     let chamber = one_ordinary_block_over_water();
-    let mut simulation = Simulation::new(standing(FACING_IT), chamber.build()?);
+    let mut simulation = Simulation::new(standing(FACING_IT), chamber.build()?, fixture_content()?);
 
     let report = simulation.advance(TickIntent {
         movement: MovementIntent::default(),
@@ -282,7 +284,7 @@ fn after_a_break(
     chamber: &BlockChamber,
     player: PlayerState,
 ) -> Result<Simulation, Box<dyn Error>> {
-    let mut simulation = Simulation::new(player, chamber.build()?);
+    let mut simulation = Simulation::new(player, chamber.build()?, fixture_content()?);
     simulation.advance(TickIntent {
         movement: MovementIntent::default(),
         action: Some(ActionIntent::Break),

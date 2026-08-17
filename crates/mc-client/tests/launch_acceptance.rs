@@ -37,6 +37,7 @@ use mc_client::launch::simulation_to_play;
 use mc_client::startup::acceptance_from;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
 use mc_core::id::{BlockName, TextureKey};
+use mc_sim::persistence::Launching;
 use mc_world::persistence::{SavedPlayer, save_world};
 use mc_world::world::{VoxelWorld, WorldPos};
 use tempfile::TempDir;
@@ -95,7 +96,7 @@ fn a_save_whose_blocks_were_redeclared_refuses_the_start_naming_them_and_what_to
     let save = a_save_whose_two_blocks_were_redeclared()?;
     let path = save_in(&save.directory);
 
-    let told = refusal(&launch(&save, &path, &NO_ACCEPTANCE));
+    let told = refusal(&launch(&save, &path, &NO_ACCEPTANCE)?);
 
     assert_eq!(
         (
@@ -119,7 +120,7 @@ fn a_redeclared_save_is_played_when_the_player_passed_the_flag() -> TestResult {
     let save = a_save_whose_two_blocks_were_redeclared()?;
     let path = save_in(&save.directory);
 
-    let launched = launch(&save, &path, &ACCEPTANCE_GIVEN);
+    let launched = launch(&save, &path, &ACCEPTANCE_GIVEN)?;
 
     assert_eq!(
         against(&launched, &save.written),
@@ -139,7 +140,7 @@ fn a_save_whose_blocks_are_unchanged_is_played_with_no_flag_passed() -> TestResu
     let save = a_save_whose_blocks_are_all_unchanged()?;
     let path = save_in(&save.directory);
 
-    let launched = launch(&save, &path, &NO_ACCEPTANCE);
+    let launched = launch(&save, &path, &NO_ACCEPTANCE)?;
 
     assert_eq!(
         against(&launched, &save.written),
@@ -154,13 +155,16 @@ fn a_save_whose_blocks_are_unchanged_is_played_with_no_flag_passed() -> TestResu
 }
 
 /// What the client makes of `save` when it is started with `argv`.
-fn launch(save: &ASave, path: &std::path::Path, argv: &[&str]) -> Launched {
-    simulation_to_play(
-        mc_sim::REPLAY_SEED,
-        Arc::clone(&save.registry),
+fn launch(save: &ASave, path: &std::path::Path, argv: &[&str]) -> Result<Launched, Box<dyn Error>> {
+    Ok(simulation_to_play(
         path,
-        acceptance_from(argv.iter().map(|argument| (*argument).to_string())),
-    )
+        Launching {
+            seed: mc_sim::REPLAY_SEED,
+            registry: Arc::clone(&save.registry),
+            content: persistence::published_content(&save.registry)?,
+            accepting: acceptance_from(argv.iter().map(|argument| (*argument).to_string())),
+        },
+    ))
 }
 
 /// A save holding all three blocks, read against a registry in which two of them

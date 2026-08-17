@@ -104,8 +104,16 @@ easier"; if you need work off-thread, move the *data* off-thread, not the VM.
   interrupt ticks than a test-sized budget allows, so a memory test under a small budget dies of
   ticks and reports the wrong limit while passing.
 - Hot reload is tested for state preservation, not just for "the new code ran".
+  **Realised for declarations** (`docs/modding/hot-reload.md`): the world, the
+  player's position and velocity, the block in their hand and every edit they made
+  all survive a swap, and each has a scenario of its own.
 - Reload failure paths are tested: syntax error, failed validation, failing mod test, error thrown
-  inside `on_reload`. Each must leave the previous registry serving.
+  inside `on_reload`. Each must leave the previous registry serving. **Realised for
+  the paths that exist today** — a chunk that will not compile, a misspelled field,
+  a candidate that stops declaring a block the world holds, one that registers no
+  solid block, and one needing more array-texture layers than the session has left.
+  There is no mod `tests/` directory and no `on_reload`; what gates a candidate is
+  the loader's own all-or-nothing validation, the same gate that runs at launch.
 
 ## Composition is the extension model
 

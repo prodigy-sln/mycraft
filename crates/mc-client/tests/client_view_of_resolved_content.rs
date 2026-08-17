@@ -32,11 +32,16 @@
 //! reported a block's layer by looking its *name* up in the assignment answers
 //! nothing for any of the three rather than accidentally answering correctly.
 
+#[path = "support/staged_layers.rs"]
+mod staged_layers;
+
 use std::error::Error;
 
 use mc_client::content::ContentView;
 use mc_core::content::{ResolvedBlock, ResolvedContent};
 use mc_core::id::{BlockName, TextureKey};
+
+use staged_layers::assigned;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -98,9 +103,9 @@ fn written_down() -> Result<ResolvedContent, Box<dyn Error>> {
             texture: TextureKey::parse(texture)?,
             is_solid,
         });
-        assignment.push((TextureKey::parse(texture)?, layer));
+        assignment.push((texture, layer));
     }
-    Ok(ResolvedContent::stating(blocks, assignment))
+    Ok(ResolvedContent::stating(blocks, assigned(&assignment)?))
 }
 
 /// What `view` reports for each block the value states: the layer its texture

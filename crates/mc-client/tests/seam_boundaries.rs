@@ -39,13 +39,26 @@
 //! *does* commit the offence reports it while the file that is allowed to commit
 //! it is passed over.
 //!
-//! The third guard's control is asked a third question, because its exemption is
-//! the one with a trap in it. It walks two roots, and the file it must exempt is
-//! the core itself — so an exemption compared by bare file name would silently
-//! excuse a harness file called `session.rs`, which is precisely what a harness
-//! re-implementing the core would be called. The fixture therefore carries both:
-//! a `src/session.rs` that must be passed over and a
-//! `tests/support/input/session.rs` that must not.
+//! The third guard's control is asked two further questions, because its
+//! exemption is the one with a trap in it, and **the trap moved and got sharper
+//! when the core became a directory.** It walks two roots and the file it must
+//! excuse is the core itself, which is now `src/session/mod.rs` — so:
+//!
+//! - **An exemption compared by bare file name would excuse every `mod.rs` in
+//!   the tree**, the harness's own included, which is a far wider hole than the
+//!   one this paragraph used to describe. When the core was `src/session.rs` the
+//!   name it shared was `session.rs`, and a harness re-implementing the core is
+//!   exactly what somebody would call `session.rs`; `mod.rs` is a name almost
+//!   every directory already has.
+//! - **An exemption compared by directory prefix would excuse every file ever
+//!   put beside the core**, for good and in silence. That is the same failure
+//!   one level up: the exemption is the *file* whose job is to drain the input
+//!   and advance the tick, and a sibling doing either has to be reported.
+//!
+//! The fixture therefore carries three files against one exemption: a
+//! `src/session/mod.rs` that must be passed over, a `src/session/reload.rs`
+//! beside it that must not, and a `tests/support/input/mod.rs` wearing the
+//! exempt file's own name that must not either.
 //!
 //! # Shape, not filter
 //!
@@ -160,9 +173,17 @@ const WINDOW_FACING_GUARD: Guard = Guard {
 /// name, and it is deliberately the name the implementation gives it rather than a
 /// method the design never declared: a needle that matches nothing even when the
 /// offence is committed passes its scan forever.
+///
+/// **The exemption is the core's own file and never its directory.** The core
+/// grew a child module when the reload surface landed, so `src/session/` now
+/// holds a sibling — one that names none of these needles and has to go on being
+/// read. A prefix would excuse it, and everything put there after it, for good.
+/// It is compared whole for the reason the module header gives: judged by name,
+/// an exemption on a file called `mod.rs` excuses nearly every directory there
+/// is.
 const OUTSIDE_THE_CORE_GUARD: Guard = Guard {
     roots: &["src", "tests/support/input"],
-    exempt: |path| path == "src/session.rs",
+    exempt: |path| path == "src/session/mod.rs",
     needles: &[
         "take_intent",
         "MovementIntent",
@@ -330,20 +351,24 @@ fn nothing_outside_the_core_drains_the_input_builds_an_intent_or_advances_the_si
     Ok(())
 }
 
-/// The control for the guard above, in all four of its directions.
+/// The control for the guard above, in all five of its directions.
 ///
-/// The third is the one that matters most: the exemption is compared against the
-/// whole path, so the harness file sharing the core's *name* is reported rather
-/// than excused. A bare-name comparison would place the exemption on exactly the
-/// file a harness re-implementing the core would be called.
+/// The third and fourth are the ones that matter most, and they are the two ways
+/// the one exemption can be widened. It is compared against the whole path, so a
+/// file sharing the core's *name* is reported rather than excused — and since the
+/// core is now a `mod.rs`, a bare-name comparison would excuse the harness's own
+/// `mod.rs` along with nearly every other directory in the tree. And a file
+/// sitting *beside* the core is reported too, so a directory prefix — the other
+/// obvious spelling, and the one that looks like it merely follows the split —
+/// fails here rather than excusing everything ever put there afterwards.
 ///
-/// The fourth is new and is why the offending file below names **every** needle
-/// the guard carries rather than one of them. A needle no fixture ever commits is
-/// a needle nobody has watched match anything: mistype one and it reports a clean
+/// The fifth is why the offending frame path below names **every** needle the
+/// guard carries rather than one of them. A needle no fixture ever commits is a
+/// needle nobody has watched match anything: mistype one and it reports a clean
 /// scan for as long as it stands there, which is the failure the whole file is
 /// about, one level up. The expected count is therefore derived — one hit per
-/// needle from the frame path, and one more from the harness file that advances
-/// the simulation — so a needle added without a fixture to catch it fails here
+/// needle from the frame path, one from the core's sibling and one from the
+/// harness file — so a needle added without a fixture to catch it fails here
 /// rather than passing silently.
 #[test]
 fn the_same_scan_reports_a_non_core_file_that_advances_the_simulation_wherever_it_sits()
@@ -352,34 +377,48 @@ fn the_same_scan_reports_a_non_core_file_that_advances_the_simulation_wherever_i
     a_tree_that_advances_the_simulation(fixture.path())?;
 
     let scanned = scan(fixture.path(), &OUTSIDE_THE_CORE_GUARD)?;
-    let reported = |file: &str| scanned.hits.iter().any(|hit| hit.starts_with(file));
-    let every_needle = OUTSIDE_THE_CORE_GUARD
-        .needles
-        .iter()
-        .all(|needle| scanned.hits.iter().any(|hit| hit.contains(needle)));
 
     assert_eq!(
+        what_it_came_to(&scanned),
         (
-            scanned.files_read,
-            scanned.hits.len(),
-            reported("src/app.rs"),
-            reported("tests/support/input/session.rs"),
-            every_needle
-        ),
-        (
-            2,
-            OUTSIDE_THE_CORE_GUARD.needles.len() + 1,
+            3,
+            OUTSIDE_THE_CORE_GUARD.needles.len() + 2,
+            true,
             true,
             true,
             true
         ),
         "the scan has to report the frame path assembling and advancing a tick — every needle the \
-         guard carries, one hit apiece — report a harness file advancing the simulation wherever \
-         it sits and whatever it is called, and pass over the one file whose job that is, judged \
-         on its whole path and never on its name: {:?}",
+         guard carries, one hit apiece — report a file advancing the simulation wherever it sits \
+         and whatever it is called, its own sibling and its own name included, and pass over the \
+         one file whose job that is, judged on its whole path and never on its name or its \
+         directory: {:?}",
         scanned.hits
     );
     Ok(())
+}
+
+/// What one scan of that offending tree came to, as one value: how many files it
+/// read, how many places it reported, whether each of the three files that must
+/// be reported was, and whether every needle the guard carries matched something.
+///
+/// Gathered here rather than inline so the assertion is the whole of the test it
+/// sits in. The three file checks are `starts_with` against a whole relative
+/// path, which is what makes "reported for where it sits" a different question
+/// from "reported for what it is called".
+fn what_it_came_to(scanned: &Scan) -> (usize, usize, bool, bool, bool, bool) {
+    let reported = |file: &str| scanned.hits.iter().any(|hit| hit.starts_with(file));
+    (
+        scanned.files_read,
+        scanned.hits.len(),
+        reported("src/app.rs"),
+        reported("src/session/reload.rs"),
+        reported("tests/support/input/mod.rs"),
+        OUTSIDE_THE_CORE_GUARD
+            .needles
+            .iter()
+            .all(|needle| scanned.hits.iter().any(|hit| hit.contains(needle))),
+    )
 }
 
 #[test]
@@ -447,27 +486,31 @@ fn the_same_scan_reports_a_harness_file_that_reaches_for_the_simulations_travers
 
 /// The offending tree the control above scans, written under `root`.
 ///
-/// Three files, each for one direction of that control: a frame path that
-/// assembles a whole tick and advances it — naming every needle the guard carries,
-/// so a mistyped one is caught rather than standing unwatched; the core beside it,
-/// whose job that is and which must be passed over; and a harness file wearing the
-/// core's own name, which must not be.
+/// Four files, each for one direction of that control: a frame path that
+/// assembles a whole tick and advances it — naming every needle the guard
+/// carries, so a mistyped one is caught rather than standing unwatched; the core
+/// itself, whose job that is and which must be passed over; a **sibling of the
+/// core**, which must not be, so a directory-prefix exemption fails here rather
+/// than quietly excusing everything ever put beside it; and a harness file
+/// **wearing the core's own file name**, which must not be either, so a
+/// bare-name exemption fails here rather than excusing every `mod.rs` there is.
 fn a_tree_that_advances_the_simulation(root: &Path) -> Result<(), Box<dyn Error>> {
-    let sources = root.join("src");
+    let core = root.join("src/session");
     let harness = root.join("tests/support/input");
-    fs::create_dir_all(&sources)?;
+    fs::create_dir_all(&core)?;
     fs::create_dir_all(&harness)?;
     fs::write(
-        sources.join("app.rs"),
+        root.join("src/app.rs"),
         "let action: Option<ActionIntent> = self.pending_action.take();\n\
          let movement: MovementIntent = self.input.take_intent();\n\
          simulation.advance(TickIntent { movement, action });\n",
     )?;
     fs::write(
-        sources.join("session.rs"),
+        core.join("mod.rs"),
         "self.simulation.advance(self.input.take_intent());\n",
     )?;
-    fs::write(harness.join("session.rs"), "simulation.advance(intent);\n")?;
+    fs::write(core.join("reload.rs"), "simulation.advance(candidate);\n")?;
+    fs::write(harness.join("mod.rs"), "simulation.advance(intent);\n")?;
     Ok(())
 }
 

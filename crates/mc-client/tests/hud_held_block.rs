@@ -315,6 +315,7 @@ fn client_holding(
     let world = simulation_for(
         &frames_of.content.world,
         Arc::clone(&frames_of.content.registry),
+        support::published_content(&frames_of.content.registry)?,
     )?;
     client.play(world, placing.clone());
     Ok(client)

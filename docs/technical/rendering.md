@@ -454,6 +454,61 @@ deliberately implausible (teal stone, tan grass). They are not to be "corrected"
 per block: a per-key colour table in Rust is a block definition in Rust, which
 invariant 1 forbids. Real textures arrive as content, not as a patch.
 
+### Appended, never renumbered: what a layer index costs across a reload
+
+Hot reload replaces the registry whole while packed vertices the renderer already
+holds carry layer indices inside them. **So a layer, once assigned, keeps its index
+for the whole session.** A reload appends assignments for keys it has not seen and
+changes none that it has.
+
+The alternative was renumbering — re-deriving the assignment lexicographically over
+whatever the new content declares — and it fails for a reason worth stating plainly:
+a key inserted anywhere but last shifts every key after it, and every vertex the
+renderer is holding then draws from somebody else's texture until the whole world has
+been re-meshed and re-uploaded. That is not a transient artefact, it is a wrong
+picture with no error, and it lasts as long as any un-re-meshed section does.
+
+**The bound is 256 and it is not configurable.** Eight bits of the packed vertex
+carry a layer index, so 256 is the content-to-renderer contract rather than either
+side's preference. `mc-render` asserts agreement with its own capacity at compile
+time; the constant is declared in `mc-core` and restated nowhere.
+
+**The budget is spent by distinct keys ever seen, not by keys live at once.** A key
+that stops being declared keeps its layer *and its texels* for the session — retired
+but not reclaimed — because reclaiming means renumbering. What that costs is a
+session that renames a key repeatedly running out of layers while declaring only a
+handful; **relaunching reclaims every layer retired since the client started**, and
+the arithmetic is exactly `spent − live`.
+
+**Appending writes one layer rather than re-creating the array**, but the write path
+iterates every live entry per call, so "append one layer" is a rewrite of every live
+layer's texels. That is accepted and it is why the per-reload upload cost is what it
+is. A reload's texture upload happening at all is held by the type system rather than
+by review: the layers reach the frame path wrapped, and the only route to a value the
+re-mesh worker will accept runs through the upload.
+
+### A reload that changes what is drawn re-meshes the whole world
+
+The rule is **binary**: a candidate that changes some block's declared solidity or
+declared texture key, or adds or removes a block, marks every section; one that
+changes neither marks none. `replaceable`, `breakable` and `breaks_into` change no
+geometry.
+
+**Selective marking was measured and refused, and the measurement is the reason.**
+The shipped world's highest occupied section is 3 in fifteen columns and 4 in one, so
+marking only the sections whose palettes hold a changed name, plus their neighbours,
+marks about **82 of 256** — which fails the bound the spec states outright. What the
+binary rule adds over a selective one is exactly the *empty* sections, and those mesh
+to no quads. Narrowing this is a specification change, not an optimisation somebody
+may take while passing.
+
+**A drawn observable cannot see the difference, which is why the counting
+assertions are the guard.** Marking only the lowest four sections of each column —
+64 of 256 — still covers every occupied section of the shipped world, so the scenario
+that watches a culled face appear once stone stops being solid passes against a
+selective rule. Measured. Anything that weakens the section-count assertions removes
+the only instrument that can see this.
+
 ### The compute cull pass and the single indirect draw
 
 One entry point, **one workgroup per section**, `workgroup_size(64)`:

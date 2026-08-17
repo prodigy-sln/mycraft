@@ -22,10 +22,10 @@ use mc_core::hud::source::{HudElementSource, HudElementSourceError, HudElementSt
 use mc_core::hud::{DeclaredValue, HudElement, HudOrigin, RawHudElement};
 
 /// The subdirectory of a content root that HUD declarations live in.
-const HUD_DIRECTORY: &str = "hud";
+pub(super) const HUD_DIRECTORY: &str = "hud";
 
 /// The extension a HUD declaration is written with.
-const DECLARATION_EXTENSION: &str = "toml";
+pub(super) const DECLARATION_EXTENSION: &str = "toml";
 
 /// HUD elements read from the declaration files under a content root.
 ///

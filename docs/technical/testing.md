@@ -2114,6 +2114,15 @@ whole content root copied and a whole preparation refused, and the set is built
 once per test in that binary — so a set of fourteen wants building once and
 sharing rather than growing one `shipped_copy()` call at a time.
 
+**The recogniser cannot tell a refusal from any other line the program writes**,
+and that reaches further than the coverage gap above. Its subject is the `mycraft: `
+prefix, which is the first thing *all* of the reporting writes — refusals and
+ordinary notices alike. So a page fencing a notice that is not a refusal at all,
+such as the line telling a player where a reload moved them, is making a claim this
+guard will check and fail: nothing in that binary's run produces it. **Quote a
+notice in prose or inline, and reserve a fence for a text the guard's own run
+produces.** The alternative is widening the run, which is the paragraph above.
+
 **A substring assertion cannot see rendering, and that is how a malformed refusal
 shipped.** The declared-text bound's own test asks whether both quantities are
 *mentioned* in the cause, which is equally true of a message carrying eighteen
@@ -2424,3 +2433,411 @@ real loader never performs** and flatters the number; the figure above is a sing
 read at the end. **The decisive evidence is the production run completing at
 all**, because the backstop is enforced by the allocator on raw usage, so
 finishing is itself proof that raw peak never reached it.
+
+### Driving a reload with no filesystem and no window
+
+A reload is a filesystem event, a build on a worker, a swap between two ticks and an
+upload to a device. Three of those four are drivable and the fourth is not, and the
+split is worth knowing before writing a scenario about any of it.
+
+- **The swap** is driven through `Session::adopt_content`, which takes an
+  already-loaded content set. No watcher, no worker, no clock — a scenario that is
+  about what a swap *does* uses this and nothing else.
+- **The watcher** is driven by writing into a real temporary directory a real
+  `NotifyContentWatch` is watching. A scenario that is about the reload *arriving* —
+  the verdict reaching a person, an attempt beginning at all — has to go through it,
+  because a scenario that asks a pure call what a search decided grades none of the
+  path between.
+- **The device half** is driven by building a renderer with no window over an
+  offscreen target, which is how the appended layer's texels are checked to have
+  actually reached the array texture.
+- **`App` is driven by nothing**, and that is the load-bearing gap in this seam. See
+  the two entries below.
+
+**A patience bound in a reload fixture is denominated in the settling window and
+never in boundary crossings.** A count of tick boundaries is a proxy for elapsed
+time whose conversion factor differs by orders of magnitude between a tight test loop
+and a rendered frame, and it fails in both directions. The loud direction is a run
+that gives up before something has happened. The silent one cost five scenarios here:
+three hundred tight boundaries span 30 microseconds against a 0.7–1.7 ms build, so
+five scenarios asserting "no attempt began yet" were passing against a correct
+implementation in a window too short for an attempt to have *completed*. Both bounds
+now derive from `SETTLING_WINDOW`, on the argument that a build outlasting the
+declared window would have blown the one-second target long before a fixture noticed.
+
+### Why the reload's latency target is a benchmark and not a gate stage
+
+The end-to-end target is one second from save to visible change. It is measured by
+`crates/mc-sim/benches/reload.rs`, run as a standalone command exactly as the mesher's
+per-section budget is, and **it is deliberately not a gate stage.**
+
+```text
+cargo bench -p mc-sim --bench reload
+```
+
+**The budget it judges is 850 ms, and it is derived rather than written.** 150 ms of
+the second is spent before the engine is told anything — the settling window a save is
+allowed — so the engine's share is the remainder, computed from the two constants so
+that it cannot disagree with either.
+
+**Measured 2026-08-17 on an Intel Core i5-12600K (10 cores / 16 threads), Windows 11
+Pro:** candidate build **0.8 ms**, whole-world re-mesh of 256 sections **9.1 ms**,
+**9.9 ms against 850 ms.**
+
+**The machine is named because this benchmark gates nothing**, so these figures are the
+only baseline anybody will ever have for it. Without the hardware beside the date, the
+first person to run it on a different box has a number they cannot compare to anything
+and no way to tell drift from a different machine.
+
+**The two numbers disagree by more than double and nobody has established why.**
+Criterion's own estimate for the build
+is 1.79 ms over the same work; as with the meshing benchmark, two numbers exist for one
+workload and **only this run's own mean decides anything**, because criterion returns no
+estimate to a caller and documents its report files as private.
+
+It follows the meshing benchmark's three steps, and step one is the load-bearing one:
+**the workload is asserted before a single timing is taken**, from oracles that share no
+code with what they check — the declaration count read off the directory, the section
+count derived from the footprint the world reports. A build that read nothing would
+benchmark superbly.
+
+What it does not time: the tick-boundary swap, which resolves solidity over the same
+footprint and is bounded by the same arithmetic, and the texture upload and the draw,
+which are a device's.
+
+A wall-clock assertion on shared hardware is a flake generator, and a stage that
+fails intermittently teaches everybody to re-run it — which is precisely the state in
+which it reports nothing. What the gate carries instead is the deterministic half:
+that the re-mesh transport runs off the tick thread, and that the candidate build
+does too.
+
+**Both of those are asserted by identity and ordering, never by duration**, and the
+reason is sharper than flakiness. A timing discriminator here is wrong in the
+convenient direction: **a blocking collect is *faster* than a polling one**, so a
+threshold on elapsed time or on boundaries crossed would pass most reliably against
+the defect it exists to catch. The instruments are a `ThreadId` comparison and a
+second tick boundary crossed while a build is deliberately still blocked.
+
+**An in-flight guard is not one of them.** A fixture asserting that a build is still
+in flight cannot see a build that ran *inline on the ticking thread*, provided its
+outcome is reported at the following boundary — measured: four such tests stayed green
+under exactly that mutation.
+
+### The one manual acceptance check no harness can drive
+
+**A real editor, a real save, a real window.** Start the client, open
+`content/base/blocks/stone.luau` in an editor, change `solid = true` to
+`solid = false`, save, and walk into stone.
+
+What that covers and nothing automated does: an editor's actual write pattern rather
+than a fixture's file write, the watcher running against a real filesystem under a
+real working directory, and the frame path — which nothing in this workspace
+constructs — actually uploading and drawing the result.
+
+### One reload fixture is marginal rather than fixed, and the three readings say so
+
+`reload_remesh_blocks_no_tick` waits for a whole-world re-mesh, and its history is worth
+keeping side by side because no single reading shows what it is:
+
+| Reading | Result |
+|---|---|
+| full workspace, instrumented | **FAIL** at 28.6 s, past a 15 s collect bound |
+| the test alone, instrumented | PASS, 4.1 s |
+| the test alone, uninstrumented | PASS, 0.3 s |
+| full workspace, instrumented, again | PASS, 1190 of 1190 |
+| full workspace, instrumented, at the gate | PASS at 17.7 s |
+
+**Instrumentation alone does not reproduce it** — 4.1 s against a 15 s bound — so it needs
+the concurrent workspace run. That fits a starved or a dead worker and does not fit a
+merely slow one, and it rules out "instrumented builds are slower" as the whole story.
+
+**One hypothesis is already dead and the reasoning generalises:** a stack overflow in the
+worker's chain would **abort** rather than unwind, so the runner would report a signal
+rather than an assertion — and what was seen was an assertion with four of five compared
+elements exact, which means the process survived. What remains is a panic that unwound,
+which disconnects the channel *and leaves text in that test's captured stderr nobody has
+read*, or plain starvation past the bound. The verdict arms now tell those apart, so the
+next occurrence should be read as **the arm plus the captured stderr**, not the arm alone.
+
+**Run it in its own working directory, and then none of the rest of this applies.** The
+client resolves its content root and its save relative to where it was started, so a
+copy of `content/base` under a scratch directory launched with
+`cargo run --manifest-path <repo>/Cargo.toml -p mc-client` mutates nothing a
+verification run reads. `working-in-this-repo.md` carries the three commands.
+
+**If the shipped tree must be the subject: put the file back afterwards — and announce
+the window before you start.** Putting
+it back is necessary and nowhere near sufficient. This check *is* a mutation of shipped
+content in a shared tree, so a gate run that overlaps it reads a different world: a
+golden mismatch with three quarters of the frame past tolerance, plus a control
+assertion failing in a second suite, both of which read as a catastrophic rendering
+regression. Measured, twice — once from an edit left behind and once from one in flight.
+The instruments that tell the two apart are file mtimes and a clean content diff, not
+anything in the failure text. `working-in-this-repo.md` holds the operational rule.
+
+### The one question the eight below are instances of
+
+> **Every defect this spec shipped past six phases of green tests was a fixture supplying
+> something in a form no caller uses, or a product path no caller takes. Before writing a
+> test, ask what the shipped caller supplies and which shipped path reaches this — if the
+> answer is "a fixture supplies it" or "no shipped path does", that is the test worth
+> writing, and it is never the one the scenario's wording suggests.**
+
+Four defects, one shape. The content root was relative and every fixture built an
+absolute one, because `tempfile` does. The call that puts a root under watch had no
+production caller and every scenario drove the session directly. The hand-back of a
+discarded batch was performed by the fixture that was supposed to be grading it. The
+reloaded texture upload had no caller anything in this workspace runs.
+
+**Two facts about how they were found, and both belong to the rule rather than beside
+it.** Two of the four were caught by an instrument **nobody asked for** — a test author
+reaching outside their brief because a scan they were writing would have been satisfied
+by a product that never reached the seam. The other was caught by **the owner playing the
+game.** Neither is an argument against the suite; both are arguments about what a suite
+made of scenario wordings cannot ask.
+
+### Eight things this seam cost, kept in general terms
+
+**1 — A channel that does not update cannot report what happened through it.** Where
+publication is a pointer swap that only one operation performs, every assertion
+reading the published snapshot is blind to anything a *different* operation did
+between publications. Two scenarios shipped green and vacuous here for exactly that
+reason and both survived their named mutations; the control half kept passing while
+the headline claim was unfalsifiable. The actionable form: **any future test of
+something that mutates state between ticks has this trap under it**, and the repair
+is to read the observable a tick *after* the operation rather than at it.
+
+**2 — When an unreachable branch earns a witness, and when it does not.** The
+discriminator is **whether a real defect can put the program in that state** — not
+how the test would look, and not whether the branch is reachable today. Three cases
+side by side is what made it visible:
+
+| Branch | What it guards | Verdict |
+|---|---|---|
+| A write door that could write its two views in the wrong order | **State.** A wrong ordering leaves one view answering for something the other no longer knows, and it becomes reachable the day a check above it regresses | **Witnessed**, two guards, both mutations measured |
+| A run-ending policy whose safety rests on one failure mode being unreachable | **A classification.** Its safety is a claim about the world rather than about the type system, and claims about the world can be wrong | **Interrogated**, then replaced by a compiler-held obligation once a mutation showed review could not hold it |
+| An error variant that exists only because a conversion flattens and a match must be total | **Nothing.** There is no behaviour there to go wrong silently | **No test, and a later phase offering one is refused** |
+
+Keep the symmetry note, because it is the part that generalises: *"reaching that
+would need a fixture in a state the program cannot be in, which tests the fixture"*
+is **sound** for the third case and **unsound** for the first, and which it is depends
+only on reachability by a real defect.
+
+**3 — A multi-crate `-D warnings` run names only the crate that failed first**, not
+every crate that would fail. One crate's test support tripped a lint and the build
+aborted before a sibling crate's twin of the same fixture was checked, so fixing what
+clippy named would have met the identical diagnostic on the next run, reading as a new
+defect. **When you fix a lint, look for the same defect in the sibling crate's copy.**
+Same shape as reading a multi-stage gate failure for one cause before reading it as
+several, with the sign flipped: one cause, reported in one of the several places it
+lives.
+
+**4 — A count is not a membership, and whatever number reaches `docs/` is the
+measured one.** A reader cannot tell an estimate from a measurement, so an estimate in
+as-built documentation is worse than no number at all. This arrived four times in one
+spec — scenario counts, construction-site counts, a refusal template mistaken for one
+fixture's instantiation, and a data-size figure.
+
+The fourth has a twist that generalises further, because **obeying the instruction
+would have created the defect.** An architecture document instructed that a "well
+under 100 KB" claim had become false and should be replaced with roughly 1.3 MB.
+Measured, the real figure is 44.5 KB — 54 of 256 sections carry any packed indices,
+because a one-entry palette needs zero bits per voxel and the world is uniform above
+and below its terrain. The claim had not become false and the replacement was wrong by
+an order of magnitude. A wrong count reports something false; **a wrong instruction
+premised on a falsehood makes a faithful implementer write the falsehood into the code
+— and the more disciplined they are, the more certainly it lands.** So:
+
+> **An instruction to update a figure is itself a claim, and it is measured before it
+> is obeyed.**
+
+**5 — An observation is annotated, never amended.** A measurement carries the commit
+it was taken at, and a dated measurement that turns out to be superseded is **still
+evidence**; rewriting the number destroys the only thing that made it evidence, and
+makes the document claim an observation nobody took. Annotate with the current fact
+and leave the original standing.
+
+**6 — A report of a change and the change are separate artifacts, and only one of them
+a future reader can act on.** *"I wrote it in a message"* and *"it is in the tree"* are
+different facts. The check that closes it: **read the file before reporting anything as
+recorded** — not memory, and not the message you wrote about it. This belongs beside
+*an absent reviewer and a clean reviewer look identical*, because it is the same
+family: verification about verification rather than about code.
+
+It has occurred in both directions here, which is why it is a project rule rather than
+a remark about one contributor's diligence: upward as a report claiming a note had
+landed when it had only been written in a message, and downward into briefs three times
+and worse — a file path relayed without checking it existed, a scenario count whose
+*membership* was wrong, and a preference stated as settled when it had already been
+ruled the other way. **The tell was identical every time: somebody was writing a
+literal they had not looked at.**
+
+Its kinship with item 4 is what makes the pattern visible, and neither one alone shows
+it. A **count** survives being wrong about every element; a **report** survives being
+wrong about whether the write landed. Both are summaries that read as evidence and are
+not, and the defence in both cases is to go and look at the thing.
+
+**7 — An instruction that names an action without naming the discrimination it serves
+will be satisfied by the action alone.** A trap here told a phase to run the golden
+suites *and why* — that running them after two changes together cannot tell a wiring
+defect from an assignment defect. The two steps were collapsed and the goldens run
+once; what made the shortfall visible afterwards was the stated purpose, not the named
+instrument. In the implementer's own words: *had the trap only said "run the goldens",
+I would have run them and reported a pass.* So every trap, task and closing condition
+**states the discrimination, not just the command.**
+
+Its kinship with item 6 is the sharpest on this list, because it is the same error
+turned inward: the implementer had briefed that phase's test author on that very
+ordering and then collapsed it personally. **Explaining a rule is not applying it**,
+and that is worse than merely forgetting it, because having just explained it feels
+like having done it.
+
+### A fixture that offers a decision as a call of its own is how a scenario about that decision comes to make it
+
+The mechanism behind *policy is not wiring*, and the half a reader can act on before
+writing the fixture.
+
+A scenario required that a discarded batch of re-mesh work hand its sections back so
+they are meshed again. It was first built with the hand-back reachable as a method of
+its own, driven by the test through a harness forward. Then the frame path's arm was
+replaced with a plain drop: **3 of 3 still passed**, because the scenario was grading
+the fixture's own call.
+
+- **Renaming the reachable call changes nothing.** A method on the discarded value and
+  a public method on the session are the same mistake under two names, because neither
+  runs the product's path. The repair has to move *which function the product calls*,
+  not what it is called.
+- **The verdict alone could not see it**, which is why the observable is downstream:
+  under the mutation the collect still answered "discarded" — a discard that lost its
+  keys is still a discard — so what reddens is the sections found waiting afterwards.
+- **The durable half is that the mistake stopped being writable.** With the hand-back
+  inside the product's own collect and the marking method private, there is no harness
+  forward and no arm in the frame path to write either way. The public marker came off
+  with **no exception needed anywhere**, which is the tell that the seam was real
+  rather than convenient: a design that removes an exception rather than accommodating
+  one is usually the right one.
+- **A `#[must_use]` value handed to a caller is a weaker guard than it looks.** An arm
+  binding it and doing nothing fails the build under a denied `unused_variables`; an
+  arm written with a wildcard pattern would not, because `#[must_use]` fires on unused
+  *expressions* and not on discarded bindings.
+
+### Nothing in this workspace runs `App`, measured twice more and closed once
+
+The standing entry above says a handler needing a real window is a layer coverage does
+not count. Two more measurements, and they belong to different categories:
+
+**The one that had to be closed.** Deleting the reloaded texture upload outright — not
+reordering it, deleting it — left **234 of 234** `mc-client` tests green. In the shipped
+client an appended layer would then never reach the device, the world would draw a new
+block from whatever that layer held before, indefinitely, and nothing would report it.
+That is a *player-visible outcome deleted silently*, which is a different category from
+the assignments of arrived values that this layer's other residues are, and it was
+closed by a compiler-held obligation rather than left to review: the layers reach the
+frame path wrapped, and the only route to a value the re-mesh worker will accept runs
+through the upload. Both realistic spellings of the omission now fail to compile.
+
+**The one that cannot be reached at all, and it is a third category rather than a
+weaker second.** The re-mesh worker's channel going away is reported by
+`Collecting::WorkerGone` and said by `App`, and **no fixture can produce that state.**
+The worker ends only when the `Remesher`'s sender or receiver is dropped, and both are
+the `Remesher` itself — so nothing can hold a live one and ask it about a dead worker.
+The only route is a panic inside the worker, which crate-wide `indexing_slicing` denial
+and `Result`-returning steps make un-inducible.
+
+So: **defect-reachable, fixture-unreachable.** The exhaustive match with no wildcard is
+what stops the arm being silently deleted; what is unheld is that the report is *reached*
+and that its wording is right, and that is a reviewer's. The arm still earns its place —
+it converts a silent, permanent stop into a reported one — and the discriminator that
+admits it is the one the unreachability rule already uses: **what would go wrong
+silently, not how hard it is to reach.** A seam that would make it witnessable is an
+*injectable worker*, which is a production door added to be observed; that is a real
+technique with precedent, and it belongs with a reading of a real occurrence rather than
+beside the arm it would test.
+
+**The one that stayed open, with its reasoning.** `App` turning a clearing verdict into
+a line a person reads is unassertable for the same reason and stays reviewer-held —
+what is lost there is a diagnostic, not a user-visible outcome, and the halves either
+side of it are covered.
+
+**The obligation's residual hole is stated where the type is declared, not only here.**
+The wrapped value's inner type is `Clone`, so cloning the borrow and using that
+compiles. What makes that acceptable is the *polarity*: for an upload the realistic
+defect is an omission or a reorder during a refactor, which the compiler covers. Where
+a deliberate discard is plausible instead — as it was for the discarded-batch hand-back
+above — the compiler half is not enough on its own and a test half is owed.
+
+### An absence guard and its mirror image are both owed, and only one of them is usually written
+
+A scan asserting that the client's own sources name none of the doors content is read
+through is satisfied **just as well by a client that never reads content at all.** That
+is not hypothetical: at one point every reload scenario in this spec was green, the
+absence guard was green, and running the client watched nothing at all, because the one
+call that puts a content root under watch had no caller outside test fixtures. The
+capability the specification opens with was unreachable by the person it is for.
+
+**So an absence guard over a seam wants a presence guard over the wiring beside it.**
+Two notes on writing the second one:
+
+- **Spell a needle as a call, not as a name.** A bare `attach_reload` matches the
+  method's own definition, which lives in the crate being scanned — so the needle is
+  satisfied by the very declaration whose caller is missing. Written with the receiver
+  dot in front of it, it cannot be: a definition carries no receiver before it.
+- **A presence assertion needs no positive control and does need the could-not-look
+  arm.** A needle that stops matching reddens immediately, which is the whole difference
+  from an absence guard. But a walk that has lost the tree it reads names nothing, which
+  reads exactly like a client that reaches for nothing, so the verdict has to separate
+  the two.
+
+**8 — A report about one half of a two-part task is not a report about the task, and the
+defence is per item rather than in aggregate.**
+
+Recorded because of who committed it rather than because it was serious. A task with two
+deliverables — a deterministic guard and a standalone benchmark — was reported complete
+on the guard alone, the task was checked off on that report, and the documentation then
+claimed the benchmark existed. It did not. **The person who checked it had written item 6
+above within the hour**, and a second reader accepted the same checkmark on the same
+report without opening the directory either.
+
+- It is **item 6 turned on its own author**: a literal written about a directory nobody
+  opened.
+- It is **item 7's mechanism inward**: an instruction naming two deliverables satisfied by
+  a report about the one with a test attached.
+- **The rule that fixes it already existed for mutation results and had not been carried
+  across:** report and accept **per item, never in aggregate.** A two-part task takes two
+  answers.
+
+### A fixture that supplies an argument in a form no caller uses tests a contract nobody has
+
+The sharpest instance this project has produced, and it survived everything: 1 188
+tests, a source scan written for exactly this seam, and five phases of scenarios.
+
+The relevance rule that decides whether a saved file is content compared a caller's
+content root against the path a filesystem watcher reported, **as written**. A vendor
+reports the paths the platform gives it, which are absolute. The shipped client hands
+over a **relative** root. So every comparison failed, every save was classified as not
+being content, and hot reload was inert in the shipped client — with no refusal printed
+either, because from the domain's point of view nothing had changed.
+
+**What hid it is the fixtures, and they were all correct.** Every automated test over
+that path built its root with `tempfile`, which is absolute. The two forms therefore
+always agreed, and no assertion anywhere was wrong. **A port whose contract holds for
+one spelling of its argument has no contract; it has a habit.**
+
+Three things worth carrying forward:
+
+- **Ask what form the *shipped caller* supplies, not what form is convenient to
+  construct.** A temporary directory is the natural fixture root and it is absolute for
+  reasons that have nothing to do with the subject. Where a value has spellings — paths,
+  identifiers, anything normalised somewhere — the shipped spelling is a distinct case
+  and is usually the one nothing exercises.
+- **This is *policy is not wiring* one layer down.** The wiring landed; the thing it
+  wires was a no-op. So a presence guard over the wiring, which this seam has, is still
+  not enough: it says the call exists, not that the call does anything.
+- **The repair belongs in the rule, not at the call site.** Canonicalising the root
+  where the client builds its watcher would have fixed the client and left the port
+  exactly as narrow. The test that pins this hands the root to the *adapter* in three
+  spellings, which rejects the call-site repair by construction.
+
+It was found by the owner playing the game. That is the honest note to end on: the
+instrument that caught this was a person, and the automated suite's whole contribution
+was to say nothing at all.

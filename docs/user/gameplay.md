@@ -132,6 +132,50 @@ load: it says which save, and why, once rather than twice, and where passing
 reason. Look on the terminal you started the game from; the text begins
 `mycraft: `.
 
+## Content edited while you play reaches the world without a restart
+
+Leave the game running, edit a content file, save it, and the change is in the world
+about a sixth of a second later. No restart, no reloading a save, nothing to press.
+Blocks and the on-screen crosshair are both read again together, because both come
+from the same content directory.
+
+**Your world is not touched by it.** Everything you broke is still broken and
+everything you placed is still there, cell for cell. You stay exactly where you were
+standing, still moving however you were moving, with the same block in your hand —
+unless the block in your hand stopped existing, in which case you are given another
+one. Your save is not written and not read.
+
+**A change either all happens or none of it does.** If the file you saved has a
+mistake in it, the game keeps playing the content it already had and prints one line
+on the terminal you started it from saying what it could not accept. Fix the file,
+save again, and it takes. You never end up half-way between two versions, and you
+are never left with a world the game has stopped understanding — a change that would
+delete a block you have already placed somewhere is turned away for that reason and
+named.
+
+**If something you are standing in becomes solid, you are moved clear.** Make water
+solid while you are swimming in it and you are put in the nearest clear space
+instead of being stuck inside rock: sideways in preference to upward, never
+downward, and searching up to eight blocks out. Being moved costs you your exact
+position within the block — you arrive standing in the middle of a cell — and it
+takes away whatever jump or fall you were in the middle of. **If there is nowhere
+clear within those eight blocks, you are left where you are and told so** rather
+than moved somewhere arbitrary.
+
+**And you are never put outside the world.** The world you play is a fixed square of
+ground with an edge, and past that edge there is no ground at all — not empty space
+you could stand in, but nowhere. Only somewhere the world actually exists counts as
+clear, so near an edge you are moved inward or upward and never out over it. If the
+ground that is left is solid too, you get the same answer as anyone else with nowhere
+to go: you stay where you are and are told so. Stuck but standing on the world is the
+better of the two outcomes — the other one is falling with nothing underneath you.
+
+**One thing to expect that looks like a bug and is not.** Changing a block's
+*texture* is read and accepted, and you will not see it: what a block is drawn with
+is still chosen by the block's name. Changing whether a block is solid, or adding a
+block, does show. The rest of `docs/modding/hot-reload.md` says which edits are
+visible today.
+
 ## What this does not cover yet
 
 This is walking, looking, jumping and saving on a fixed, already-generated world. It does not

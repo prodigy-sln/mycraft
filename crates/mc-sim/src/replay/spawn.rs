@@ -20,7 +20,7 @@ use mc_core::block::{BlockRegistry, RegistryError};
 use thiserror::Error;
 
 use crate::player::PlayerState;
-use crate::simulation::Simulation;
+use crate::simulation::{PublishedContent, Simulation};
 use crate::world::World;
 
 use super::world::ReplayWorld;
@@ -98,9 +98,11 @@ pub fn spawn(world: &ReplayWorld) -> Result<PlayerState, SpawnError> {
 pub fn simulation_for(
     world: &ReplayWorld,
     registry: Arc<BlockRegistry>,
+    content: PublishedContent,
 ) -> Result<Simulation, SpawnError> {
     Ok(Simulation::new(
         spawn(world)?,
         World::new(world.blocks().clone(), registry)?,
+        content,
     ))
 }

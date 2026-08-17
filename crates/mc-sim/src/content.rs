@@ -31,7 +31,7 @@
 use std::path::{Path, PathBuf};
 
 use mc_core::block::{BlockId, BlockRegistry, RegistryError};
-use mc_core::content::{ResolvedBlock, ResolvedContent};
+use mc_core::content::{LayerAssignment, LayerBudget, ResolvedBlock, ResolvedContent};
 use mc_core::hud::source::InMemoryHudSource;
 use mc_core::hud::{HudLayout, HudLoadError, HudOrigin};
 use mc_world::content::{LuauFileDefinitionSource, TomlFileHudSource};
@@ -79,6 +79,13 @@ pub enum ContentError {
     /// The root's HUD declarations were refused.
     #[error("the content root's HUD declarations could not be read")]
     Hud(#[from] HudLoadError),
+    /// The root needs more array-texture layers than the session has left.
+    ///
+    /// Carries [`LayerBudget`]'s sentence rather than restating it: the count,
+    /// the bound and the way out are declared once, in `mc-core`, beside the
+    /// budget itself.
+    #[error("the content root needs more texture layers than this session has left")]
+    Layers(#[from] LayerBudget),
 }
 
 /// The shipped content directory, checked to exist before anything is started
@@ -109,11 +116,11 @@ pub fn shipped_directory() -> Result<PathBuf, PathBuf> {
 /// # Errors
 ///
 /// Returns [`ContentError`] carrying whichever reader refused the root.
-pub fn load(root: &Path) -> Result<LoadedContent, ContentError> {
+pub fn load(root: &Path, spent: &LayerAssignment) -> Result<LoadedContent, ContentError> {
     let mut registry = BlockRegistry::new();
     registry.apply(&LuauFileDefinitionSource::new(root.to_owned()))?;
     let hud = HudLayout::load(&TomlFileHudSource::new(root))?;
-    let resolved = resolved_from(&registry);
+    let resolved = resolved_from(&registry, spent)?;
     Ok(LoadedContent {
         registry,
         hud,
@@ -135,7 +142,20 @@ pub fn load(root: &Path) -> Result<LoadedContent, ContentError> {
 /// about — silently, and not localised to that block. Assigning it once, where
 /// the content was read, is what makes the client's job to *honour* an answer
 /// rather than to reproduce a decision.
-fn resolved_from(registry: &BlockRegistry) -> ResolvedContent {
+///
+/// **It appends to `spent` rather than numbering from zero.** A launch passes an
+/// assignment that has spent nothing, which is a fact rather than a decision; a
+/// reload passes what the serving content holds, so a key that already has a
+/// layer keeps it and a new one takes the next unspent index.
+///
+/// # Errors
+///
+/// Returns [`ContentError::Layers`] when the root needs more layers than the
+/// session has left.
+fn resolved_from(
+    registry: &BlockRegistry,
+    spent: &LayerAssignment,
+) -> Result<ResolvedContent, ContentError> {
     let blocks = (0..registry.registered_count())
         .filter_map(|position| u32::try_from(position).ok())
         .filter_map(|raw| registry.definition(BlockId::from_raw(raw)).ok())
@@ -145,15 +165,8 @@ fn resolved_from(registry: &BlockRegistry) -> ResolvedContent {
             is_solid: definition.is_solid,
         })
         .collect::<Vec<_>>();
-    // Lexicographic today, and that is an implementation detail rather than a
-    // contract: nothing downstream may derive this order for itself, which is
-    // exactly what shipping the assignment buys.
-    let layers = registry
-        .texture_keys()
-        .into_iter()
-        .zip(0..)
-        .collect::<Vec<_>>();
-    ResolvedContent::stating(blocks, layers)
+    let layers = spent.appending(&registry.texture_keys())?;
+    Ok(ResolvedContent::stating(blocks, layers))
 }
 
 /// The HUD of a client that has not read its content yet.

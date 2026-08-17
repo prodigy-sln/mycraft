@@ -108,6 +108,19 @@ they are still there next launch.
 That is a mod. One file, no build step for the content itself, no registration
 call anywhere.
 
+### 4. Leave the game running and edit the file again
+
+Do not close the window. Open `content/base/blocks/amber.luau`, change
+`solid = true` to `solid = false`, and save.
+
+About a sixth of a second later you can walk through your own block. The world you
+were standing in is untouched, you are where you left yourself, and nothing was
+restarted. Change it back and save again, and it stops you again.
+
+That is the shortest complete loop this project has: write, save, see. What is
+visible, what is accepted and invisible, and every refusal you can meet on the way
+are on `hot-reload.md`.
+
 ## Why that worked, and how to make it work for your block
 
 The swatch changed because of a rule worth knowing before it surprises you:

@@ -25,7 +25,7 @@ use thiserror::Error;
 
 use crate::player::PlayerState;
 use crate::replay::{ReplayWorld, SpawnError, WorldGenError, simulation_for};
-use crate::simulation::Simulation;
+use crate::simulation::{PublishedContent, Simulation};
 use crate::world::World;
 
 /// Why a launch could not start.
@@ -142,26 +142,44 @@ pub fn save(simulation: &Simulation, path: &Path) -> Result<(), SaveError> {
 /// be built without, [`LaunchError::Spawn`] where the generated world cannot
 /// place a player, and [`LaunchError::Registry`] where a world holds a block
 /// `registry` does not know.
-pub fn simulation_at_launch(
-    save: &Path,
-    seed: u64,
-    registry: Arc<BlockRegistry>,
-    accepting: Acceptance,
-) -> Result<Simulation, LaunchError> {
+pub fn simulation_at_launch(save: &Path, launching: Launching) -> Result<Simulation, LaunchError> {
+    let Launching {
+        seed,
+        registry,
+        content,
+        accepting,
+    } = launching;
     match load_world(save, &registry, accepting) {
         Ok(loaded) => Ok(Simulation::new(
             resuming(&loaded.player),
             World::new(loaded.world, registry)?,
+            content,
         )),
         Err(LoadError::Missing { .. }) => {
             let generated = ReplayWorld::generate(seed, &registry)?;
-            Ok(simulation_for(&generated, registry)?)
+            Ok(simulation_for(&generated, registry, content)?)
         }
         Err(refusal) => Err(LaunchError::Load {
             save: save.to_owned(),
             source: Box::new(refusal),
         }),
     }
+}
+
+/// Everything a launch needs beyond where its save is.
+///
+/// A group rather than four more parameters: the constitutional limit is four
+/// including the receiver, and `content` is the fifth thing a launch takes.
+#[derive(Debug)]
+pub struct Launching {
+    /// Derives a world only where there is no save to resume.
+    pub seed: u64,
+    /// What the world's blocks are named against.
+    pub registry: Arc<BlockRegistry>,
+    /// What a reader draws with, published under the first serial.
+    pub content: PublishedContent,
+    /// Whether a save whose blocks have changed is loaded anyway.
+    pub accepting: Acceptance,
 }
 
 /// The player a save records, as the simulation resumes them.

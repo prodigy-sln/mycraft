@@ -46,6 +46,7 @@ use mc_client::startup::PreparationError;
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 use mc_render::window::Ending;
+use mc_sim::persistence::Launching;
 use mc_sim::replay::{ReplayWorld, WorldGenError};
 use mc_world::content::LuauFileDefinitionSource;
 use mc_world::persistence::{Acceptance, LoadError, SavedPlayer, load_world, save_world};
@@ -233,7 +234,13 @@ fn turned_away_by(
     save: &Path,
     registry: &Arc<BlockRegistry>,
 ) -> Result<PreparationError, Box<dyn Error>> {
-    match simulation_to_play(mc_sim::REPLAY_SEED, Arc::clone(registry), save, ACCEPTING) {
+    let launching = Launching {
+        seed: mc_sim::REPLAY_SEED,
+        registry: Arc::clone(registry),
+        content: persistence::published_content(registry)?,
+        accepting: ACCEPTING,
+    };
+    match simulation_to_play(save, launching) {
         Ok(_) => Err(format!(
             "this scenario needs the launch reading {} to be turned away, and it started a \
              simulation instead",
