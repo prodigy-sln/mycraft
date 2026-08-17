@@ -139,6 +139,20 @@ the next is in the diff you are looking at.
   *nothing* — the same way a summary line cannot distinguish a passing
   assertion from one that never ran. Check the per-reviewer payloads, not
   the merged result.
+- **Before writing a test, ask what the shipped caller supplies and which
+  shipped path reaches this.** Every defect that shipped past six phases of
+  green tests in the hot-reload spec was one of two things: a fixture
+  supplying a value in a form no caller uses, or a product path no caller
+  takes. The watcher's fixtures handed it absolute roots while the shipped
+  root is relative, so a path comparison that could never match in
+  production matched in every test — 1 188 green. The reload path's attach
+  step was performed by no shipped launch at all, and 86 of 91 scenarios
+  ran over it regardless. Neither is visible from inside the test: both
+  fixtures are *correct*, and each asserts truthfully about a world the
+  product does not inhabit. The question has to be asked before the fixture
+  is written, because afterwards it looks like everything else that passes.
+  Answering it is a matter of reading the caller — not of reasoning about
+  what it probably does.
 - **Policy is not wiring.** Testing a pure decision does not test that the
   application consults it. A client submitting a default movement intent
   every tick — no key press and no pointer motion reaching the player at

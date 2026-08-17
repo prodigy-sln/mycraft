@@ -80,3 +80,36 @@ elsewhere, which is why it is strict and why a red gate is an absolute stop.
 - A push failure is reported, never silently retried in a loop. Rewriting
   history is a legitimate response to an intentional rebase, never a way to
   paper over a push you do not understand — diagnose first, then decide.
+
+## 5. A shared working tree
+
+More than one agent may hold this working tree at once, and there is no
+mechanism that tells you when a second one arrives. The rule that follows
+from that is one sentence:
+
+**An observation of the tree ages exactly as fast as anybody else's.** A
+`git status` is a statement about a moment, not a standing fact, and every
+inference resting on one inherits that expiry — including inferences about
+your own work.
+
+- **Re-read the tree immediately before any merge, revert, or gate
+  conclusion.** `git stash list && git status --short`, then act. A gate
+  reading is a statement about a tree, not about a commit.
+- **A red test you did not break may already be fixed.** Check whether
+  `HEAD` moved before concluding anything from a failure — a gate was once
+  held for an hour on failures that had been repaired before it finished
+  running.
+- **"Nothing to commit" can mean somebody else committed your edit.** The
+  question is whether `HEAD` moved, not whether you remember committing.
+- **Announce a mutation window before deliberately breaking the tree.** Two
+  agents mutating one tree produces exactly the signature of a flaky test.
+  The failing-test *count* is what distinguishes them afterwards, so record
+  it.
+- **Never stage a path you did not write.** This is why `git add -A` is
+  banned above and why the ban has no "the tree is clean, I checked"
+  exception: the check and the commit are two different moments.
+- **Never revert a file to repair something you did not do.** Another
+  agent's uncommitted work looks identical to litter. It is not yours to
+  discard — and neither is a human's: acceptance edits made by hand have
+  been reverted out from under a person mid-session by an agent tidying
+  what it read as a stray change.
