@@ -32,7 +32,7 @@ use glam::Vec3;
 use mc_core::id::BlockName;
 use mc_sim::action::{ActionIntent, EditReport, Refusal, TickIntent};
 use mc_sim::player::{MovementIntent, PlayerState};
-use mc_sim::simulation::Simulation;
+use mc_sim::simulation::seat;
 use mc_sim::world::World;
 use mc_world::world::{VoxelWorld, WorldPos};
 
@@ -104,7 +104,7 @@ fn placing(block: &str) -> Result<Placement, Box<dyn Error>> {
     let declared = floored_world()?;
     let played = floored_world()?;
     let content = published_content(played.registry())?;
-    let mut simulation = Simulation::new(looking_down_at_the_target(), played, content);
+    let mut simulation = seat(looking_down_at_the_target(), played, content).simulation;
     let report = simulation.advance(TickIntent {
         movement: MovementIntent::default(),
         action: Some(ActionIntent::Place {

@@ -20,7 +20,7 @@ use mc_core::block::{BlockRegistry, RegistryError};
 use thiserror::Error;
 
 use crate::player::PlayerState;
-use crate::simulation::{PublishedContent, Simulation};
+use crate::simulation::{PublishedContent, Seated, seat};
 use crate::world::World;
 
 use super::world::ReplayWorld;
@@ -99,8 +99,8 @@ pub fn simulation_for(
     world: &ReplayWorld,
     registry: Arc<BlockRegistry>,
     content: PublishedContent,
-) -> Result<Simulation, SpawnError> {
-    Ok(Simulation::new(
+) -> Result<Seated, SpawnError> {
+    Ok(seat(
         spawn(world)?,
         World::new(world.blocks().clone(), registry)?,
         content,

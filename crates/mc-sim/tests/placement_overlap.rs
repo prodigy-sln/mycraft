@@ -45,7 +45,7 @@ use glam::Vec3;
 use mc_core::id::BlockName;
 use mc_sim::action::{ActionIntent, EditReport, Refusal, TickIntent};
 use mc_sim::player::{MovementIntent, PlayerState};
-use mc_sim::simulation::Simulation;
+use mc_sim::simulation::seat;
 use mc_world::world::WorldPos;
 
 use support::chamber::{BlockChamber, at, differences, fixture_content};
@@ -171,7 +171,7 @@ fn placing(
     block: &str,
 ) -> Result<Placement, Box<dyn Error>> {
     let declared = chamber.build()?;
-    let mut simulation = Simulation::new(player, chamber.build()?, fixture_content()?);
+    let mut simulation = seat(player, chamber.build()?, fixture_content()?).simulation;
     let report = simulation.advance(TickIntent {
         movement: MovementIntent::default(),
         action: Some(ActionIntent::Place {

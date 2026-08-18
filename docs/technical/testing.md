@@ -2118,10 +2118,37 @@ sharing rather than growing one `shipped_copy()` call at a time.
 and that reaches further than the coverage gap above. Its subject is the `mycraft: `
 prefix, which is the first thing *all* of the reporting writes — refusals and
 ordinary notices alike. So a page fencing a notice that is not a refusal at all,
-such as the line telling a player where a reload moved them, is making a claim this
-guard will check and fail: nothing in that binary's run produces it. **Quote a
+such as the line telling a player where a **reload** moved them, is making a claim
+this guard will check and fail: nothing in that binary's run produces it. **Quote a
 notice in prose or inline, and reserve a fence for a text the guard's own run
 produces.** The alternative is widening the run, which is the paragraph above.
+
+**And widening the run is what the two entry notices did, so the page may fence
+those two and only those two.** A player a save recorded inside solid rock is told
+where they were put, or that nothing within reach was clear — and
+`docs/modding/hot-reload.md` quotes both under the offline half of the reload story,
+because `support/printed_refusals.rs` now drives a real launch over a save that traps
+a player and composes the line through `mc_client::notice::entering`. The escape that
+was refused is the one that looks tidier: quoting the sentences as prose instead, which
+buys a green suite by making the documentation unguarded — the page would promise text
+nothing checks, which is the exact failure this guard exists to catch. **Extend the
+producer rather than dodge the recogniser.** The producer states the sentence nowhere:
+the fixture decides only which of the two answers the launch arrives at, and a premise
+refuses to hand back a line if it arrived at the other one, so a page held to it is
+agreeing with the client rather than with a third copy of somebody's belief about it.
+The reload's own two clearing notices are still unproduced and therefore still belong
+in prose — which is why that page now carries the entry pair fenced and the reload
+pair inline, with a sentence saying why.
+
+**One quotation of those sentences is outside the guard entirely, and that is worth
+knowing rather than assuming.** The scan walks `docs/modding/` only, so
+`docs/user/gameplay.md` — which quotes both entry lines for the player — is held by
+nobody. It can drift from what the program prints with the whole suite green. Widening
+the walk to `docs/` would close it and is not free: every page under `docs/technical/`
+that quotes a program line would come under the same comparison, and several quote
+lines no fixture produces. The hole is small, one-directional and recorded; whichever
+spec next touches that walk should decide it deliberately rather than by widening a
+constant.
 
 **A substring assertion cannot see rendering, and that is how a malformed refusal
 shipped.** The declared-text bound's own test asks whether both quantities are
@@ -2841,3 +2868,204 @@ Three things worth carrying forward:
 It was found by the owner playing the game. That is the honest note to end on: the
 instrument that caught this was a person, and the automated suite's whole contribution
 was to say nothing at all.
+
+### The entry door: what the fixtures supply, and why the composition needed pulling out
+
+Entry clearing is asked at one place — `mc_sim::simulation::seat`, the only way a player gets into
+a world (`technical/architecture.md`). Grading it needed two different instruments for two
+different obligations, and the split is the durable lesson.
+
+**The fixtures are real saves read through the shipped launch.** `crates/mc-client/tests/entry_*.rs`
+write a save file and resume it, rather than constructing a `Simulation` in memory. That is not
+thoroughness for its own sake: the extent argument the search is given is supplied *at the launch
+call site*, so an in-memory fixture takes the test off the only path where an over-large extent
+would ever be passed. `crates/mc-sim/tests/entry_leaves_a_generated_spawn_alone.rs` covers the
+other door, where there is no save at all.
+
+Two properties of that suite are worth not softening:
+
+- **The one-cell-sideways scenario asserts the exact destination**, not "covers no solid cell".
+  It is what controls the extent argument from the other direction: a shrunken extent rejects that
+  destination while an over-large one passes it and fails the near-the-edge refusal. Weakened to
+  the loose assertion, both go green and the refusal loses its control.
+- **The generated-spawn scenario asserts the derived spawn exactly.** "Covers no solid cell" is
+  green there before a line is written — the derived spawn is three blocks above its column's
+  surface and no shipped content can trap it. What that scenario is actually for is the opposite
+  failure: an entry check that moves, cell-centres or grounds a player who needed nothing.
+
+**A composition behind a device nothing constructs is a composition nothing asserts.** The reload's
+two clearing sentences lived inside `App::report_clearing`, behind a `wgpu::Surface` and a
+`winit::Window` that nothing in this workspace builds — so the exact words a moved player reads
+were graded by nothing at all, for as long as they existed. `mc_client::notice::entering` and
+`::reloading` are total functions of a `Copy` verdict: no window, no session, no `&self`. The
+`say_*` pair is the whole of what needs a running client. That split is why four sentences are now
+asserted where none were, and it is the shape to reach for whenever the interesting decision is
+sitting behind a device.
+
+### Two scans, four verdicts each, and the asymmetry in their controls
+
+Both new guards read production sources as text and answer a total enumerated verdict, for the
+reason recorded throughout this document: an empty answer and a scan that can no longer look must
+never compare equal.
+
+| Scan | Good verdict | The other three |
+|---|---|---|
+| `crates/mc-sim/tests/one_way_seats_a_player.rs` | `OneWaySeatsAPlayerAndItReportsItsClearing` | `AnotherSourceSeatsAPlayer(sites)`, `TheDoorNoLongerSeatsAPlayer(spellings)`, `NoSourceWasRead` |
+| `crates/mc-client/tests/the_entry_sentence_is_said_once.rs` | `ComposedOnceAndSaidWhereTheLaunchIsCollected` | `AnotherSourceComposesOrSaysIt(sites)`, `ComposedButNeverSaid`, `NoSourceWasRead` |
+
+**The seating scan has three controls and the sentence scan has four, and the extra one is the
+interesting case.** Each carries one control per bad verdict. The sentence scan carries a further
+test, `a_tree_that_states_every_rule_is_named_by_the_good_verdict`, because its rules are
+*heterogeneous* where the seating scan's are uniform — five needles with different homes, one of
+them a file-set rule rather than a count — and nothing otherwise established that they can all be
+satisfied at once. A rule set nothing can satisfy would leave the implementer fighting the
+instrument, and the fight looks exactly like a defect in their own code. It was measured
+non-vacuous by emitting one extra copy of every spelling, which reddens it.
+
+**The sentence scan reads missing-before-extras and the seating scan reads extras-before-missing,
+and the inversion is deliberate.** While anything is unstated, a second source saying it is
+invisible — that masking is real, and it is bought because on the tree that opened the phase
+`Clearing` was named in a file the implementation was about to delete, so an extras-first reading
+would have opened with a diagnosis about a file that was about to disappear. Both states are never
+true at once in a tree anybody would commit. It is written down because a reader who does not know
+it will mis-read a verdict exactly once.
+
+### These scans are copied on purpose, and a shared engine is the thing to refuse
+
+Every guard of this shape carries its own copy of the same scaffolding: a walk over one crate's
+production sources, `production_text` stripping `///` and `//!`, sibling `*_test.rs` files skipped,
+`/`-separated relative paths, `tempfile` trees as the positive controls. The copies are deliberate
+and they are not a tidy-up waiting to happen.
+
+**Take the measurement rather than inheriting it.** On 2026-08-18,
+`grep -rln "fn production_text" crates/` reported seventeen test files defining their own, spread
+across `mc-client`, `mc-sim`, `mc-render`, `mc-script` and `mc-world`. That figure moves every time
+a guard is added, so re-run the command instead of trusting the number beside it.
+
+`code-quality.md` §1's "no abstraction before 3 concrete uses" affirmatively **permits** extracting
+this into `mc-testkit`, and that is precisely the refactor to refuse. Each guard is worth exactly as
+much as a reader's ability to see the whole of it in one file, and **a shared engine makes every
+guard weakenable by an edit made for another guard's sake** — one walk taught to skip a directory,
+one needle list loosened, one exemption slot filled for a caller that needed it, and guards nobody
+was thinking about go quietly green. It is the failure mode `crates/mc-client/tests/reporting_seam.rs`
+records about hand-maintained exemption lists, one level up: that header keeps its exemption slot
+empty on purpose, because a guard whose scope is a list of permitted sites goes green with one more
+entry on the day a new site stops reporting.
+
+The copies have also already stopped being interchangeable, which is the second reason a single
+engine would cost something real. `reporting_seam.rs` pushes one site per (file, needle) pair, so a
+*second* offence inside an already-named file is invisible to it; the seating scan carries a `times`
+count instead, because there the repetition inside the right file is itself the defect. Both shapes
+are correct for their own question and neither generalises to the other.
+
+Revisit when the next guard of this shape is written, or when the copies are found to have drifted
+**in a way that mattered** — a drift nobody can name a consequence for is the duplication doing its
+job.
+
+### A bare `rg` is the wrong instrument for a needle count, and three lines in this tree prove it
+
+Every expected count in both scans is derived over `production_text`
+(`crates/mc-client/tests/reporting_seam.rs`), which **drops every line whose trimmed start is
+`///` or `//!`** before any `contains` runs. So the count the scan sees and the count the shell
+sees are different numbers, and deriving from the shell produces either a scan that is red on
+arrival — whose cheapest green is editing the number until it matches, at which point the scan has
+stopped reporting anything — or a number nobody can defend.
+
+Three standing counter-examples live in this tree:
+
+- `crates/mc-sim/src/reload/mod.rs:91` matches `published:` — the English word followed by a colon,
+  inside `///` prose. `rg` says 3, the scan says 2.
+- `crates/mc-client/src/session/mod.rs:295` matches `Clearing`, likewise inside `///` prose.
+- `crates/mc-client/src/notice_test.rs` names all four clearing sentences and is not a place any of
+  them is said. The sentence scan's file filter drops `_test.rs` siblings, and that skip is
+  load-bearing rather than tidy: dropping the term reddens one control and only it.
+
+**The `published:` exposure is one character wide, and it is open and accepted.** Turn that `///`
+into `//` — a plausible edit, since the line is prose — and the count becomes 3, and the scan
+reddens with no second seating door anywhere. It is accepted because the shape the needle is paid
+to catch is a struct-literal second door inside `simulation.rs`, and a red naming `reload/mod.rs`
+is a diagnosis a reader acts on in a minute.
+
+### A needle may not be a whole sentence, and three mechanisms make that true
+
+Neither guard can hold a whole refusal sentence as its needle, and both reasons look like
+carelessness until you know them:
+
+- **The reach is interpolated.** `NoClearSpaceWithin { blocks }` carries the search's own reach and
+  the sentence renders it, so no source line contains `nothing within 8 blocks is clear`
+  contiguously. A needle spelling the `8` would be asserting a literal the sentence deliberately
+  does not have — and a *hardcoded* `8` in the composition is caught behaviourally instead, by a
+  test that asks with a reach of 3.
+- **A long literal inside `format!` lands across a `\` continuation**, which the macro joins. The
+  clause a source scan can see is therefore whatever survived line-wrapping. This is why both entry
+  clauses are declared as consts rather than written inline: **the const's job is to keep the
+  clause on a line of its own and single.**
+
+**A substring needle matches its own extension**, which is the third mechanism and the one that has
+bitten twice here. `) -> Seated` is satisfied by `) -> SeatedPlayer {`, so a rename to anything
+beginning with `Seated` left the scan green over a door that no longer hands back the type the rule
+names; the needle is now `) -> Seated {`, and the brace rejects a renamed type outright because a
+rename carries its own characters between the name and the body. `fn say_entering` was the same
+shape, satisfied by `say_entering_now`, and is now `fn say_entering(`. **Check every needle against
+that before trusting it** — and note that the first was found only because a mutation was run,
+after its row already said what it was expected to do.
+
+**A file-set rule has no ceiling where a counted rule does.** The sentence scan's `Clearing` rule
+names the exact set of files that may mention the type, with no count — so a *fourth* file naming
+it is caught and a second mention inside an already-named file is not. That is why the rules that
+must not be said twice carry `times: 1` instead. Both shapes are correct; which one a needle wants
+depends on whether repetition inside the right file is itself the defect.
+
+### The entry door's mutation tables, including the ones that did not bite
+
+Run by hand, reverted by hand, `git diff --exit-code` confirmed clean between rows.
+
+**The seating door.** The first four rows were run over the five entry binaries plus
+`reload_leaves_the_player_alone` — 18 tests; the velocity row over the full workspace suite —
+1 209; the second-door row over `one_way_seats_a_player` alone — 4. The baseline for the first four
+carried exactly one red, which is what lets the first row report that red going *green*.
+
+| Mutation | Outcome |
+|---|---|
+| `seat` computes the clearing and discards it | **7 of 18** — the whole do-nothing set. It also turned the one baseline red green, which is what established that the baseline fixture was failing because entry clearing moves the player it seats, and not for something else in the tuple it asserts |
+| `seat` passes a whole-coordinate-space extent | **2 of 18** — the off-the-map refusal *and* its positive control. An over-large extent does not only let a player be moved who should not be; it changes where a near-edge player who *should* move lands |
+| `seat` passes an extent one cell smaller on each axis | **2 of 18** — the exact-destination scenario and the first-snapshot one, which share a fixture position |
+| `clear_the_player` called after the first snapshot is published | **8 of 18**, including the scan. "The snapshot scenario only" was unreachable by construction: `Simulation` exposes the player through `latest()` alone, so every entry scenario reads one accessor and any defect upstream of the first publish surfaces in all of them together |
+| `clear_the_player` sets position but not velocity | **did not bite at entry — 1 of 1 209**, and see below |
+| a second `pub fn` in `simulation.rs` building the struct by literal | **1 of 4**, naming the site. The three controls stayed green, so the bite was not bought by breaking them |
+| the door's return type renamed | **bit only after the needle was tightened** — the prefix hole above |
+
+**Four of those bit wider than predicted and they share one cause**: every entry scenario reads the
+player through one accessor. A prediction written per-scenario against one shared observable will
+keep coming out narrow. Read the wider bites as evidence about the shape of the observable, not as
+tests overreaching.
+
+**The sentences.** Every row run over the whole `mc-client` suite with `--no-fail-fast`, so each
+count is the suite and not the prefix a fail-fast run stopped at.
+
+| Mutation | Outcome |
+|---|---|
+| delete the `say_entering` call at the collection point | **1 of 275**, as `ComposedButNeverSaid`. Nothing else in the workspace reddens when the client stops saying what entry did, which is the whole reason that scan exists |
+| call `say_entering` a second time in the frame path | **1 of 275**, naming the site rather than merely counting it |
+| `entering` returns the reload wording | **5 of 275, and the scenario written for unification was not among them.** It stayed green *correctly* — the reload composer was untouched and still answers the reload wording, so that scenario is blind to this direction by construction. What saw it was an additional-coverage test |
+| add `{:.1}` to the `y` coordinate | **2 of 275** — the wording scenario plus the formatting test that says *why*. The first reads as a reworded sentence and sends a reader looking in the wrong place; the second names the number |
+| make the two composers one function | **3 of 275**, and narrower than the wording mutation. **Each direction of a unification is seen by a different scenario test**, and only one additional-coverage test sees both |
+| inline the two clause consts at their use sites | **1 of 275, and not for the predicted reason** — see below |
+
+**The three findings that are about structure rather than about a defect:**
+
+- **The velocity rule has one witness and it is not at entry.** Dropping the velocity zeroing left
+  every entry test green and reddened exactly one reload test. Entry cannot see it: the entering
+  velocity is already zero, so zeroing it is inherited rather than newly observable. A future
+  change that removes the reload path's clearing takes this rule's only witness with it, and no
+  entry test will report that.
+- **The const idiom protects singleness, not unwrapping.** Inlining both clauses and running
+  `cargo fmt --all` left both literals *unwrapped*, on lines of 115 and 148 characters — no
+  `rustfmt.toml` exists, `format_strings` is off, and rustfmt never reflows a string literal. So
+  the needles do not rest on formatting luck. What reddened instead was duplication: the shared
+  clause then appears twice in one file and the `times: 1` rule reports it.
+- **The hazard that survives is a hand-written continuation, and only review sees it.** From that
+  inlined state, hand-wrapping one clause across a `\` continuation so it matches nothing leaves
+  **275 of 275 green**: the count falls back to 1, the scan calls the client well wired, and the
+  const idiom has been abandoned. rustfmt cannot reach this and no assertion can. It is recorded
+  rather than papered over, because it is the one hole here that has no instrument at all.

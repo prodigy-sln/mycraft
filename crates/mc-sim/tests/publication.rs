@@ -43,7 +43,7 @@ use std::error::Error;
 use glam::Vec3;
 use mc_sim::player::{MovementIntent, PlayerState};
 use mc_sim::replay::SCRIPT_TICKS;
-use mc_sim::simulation::Simulation;
+use mc_sim::simulation::{Simulation, seat};
 use mc_sim::world::World;
 
 use support::chamber::{BlockChamber, at, fixture_content};
@@ -75,7 +75,7 @@ const FEET: Vec3 = Vec3::new(10.5, 41.0, 3.5);
 
 #[test]
 fn every_submitted_intent_publishes_the_tick_after_the_one_before_it() -> TestResult {
-    let mut simulation = Simulation::new(standing(), flat_floor()?, fixture_content()?);
+    let mut simulation = seat(standing(), flat_floor()?, fixture_content()?).simulation;
     let mut published = vec![simulation.latest().tick];
 
     for _ in 0..SUBMISSIONS {
@@ -147,7 +147,7 @@ fn a_later_publish_leaves_the_snapshot_the_renderer_holds_unchanged() -> TestRes
 
 /// A simulation that has been advanced `tick` times from its start.
 fn advanced_to(tick: u32) -> Result<Simulation, Box<dyn Error>> {
-    let mut simulation = Simulation::new(standing(), flat_floor()?, fixture_content()?);
+    let mut simulation = seat(standing(), flat_floor()?, fixture_content()?).simulation;
     for _ in 0..tick {
         simulation.advance(MovementIntent::default());
     }

@@ -72,7 +72,7 @@ use std::f32::consts::TAU;
 use glam::Vec3;
 use mc_sim::action::{EditReport, TickIntent};
 use mc_sim::player::MovementIntent;
-use mc_sim::simulation::{SimSnapshot, Simulation};
+use mc_sim::simulation::{SimSnapshot, Simulation, seat};
 use mc_world::world::WorldPos;
 
 use schedule::{
@@ -190,7 +190,7 @@ struct Run {
 
 /// Drives the whole schedule through one simulation, one action per tick.
 fn run(schedule: &Schedule, chamber: &BlockChamber) -> Result<Run, Box<dyn Error>> {
-    let mut simulation = Simulation::new(spawn(), chamber.build()?, fixture_content()?);
+    let mut simulation = seat(spawn(), chamber.build()?, fixture_content()?).simulation;
     let mut answers = Vec::with_capacity(schedule.steps().len());
     for step in schedule.steps() {
         let movement = turned_onto(&simulation.latest(), step.aim());

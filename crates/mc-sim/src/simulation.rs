@@ -38,7 +38,6 @@ use std::fmt;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use glam::Vec3;
 
 use mc_core::content::{ContentSerial, ResolvedContent};
 use mc_core::hud::HudLayout;
@@ -113,6 +112,47 @@ pub struct Accepted {
     pub holding: BlockName,
 }
 
+/// A simulation of a world, and what seating the player in it did about where
+/// they were going to stand.
+///
+/// The verdict travels out beside the simulation because a verdict computed and
+/// dropped satisfies nothing: the one place that prints for a person is a long
+/// way from the one place that seats a player.
+#[derive(Debug)]
+pub struct Seated {
+    /// The simulation the player was seated in.
+    pub simulation: Simulation,
+    /// What entry did about a player whose box covered a solid cell.
+    pub clearing: Clearing,
+}
+
+/// Seats the player at `spawn` in `world` serving `content`, moving them clear
+/// of solid blocks first if their box covers any.
+///
+/// **The one public way to put a player into a world.** `Simulation`'s
+/// constructor is private to this crate, so every door — a resume, a first
+/// launch, a golden capture, a fixture — passes through here and is asked the
+/// clearing question. What the compiler holds is that no caller *outside* this
+/// crate can skip it; a second seating path added inside it would not be held
+/// at all, which is what `crates/mc-sim/tests/one_way_seats_a_player.rs` reads
+/// these sources for.
+///
+/// **The clearing is applied before the simulation exists**, so the first
+/// snapshot ever published already shows the player where they were put and no
+/// frame is ever drawn of them inside rock.
+///
+/// Infallible, and deliberately: [`Clearing::NoClearSpaceWithin`] is a verdict
+/// rather than a refusal, so a player nothing clear was found for is still
+/// seated — where they were — and still told.
+#[must_use]
+pub fn seat(mut spawn: PlayerState, world: World, content: PublishedContent) -> Seated {
+    let clearing = clearing::clear_the_player(&mut spawn, &world, world.extent());
+    Seated {
+        simulation: Simulation::new(spawn, world, content),
+        clearing,
+    }
+}
+
 /// The simulation's own state, and the snapshot it publishes.
 pub struct Simulation {
     published: ArcSwap<SimSnapshot>,
@@ -140,7 +180,7 @@ impl Simulation {
     /// `content` is taken at construction so that a simulation is never in a
     /// state where it has a world and nothing to draw it with.
     #[must_use]
-    pub fn new(spawn: PlayerState, world: World, content: PublishedContent) -> Self {
+    fn new(spawn: PlayerState, world: World, content: PublishedContent) -> Self {
         Self {
             published: ArcSwap::from_pointee(SimSnapshot {
                 tick: FIRST_TICK,
@@ -215,7 +255,8 @@ impl Simulation {
         // Admission first, so a refusal returns before anything is published and
         // the content a reader holds is untouched by construction.
         let adopted = reload::adopt_candidate(&mut self.world, Arc::new(registry))?;
-        let clearing = self.clear_the_player();
+        let clearing =
+            clearing::clear_the_player(&mut self.player, &self.world, self.world.extent());
         let serial = self.content().serial.next();
         self.content.store(Arc::new(PublishedContent {
             serial,
@@ -227,26 +268,6 @@ impl Simulation {
             holding: adopted.holding,
             clearing,
         })
-    }
-
-    /// Moves the player clear of a cell the candidate made solid, if any did.
-    ///
-    /// Run against the solidity the candidate produced, so it is called after the
-    /// world has adopted and never on the refusal path — a player a refused
-    /// candidate would have trapped is not trapped.
-    ///
-    /// **The velocity goes on any move**, not only an upward one: a cleared player
-    /// has been teleported, and one rule is better than one per direction.
-    ///
-    /// The world's extent travels with its solidity because the search needs both:
-    /// a cell past the extent is unknown, and `is_solid` cannot say so.
-    fn clear_the_player(&mut self) -> Clearing {
-        let clearing = clearing::cleared(self.player.position, &self.world, self.world.extent());
-        if let Clearing::MovedTo(feet) = clearing {
-            self.player.position = feet;
-            self.player.velocity = Vec3::ZERO;
-        }
-        clearing
     }
 
     /// What has to be re-meshed for this simulation's edits to be seen, or

@@ -23,6 +23,14 @@
 //! a test that never opened a window, and that is what makes ADR-013's wholesale
 //! exclusion of this crate from the coverage denominator honest rather than
 //! convenient.
+//!
+//! **[`notice`] is the standing exception, and naming it is the point.** The words
+//! a clearing verdict becomes have been composed in this crate since PRO-918, but
+//! they lived inside `App` behind a surface and a window nothing here constructs,
+//! so they were policy this crate held and nothing asserted. They are now a module
+//! of total functions over a `Copy` verdict, with the sentences a player reads held
+//! by tests that open nothing — the exception made visible and tested rather than
+//! widened.
 
 /// The frame path: acquire, record, present, advance one tick.
 pub mod app;
@@ -38,6 +46,8 @@ pub mod events;
 pub mod gpu_startup;
 /// Which world a launch plays, and preparing that world for the renderer.
 pub mod launch;
+/// The words a clearing verdict becomes, composed with no device in reach.
+pub mod notice;
 /// Turning an edit into a scene, off the tick thread and off the frame thread.
 pub mod remesh;
 /// The client's input dispatch, drivable with no window and no adapter.

@@ -42,12 +42,14 @@
 
 use std::error::Error;
 use std::path::Path;
+use std::sync::Arc;
 
 use glam::Vec3;
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 use mc_sim::player::PlayerState;
 use mc_sim::reload::ContentReload;
+use mc_sim::simulation::SimSnapshot;
 use mc_world::section::{Contents, SECTION_SIZE};
 use mc_world::world::{VoxelWorld, WorldPos};
 
@@ -257,41 +259,64 @@ pub fn require_the_reload_misses(blocks: &VoxelWorld, feet: Vec3) -> Result<(), 
 /// somewhere to move the player, **and** the candidate would have made solid one
 /// further cell their box overlaps.
 ///
-/// **The premise a scenario about a refused candidate turns on, and the two halves are
-/// there for two different reasons.** The second is that scenario's own: a refused
-/// candidate that could never
-/// have made the player's cell solid is not the candidate the scenario describes. The
-/// first is what makes its named mutation bite — a search called on the refusal path
-/// runs against the solidity the world *still has*, so unless the box already stands
-/// in something solid there, that call answers "no move needed" and the mutation
-/// leaves the test green while proving nothing. **Measured, not reasoned: with the
-/// stone cell removed and this guard replaced by
-/// [`require_the_reload_traps`], the mutation left the scenario passing.**
+/// **The premise a scenario about a refused candidate turns on, and it is three
+/// halves.** The candidate has to be one that could have made a further cell of the
+/// box solid, or it is not the candidate the scenario describes. The box has to
+/// already stand in something solid under the content *serving*, because a search
+/// called on the refusal path runs against the solidity the world still has — and the
+/// search has to have somewhere to put them, or that call answers "nothing within
+/// eight blocks is clear" and moves nobody anyway. Miss any one and the named
+/// mutation leaves the scenario green while proving nothing. **Measured, not
+/// reasoned: with the stone cell removed and this guard replaced by
+/// [`require_the_reload_traps`], the mutation left the scenario passing.** Measured
+/// again after entry clearing shipped and the fixture was rebuilt around it: the
+/// mutation moves the player from the cell their feet are in to the one the break
+/// opened, one block up, and the scenario reddens on that and on nothing else — the
+/// break report and the refusal are identical either way, which is what says the
+/// position is carrying the signal.
+///
+/// **It reads where the run *seated* the player, and it used to read the position the
+/// fixture declared.** Those were the same value until entry clearing shipped, and
+/// then they stopped being: a player declared inside solid rock with somewhere clear
+/// nearby is moved by the admission door before the reload under test ever happens.
+/// A guard reading the declared spawn therefore went on passing while being false of
+/// the run — the exact shape of a scan that can no longer look at the thing it
+/// guards. Taking the published snapshot rather than a `Vec3` is what makes handing
+/// it a declared constant unspellable.
 ///
 /// # Errors
 ///
-/// Returns an error naming which half failed and which cells it found.
+/// Returns an error naming which half failed and what it found, or saying that the
+/// client has published nothing to read a position out of.
 pub fn require_a_refusal_could_have_moved_them(
     blocks: &VoxelWorld,
-    feet: Vec3,
+    seated: Option<Arc<SimSnapshot>>,
 ) -> Result<(), Box<dyn Error>> {
+    let feet = seated
+        .ok_or(
+            "this scenario's premise is about where the run seated the player, and the client has published no snapshot for one to be read out of",
+        )?
+        .player
+        .position;
     let serving = overlap_at(blocks, &SOLID_WHILE_SERVING, feet);
     let once_water_is = overlap_at(blocks, &SOLID_ONCE_WATER_IS, feet);
     require(
         matches!(serving, Overlap::Overlapping(_)),
         format!(
-            "this scenario's named mutation calls the clearing search from the refusal path, where \
-             the world still has the solidity it had — so the player's box has to overlap something \
-             solid there or that call has no work to do and the mutation cannot bite. It overlaps \
-             {serving:?}"
+            "this scenario's named mutation calls the clearing search from the refusal path, where the world still has the solidity it had — so the box where the run seated the player, at {feet:?}, has to overlap something solid there or that call has no work to do and the mutation cannot bite. It overlaps {serving:?}"
         ),
     )?;
     require(
         overlapping_count(&once_water_is) > overlapping_count(&serving),
         format!(
-            "this scenario needs a refused candidate that would have made solid a *further* cell \
-             the player's box overlaps, and it overlaps {serving:?} while serving against \
-             {once_water_is:?} once `base:water` is solid"
+            "this scenario needs a refused candidate that would have made solid a *further* cell the player's box overlaps, and it overlaps {serving:?} while serving against {once_water_is:?} once `base:water` is solid"
+        ),
+    )?;
+    let somewhere = clear_within_the_search(blocks, &SOLID_WHILE_SERVING, feet);
+    require(
+        !somewhere.is_empty(),
+        format!(
+            "this scenario's named mutation moves the player only where the search it wrongly reaches finds somewhere to put them, and nothing within {A_SEARCH_OF} blocks of {feet:?} is clear under the content serving — so that call would answer that it found nowhere, move nobody, and leave the scenario green"
         ),
     )
 }
@@ -323,10 +348,7 @@ pub fn require_nothing_clear_within_the_search(
     blocks: &VoxelWorld,
     feet: Vec3,
 ) -> Result<(), Box<dyn Error>> {
-    let clear: Vec<Vec3> = every_candidate()
-        .map(|offset| candidate_feet(feet, offset))
-        .filter(|position| overlap_at(blocks, &SOLID_ONCE_WATER_IS, *position) == Overlap::Clear)
-        .collect();
+    let clear = clear_within_the_search(blocks, &SOLID_ONCE_WATER_IS, feet);
     require(
         clear.is_empty(),
         format!(
@@ -336,6 +358,18 @@ pub fn require_nothing_clear_within_the_search(
             first = clear.first()
         ),
     )
+}
+
+/// Every position the search may look at from `feet` that `solid` leaves clear.
+///
+/// The one walk of the cube, read by the guard that needs it to be empty and by the
+/// one that needs it not to be — which is what keeps "where the search may look"
+/// stated once rather than once per direction.
+fn clear_within_the_search(blocks: &VoxelWorld, solid: &[&str], feet: Vec3) -> Vec<Vec3> {
+    every_candidate()
+        .map(|offset| candidate_feet(feet, offset))
+        .filter(|position| overlap_at(blocks, solid, *position) == Overlap::Clear)
+        .collect()
 }
 
 /// Every offset the search may look at.

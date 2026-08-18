@@ -47,7 +47,7 @@ use mc_core::id::BlockName;
 use mc_render::window::Ending;
 use mc_sim::persistence::Launching;
 use mc_sim::player::BlockPos;
-use mc_sim::simulation::{PublishedContent, Simulation};
+use mc_sim::simulation::{PublishedContent, Seated};
 use mc_world::persistence::{Acceptance, load_world, requirements};
 use mc_world::section::Contents;
 use mc_world::world::{VoxelWorld, WorldPos};
@@ -183,7 +183,7 @@ pub fn declared_by(save: &Path) -> Result<Vec<(String, u64, u64)>, String> {
 pub const STARTED: &str = "it started a simulation";
 
 /// What starting the client again against a content root and a save comes to.
-pub type Launched = Result<(Simulation, BlockName), PreparationError>;
+pub type Launched = Result<(Seated, BlockName), PreparationError>;
 
 /// The client starting again: the world at `save`, against the content the root
 /// at `root` declares, with the player asked to accept nothing.
@@ -243,10 +243,12 @@ pub fn resumed_at(launched: &Launched, at: Cell) -> Result<String, String> {
         return Err(how_it_went(launched));
     };
     let (x, y, z) = at;
-    Ok(match simulation.world().block_at(BlockPos { x, y, z }) {
-        None => OUTSIDE.to_owned(),
-        Some(held) => described_contents(held),
-    })
+    Ok(
+        match simulation.simulation.world().block_at(BlockPos { x, y, z }) {
+            None => OUTSIDE.to_owned(),
+            Some(held) => described_contents(held),
+        },
+    )
 }
 
 /// One entry of what a save recorded, or a sentence saying the save has none.

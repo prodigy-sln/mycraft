@@ -120,7 +120,8 @@ pub fn player_pose(
         world,
         Arc::clone(registry),
         super::published_content(registry)?,
-    )?;
+    )?
+    .simulation;
     for earlier in 0..tick {
         simulation.advance(scripted_intent(TickIndex::new(earlier)?));
     }

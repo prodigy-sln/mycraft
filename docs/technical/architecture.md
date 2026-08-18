@@ -292,9 +292,11 @@ here. Everywhere else the split is observable; on this path it is held by the ar
 separately and by review.
 
 **The simulation cannot exist before the world does.**
-`mc_sim::replay::simulation_for(world: &ReplayWorld, registry: &BlockRegistry) ->
-Result<Simulation, SpawnError>` resolves `SolidVoxels`, derives the spawn and constructs the
-`Simulation`; the client calls it and decides nothing. `PreparedScene` carries `world` and
+`mc_sim::replay::simulation_for(world: &ReplayWorld, registry: Arc<BlockRegistry>, content:
+PublishedContent) -> Result<Seated, SpawnError>` resolves `SolidVoxels`, derives the spawn and
+seats the player; the client calls it and decides nothing. It hands back a `Seated` rather than a
+`Simulation` because every door into a world now passes through one seating function and carries
+that function's verdict out with it — see "The seating door" below. `PreparedScene` carries `world` and
 `registry` alongside the mesh, so the golden, probe and determinism suites build their simulation
 from the same preparation their frames are packed by; the composition root builds its own from
 `PreparedLaunch`, which carries the `Simulation` itself rather than a world to derive one from,
@@ -644,8 +646,9 @@ workspace, because nothing outside the module had ever named the encoder or its 
 `mc_sim::world::World` gains `pub(crate) fn blocks(&self) -> &VoxelWorld` — a shared borrow, so the
 crate's single private write path (`World::write`, see "The editable world" above) is untouched by
 it — and a new `mc_sim::persistence` module owns both `save(simulation, path)` and
-`simulation_at_launch(save, seed, registry, accepting)`. It takes the **seed** rather than a world
-built from it, and generates one only in the arm where there is no save to resume — a caller handing
+`simulation_at_launch(save: &Path, launching: Launching) -> Result<Seated, LaunchError>`, where
+`Launching` bundles the seed, the registry, the published content and the acceptance. It takes the
+**seed** rather than a world built from it, and generates one only in the arm where there is no save to resume — a caller handing
 over a `ReplayWorld` has already generated one, so "a resume derives no world from the seed" would
 otherwise be true of the function and false of the process running it. Deciding which world a launch plays,
 what a refusal does, and what happens on quit is policy, and `mc-sim` is where it lives: it is the
@@ -666,10 +669,12 @@ What changed is where the other path lives. There are two preparation entry poin
 with a branch above it: `startup::prepare_scene(root)` turns a content root into a drawable
 *generated* scene and reads no save, and `launch::prepare_launch(root, save, accepting)` asks
 `mc-sim` which world this launch plays and prepares **that** world. The launch path establishes
-which world is needed before doing any work for it — `launch::simulation_to_play` calls
-`mc_sim::persistence::simulation_at_launch` first, and only then meshes, resolves layers and packs —
-so a resume generates nothing at all, rather than generating a world, meshing it and discarding both
-once a save turns up.
+which world is needed before doing any work for it — `launch::simulation_to_play(save, launching)
+-> Result<(Seated, BlockName), PreparationError>` calls `mc_sim::persistence::simulation_at_launch`
+first, and only then meshes, resolves layers and packs — so a resume generates nothing at all,
+rather than generating a world, meshing it and discarding both once a save turns up. The `Seated`
+it returns is what carries the entry clearing's verdict up to the client; `simulation_to_play`
+itself decides only which block a player holds.
 
 Two of anything on the golden path is how images drift, so the split is answered structurally rather
 than by care: both doors share one mesher (`mesh_world`) and one packer (`scene_of`), and both build
@@ -694,6 +699,121 @@ becomes a failed ending naming the path and the reason rather than a silent one.
 *which* world to play, *whether* a changed-block save should load, or *how* a refusal is worded
 lives in `mc-client` — those answers all come from `mc-sim` and `mc-world`, unchanged by which crate
 happens to call them.
+
+## The seating door: one way a player enters a world, and it says what it did
+
+`mc_sim::simulation::seat(spawn, world, content) -> Seated` is the only way to put a player into a
+world. It runs the clearing search first, moves the player if their box covers a solid cell, builds
+the `Simulation`, and hands back `Seated { simulation, clearing }`.
+
+**The door is the constructor, not the launch path, and that is the whole design.**
+`Simulation::new` is module-private — no `pub`, no `pub(crate)` — so `seat` is the only thing in the
+workspace that can construct a `Simulation` at all. Every way into a world already passed through
+that constructor: a resume, a first launch into a generated world, a golden capture, every fixture
+in `crates/mc-sim/tests` and `crates/mc-client/tests`. Closing it makes "no player enters a world
+unchecked" a property the compiler holds. The alternative considered and refused was a call added
+to `simulation_at_launch`: that can be deleted with the whole suite green, and it would never have
+covered the generated-world door in the first place.
+
+**What the compiler holds, and what it does not.** It holds against *every* caller, `mc-sim`'s own
+modules included, because `new` is private to the `simulation` module rather than to the crate.
+What it cannot hold is a second seating path added **inside that module** — a `pub fn` next to
+`seat` building the struct by literal. That is why `crates/mc-sim/tests/one_way_seats_a_player.rs`
+exists: it reads the crate's own sources and answers an enumerated verdict —
+`OneWaySeatsAPlayerAndItReportsItsClearing`, `AnotherSourceSeatsAPlayer(sites)`,
+`TheDoorNoLongerSeatsAPlayer(spellings)` or `NoSourceWasRead` — so a scan that has stopped being
+able to look never reads as a clean crate.
+
+**The residual hole is narrower than the scan and is worth naming exactly**: a second `pub fn` that
+*calls* `seat` and discards the `Clearing`. The rule still runs — the player is still moved — and
+only the reporting is lost. Nothing detects that, and the reason it is tolerable is that the thing
+which must not be skippable is the search rather than the sentence.
+
+### The rule is factored so a join inherits it, and one mistake stays invisible
+
+MVP 3's networked join adds a player to an already-running simulation, so it will not call a
+constructor. It inherits the *rule* rather than the function: it calls
+`clearing::clear_the_player(&mut joining, &self.world, self.world.extent())` and gets the same
+`Clearing` back that entry and the reload swap get. No join API, trait or admission abstraction is
+built for it here.
+
+**The omission a join cannot make is forgetting the rule; the mistake it can still make is
+supplying the wrong ground.** `clear_the_player` takes the extent the search may consider as an
+argument, because a cell past it is *unknown* rather than clear and `is_solid` cannot say so — and
+an extent that is too large lets a player be moved off the map, while one that is too small rejects
+destinations that were fine. Nothing in this design makes a wrong extent visible. **Whichever spec
+adds the join owes it a scenario**; it is not buildable here, because there is no join to grade.
+
+**The ground is an argument rather than something the rule reads for itself, and there is a stated
+condition for changing that.** Reading `world.extent()` inside `clear_the_player` would make the
+wrong-ground mistake unspellable — the expression would appear on one line in the whole crate and no
+future caller could pass a different one. It was refused for a reason that expires: the two
+scenarios that control the argument grade it *at the call site*, one from each direction — a
+shrunken extent rejects the exact destination the one-cell-sideways scenario asserts, and an
+over-large one lets a near-edge player be moved off the map — so reading the extent inside would
+leave both of them with almost nothing left to catch. That reasoning holds while there are two
+callers, and it stops holding at a third: three call sites each spelling `world.extent()` is a rule
+with three copies, which is the condition the rejected option was right for. **Revisit the factoring
+when a third caller appears** — MVP 3's join is the candidate.
+
+### The search runs at every entry, and the alternative was refused on coupling
+
+Entry does not ask whether the save reported changed blocks. `RegistryVerdict`
+(`crates/mc-world/src/persistence/table.rs`) is computed and dropped inside `load_world`, and
+`LoadedWorld` carries only `{ world, player }`. Gating on it would mean widening `mc-world`'s
+persistence return so that `mc-sim` could ask persistence whether to ask the physics a question —
+persistence coupled to physics for a saving of almost nothing, since `cleared` opens with an
+`overlaps_solid` early return and a clear player therefore costs only the cells their own box
+covers (two, where the box lies inside one cell column). The 2 601-candidate ring is walked only by
+a player who is genuinely trapped. `changed` is also not the only way to be trapped: a hand-written
+save, or a launch made without `--load-changed-blocks` over a save whose blocks all still match,
+reaches the same state.
+
+### Where the verdict is parked, and why once-ness is structural
+
+The verdict rides out of `mc-sim` on `Seated`, through `simulation_to_play`, onto
+`PreparedLaunch::clearing`, and is read exactly once in `App::collect_preparation`, which calls
+`notice::say_entering(prepared.clearing)`. There is no dedup field and none is wanted: the
+preparation handle is `take`n, the `PreparedLaunch` is consumed, and there is one entry per process
+run — so "said once" is a property of the construction rather than of a flag. The shape that would
+break it is a `Clearing` parked on long-lived client state and read by the frame path, which is
+what `crates/mc-client/tests/the_entry_sentence_is_said_once.rs` watches for; `src/session/reload.rs`
+already parks one for the reload, so the natural place to park a second is three files from where a
+scan over `src/app` alone could see it.
+
+**Why the entry notice is said only after the uploads succeed.** `say_entering` sits below
+`upload_textures` and `upload_scene` in `collect_preparation`, deliberately:
+
+> A launch that fails to reach the device must not tell a player where they were put in a world
+> they will never see.
+
+That sentence exists in no source file, and how it came not to is the part worth recording. It was
+written as a comment in `crates/mc-client/src/app/mod.rs` and dropped to keep that file inside its
+500-line cap — **the cap did not reject code, it evicted an explanation**, silently, with nothing
+going red and no deletion for a reviewer to see. This document is its only remaining home. Note
+also that `app/mod.rs` now measures exactly 500 non-blank lines: **it has zero margin**, so the next
+line added to it forces a split that should be planned rather than discovered by a red gate.
+
+### A cleared player arrives with `on_ground: false`, and that is deliberate
+
+This is the single thing about entry clearing most likely to be re-derived wrongly. `resuming`
+gives a resumed player `velocity: Vec3::ZERO` and `on_ground: false`, and the clearing move touches
+position and velocity only. So a player moved at entry is standing at the centre of a cell, on that
+cell's floor, *not yet marked as being in contact* — and tick 1 settles them by falling a fraction
+and landing. Read at tick 0 the position is exactly where the search put them; read at tick 1 the
+`y` differs slightly.
+
+`resuming` does not set `on_ground` because that would be a claim about contact nothing checked,
+and grounding a cleared player is Out of Scope for the spec that built this. The cheapest way to
+make a tick-1 assertion pass is to set the flag in the search or ground the player there; both are
+forbidden, and a future change that does either is changing behaviour rather than fixing a test.
+
+### Entry clearing is self-limiting through the save, not through a flag
+
+Nothing records that a player was moved. It does not need to: the moved position is what the next
+save writes, so a player cleared once resumes from where they were put rather than from where they
+were trapped. A stored "already cleared" flag would be a second source of truth about a fact the
+save already carries.
 
 ## The HUD: content in three crates, composed through one entry point
 
@@ -1604,12 +1724,26 @@ halves of one claim and neither is sufficient alone.
 
 **One deviation, recorded rather than smoothed over.** The reported ending goes
 through a caller-supplied `&mut dyn Write`, and `main.rs` is the only place that
-names `std::io::stderr()`. But four **non-fatal notices** in the library still
+names `std::io::stderr()`. But **seven non-fatal notices** in the library still
 write to the process error stream directly with `eprintln!`:
-`app.rs`'s dropped-frame, unshowable-edit and swatch notices, and `events.rs`'s
-cursor-release notice. None of them ends a run and none goes through `report`,
-which is why the reporting guards do not cover them — they are a stream
-question rather than a rendering one. It does mean nothing can capture,
+
+| Where | Notice |
+|---|---|
+| `app/mod.rs` | the dropped-frame notice |
+| `app/mod.rs` | the swatch notice |
+| `app/mod.rs` | the unshowable-edit notice |
+| `events.rs` | the cursor-release notice |
+| `app/reload.rs` | the refused-content-root notice |
+| `notice.rs` | what an **entry** did about a player it found inside solid blocks |
+| `notice.rs` | what a **reload** did about a player its swap trapped |
+
+**The count was four and the list omitted the two clearing notices**, which were
+inside `App::report_clearing` when it was written. Both now live in `notice.rs`
+beside the entry notice this seam gained — the composing half of each is a total
+function of a `Copy` verdict and the `eprintln!` is all that needs a running
+client, which is what made the exact words assertable at all. None of the seven
+ends a run and none goes through `report`, which is why the reporting guards do
+not cover them — they are a stream question rather than a rendering one. It does mean nothing can capture,
 redirect or silence them, and a library naming a stream is not the shape the
 sink parameter exists to establish. The spec that next touches client output
 should route them through a sink too.

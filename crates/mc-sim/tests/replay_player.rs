@@ -84,7 +84,8 @@ const TURN_DEGREES: f32 = 30.0;
 fn replay() -> Result<(ReplayWorld, Simulation), Box<dyn Error>> {
     let registry = Arc::new(content_registry()?);
     let world = replay_world(&registry)?;
-    let simulation = simulation_for(&world, Arc::clone(&registry), published_content(&registry)?)?;
+    let simulation =
+        simulation_for(&world, Arc::clone(&registry), published_content(&registry)?)?.simulation;
     Ok((world, simulation))
 }
 

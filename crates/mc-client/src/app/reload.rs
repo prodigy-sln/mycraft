@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use mc_render::gpu::RendererError;
 use mc_sim::simulation::PublishedContent;
-use mc_sim::world::Clearing;
 
+use crate::notice;
 use crate::session::Session;
 use crate::session::reload::{CONTENT_NOT_TAKEN_UP, ReloadReport};
 use crate::upload::Unuploaded;
@@ -47,7 +47,7 @@ impl App {
                 layers,
                 clearing,
             }) => {
-                report_clearing(clearing);
+                notice::say_reloading(clearing);
                 self.serve(&content, layers)
             }
         }
@@ -82,34 +82,6 @@ impl App {
         if self.reported_reload.as_deref() != Some(reason) {
             eprintln!("mycraft: {CONTENT_NOT_TAKEN_UP}: {reason}");
             self.reported_reload = Some(reason.to_owned());
-        }
-    }
-}
-
-/// Tells the player what the swap did to where they were standing.
-///
-/// **`NoClearSpaceWithin` is the one a person must hear**: the reload stood, they
-/// are still inside solid rock, and nothing else in the run would say so. The move
-/// is said too, because being teleported without explanation reads as a bug. Said
-/// once per reload rather than deduplicated: each of these is one event, not a
-/// condition that recurs every frame.
-fn report_clearing(clearing: Clearing) {
-    match clearing {
-        Clearing::Unneeded => {}
-        Clearing::MovedTo(feet) => {
-            eprintln!(
-                "mycraft: the reload made your cell solid, so you were moved to \
-                 ({x}, {y}, {z})",
-                x = feet.x,
-                y = feet.y,
-                z = feet.z
-            );
-        }
-        Clearing::NoClearSpaceWithin { blocks } => {
-            eprintln!(
-                "mycraft: the reload made your cell solid and nothing within {blocks} blocks is \
-                 clear, so you were left where you were"
-            );
         }
     }
 }

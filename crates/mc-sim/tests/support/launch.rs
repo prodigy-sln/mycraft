@@ -23,7 +23,7 @@ use mc_core::id::{BlockName, TextureKey};
 use mc_sim::persistence::{LaunchError, Launching};
 use mc_sim::player::{BlockPos, PlayerState};
 use mc_sim::replay::ReplayWorld;
-use mc_sim::simulation::Simulation;
+use mc_sim::simulation::{Seated, Simulation};
 use mc_world::persistence::{Acceptance, SavedPlayer};
 use mc_world::world::{VoxelWorld, WorldPos};
 use tempfile::TempDir;
@@ -180,7 +180,7 @@ pub fn recorded_player() -> SavedPlayer {
 /// # Errors
 ///
 /// Returns the rendered refusal where the launch was turned away.
-pub fn placed(launched: &Result<Simulation, LaunchError>) -> Result<([u32; 3], u32, u32), String> {
+pub fn placed(launched: &Result<Seated, LaunchError>) -> Result<([u32; 3], u32, u32), String> {
     let player = published_player(launched)?;
     Ok((
         player.position.to_array().map(f32::to_bits),
@@ -195,7 +195,7 @@ pub fn placed(launched: &Result<Simulation, LaunchError>) -> Result<([u32; 3], u
 /// # Errors
 ///
 /// Returns the rendered refusal where the launch was turned away.
-pub fn stood(launched: &Result<Simulation, LaunchError>) -> Result<u32, String> {
+pub fn stood(launched: &Result<Seated, LaunchError>) -> Result<u32, String> {
     Ok(published_player(launched)?.position.y.to_bits())
 }
 
@@ -209,7 +209,7 @@ pub fn stood(launched: &Result<Simulation, LaunchError>) -> Result<u32, String> 
 /// # Errors
 ///
 /// Returns the rendered refusal where the launch was turned away.
-pub fn moving(launched: &Result<Simulation, LaunchError>) -> Result<[u32; 3], String> {
+pub fn moving(launched: &Result<Seated, LaunchError>) -> Result<[u32; 3], String> {
     Ok(published_player(launched)?
         .velocity
         .abs()
@@ -224,7 +224,7 @@ pub fn moving(launched: &Result<Simulation, LaunchError>) -> Result<[u32; 3], St
 ///
 /// Returns the rendered refusal where the launch was turned away.
 pub fn held_at(
-    launched: &Result<Simulation, LaunchError>,
+    launched: &Result<Seated, LaunchError>,
     at: (u32, u32, u32),
 ) -> Result<String, String> {
     let (x, y, z) = at;
@@ -250,7 +250,7 @@ pub fn held_at(
 ///
 /// Returns the rendered refusal where the launch was turned away.
 pub fn against_generated(
-    launched: &Result<Simulation, LaunchError>,
+    launched: &Result<Seated, LaunchError>,
     generated: &ReplayWorld,
 ) -> Result<(usize, Vec<String>), String> {
     let played = playing(launched)?;
@@ -283,7 +283,7 @@ pub fn against_generated(
 /// hold it to is the typed obligation: this layer's sentence, and separately
 /// what it carries beneath (see [`beneath`]).
 #[must_use]
-pub fn answered(launched: &Result<Simulation, LaunchError>) -> String {
+pub fn answered(launched: &Result<Seated, LaunchError>) -> String {
     match launched {
         Ok(_) => "it started a simulation".to_owned(),
         Err(refusal) => refusal.to_string(),
@@ -299,7 +299,7 @@ pub fn answered(launched: &Result<Simulation, LaunchError>) -> String {
 /// reads at this level, so this is the one thing standing between a player and
 /// the reason their save would not load.
 #[must_use]
-pub fn beneath(launched: &Result<Simulation, LaunchError>) -> String {
+pub fn beneath(launched: &Result<Seated, LaunchError>) -> String {
     match launched {
         Ok(_) => "it started a simulation".to_owned(),
         Err(refusal) => refusal
@@ -315,12 +315,15 @@ pub fn beneath(launched: &Result<Simulation, LaunchError>) -> String {
 pub const NOTHING_BENEATH: &str = "it carries no reason beneath it";
 
 /// The simulation a launch started, or the refusal it gave instead.
-fn playing(launched: &Result<Simulation, LaunchError>) -> Result<&Simulation, String> {
-    launched.as_ref().map_err(LaunchError::to_string)
+fn playing(launched: &Result<Seated, LaunchError>) -> Result<&Simulation, String> {
+    Ok(&launched
+        .as_ref()
+        .map_err(LaunchError::to_string)?
+        .simulation)
 }
 
 /// The player a launch published, or the refusal it gave instead.
-fn published_player(launched: &Result<Simulation, LaunchError>) -> Result<PlayerState, String> {
+fn published_player(launched: &Result<Seated, LaunchError>) -> Result<PlayerState, String> {
     Ok(playing(launched)?.latest().player)
 }
 

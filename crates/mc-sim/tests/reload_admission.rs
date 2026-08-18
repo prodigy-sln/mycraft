@@ -41,7 +41,7 @@ use std::sync::Arc;
 use glam::Vec3;
 use mc_core::id::BlockName;
 use mc_sim::player::PlayerState;
-use mc_sim::simulation::Simulation;
+use mc_sim::simulation::{Simulation, seat};
 use mc_sim::world::World;
 use mc_world::section::{Contents, SECTION_SIZE};
 use mc_world::world::{VoxelWorld, WorldPos};
@@ -153,11 +153,7 @@ fn playing(blocks: VoxelWorld) -> Result<Simulation, Box<dyn Error>> {
         on_ground: false,
     };
     let content = published_content(&registry)?;
-    Ok(Simulation::new(
-        spawn,
-        World::new(blocks, registry)?,
-        content,
-    ))
+    Ok(seat(spawn, World::new(blocks, registry)?, content).simulation)
 }
 
 /// One empty column with `cells` written into it, and then `emptied` taken back

@@ -34,7 +34,7 @@ use std::error::Error;
 use glam::Vec3;
 use mc_sim::action::{ActionIntent, TickIntent};
 use mc_sim::player::{MovementIntent, PlayerState};
-use mc_sim::simulation::Simulation;
+use mc_sim::simulation::{Simulation, seat};
 use mc_world::world::WorldPos;
 
 use support::chamber::{BlockChamber, at, fixture_content};
@@ -103,7 +103,7 @@ fn walked_after(action: Option<ActionIntent>) -> Result<Simulation, Box<dyn Erro
     let chamber = BlockChamber::empty(COLUMNS)
         .run(at(0, FLOOR_LAYER, 0), at(16, FLOOR_LAYER + 1, 16), STONE)
         .cell(IN_THE_WAY, STONE);
-    let mut simulation = Simulation::new(aiming_at_it(), chamber.build()?, fixture_content()?);
+    let mut simulation = seat(aiming_at_it(), chamber.build()?, fixture_content()?).simulation;
 
     simulation.advance(TickIntent {
         movement: MovementIntent::default(),

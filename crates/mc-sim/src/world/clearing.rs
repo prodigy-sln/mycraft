@@ -1,4 +1,9 @@
-//! Where a reload puts a player whose box it made solid.
+//! Where a player whose box covers a solid cell is put instead.
+//!
+//! Asked at the two moments a player's surroundings are settled for them: when
+//! they are seated in a world, and when a reload has made the cell they stand in
+//! solid. Both go through [`clear_the_player`]; the search underneath is one
+//! search, so the two moments cannot drift.
 //!
 //! **The candidates are cell centres**, so the 0.6-wide box lies strictly inside
 //! one cell column and clearance is a question about the two cells the 1.8-tall box
@@ -23,7 +28,7 @@
 use glam::Vec3;
 use mc_world::world::Extent;
 
-use crate::player::{BlockPos, Solidity, collide};
+use crate::player::{BlockPos, PlayerState, Solidity, collide};
 
 use super::inside_the_world;
 
@@ -72,6 +77,33 @@ pub(crate) fn cleared(feet: Vec3, world: &dyn Solidity, ground: Extent) -> Clear
             Clearing::NoClearSpaceWithin { blocks: REACH },
             Clearing::MovedTo,
         )
+}
+
+/// Moves `player` clear of the solid cells their box covers, if it covers any,
+/// and reports what that settled.
+///
+/// **The velocity goes on any move**, not only an upward one: a cleared player
+/// has been teleported, and one rule is better than one per direction.
+///
+/// The ground the search may consider travels beside the solidity because the
+/// search needs both: a cell past the extent is unknown, and `is_solid` cannot
+/// say so.
+///
+/// Both callers pass the world the player is about to stand in — entry before
+/// the simulation that publishes them exists, and a reload after the candidate
+/// has been adopted, so a player a *refused* candidate would have trapped is
+/// never moved.
+pub(crate) fn clear_the_player(
+    player: &mut PlayerState,
+    world: &dyn Solidity,
+    ground: Extent,
+) -> Clearing {
+    let clearing = cleared(player.position, world, ground);
+    if let Clearing::MovedTo(feet) = clearing {
+        player.position = feet;
+        player.velocity = Vec3::ZERO;
+    }
+    clearing
 }
 
 /// Whether a player may be put at `position`: every cell their box would cover is

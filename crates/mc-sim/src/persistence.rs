@@ -25,7 +25,7 @@ use thiserror::Error;
 
 use crate::player::PlayerState;
 use crate::replay::{ReplayWorld, SpawnError, WorldGenError, simulation_for};
-use crate::simulation::{PublishedContent, Simulation};
+use crate::simulation::{PublishedContent, Seated, Simulation, seat};
 use crate::world::World;
 
 /// Why a launch could not start.
@@ -142,7 +142,7 @@ pub fn save(simulation: &Simulation, path: &Path) -> Result<(), SaveError> {
 /// be built without, [`LaunchError::Spawn`] where the generated world cannot
 /// place a player, and [`LaunchError::Registry`] where a world holds a block
 /// `registry` does not know.
-pub fn simulation_at_launch(save: &Path, launching: Launching) -> Result<Simulation, LaunchError> {
+pub fn simulation_at_launch(save: &Path, launching: Launching) -> Result<Seated, LaunchError> {
     let Launching {
         seed,
         registry,
@@ -150,7 +150,7 @@ pub fn simulation_at_launch(save: &Path, launching: Launching) -> Result<Simulat
         accepting,
     } = launching;
     match load_world(save, &registry, accepting) {
-        Ok(loaded) => Ok(Simulation::new(
+        Ok(loaded) => Ok(seat(
             resuming(&loaded.player),
             World::new(loaded.world, registry)?,
             content,

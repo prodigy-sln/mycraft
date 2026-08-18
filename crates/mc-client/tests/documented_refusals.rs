@@ -78,6 +78,18 @@
 //! **Seven or eight of fourteen rather than three, and the filed gap above stands
 //! for the rest.**
 //!
+//! # The two an entry writes, added with the offline half of the reload page
+//!
+//! A player a save recorded inside solid rock is told where they were put, or that
+//! nothing within reach was clear and they were left in it. Neither is a refusal
+//! — the launch proceeds either way — and both are quoted where the reload page
+//! answers for a solidity change made while the game was off. **The recogniser does
+//! not know the difference and must not**: it is the prefix the reporting writes, so
+//! whatever a page shows under it is held to what a run produces. Both come out of
+//! `mc_client::notice::entering`, over a verdict a launch over a real save arrived
+//! at; `support/printed_refusals.rs` records why the fixture decides the world and
+//! never the sentence.
+//!
 //! # Two normalisations, both stated rather than assumed
 //!
 //! - **The fixture root becomes the shipped one.** A refusal names the declaration
@@ -107,8 +119,12 @@
 //! because whoever next meets a red here needs to know which half a parser can
 //! reach.
 
+#[path = "support/entry.rs"]
+mod entry;
 #[path = "support/input/mod.rs"]
 mod input;
+#[path = "support/persistence.rs"]
+mod persistence;
 #[path = "support/printed_refusals.rs"]
 mod printed_refusals;
 #[path = "support/reload.rs"]
@@ -173,8 +189,8 @@ fn every_refusal_the_modding_pages_quote_is_a_refusal_the_client_prints() -> Tes
         Verdict::EveryQuotedRefusalIsTheRefusalPrinted,
         "a page quoting a refusal the client does not write sends a mod author looking for text \
          that will never reach their terminal, and a page quoting none leaves the all-or-nothing \
-         promise with nothing showing it kept. What the client writes today, for the eight roots \
-         and runs these pages are about, is:\n\n{}\n",
+         promise with nothing showing it kept. What the client writes today, for the roots and \
+         runs these pages are about, is:\n\n{}\n",
         printed.join("\n\n")
     );
     Ok(())

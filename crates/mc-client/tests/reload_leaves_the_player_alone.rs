@@ -26,6 +26,36 @@
 //! so each assertion reads what the client is now serving alongside the position:
 //! the taken-up candidate must have made `base:water` solid, and the refused one
 //! must have left it as it was.
+//!
+//! # The refused scenario's control was rebuilt when entry clearing shipped, and why
+//! it was rebuilt rather than dropped
+//!
+//! Its named mutation — the clearing search called from the *refusal* path — bites
+//! only while the player's box already stands in something solid **and** the search
+//! has somewhere to put them. That state used to be reached by declaring a spawn
+//! inside a block. Entry clearing removed it: the admission door now moves such a
+//! player before any reload happens, so the fixture asserted a position the run no
+//! longer produced, and its premise guard went on passing because it measured the
+//! declared spawn rather than the seated one.
+//!
+//! **Weakening it was refused.** This is the only instrument in the project for "the
+//! clearing search is never reached from the refusal path", and the spec that broke
+//! it is the one that would have been paying for it — the cost would have landed on
+//! whoever ships the next change to that path, reading a green suite and believing
+//! something nobody had checked since the day it was weakened. A control that is
+//! cheap to restore and expensive to lose is restored.
+//!
+//! So the state is reached the way a player reaches it. The pocket is packed solid
+//! through the whole of the search, which is a world entry itself leaves the player
+//! embedded in — nothing within eight blocks is clear, so the door reports that and
+//! moves nobody. Their feet are in stone and their head is in water, which is *not*
+//! solid while the shipped content is serving: that is what leaves their eye in a
+//! cell they can aim out of, since `crates/mc-sim/src/world/action/trace.rs` gives an
+//! eye inside a solid block a target at distance zero and no face. One break
+//! straight up empties the cell over their head, and the position one block up — head
+//! cell and broken cell — becomes the somewhere the wrongly-reached search would take
+//! them to. Nothing clears a player on a break, so they are still standing in stone
+//! when the refused candidate arrives.
 
 #[path = "support/input/mod.rs"]
 mod input;
@@ -45,18 +75,24 @@ use std::error::Error;
 
 use glam::Vec3;
 use mc_core::block::BlockRegistry;
+use mc_sim::action::EditReport;
 use mc_world::world::VoxelWorld;
+use winit::event::MouseButton;
+
+use input::InputHarness;
+use reload_world::AIM_AT_THE_CEILING;
 
 use reload::{GRASS, GRASS_FILE, STONE, WATER, WATER_FILE, candidate, restating, shipped};
 use reload_clearing::{
     Clearance, at, clearance_of, holding_blocks_it_does_not_declare, standing_of,
 };
 use reload_trap::{
-    FEET_ROW, HEAD_ROW, ON_THE_FLOOR, Shape, a_client_over, a_world,
+    A_SEARCH_OF, FEET_ROW, HEAD_ROW, ON_THE_FLOOR, Shape, a_client_over, a_world,
     require_a_refusal_could_have_moved_them, require_the_reload_misses, water_that_is_solid,
+    within_the_search,
 };
 use reload_watch::solidity_of;
-use reload_world::{Cell, standing_at};
+use reload_world::{ACROSS, Cell, Edit, edit, registry_of, standing_at};
 use support::content::ContentRoot;
 use support::{TestResult, content_root};
 
@@ -67,9 +103,26 @@ const ONE_COLUMN: u32 = 1;
 /// but at neither its centre in `x` nor in `z`, an eighth of a block off each.
 const OFF_CENTRE: Vec3 = Vec3::new(8.625, ON_THE_FLOOR, 8.375);
 
-/// Where the player whose candidate is refused stands: the centre of the same
-/// column, with their head already inside a solid block.
+/// Where the run seats the player whose candidate is refused: the centre of the same
+/// column, feet inside a solid cell and head inside water.
+///
+/// **The declared spawn and the seated position are the same value here, and that is
+/// a property of the fixture rather than an assumption.** Entry clearing leaves this
+/// player exactly where they are because the pocket has nothing clear anywhere inside
+/// the search; nothing below reads this constant as if it were the seated position —
+/// the premise guard reads the published snapshot, and the assertion compares against
+/// what the run answered.
 const EMBEDDED: Vec3 = Vec3::new(8.5, ON_THE_FLOOR, 8.5);
+
+/// The cell the embedded player's feet are in, the cell their head is in, and the
+/// cell they break open above it.
+///
+/// Breaking the third is what turns the position one block up — the head cell and the
+/// broken one — into somewhere the search could put them, without taking away the
+/// stone their feet are in.
+const FEET_CELL: Cell = (8, FEET_ROW, 8);
+const HEAD_CELL: Cell = (8, HEAD_ROW, 8);
+const BROKEN_OPEN: Cell = (8, HEAD_ROW + 1, 8);
 
 /// The cell a candidate makes solid that no player's box here reaches — four
 /// columns away from either of them.
@@ -101,29 +154,44 @@ fn a_reload_that_makes_a_cell_no_part_of_the_player_stands_in_solid_moves_them_n
 #[test]
 fn a_candidate_that_would_have_trapped_the_player_and_was_refused_moves_them_nowhere() -> TestResult
 {
-    let (mut client, declared) = a_client_over(&content_root()?, standing_at(EMBEDDED), a_pocket)?;
-    require_a_refusal_could_have_moved_them(&declared, EMBEDDED)?;
+    let root = content_root()?;
+    let (mut client, _) = a_client_over(&root, standing_at(EMBEDDED), |registry| {
+        a_pocket_opened_at(registry, &[])
+    })?;
+    let broke = edit(a_break_straight_up(&mut client));
+    require_a_refusal_could_have_moved_them(
+        &a_pocket_opened_at(&registry_of(&root)?.clone(), &[BROKEN_OPEN])?,
+        client.published(),
+    )?;
 
     let said = clearance_of(client.adopt(candidate(water_solid_and_grass_dropped()?.path())?));
     let after = standing_of(client.tick());
     let water_now = solidity_of(&client, WATER)?;
 
     assert_eq!(
-        (said, after, water_now),
+        (broke, said, after, water_now),
         (
+            Edit::Emptied(BROKEN_OPEN),
             holding_blocks_it_does_not_declare(&[GRASS]),
             at(EMBEDDED),
             Some(false)
         ),
-        "the candidate declares `base:water` solid — which would put the player inside solid rock — \
-         and stops declaring `base:grass`, which the floor under them holds, so it is turned away. \
-         Nobody is moved because the search never runs. **The player's head is already inside a \
-         solid block, and that is the whole point of this fixture**: a search wrongly reached from \
-         the refusal path runs against the solidity the world still has, so unless there is already \
-         something to clear them out of, that call answers `Unneeded` and the defect this scenario \
-         exists to catch leaves it green"
+        "the candidate declares `base:water` solid — which would put the player further inside solid rock — and stops declaring `base:grass`, which the floor under the pocket holds, so it is turned away. Nobody is moved because the search never runs. **The player is standing in stone with exactly one way out, and that is the whole point of this fixture**: a search wrongly reached from the refusal path runs against the solidity the world still has, so unless there is both something to clear them out of and somewhere to clear them to, that call answers `Unneeded` or `NoClearSpaceWithin`, moves nobody, and the defect this scenario exists to catch leaves it green. The break is asserted here because it is what opens the way out — a run where it was refused or landed elsewhere is a run whose premise the guard above measured against a world the client is not playing"
     );
     Ok(())
+}
+
+/// The one break: aimed straight up from an eye standing in water, spent on the next
+/// tick.
+///
+/// Their head cell is the non-solid one precisely so this is possible. An eye inside
+/// a solid block has a target at distance zero, so an embedded player whose head cell
+/// were stone could only ever break the cell they are standing in — which would let
+/// them out of the very thing this scenario needs them to be in.
+fn a_break_straight_up(client: &mut InputHarness) -> Option<EditReport> {
+    client.move_pointer(0.0, AIM_AT_THE_CEILING);
+    client.click(MouseButton::Left);
+    client.edit()
 }
 
 /// A copy of the shipped root whose `water.luau` declares `base:water` solid.
@@ -163,16 +231,49 @@ fn a_floor(registry: &BlockRegistry) -> Result<VoxelWorld, Box<dyn Error>> {
     a_floor_holding(registry, &[(WELL_CLEAR_OF_THEM, WATER)])
 }
 
-/// A grass floor with water in the cell the player's feet are in and stone in the
-/// one their head reaches.
+/// A grass floor under a pocket packed solid through the whole of the search, with
+/// `opened` left empty.
 ///
-/// The stone is what the shipped content already calls solid, so the box the player
-/// carries overlaps something before anybody edits anything; the water is what the
-/// candidate would add to that. The player is stable there — a box overlapping a
-/// block is resolved back onto the face below it, not pushed out.
-fn a_pocket(registry: &BlockRegistry) -> Result<VoxelWorld, Box<dyn Error>> {
-    a_floor_holding(
-        registry,
-        &[((8, FEET_ROW, 8), WATER), ((8, HEAD_ROW, 8), STONE)],
-    )
+/// **Packed rather than sparse, because that is what makes entry leave the player
+/// where the fixture puts them.** Nothing anywhere inside the eight blocks the search
+/// looks at is clear, so the admission door reports that it found nowhere and moves
+/// nobody — and the player is standing in stone when the reload arrives, which is the
+/// state the named mutation needs.
+///
+/// The head cell holds water rather than stone, for two reasons that happen to be the
+/// same cell. It is what the refused candidate would make solid, so the candidate
+/// really is one that would have trapped them further; and it leaves their eye in a
+/// cell they can aim out of.
+///
+/// The player is stable in it — a box overlapping a block is resolved back onto the
+/// face below it, not pushed out — so no tick moves them and the readings are of the
+/// position the run seated them at.
+fn a_pocket_opened_at(
+    registry: &BlockRegistry,
+    opened: &[Cell],
+) -> Result<VoxelWorld, Box<dyn Error>> {
+    let cells: Vec<(Cell, &str)> = the_pocket()
+        .into_iter()
+        .filter(|cell| !opened.contains(cell))
+        .map(|cell| (cell, if cell == HEAD_CELL { WATER } else { STONE }))
+        .collect();
+    a_floor_holding(registry, &cells)
+}
+
+/// Every cell of the pocket: the whole of what the search may look at from the
+/// player's own cell, clipped to the world that holds it.
+///
+/// Derived from the declared reach on every axis rather than from a count, so a
+/// fixture that has to fill everything the search can see follows the bound and goes
+/// on following it if it ever changes. The clip is what makes the world writable at
+/// all — a write past an edge is refused — and the cells it drops are outside the
+/// world, which the search reads as unknown rather than clear.
+fn the_pocket() -> Vec<Cell> {
+    let reach = A_SEARCH_OF as i32;
+    let rows: Vec<i32> = (FEET_ROW..=FEET_ROW + reach).collect();
+    let across = (ONE_COLUMN * ACROSS) as i32;
+    within_the_search(FEET_CELL, &rows)
+        .into_iter()
+        .filter(|(x, _, z)| (0..across).contains(x) && (0..across).contains(z))
+        .collect()
 }

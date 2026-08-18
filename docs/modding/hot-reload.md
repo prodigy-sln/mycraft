@@ -245,6 +245,65 @@ That refusal is **not** a fault in your content. Nothing is being refused, there
 declaration you can change to avoid it, and the alternative it replaces is worse: a
 player put past the edge stands where nothing is solid and falls out of the world.
 
+## The same edit made while the game is not running
+
+Everything above is what your edit does to somebody who is playing. Editing a content
+root with nothing running is the other half of the same authoring loop — you quit, you
+change a declaration, you start the client again — and it used to be the more dangerous
+half: a `solid = false` block that became `solid = true` while the game was off left
+whoever was standing in it inside solid rock on the next launch, with no move and no
+line on the terminal.
+
+**It is now answered at entry exactly as a live change is answered at the swap.** Same
+search, same eight blocks, same sideways-before-upward order, same rule about ground
+the world does not have. What differs is only the words, and they differ on purpose: a
+player moved by a reload watched their cell become solid, and a player moved at entry
+witnessed nothing at all, so the entry line names the state it found rather than an
+event nobody saw.
+
+**Both lines a launch can write, quoted:**
+
+```
+mycraft: you would have entered the world inside solid blocks, so you were moved to (12.5, 10, 12.5)
+```
+
+```
+mycraft: you would have entered the world inside solid blocks and nothing within 8 blocks is clear, so you were left inside them
+```
+
+**The three numbers in the first are one example run, not part of the sentence** — they
+are where that player's feet ended up, so yours will differ. The `8` in the second is
+the search's reach and is the same for everyone.
+
+The reload's own pair, for comparison, is `mycraft: the reload made your cell solid, so
+you were moved to (x, y, z)` and `mycraft: the reload made your cell solid and nothing
+within 8 blocks is clear, so you were left where you were`. Those two are written in
+prose here rather than fenced, and the reason is worth knowing before you paste a line
+onto this page: **every fenced block on these pages whose first line begins `mycraft: `
+is compared, character for character, against text a real run produces** — so a fence
+is a promise the build checks, and quoting a line no run in that guard produces fails
+the build rather than documenting anything. The two entry lines above are produced; the
+two reload lines are not yet.
+
+Three things follow for you as an author:
+
+- **Neither line is a refusal.** Nothing about your content is turned away, the launch
+  proceeds, and there is no declaration you can change to make the message go away
+  other than the solidity change you meant to make.
+- **The edge rule is the same one.** Only ground the world actually holds counts as
+  clear, so a player near the edge is moved inward or upward and never out over it —
+  and where the eligible ground is all solid too, they get the second line and stay put.
+  That is the same answer a player wedged in the middle of a lake gets; there is no
+  separate message for being near an edge.
+- **The launch is never refused for it**, which is what keeps the loop usable: you can
+  always start, read the line, quit, and change the declaration back.
+
+A save whose blocks *behave* differently than they did when it was written is a
+separate question, and it is answered before this one: the launch refuses until you
+pass `--load-changed-blocks` (`docs/user/gameplay.md`). Making water solid is exactly
+such a change, so the offline half of the loop is two decisions rather than one — first
+whether to load the world at all, then where the player who loaded it can stand.
+
 ## The HUD reloads too
 
 `hud/` is read on the same pass and applied by the same swap. Change a crosshair's
@@ -395,6 +454,41 @@ position the terminal prints is **inside** the world, never past its edge, even 
 most of the eight blocks around you at a corner is not world at all. Both runs
 accepted your content; what differs is how much ground the search had, which is the
 world's shape rather than anything in your declaration.
+
+**6. Make the same edit with the game shut down.** This is the offline half, and it is
+the step that used to end with a player inside rock.
+
+Put `water.luau` back to `solid = false` first. Walk into water somewhere near the
+middle of the world, so that you are standing *in* a cell, and **quit normally** —
+close the window rather than killing the process, so the save is written with you in
+there. Now, with nothing running, edit `content/base/blocks/water.luau` and change
+`solid = false` to `solid = true`. Then, from the checkout root:
+
+```
+cargo run -p mc-client -- --load-changed-blocks
+```
+
+The flag is needed because water now *behaves* differently than it did when you saved,
+and a launch refuses over that until you say to load the world anyway. That is the
+first decision. The second is the one this section is about, and the terminal answers
+it before the window has anything in it:
+
+```
+mycraft: you would have entered the world inside solid blocks, so you were moved to (12.5, 10, 12.5)
+```
+
+The three numbers are wherever your own player was put — near where you quit, at the
+centre of a cell, on that cell's floor. You are standing on the world and you can walk,
+and you were told why you are not where you left off.
+
+To undo it: quit, set `solid = false` again, and launch with `--load-changed-blocks`
+once more — the save now records water as solid, so the flag is asked for in the other
+direction too. Nothing is printed this time, because a player whose box covers no solid
+cell is not moved and is told nothing.
+
+**Worth doing once for the contrast.** Step 5 and step 6 are the same one-word edit to
+the same file. The only difference is whether the game was running when you made it,
+and that difference used to decide whether the player was looked after at all.
 
 ## What hot reload is not, yet
 

@@ -38,7 +38,8 @@ use mc_sim::action::default_held_block;
 use mc_sim::content::LoadedContent;
 use mc_sim::persistence::{Launching, simulation_at_launch};
 use mc_sim::replay::SectionQuads;
-use mc_sim::simulation::{PublishedContent, Simulation};
+use mc_sim::simulation::{PublishedContent, Seated, Simulation};
+use mc_sim::world::Clearing;
 use mc_world::persistence::Acceptance;
 
 use crate::content::ContentView;
@@ -69,6 +70,12 @@ const SAVE_PATH: [&str; 2] = ["saves", "world.mcw"];
 /// the list it is putting them back into — and `splice` is positional, so it must
 /// be *this* list and not a second whole-world mesh of the same world.
 ///
+/// **The clearing verdict does not weaken the absence above.** What made a
+/// `world` field dangerous is that there were two answers to one question and
+/// the frame path would have had to pick; a [`Clearing`] is a `Copy` verdict
+/// about what already happened, with no second candidate anywhere in scope to
+/// confuse it with, and the one thing done with it is saying it out loud.
+///
 /// The registry is shared rather than handed over, because the simulation holds
 /// one for the whole run — every edit resolves the name it writes against the
 /// same registry the world was resolved against — and the caller keeps reading the
@@ -87,6 +94,8 @@ pub struct PreparedLaunch {
     pub layers: TextureLayers,
     pub meshed: Vec<SectionQuads>,
     pub simulation: Simulation,
+    /// What seating the player in that simulation did about where they stood.
+    pub clearing: Clearing,
     pub holding: BlockName,
     pub registry: Arc<BlockRegistry>,
     pub hud: Arc<HudLayout>,
@@ -125,7 +134,7 @@ pub fn save_path() -> PathBuf {
 pub fn simulation_to_play(
     save: &Path,
     launching: Launching,
-) -> Result<(Simulation, BlockName), PreparationError> {
+) -> Result<(Seated, BlockName), PreparationError> {
     let holding =
         default_held_block(&launching.registry).ok_or(PreparationError::NothingToPlace)?;
     Ok((simulation_at_launch(save, launching)?, holding))
@@ -207,7 +216,7 @@ pub fn prepare_launch(
     let content = PublishedContent::first(resolved, hud);
     let hud = Arc::clone(&content.hud);
 
-    let (simulation, holding) = simulation_to_play(
+    let (seated, holding) = simulation_to_play(
         save,
         Launching {
             seed: mc_sim::REPLAY_SEED,
@@ -217,14 +226,15 @@ pub fn prepare_launch(
         },
     )?;
 
-    let meshed = simulation.world().mesh()?;
+    let meshed = seated.simulation.world().mesh()?;
 
     Ok(PreparedLaunch {
         root: root.to_path_buf(),
         scene: scene_of(&meshed, &layers)?,
         layers,
         meshed,
-        simulation,
+        clearing: seated.clearing,
+        simulation: seated.simulation,
         holding,
         registry,
         hud,

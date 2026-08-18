@@ -44,7 +44,7 @@ use mc_core::id::{BlockName, TextureKey};
 use mc_render::window::{Ending, report};
 use mc_sim::action::default_held_block;
 use mc_sim::player::{BlockPos, PlayerState};
-use mc_sim::simulation::{PublishedContent, Simulation};
+use mc_sim::simulation::{PublishedContent, Seated, Simulation, seat};
 use mc_sim::world::World;
 use mc_world::persistence::{Acceptance, load_world};
 use mc_world::section::Contents;
@@ -56,7 +56,7 @@ pub type TestResult = Result<(), Box<dyn Error>>;
 
 /// What a launch came to: the simulation it plays and the block a client holds
 /// in it, or the refusal it gave instead.
-pub type Launched = Result<(Simulation, BlockName), PreparationError>;
+pub type Launched = Result<(Seated, BlockName), PreparationError>;
 
 /// What a cell holding nothing is called wherever this suite compares contents
 /// as text.
@@ -209,7 +209,7 @@ pub fn standing_on_the_floor(
     let content = published_content(&registry)?;
     let world = World::new(blocks, registry)?;
     Ok((
-        Simulation::new(
+        seat(
             PlayerState {
                 position: SPAWN,
                 velocity: Vec3::ZERO,
@@ -219,7 +219,8 @@ pub fn standing_on_the_floor(
             },
             world,
             content,
-        ),
+        )
+        .simulation,
         holding,
     ))
 }
@@ -401,8 +402,9 @@ fn shown_to_a_player(turned_away: &PreparationError) -> String {
 
 /// The simulation a launch started and the block it holds, or the refusal it
 /// gave instead.
-fn played(launched: &Launched) -> Result<&(Simulation, BlockName), String> {
-    launched.as_ref().map_err(PreparationError::to_string)
+fn played(launched: &Launched) -> Result<(&Simulation, &BlockName), String> {
+    let (seated, holding) = launched.as_ref().map_err(PreparationError::to_string)?;
+    Ok((&seated.simulation, holding))
 }
 
 /// The content a simulation over `registry` publishes at launch.

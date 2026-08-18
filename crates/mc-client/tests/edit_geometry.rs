@@ -100,7 +100,7 @@ use mc_render::texture::TextureLayers;
 use mc_sim::action::{ActionIntent, EditReport, TickIntent};
 use mc_sim::player::{BlockPos, MovementIntent, PlayerState};
 use mc_sim::replay::{SectionQuads, remesh, splice};
-use mc_sim::simulation::Simulation;
+use mc_sim::simulation::{Simulation, seat};
 use mc_sim::world::World;
 use mc_world::section::Contents;
 
@@ -298,7 +298,7 @@ impl Handed {
         )?;
         let content = support::published_content(&prepared.registry)?;
         Ok(Self {
-            simulation: Simulation::new(looking_down_from(feet), world, content),
+            simulation: seat(looking_down_from(feet), world, content).simulation,
             meshed: prepared.meshed,
             layers: prepared.layers,
             registry: prepared.registry,

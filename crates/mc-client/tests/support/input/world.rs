@@ -37,7 +37,7 @@ use mc_core::content::{LayerAssignment, ResolvedBlock, ResolvedContent};
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::action::default_held_block;
 use mc_sim::player::PlayerState;
-use mc_sim::simulation::{PublishedContent, Simulation};
+use mc_sim::simulation::{PublishedContent, Simulation, seat};
 use mc_sim::world::World;
 use mc_world::world::{VoxelWorld, WorldPos};
 
@@ -97,7 +97,7 @@ pub fn ground_plane() -> Result<(Simulation, BlockName), Box<dyn Error>> {
         .ok_or("the driven client's declared registry holds no solid block to place")?;
     let content = published_content(&registry)?;
     Ok((
-        Simulation::new(
+        seat(
             PlayerState {
                 position: SPAWN,
                 velocity: Vec3::ZERO,
@@ -107,7 +107,8 @@ pub fn ground_plane() -> Result<(Simulation, BlockName), Box<dyn Error>> {
             },
             World::new(blocks, registry)?,
             content,
-        ),
+        )
+        .simulation,
         holding,
     ))
 }

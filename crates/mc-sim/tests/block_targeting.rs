@@ -43,7 +43,7 @@ use std::error::Error;
 use glam::Vec3;
 use mc_sim::action::{ActionIntent, TickIntent};
 use mc_sim::player::{MovementIntent, PlayerState};
-use mc_sim::simulation::Simulation;
+use mc_sim::simulation::{Simulation, seat};
 use mc_world::world::WorldPos;
 
 use support::chamber::{BlockChamber, at, differences, fixture_content};
@@ -224,7 +224,7 @@ fn after_a_break(
     chamber: &BlockChamber,
     player: PlayerState,
 ) -> Result<Simulation, Box<dyn Error>> {
-    let mut simulation = Simulation::new(player, chamber.build()?, fixture_content()?);
+    let mut simulation = seat(player, chamber.build()?, fixture_content()?).simulation;
     simulation.advance(TickIntent {
         movement: MovementIntent::default(),
         action: Some(ActionIntent::Break),

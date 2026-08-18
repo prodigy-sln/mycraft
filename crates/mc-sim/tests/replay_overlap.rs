@@ -60,7 +60,7 @@ fn no_tick_of_the_declared_replay_leaves_the_player_inside_a_solid_voxel() -> Te
     let registry = Arc::new(content_registry()?);
     let world = replay_world(&registry)?;
     let mut simulation =
-        simulation_for(&world, Arc::clone(&registry), published_content(&registry)?)?;
+        simulation_for(&world, Arc::clone(&registry), published_content(&registry)?)?.simulation;
     let mut standing = vec![simulation.latest().player.position];
     let mut buried = Vec::new();
 

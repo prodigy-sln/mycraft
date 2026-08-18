@@ -122,7 +122,8 @@ fn a_player_saved_while_they_were_moving_resumes_at_rest() -> TestResult {
         &generated,
         Arc::clone(&registry),
         published_content(&registry)?,
-    )?;
+    )?
+    .simulation;
     for _ in 0..FALLING_TICKS {
         playing.advance(MovementIntent::default());
     }

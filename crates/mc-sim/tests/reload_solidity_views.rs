@@ -41,7 +41,7 @@ use std::sync::Arc;
 use glam::Vec3;
 use mc_core::id::BlockName;
 use mc_sim::player::{BlockPos, PlayerState, Solidity};
-use mc_sim::simulation::Simulation;
+use mc_sim::simulation::{Simulation, seat};
 use mc_sim::world::World;
 use mc_world::section::Contents;
 use mc_world::world::{VoxelWorld, WorldPos};
@@ -100,11 +100,7 @@ fn playing() -> Result<Simulation, Box<dyn Error>> {
         on_ground: false,
     };
     let content = published_content(&registry)?;
-    Ok(Simulation::new(
-        spawn,
-        World::new(blocks, registry)?,
-        content,
-    ))
+    Ok(seat(spawn, World::new(blocks, registry)?, content).simulation)
 }
 
 /// What each of the two views says about the cell at `at`: whether the physics

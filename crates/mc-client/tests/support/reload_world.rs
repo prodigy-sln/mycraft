@@ -70,7 +70,7 @@ use mc_core::content::LayerAssignment;
 use mc_core::id::BlockName;
 use mc_sim::action::{EditReport, Refusal, default_held_block};
 use mc_sim::player::{BlockPos, PlayerState};
-use mc_sim::simulation::{PublishedContent, SimSnapshot, Simulation};
+use mc_sim::simulation::{PublishedContent, SimSnapshot, Simulation, seat};
 use mc_sim::world::World;
 use mc_world::column::{COLUMN_HEIGHT, SECTIONS_PER_COLUMN};
 use mc_world::section::{Contents, SECTION_SIZE};
@@ -285,7 +285,7 @@ pub fn playing_serving(
         .ok_or("this fixture's content root declares no solid block for a client to hold")?;
     let content = PublishedContent::first(loaded.resolved, loaded.hud);
     Ok((
-        Simulation::new(spawn, World::new(blocks, Arc::clone(&registry))?, content),
+        seat(spawn, World::new(blocks, Arc::clone(&registry))?, content).simulation,
         holding,
     ))
 }

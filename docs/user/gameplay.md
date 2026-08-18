@@ -101,6 +101,10 @@ all, or leave it off and the game keeps refusing until you either restore the mo
 the flag. A block that only *looks* different — a retextured mod, with nothing about how it behaves
 changed — never triggers this at all; that world loads normally, without asking.
 
+A save that loads can still put you somewhere that stopped being standable while the
+game was off. That is answered rather than refused, and "Coming back to a save never
+leaves you inside a block" below says what happens and what you read.
+
 ## Mods and scripting
 
 **Every block you break and place is now defined in a script, and nothing about playing the game
@@ -175,6 +179,46 @@ better of the two outcomes — the other one is falling with nothing underneath 
 is still chosen by the block's name. Changing whether a block is solid, or adding a
 block, does show. The rest of `docs/modding/hot-reload.md` says which edits are
 visible today.
+
+## Coming back to a save never leaves you inside a block
+
+The section above is about an edit landing while you watch. This one is about an edit
+that landed while you were away, and the two are different events: nobody was playing
+when this one happened, and the first you see of it is the world you arrive in.
+
+**Resuming a save now puts you somewhere you can move, even when a block became solid
+while the game was off.** Quit while you are standing in water, change that block to
+solid in the content files, start the client again, and you begin the session standing
+somewhere clear instead of stuck inside rock. The same search the section above
+describes decides where: sideways in preference to upward, never downward, up to eight
+blocks out, and never anywhere the world does not actually have ground.
+
+**You are told, on the terminal you started the game from**, and the line names where
+you ended up:
+
+```
+mycraft: you would have entered the world inside solid blocks, so you were moved to (12.5, 10, 12.5)
+```
+
+It says *you would have entered* rather than blaming a change, because you were not
+there for the change and there is nothing you did to undo. The three numbers are where
+your feet are now.
+
+**If nothing within those eight blocks is clear, you are left inside them and told
+so** — and the game still starts:
+
+```
+mycraft: you would have entered the world inside solid blocks and nothing within 8 blocks is clear, so you were left inside them
+```
+
+Starting anyway is deliberate. A launch refused for this would take the save away along
+with the edit, and the way out of the situation is to quit, change the block back or
+change something near you, and start again — which is only possible if the game runs.
+
+**Starting a fresh world moves you not at all.** A first launch with no save to resume
+puts you exactly where the world's own spawn is, says nothing on the terminal, and
+looks the way it always has. You only ever read one of the two lines above after a
+resume, and only when the world you saved into stopped being somewhere you could stand.
 
 ## What this does not cover yet
 

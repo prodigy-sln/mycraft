@@ -48,6 +48,7 @@ mod reload;
 
 use crate::gpu_startup::Gpu;
 use crate::launch::{PreparationHandle, collect};
+use crate::notice;
 use crate::remesh::{Remesher, Retained};
 use crate::session::Session;
 use crate::session::reload::Remeshing;
@@ -434,6 +435,7 @@ impl App {
             .upload_textures(&self.gpu.queue, &prepared.layers)?;
         let scene = Arc::new(prepared.scene);
         self.renderer.upload_scene(&self.gpu.queue, &scene)?;
+        notice::say_entering(prepared.clearing);
         session.attach_simulation(prepared.simulation, prepared.holding);
         // What makes the whole reload path reachable by the person it is for: the
         // root the launch was prepared from goes under watch, and the session
