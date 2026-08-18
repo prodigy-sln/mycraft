@@ -121,7 +121,7 @@ it before a run starts.
 | P0 | Hot reload — *edit a block while playing* | PRO-918 | **Done** |
 | P0 | A player entering a world is never left inside solid rock — *the shove, at every door rather than only at a reload* | PRO-948 | **Done** |
 | P0 | The composition root moves to `mc-server`, and the registry stops travelling to the client — *the split becomes structural instead of a comment* | PRO-944 | Todo |
-| P0 | Solid, drawn, occludes and targetable split, plus swimmable and density — *you can see water and swim in it* | PRO-904 | Todo — the drawn/occludes half rides with PRO-947 |
+| P0 | Solid, drawn, occludes and targetable split, plus swimmable and density — *you can see water and swim in it* | PRO-904 | Todo — immediately after PRO-947 |
 | P0 | Where generated art comes from at build time — *a decision and an ADR amendment, not a spec* | PRO-930 | **Done** — ADR-026 |
 | P0 | The grass block looks like a grass block: per-face keys, baked art, real pixels from disk — *the world stops being teal* | PRO-947, PRO-902 | Todo — unblocked |
 | P0 | The placeholder palette guarantees separation for blocks shipping no art | PRO-869 | Todo — unblocked |
@@ -172,14 +172,29 @@ spec states "nothing a player can see changes" as an intended outcome rather tha
 answers "the world is teal" and leaves "there are only four blocks" open.
 
 
-**The drawn/occludes split rides along with PRO-947 rather than following it, and the reason is a
-correctness argument.** Per-face texture keys, splitting the one `solid` bit into its separate
-consumers, and giving blocks a declared render method are three changes that each re-shoot the whole
-golden set — the scene revision is part of every capture id, so a mesher-contract change renames the
-set rather than modifying binaries. That re-shoot has a known corrupting failure mode
-(`docs/technical/rendering.md`, "Re-shooting a golden set"), and each repetition is another chance to
-mint goldens from a renderer that is already wrong. Paying it once is worth more than the scheduling
-convenience of paying it three times.
+**The drawn/occludes split does NOT ride along with PRO-947. This reverses a ruling made on
+2026-08-18 and the reversal is the more careful call.** The original argument was a re-shoot argument:
+per-face texture keys, splitting the one `solid` bit into its separate consumers, and giving blocks a
+declared render method each rename the whole golden set — the scene revision is part of every capture
+id, so a mesher-contract change renames the set rather than modifying binaries. That re-shoot has a
+known corrupting failure mode (`docs/technical/rendering.md`, "Re-shooting a golden set"), and each
+repetition is another chance to mint goldens from a renderer that is already wrong. Paying it once
+looked strictly better than paying it three times.
+
+**What that argument did not weigh is the cost of the spec it creates.** PRO-947 already absorbs
+PRO-914 (per-face keys) and PRO-869's first part (mips and filtering), and PRO-904 is itself
+substantial — four separate consumers of one bit, plus swimmable and density. Folding them together
+produces the largest spec this project would have attempted. Its own history is the counter-evidence:
+the 82-scenario terrain-render spec found **eighteen** instances of something passing for the wrong
+reason, and a spec is exactly where that failure hides, because nobody holds the whole of it at once.
+The re-shoot's danger is procedural and has a written procedure; the large-spec danger is measured and
+has none.
+
+So PRO-947 ships alone and PRO-904 follows it immediately, paying a second re-shoot deliberately.
+Two further consequences worth stating: **PRO-904 is player-visible in its own right** — "you can see
+water and swim in it" — and deserves to arrive as its own increment rather than buried inside an art
+spec; and PRO-947 is the first thing in this MVP a player can see at all, so delaying it behind
+solidity semantics delays the only visible payoff the MVP has produced.
 
 **Water is invisible today, not untextured** — `visible_face` (`crates/mc-world/src/mesh/sweep.rs`)
 returns no faces at all unless the voxel is solid, and `base:water` is the one shipped block declared

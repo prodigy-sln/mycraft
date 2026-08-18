@@ -165,12 +165,21 @@ Three separate pieces of MVP 2 work each trigger that re-shoot:
 | PRO-904 | splitting `solid` into its separate consumers | yes |
 | PRO-952 | a second render method | yes |
 
-**Decided: the drawn/occludes split rides along with PRO-947's per-face keys.**
-Done separately they pay the re-shoot twice, and liquids would pay it a third
-time. The re-shoot is not merely slow — it is the operation with a known
-corrupting failure mode, and each repetition is another chance to mint goldens
-from a renderer that is already wrong. Minimising the number of times it
-happens is a correctness argument, not a throughput one.
+**Reversed 2026-08-18: the drawn/occludes split does NOT ride along with
+PRO-947.** The original ruling was that doing them separately pays the re-shoot
+twice, and that liquids would pay it a third time — the re-shoot being the
+operation with a known corrupting failure mode, so minimising repetitions is a
+correctness argument rather than a throughput one. That reasoning still stands
+on its own terms.
+
+What it did not weigh is the spec it creates. PRO-947 already absorbs PRO-914
+and PRO-869's first part, and PRO-904 is substantial by itself. The combined
+spec would be the largest this project has attempted, and its own history says
+that is where defects hide: the 82-scenario terrain-render spec found eighteen
+instances of something passing for the wrong reason. **The re-shoot's danger is
+procedural and has a written procedure; the large-spec danger is measured and
+has none.** So PRO-947 ships alone, PRO-904 follows immediately, and the second
+re-shoot is paid deliberately.
 
 **PRO-952 lands after PRO-904.** A render method cannot be declared coherently
 while one `solid` bool still means drawn, occludes, collides and
