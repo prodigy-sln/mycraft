@@ -119,9 +119,9 @@ it before a run starts.
 | P0 | A content refusal names the file, the declaration and the field — *fix a typo in one edit* | PRO-939 | **Done** |
 | P0 | Blocks defined in Luau — pure loader swap, TOML retired — *the base game is a mod* | PRO-917 | **Done** |
 | P0 | Hot reload — *edit a block while playing* | PRO-918 | **Done** |
-| P0 | A player entering a world is never left inside solid rock — *the shove, at every door rather than only at a reload* | PRO-948 | Todo |
+| P0 | A player entering a world is never left inside solid rock — *the shove, at every door rather than only at a reload* | PRO-948 | **Done** |
 | P0 | The composition root moves to `mc-server`, and the registry stops travelling to the client — *the split becomes structural instead of a comment* | PRO-944 | Todo |
-| P0 | Solid, drawn, occludes and targetable split, plus swimmable and density — *you can see water and swim in it* | PRO-904 | Todo |
+| P0 | Solid, drawn, occludes and targetable split, plus swimmable and density — *you can see water and swim in it* | PRO-904 | Todo — the drawn/occludes half rides with PRO-947 |
 | P0 | Where generated art comes from at build time — *a decision and an ADR amendment, not a spec* | PRO-930 | Todo — **gates all art below** |
 | P0 | The grass block looks like a grass block: per-face keys, baked art, real pixels from disk — *the world stops being teal* | PRO-947, PRO-902 | Blocked on PRO-930 |
 | P0 | The placeholder palette guarantees separation for blocks shipping no art | PRO-869 | Blocked on PRO-930 |
@@ -170,6 +170,23 @@ confuse: it ships real *art* for blocks that already exist, not new blocks. It i
 this MVP a player can see at all — every one before it is invisible to them by design, and PRO-917's
 spec states "nothing a player can see changes" as an intended outcome rather than an omission. So it
 answers "the world is teal" and leaves "there are only four blocks" open.
+
+
+**The drawn/occludes split rides along with PRO-947 rather than following it, and the reason is a
+correctness argument.** Per-face texture keys, splitting the one `solid` bit into its separate
+consumers, and giving blocks a declared render method are three changes that each re-shoot the whole
+golden set — the scene revision is part of every capture id, so a mesher-contract change renames the
+set rather than modifying binaries. That re-shoot has a known corrupting failure mode
+(`docs/technical/rendering.md`, "Re-shooting a golden set"), and each repetition is another chance to
+mint goldens from a renderer that is already wrong. Paying it once is worth more than the scheduling
+convenience of paying it three times.
+
+**Water is invisible today, not untextured** — `visible_face` (`crates/mc-world/src/mesh/sweep.rs`)
+returns no faces at all unless the voxel is solid, and `base:water` is the one shipped block declared
+`solid = false`. So the sea has a texture key, occupies cells, and draws nothing. That is why PRO-904
+is a prerequisite for PRO-952 rather than an improvement on it: a block cannot declare *how* it draws
+while one bit still decides whether it draws, whether it occludes, whether it collides and whether it
+can be stood on.
 
 **PRO-930 gates every art spec, and it is a decision rather than work.** Generated assets are not
 committed — deterministic and free output is regenerated, nondeterministic or paid output is
