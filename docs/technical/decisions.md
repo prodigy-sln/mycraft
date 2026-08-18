@@ -189,7 +189,8 @@ record was made.
 
 ## ADR-009 — Generated assets are a build-time artifact, never a runtime dependency
 
-**Status**: Accepted · **Date**: 2026-08-11 · **Implementation pending (`tools/asset-gen`)**
+**Status**: Accepted · **Date**: 2026-08-11 · **Implementation pending (`tools/asset-gen`)** ·
+**Narrowed in part by ADR-026**
 
 **Context.** ElevenLabs (audio, voices) and fal.ai (textures, icons) are available for asset
 production. The naive integration — call the API when an asset is needed — is wrong in four
@@ -241,6 +242,13 @@ calibrates from measurement instead of a guessed constant.
 **Rejected.** Runtime generation with caching — still ships a key, still bills per new player, and
 turns first-encounter latency into a gameplay problem. Committing only a manifest and generating on
 first build — makes every clone cost money and every CI run non-deterministic.
+
+**Record note (2026-08-18).** ADR-026 narrows this record's "output lands in `assets/`, which is
+committed to the repository" to the class of output this record was actually reasoning about:
+provider output that cannot be reproduced. Everything above stands as written about ElevenLabs and
+fal.ai assets, about cost control, and about the game reading local files only; what changed is that
+"generated" stopped being the property that decides whether output is committed, because a
+deterministic and free generator now exists that this record's reasoning never covered.
 
 ---
 
@@ -1217,3 +1225,131 @@ disagreeing at the worst possible moment.
   the one place this project will not put one.
 - **Warning and accepting.** A warning nobody reads is an acceptance, and the state it accepts is the
   one the previous option describes.
+
+## ADR-026 — Committed-ness follows reproducibility, and the generator runs as an explicit pre-build step
+
+**Status**: Accepted · **Date**: 2026-08-18 · **Narrows ADR-009 in part** ·
+**Implementation pending (first consumer of generated art)**
+
+**Context.** ADR-009 wrote committed-ness into the record as a property of *generated* output:
+"Output lands in `assets/`, which is **committed to the repository**." That sentence is about to be
+applied to a kind of output the record never reasoned about. `tools/voxforge` (SPEC-013) renders
+`.mcvox` sources to textures deterministically and for nothing, and the base game's terrain faces
+are to be authored that way. Taken literally, ADR-009 would commit a binary set every clone can
+reproduce byte for byte — and a texture set regenerated fifty times leaves fifty blobs in the pack
+forever, because git keeps them all.
+
+ADR-009's actual reason was never the word "generated". It was that fal.ai and ElevenLabs output
+**cannot be reproduced**: regenerating costs money and may differ run to run. That is why the record
+hashes each manifest entry over its full generation spec, why a matching hash skips generation, and
+why regenerating an unchanged asset needs an explicit `--force`. Every one of those mechanisms is
+protection against a re-run that is expensive or that does not come back the same. None of them says
+anything about a generator that is neither.
+
+**Decision — the rule.** Committed-ness follows **reproducibility**, not "generated".
+
+- **Deterministic and free to reproduce → not committed.** It is regenerated from the source that
+  produces it, and the source is what the repository carries.
+- **Nondeterministic, or paid for → committed**, exactly as ADR-009 says, for exactly ADR-009's
+  reasons.
+
+VoxForge output is the first thing on the near side of that line: byte-identical by requirement
+(SPEC-013 FR-5.3-S1) and costing nothing to produce. It is therefore a **different class, not an
+exception**. ADR-009's provider assets stay committed under the sharpened rule for the same reason
+they were committed under the old one, which is what makes this a narrowing rather than a reversal.
+
+**Golden frames stay committed. They are evidence, not assets.** The sets under
+`crates/mc-render/goldens/`, `crates/mc-testkit/goldens/` and `tools/voxforge/tests/goldens/` are
+reproducible in the trivial sense that re-running the renderer produces them — and that is precisely
+why they are not derived output. A golden is the committed record of what the renderer produced on
+the day a human looked at it and agreed; regenerating it from the code under test destroys the only
+property it ever had. ADR-013 states the same thing from the other side: a golden re-shot from a
+broken renderer is a golden of a broken renderer. The reproducibility test above asks whether the
+output can be re-derived **from a source that is not the thing being checked**. A golden's only
+source *is* the thing being checked, so it never satisfies the test and never falls under the rule.
+This paragraph exists because someone will eventually read the rule, see a directory of PNGs that a
+program can obviously reproduce, and tidy them away.
+
+**Decision — the mechanism.** The generator runs as an **explicit pre-build step**: a
+`voxforge build <manifest>` subcommand of the existing tool. **VoxForge is not split, and SPEC-013
+FR-9.1 — `tools/` may depend inward on `crates/`, nothing in `crates/` may depend on `tools/` — is
+not amended.** Its as-built statement and mechanical enforcement are in `technical/architecture.md`.
+
+Five things follow, and the first two are binding on whichever spec first consumes generated art.
+
+1. **The client refuses, by name, when the generated set is missing or stale against the manifest
+   hash**, and the refusal says what to run. It never draws a texture-less world. This is the
+   failure contract this codebase already applies everywhere else — `PreparationError` in
+   `crates/mc-client/src/startup.rs:92` already fails a run rather than degrading it, and already
+   carries the neighbouring case of a content root that is not there. A newcomer who has not run the
+   generator gets a sentence telling them what to do, not a broken picture, and that is what makes
+   the cost stated below tolerable rather than merely accepted.
+2. **The gate generates before it tests**, or the golden suites read a stale set. One line in
+   `scripts/sdd-gate.ps1`, ahead of stage 7, so that both the instrumented path and the
+   `-SkipCoverage` path see a fresh set. This is the single real advantage a `build.rs` had, and it
+   costs a line.
+3. **The manifest hash of the generated set is asserted.** While a texture PNG was committed it was
+   pinned; once it is derived, a generator change silently shifts every golden that samples it and
+   reads as a renderer regression. Hashing the set makes "the generator changed" fail loudly and
+   distinctly from "the renderer changed" — the same reasoning as the licence-text drift check
+   already on the gate (`technical/licensing.md`).
+4. **A gate stage fails on a committed generated artefact.** A `.gitignore` rule drifts back over
+   time; a stage that refuses the artefact is what makes the rule hold.
+5. **The build step needs a cache keyed on `.mcvox` content**, or every incremental build
+   regenerates the whole set. Cheap to design in and annoying to retrofit.
+
+The developer step is `cargo run -p voxforge -- build`, one README line above
+`cargo run -p mc-client`.
+
+**Consequences.** `cargo build` alone no longer produces a complete game. That property was worth
+something and it is being spent deliberately; item 1 above is the whole of the mitigation, and if it
+is ever weakened this decision should be reopened rather than quietly lived with. The repository
+stops accumulating binary revisions of output it can derive, and `.mcvox` sources become the thing
+under review in a diff. VoxForge gains one `Command` variant and one dispatch arm — no new crate, no
+new workspace member, no change to the dependency topology, and nothing added to any engine crate's
+resolved closure.
+
+Item 1 is about the generated **set** measured against its manifest, and is not the same question as
+a single declared texture key with no art behind it. A mod author trips the latter on their first
+block, and the per-key placeholder that answers it is unaffected by this record: one is "the build
+step was not run", the other is "this key was never authored", and they must not be collapsed into
+one message.
+
+FR-9.1 stays a checked fact rather than prose. `crates/mc-testkit/tests/workspace_layering.rs` walks
+each engine crate's resolved closure from `cargo metadata` and collects every `deps[].pkg` without
+filtering `dep_kinds` (`workspace_layering.rs:99`), and those nodes do carry build-dependency edges —
+`mc-render`'s edge onto `naga` reports `dep_kinds` of `dev` and `build`. So a `build.rs` reaching
+VoxForge fails that test today, under a total-enum verdict with a positive control on both
+directions.
+
+**Rejected.**
+
+- **A `build.rs` in the consuming crate that invokes VoxForge**, whether reached directly or through
+  a split-out crate. This is refused for reasons that hold *independently* of FR-9.1, which is why
+  the split below does not rescue it. **Generated block textures are content.**
+  `crates/mc-sim/src/content.rs:42` declares the shipped content root as the relative path
+  `["content", "base"]`, resolved against the process's working directory at runtime
+  (`content.rs:105`), and its own doc comment says so. A build script may write only to `OUT_DIR`,
+  which that loader cannot see. Both ways out are refused: `include_bytes!` from `OUT_DIR` embeds
+  base-game block textures in the engine binary, against invariant 1 and against ADR-009's own "the
+  game reads local files only"; and writing into `content/base/` has cargo mutating git-visible
+  state, which cargo explicitly reserves against. The mechanism does not fit the thing it would be
+  producing.
+- **Splitting VoxForge — render core as a crate under `crates/`, CLI staying in `tools/`.** This was
+  the recorded preference, and it is rejected although it is **cheap**. Cheapness was measured and is
+  not in doubt: `cli/` is a leaf reached from exactly one place (`tools/voxforge/src/main.rs:12`),
+  `clap` is named in one file (`tools/voxforge/src/cli/args.rs:11`), and the module graph is already
+  an acyclic layering. It is the wrong question. The split buys nothing except permission to build
+  the `build.rs` above, and the paragraph above declines to build it — so the crate boundary would be
+  paid to unlock a door into a room we do not want to enter. Worse, it satisfies FR-9.1's letter
+  while delivering the coupling the rule exists to forbid: relocating the whole authoring tool into
+  `crates/` so that `crates/` is allowed to depend on it is relocation, not architecture.
+- **Amending FR-9.1.** The honest alternative if we did want the engine build to invoke the asset
+  tool, listed here rather than left unsaid, because pretending the rule was never in the way is how
+  a rule gets hollowed out by the option that merely looks compliant. We do not want that coupling,
+  so there is nothing to amend for.
+- **Committing the generated set anyway, treating VoxForge output as an exception to ADR-009.**
+  Keeps `cargo build` complete, at the cost of the repository carrying every revision of something
+  any clone can re-derive for free, forever. It also leaves the rule stated as "generated output is
+  committed" — a rule whose reason nobody can recover, which is how the next deterministic generator
+  inherits a constraint written for a paid one.
