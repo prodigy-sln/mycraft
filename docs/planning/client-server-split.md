@@ -309,6 +309,14 @@ block definition naming it. A pack supplying an image for a key no block names
 would occupy no layer and never be sampled; a key with no image is refused loudly
 rather than drawn as layer zero.
 
+> **Superseded in one detail, 2026-08-17 (ADR-024).** A layer index is *not* a
+> key's position in a sorted set. Layers are assigned in the order keys are first
+> seen within a session and are never renumbered, so a reload that adds a key
+> appends rather than shifting every layer beneath it. The paragraph's conclusion
+> survives unchanged — a pack replacing images still cannot reach the table,
+> because a key still only exists by a block definition naming it — and that is
+> why the reasoning after it is kept.
+
 **There is no image behind a key today.** Texels are generated from the key
 itself, 16×16, in the GPU layer — same key, same texels, forever. The key *is* the
 image. Real art has not landed.

@@ -54,7 +54,7 @@ the scene places, and no fifth one for the space above them, because it places n
 the **only** file listed in `EXEMPT_FILES` in `crates/mc-world/tests/no_hardcoded_block_names.rs`.
 
 **This does not weaken invariant 1**, which forbids hardcoded block *definitions*. `world.rs` names
-blocks to *place* them; texture and solidity still come only from `content/base/blocks/*.toml` via
+blocks to *place* them; texture and solidity still come only from `content/base/blocks/*.luau` via
 the registry the generator is handed. The scan forbids every *mention* — a free over-approximation
 until something legitimately needed to reference a block. This records where the proxy is stricter
 than the rule, not a relaxation of the rule.
