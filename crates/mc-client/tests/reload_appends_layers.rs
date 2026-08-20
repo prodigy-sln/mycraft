@@ -47,8 +47,8 @@ use std::error::Error;
 
 use input::InputHarness;
 use reload::{
-    AMBER, AMBER_FILE, DIRT, GRASS, GRASS_FILE, STONE, accepted, adoption, amber, declaring,
-    holding_blocks_it_does_not_declare, shipped,
+    AMBER, AMBER_FILE, DIRT, GRASS, GRASS_FILE, GRASS_ONLY_KEYS, STONE, accepted, adoption, amber,
+    declaring, holding_blocks_it_does_not_declare, shipped,
 };
 use reload_content::{
     THE_NEXT_UNUSED_LAYER, candidate_against, layers_beside, layers_without, publishing,
@@ -93,7 +93,7 @@ fn a_key_no_declaration_names_any_more_leaves_every_remaining_key_on_the_layer_i
         (answered, published.layers, published.spent),
         (
             accepted(DIRT),
-            layers_without(GRASS)?,
+            layers_without(&GRASS_ONLY_KEYS)?,
             THE_NEXT_UNUSED_LAYER
         ),
         "the author has stopped declaring the block that held the second layer, and no cell holds \
@@ -123,8 +123,8 @@ fn a_key_taken_away_and_then_declared_again_gets_a_layer_it_has_never_held() -> 
         (
             accepted(DIRT),
             accepted(DIRT),
-            grass_on_a_layer_it_never_held()?,
-            THE_NEXT_UNUSED_LAYER + 1
+            grass_keys_on_layers_they_never_held()?,
+            THE_NEXT_UNUSED_LAYER + GRASS_ONLY_KEYS.len() as u16
         ),
         "the key is back and the layer it used to hold is not. Vertices uploaded while it was \
          retired still sample layer 1 and still name the block that was drawn there, so handing \
@@ -176,16 +176,23 @@ fn a_client_over(floor: &'static str) -> Result<InputHarness, Box<dyn Error>> {
     Ok(client)
 }
 
-/// The layers a session states once the second key has been retired and declared
-/// again: the launch's four with that key off the layer it held and on the first
-/// layer nothing has ever held.
+/// The layers a session states once the grass block's five keys have been retired
+/// and declared again: the launch's map with those five off the layers they held
+/// and on the first five layers nothing has ever held.
+///
+/// **Five and not one, and `base:dirt` is not among them.** One declaration
+/// states six facing keys; the sixth is `base:dirt`, which the dirt block
+/// declares too, so it never retires and never moves. The five come back in
+/// ascending order because that is the order an assignment appends a set in.
 ///
 /// # Errors
 ///
 /// Returns an error if the shipped key list is not the one this arithmetic rests
 /// on.
-fn grass_on_a_layer_it_never_held() -> Result<BTreeMap<String, u16>, Box<dyn Error>> {
-    let mut layers = layers_without(GRASS)?;
-    layers.insert(GRASS.to_owned(), THE_NEXT_UNUSED_LAYER);
+fn grass_keys_on_layers_they_never_held() -> Result<BTreeMap<String, u16>, Box<dyn Error>> {
+    let mut layers = layers_without(&GRASS_ONLY_KEYS)?;
+    for (key, layer) in GRASS_ONLY_KEYS.iter().zip(THE_NEXT_UNUSED_LAYER..) {
+        layers.insert((*key).to_owned(), layer);
+    }
     Ok(layers)
 }

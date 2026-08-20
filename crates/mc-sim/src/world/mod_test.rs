@@ -39,6 +39,7 @@ use std::sync::Arc;
 
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin, RegistryError};
+use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_world::world::{VoxelWorld, WorldPos};
 
@@ -133,7 +134,7 @@ fn declaring(names: &[&str]) -> Result<BlockRegistry, Box<dyn Error>> {
     for name in names {
         declared.push(Ok(BlockDefinition {
             name: BlockName::parse(name)?,
-            texture: TextureKey::parse(name)?,
+            textures: FaceTextures::uniform(TextureKey::parse(name)?),
             is_solid: true,
             replaceable: false,
             breakable: true,

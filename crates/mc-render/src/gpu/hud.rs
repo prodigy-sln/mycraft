@@ -27,11 +27,11 @@ use crate::hud::{HudFrame, compose};
 use crate::overlay::OverlayReadout;
 use crate::pass::TerrainPassConfig;
 use crate::snapshot::{FrameStats, ScenePhase, TerrainSnapshot};
-use crate::texture::TextureLayers;
+use crate::texture::TextureResolution;
 
 use super::hud_pass::{HudPass, paintable};
 use super::overlay::OverlayPass;
-use super::{FrameError, RecordTarget, RendererError, TerrainRenderer};
+use super::{FrameError, RecordTarget, RendererError, TerrainRenderer, TerrainTextures};
 
 /// Everything one frame shows: the world, the HUD over it, and the debug overlay
 /// over that.
@@ -52,7 +52,7 @@ pub struct FrameSnapshot<'a> {
 }
 
 /// The terrain pass, the HUD pass over it and the overlay pass over that, with
-/// the texture layers the HUD resolves a swatch through.
+/// the resolution the HUD resolves a swatch through.
 #[derive(Debug)]
 pub struct FrameRenderer {
     terrain: TerrainRenderer,
@@ -62,49 +62,60 @@ pub struct FrameRenderer {
     /// thread while somebody waits for a frame.
     overlay: OverlayPass,
     /// Kept from [`upload_textures`](Self::upload_textures): `compose_hud` takes
-    /// no layers, because the client uploads them once at preparation and the
+    /// no resolution, because the client uploads it once at preparation and the
     /// HUD samples the same array texture terrain does.
-    layers: TextureLayers,
+    resolution: TextureResolution,
     compositions: u64,
 }
 
 impl FrameRenderer {
     /// Builds the terrain pass `config` describes, and the HUD pass over it.
     ///
+    /// **`textures` is taken here and held for the whole run**, which is what
+    /// makes a reload unable to lose it: a reload hands over layers, never a
+    /// supply, so the second upload fills every layer from the same texels the
+    /// first did.
+    ///
     /// # Errors
     ///
     /// Returns [`RendererError`] when a resource cannot be built to the declared
-    /// capacities.
+    /// capacities, and [`RendererError::TerrainSampler`] when the device refuses
+    /// the sampler asked for.
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         config: &TerrainPassConfig,
+        textures: &TerrainTextures<'_>,
     ) -> Result<Self, RendererError> {
-        let terrain = TerrainRenderer::new(device, queue, config)?;
+        let terrain = TerrainRenderer::new(device, queue, config, textures)?;
         let hud = HudPass::new(device, config, terrain.array_texture());
         let overlay = OverlayPass::new(device, config);
         Ok(Self {
             terrain,
             hud,
             overlay,
-            layers: TextureLayers::default(),
+            resolution: TextureResolution::default(),
             compositions: 0,
         })
     }
 
-    /// Which layer of the array texture each texture key occupies, as the last
-    /// [`upload_textures`](Self::upload_textures) left it.
+    /// What each block draws on each of its facings, and which layer each key
+    /// occupies, as the last [`upload_textures`](Self::upload_textures) left it.
     ///
     /// Borrowed from the renderer rather than copied into whoever composes a
-    /// frame: the layers a swatch is looked for in have to be the layers the
-    /// array texture was filled from, and a second copy is a second answer
-    /// waiting to disagree with this one.
+    /// frame: **what a swatch is looked up in has to be what the array texture
+    /// was filled from**, and a second copy is a second answer waiting to
+    /// disagree with this one.
     #[must_use]
-    pub const fn texture_layers(&self) -> &TextureLayers {
-        &self.layers
+    pub const fn texture_resolution(&self) -> &TextureResolution {
+        &self.resolution
     }
 
     /// Fills the array texture, one layer per resolved texture key.
+    ///
+    /// The whole resolution rather than its layers alone, because this is the
+    /// one uploader that also answers a swatch. `TerrainRenderer` is handed the
+    /// layers, which is all filling an array texture needs.
     ///
     /// # Errors
     ///
@@ -113,10 +124,10 @@ impl FrameRenderer {
     pub fn upload_textures(
         &mut self,
         queue: &wgpu::Queue,
-        layers: &TextureLayers,
+        resolution: &TextureResolution,
     ) -> Result<(), RendererError> {
-        self.terrain.upload_textures(queue, layers)?;
-        self.layers = layers.clone();
+        self.terrain.upload_textures(queue, resolution.layers())?;
+        self.resolution = resolution.clone();
         Ok(())
     }
 
@@ -182,7 +193,7 @@ impl FrameRenderer {
         if !paintable(target.size) {
             return Ok(());
         }
-        let planned = compose(hud, target.size, &self.layers);
+        let planned = compose(hud, target.size, self.resolution.layers());
         self.hud.record(target, &planned);
         Ok(())
     }

@@ -1,23 +1,24 @@
 //! The held-block indicator: what it shows, what it shows instead when the
 //! block changes, and what it leaves alone when there is nothing to show.
 //!
-//! # The swatch is judged against two colours, and one would be wrong
+//! # The swatch is judged against the colours its layer holds, and one would be
+//! wrong
 //!
-//! A placeholder layer is a **checkerboard of the declared mean plus and minus
-//! one fixed step per channel**, so exactly two colours reach it and each covers
-//! half of an even-sided texture. Those two sit about ΔE 3.5 from the mean they
-//! straddle and about ΔE 7 from each other, so **no textured swatch can land
-//! every pixel within ΔE 2 of a single colour** — the only way to satisfy that
-//! form is to draw the swatch flat, which is not drawing the texture. The
-//! assertion below is therefore a two-colour multiset: every pixel within ΔE 2
-//! of *one* of the two, and *both* of them shown. That form reports a flat
-//! swatch, another block's texture, and nothing drawn at all, where the
-//! single-colour form catches those only by accident.
+//! A layer holds more than one colour whichever way it was filled: a generated
+//! texture is a checkerboard of the declared mean plus and minus one fixed step,
+//! and the shipped art holds three, five or six colours. So **no textured swatch
+//! can land every pixel within ΔE 2 of a single colour** — the only way to
+//! satisfy that form is to draw the swatch flat, which is not drawing the
+//! texture. The assertion below is therefore a multiset: every pixel within ΔE 2
+//! of *one* of the layer's colours, and *every* one of them shown. That form
+//! reports a flat swatch, another block's texture, and nothing drawn at all,
+//! where the single-colour form catches those only by accident.
 //!
-//! **Both colours come from `placeholder_texels`, which is a generator, and
-//! from the key the held block's own name spells.** Nothing here reads a colour
-//! out of a rendered frame to find out what that frame should have held; that is
-//! how a broken renderer certifies itself.
+//! **The colours come from what the layer is filled with — the built set's own
+//! image where it covers the key, and the generator where it does not — and
+//! from the key the held block's declaration states for the indicator's facing.**
+//! Nothing here reads a colour out of a rendered frame to find out what that
+//! frame should have held; that is how a broken renderer certifies itself.
 //!
 //! # Every rectangle is derived from the declaration and the target
 //!
@@ -56,7 +57,8 @@ use std::sync::Arc;
 use mc_core::block::BlockRegistry;
 use mc_core::id::{BlockName, TextureKey};
 use mc_render::hud::{HudFrame, held_swatch};
-use mc_render::texture::TextureLayers;
+use mc_render::texture::TextureResolution;
+use mc_render::texture::supplied::SuppliedTexels;
 use mc_sim::action::default_held_block;
 use mc_sim::replay::simulation_for;
 use mc_testkit::frame::gpu::CaptureContext;
@@ -68,7 +70,7 @@ use support::hud_frames::{
     Comparison, HudCapture, Rect, UnpreparedCapture, compare_frames, hud_of, no_hud,
 };
 use support::probe::distance;
-use support::swatch::{SAME_COLOR, TEXEL_COLORS, require, swatch_reading, texel_colors};
+use support::swatch::{SAME_COLOR, drawn_colors_of, require, swatch_reading};
 use support::{TestResult, content_root, frames};
 
 /// The tick every prepared frame here is drawn at.
@@ -83,12 +85,24 @@ const CROSSHAIR_DECLARATIONS: [&str; 2] = ["crosshair-horizontal.toml", "crossha
 /// holds, and where it is moved to.
 ///
 /// Blocks register in file-name sorted order and a client holds the first solid
-/// one, so `dirt`, `grass`, `stone`, `water` becomes `grass`, `stone`, `water`,
-/// `zz-dirt` and the first solid block is a different one. Nothing else about
-/// the root changes: the same four blocks register, the same world generates,
-/// and the same texture keys occupy the same layers.
-const HELD_FIRST: &str = "dirt.luau";
-const HELD_LAST: &str = "zz-dirt.luau";
+/// one, so moving `dirt` and `grass` to the end leaves `stone`, `water`,
+/// `zz-dirt`, `zz-grass` and the block a client holds is stone. Nothing else
+/// about the root changes: the same four blocks register, the same world
+/// generates, and the same texture keys occupy the same layers.
+///
+/// **Two moved rather than one, and that is the shipped art's doing.** Moving
+/// only `dirt` reaches `grass`, whose indicator face draws `base:grass_side_north`
+/// — and a grass side *is* mostly dirt: it holds the three dirt colours byte for
+/// byte, over four fifths of its texels. The assertion below says every
+/// indicator pixel differs between the two frames, which cannot be true of two
+/// textures sharing a colour, so it would be red against a correct renderer and
+/// the cheapest way to green it would be to weaken it. Stone shares no colour
+/// with dirt: the nearest pair stands ΔE 21.13 apart, against the ΔE 2.0 that
+/// calls two colours the same.
+const HELD_FIRST: [(&str, &str); 2] = [
+    ("dirt.luau", "zz-dirt.luau"),
+    ("grass.luau", "zz-grass.luau"),
+];
 
 /// Where the indicator's fill lands, derived in this file's header.
 const INDICATOR_FILL: Rect = Rect {
@@ -129,33 +143,46 @@ fn the_indicator_shows_both_texel_colours_of_the_block_the_session_holds() -> Te
         return Ok(());
     };
     require_declared(&[INDICATOR_DECLARATION])?;
-    let (mut frames_of, layers, placing) = replay_holding(&context)?;
+    let (mut frames_of, resolution, placing) = replay_holding(&context)?;
     let client = client_holding(&frames_of, &placing)?;
 
     let held = client.held_block();
-    let showing = held_swatch(held.as_ref(), &layers).texture();
+    let showing = held_swatch(held.as_ref(), &resolution).texture();
+    let key = key_shown(showing.as_ref())?;
     let request = frames::request(&context, "hud-held-block-swatch")?;
     let frame = frames_of.capture(&holding(&content_root()?, showing)?, &request)?;
+    let drawn = drawn_colors_of(&key, &frames_of.content.texels)?;
 
-    let seen = swatch_reading(&frame, INDICATOR_FILL, &texel_colors(&placing)?)?;
+    let seen = swatch_reading(&frame, INDICATOR_FILL, &drawn)?;
     let read = (
         held.as_ref().map(BlockName::as_str),
         seen.strayed,
         seen.shown,
     );
+
     assert_eq!(
         (read, seen.considered),
         (
-            (Some(placing.as_str()), 0, TEXEL_COLORS),
+            (Some(placing.as_str()), 0, drawn.len()),
             INDICATOR_FILL.area()
         ),
-        "the indicator draws the texture of the block a placement would use: every pixel of it is \
-         one of the two colours that block's placeholder layer is made of, and both of them are \
-         there — a flat swatch shows one, another block's texture shows neither, and nothing \
-         drawn shows the world behind it"
+        "{THE_SWATCH_IS_ITS_LAYER}"
     );
     Ok(())
 }
+
+/// What the reading above is about, kept beside it rather than inside it.
+///
+/// The sentence is here because the function it belongs to sits against the
+/// thirty-line limit, and a limit hit while doing something else rejects
+/// whatever is cheapest to drop — which is always the explanation.
+const THE_SWATCH_IS_ITS_LAYER: &str = "the indicator draws the texture of the block a placement would use: every pixel of it is one \
+     of the colours that block's *layer* is made of — the built set's image where the set covers \
+     the key, the generated texture where it does not — and every one of those colours is there. \
+     A flat swatch shows one, another block's texture shows none, and nothing drawn shows the \
+     world behind it. The fill is 24 x 24 over a 16 x 16 texture sampled with nearest \
+     magnification, so every texel lands on at least one pixel and the rarest colour of the \
+     shipped dirt art — 28 texels of 256 — cannot be missed";
 
 #[test]
 fn two_content_roots_holding_different_blocks_show_different_indicator_pixels() -> TestResult {
@@ -163,15 +190,19 @@ fn two_content_roots_holding_different_blocks_show_different_indicator_pixels() 
         return Ok(());
     };
     require_declared(&[INDICATOR_DECLARATION])?;
-    let moved = content::shipped_renaming_block(HELD_FIRST, HELD_LAST)?;
+    let moved = content::shipped_renaming_blocks(&HELD_FIRST)?;
     let (one, other) = (held_by(&content_root()?)?, held_by(moved.path())?);
-    require_distinguishable(&one, &other)?;
 
     let mut frames_of = HudCapture::ready(&context, TICK)?;
-    let layers = frames_of.content.layers.clone();
-    let showing = |block: &BlockName| held_swatch(Some(block), &layers).texture();
+    let resolution = frames_of.content.resolution.clone();
+    let showing = |block: &BlockName| held_swatch(Some(block), &resolution).texture();
     let (first, second) = (showing(&one), showing(&other));
     require_both_resolve(first.as_ref(), second.as_ref())?;
+    require_distinguishable(
+        (&one, &other),
+        (first.as_ref(), second.as_ref()),
+        &frames_of.content.texels,
+    )?;
 
     let request = frames::request(&context, "hud-held-block-one")?;
     let from_one = frames_of.capture(&holding(&content_root()?, first)?, &request)?;
@@ -253,8 +284,8 @@ fn holding_nothing_leaves_every_other_declared_element_where_holding_a_block_put
         return Ok(());
     };
     require_declared(&[INDICATOR_DECLARATION])?;
-    let (mut frames_of, layers, placing) = replay_holding(&context)?;
-    let showing = held_swatch(Some(&placing), &layers).texture();
+    let (mut frames_of, resolution, placing) = replay_holding(&context)?;
+    let showing = held_swatch(Some(&placing), &resolution).texture();
     let root = content_root()?;
 
     let request = frames::request(&context, "hud-holding-a-block")?;
@@ -291,11 +322,11 @@ fn holding_nothing_leaves_every_other_declared_element_where_holding_a_block_put
 /// when the shipped content registers no solid block.
 fn replay_holding(
     context: &CaptureContext,
-) -> Result<(HudCapture<'_>, TextureLayers, BlockName), Box<dyn Error>> {
+) -> Result<(HudCapture<'_>, TextureResolution, BlockName), Box<dyn Error>> {
     let frames_of = HudCapture::ready(context, TICK)?;
-    let layers = frames_of.content.layers.clone();
+    let resolution = frames_of.content.resolution.clone();
     let placing = first_solid(&frames_of.content.registry)?;
-    Ok((frames_of, layers, placing))
+    Ok((frames_of, resolution, placing))
 }
 
 /// A client's own core, playing the world `frames_of` was prepared from and
@@ -399,20 +430,43 @@ fn first_solid(registry: &BlockRegistry) -> Result<BlockName, Box<dyn Error>> {
     })
 }
 
-/// Fails unless the two blocks' placeholder layers are made of four colours no
-/// two of which could be mistaken for each other.
+/// Fails unless the two blocks' indicator layers share no colour a viewer could
+/// mistake for one of the other's.
 ///
 /// The assertion this guards says **every** indicator pixel differs between two
 /// frames, and that is only derivable when a pixel of one texture can never be
-/// a pixel of the other. Measured from the generator rather than hoped for: an
-/// over-tight assertion is red against a correct renderer, which is the failure
-/// that gets fixed by breaking the renderer.
+/// a pixel of the other. Measured from what each layer is actually filled with
+/// rather than hoped for: an over-tight assertion is red against a correct
+/// renderer, which is the failure that gets fixed by breaking the renderer.
+///
+/// **This is the check that would have caught the pairing this suite used
+/// before the shipped art existed.** Dirt against grass was two generated
+/// palettes with nothing in common; dirt against a grass *side* is two textures
+/// sharing three colours byte for byte, because a grass side is mostly dirt.
 ///
 /// # Errors
 ///
 /// Returns a failure when the two blocks are the same, or when any colour of one
 /// stands within [`SAME_COLOR`] of a colour of the other.
-fn require_distinguishable(one: &BlockName, other: &BlockName) -> Result<(), Box<dyn Error>> {
+/// The key a swatch resolved to.
+///
+/// # Errors
+///
+/// Returns a failure when it resolved to none: an indicator drawing nothing has
+/// no colours to be judged against, and a reading about them would be about a
+/// swatch nobody drew.
+fn key_shown(showing: Option<&TextureKey>) -> Result<TextureKey, Box<dyn Error>> {
+    Ok(showing
+        .ok_or("the block a client holds has to resolve to a key for its indicator to draw")?
+        .clone())
+}
+
+fn require_distinguishable(
+    blocks: (&BlockName, &BlockName),
+    keys: (Option<&TextureKey>, Option<&TextureKey>),
+    supplied: &SuppliedTexels,
+) -> Result<(), Box<dyn Error>> {
+    let (one, other) = blocks;
     require(
         one != other,
         format!(
@@ -421,15 +475,33 @@ fn require_distinguishable(one: &BlockName, other: &BlockName) -> Result<(), Box
             name = one.as_str()
         ),
     )?;
-    for mine in texel_colors(one)? {
-        for theirs in texel_colors(other)? {
+    let (mine, theirs) = (
+        keys.0
+            .ok_or("the first root's held block resolves to no key")?,
+        keys.1
+            .ok_or("the second root's held block resolves to no key")?,
+    );
+    require_no_colour_in_common(mine, theirs, supplied)
+}
+
+/// Fails naming the first colour of `mine` that reads as a colour of `theirs`.
+fn require_no_colour_in_common(
+    mine: &TextureKey,
+    theirs: &TextureKey,
+    supplied: &SuppliedTexels,
+) -> Result<(), Box<dyn Error>> {
+    let against = drawn_colors_of(theirs, supplied)?;
+    for shown in drawn_colors_of(mine, supplied)? {
+        for other in &against {
             require(
-                distance(mine, theirs)? > SAME_COLOR,
+                distance(shown, *other)? > SAME_COLOR,
                 format!(
-                    "these two blocks' placeholder texels have to be four colours no two of which \
-                     read alike, or a pixel of one texture legitimately equals a pixel of the \
-                     other and the assertion below is red against a correct renderer: {mine:?} \
-                     against {theirs:?}"
+                    "`{mine}` and `{theirs}` have to be filled from colours no two of which read \
+                     alike, or a pixel of one texture legitimately equals a pixel of the other \
+                     and the assertion below is red against a correct renderer: {shown:?} against \
+                     {other:?}",
+                    mine = mine.as_str(),
+                    theirs = theirs.as_str()
                 ),
             )?;
         }

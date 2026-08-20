@@ -1172,9 +1172,25 @@ greedy-but-still-refusing mutation leaves the caller an `Err` either way.
 **Consequences.** A session that renames a texture key repeatedly can exhaust 256 layers while
 declaring a handful, and its way out is a relaunch. Appending writes one layer's texels but the write
 path iterates every live entry, so the cost of a reload's upload is proportional to the live set
-rather than to what changed. A mod author's edit to `texture` is accepted and invisible for an
-unrelated reason — the layer a block draws from is selected by its *name* today — and that limitation
-is stated in `modding/hot-reload.md` rather than papered over.
+rather than to what changed.
+
+**One consequence has been closed, and the decision above is unchanged by it.** This record read
+that a mod author's edit to `texture` is accepted and invisible, because the layer a block draws
+from was selected by its *name* — and it named `modding/hot-reload.md` as where that limitation was
+stated. **SPEC-019 lifted it** (PRO-902, absorbed into PRO-947). Resolution now reads the block's own
+declaration at both consuming sites — `layer_for` (`crates/mc-render/src/geometry/mod.rs`) and
+`hud::held::held_swatch` (`crates/mc-render/src/hud/held.rs`), neither of which parses a block's name
+— so a `texture` edit is visible, per facing. The as-built record is
+`technical/rendering.md` §"A face draws what its block declared, and a `Quad` carries no key",
+and `technical/architecture.md` §"Making an edit visible: the remesh transport" states it
+alongside the assignment this record governs.
+Append-never-renumber, the 256 bound and the exhaustion-by-renaming consequence are untouched: they
+are properties of the *assignment*, and what changed is only which key a face asks it for.
+
+**Recorded here because pointing at another document was the failure.** A limitation stated in two
+places costs two edits to lift, and the second one was missed for a full validation pass — an ADR
+whose Consequences name another file as their record is exactly the one nobody re-reads. See
+`technical/working-in-this-repo.md` §"Lifting a limitation costs one grep per place it was stated".
 
 **Rejected.**
 
@@ -1229,7 +1245,7 @@ disagreeing at the worst possible moment.
 ## ADR-026 — Committed-ness follows reproducibility, and the generator runs as an explicit pre-build step
 
 **Status**: Accepted · **Date**: 2026-08-18 · **Narrows ADR-009 in part** ·
-**Implementation pending (first consumer of generated art)**
+**Implemented 2026-08-19 by SPEC "grass block art", its first consumer**
 
 **Context.** ADR-009 wrote committed-ness into the record as a property of *generated* output:
 "Output lands in `assets/`, which is **committed to the repository**." That sentence is about to be
@@ -1322,6 +1338,34 @@ filtering `dep_kinds` (`workspace_layering.rs:99`), and those nodes do carry bui
 VoxForge fails that test today, under a total-enum verdict with a positive control on both
 directions.
 
+**As built.** The spec that first consumed generated art landed all five items, and each is
+somewhere a reader can go and look:
+
+1. **The refusal.** `crates/mc-client/src/textures/mod.rs` judges a content root's set into a total
+   `SetVerdict` and `refusal_for` turns each arm into a `PreparationError` naming
+   `cargo run -p voxforge -- build content/base/textures.toml` — one constant, `BUILD_THE_TEXTURE_SET`
+   in `crates/mc-client/src/startup.rs`, so a message quoting a command nothing accepts is
+   unspellable. `launch::start` performs that judgement before the window opens, so a contributor
+   who has not run the build reads the sentence instead of waiting out a world nobody will show
+   them.
+2. **The gate builds first.** `scripts/sdd-gate.ps1` runs the art build ahead of the test stage on
+   both the instrumented and the `-SkipCoverage` path, and a refused build fails that stage,
+   reproduces the build's own words, and **records the skipped test stage by name** rather than
+   omitting it — a gate that drops a stage silently is one step from a gate that skips its way to
+   green.
+3. **The set is pinned to its sources, not to its output.** The index records one FNV-1a-64 value
+   folded over exactly the manifest, the models and the materials it reached, in fold order, and the
+   client re-folds the same bytes in the same order. So "the generator changed" is
+   `SetVerdict::StaleAgainstSources` and reads nothing like a renderer regression — which is the
+   whole of the distinction item 3 asked for, reached through the *sources* rather than through a
+   hash of the images. Hashing the images would have re-pinned the derived artefact this record
+   exists to stop committing.
+4. **A committed built image fails a stage** and the stage names the path.
+5. **The cache is content-keyed**: a build whose output is current does no work, which is what makes
+   the gate's extra stage cost nothing on an unchanged tree.
+
+The developer step is one README line, and the first thing a fresh checkout does.
+
 **Rejected.**
 
 - **A `build.rs` in the consuming crate that invokes VoxForge**, whether reached directly or through
@@ -1353,3 +1397,184 @@ directions.
   any clone can re-derive for free, forever. It also leaves the rule stated as "generated output is
   committed" — a rule whose reason nobody can recover, which is how the next deterministic generator
   inherits a constraint written for a paid one.
+---
+
+## ADR-027 — Terrain magnifies with nearest and minifies with linear; anisotropy is refused
+
+**Status**: Accepted · **Date**: 2026-08-19 · **Extends ADR-013**
+
+**Context.** A block texture is sixteen texels of deliberate pattern, and until the base game's art
+was baked every one of them was a generated stand-in nobody stood close to. Real art changes both
+ends of the range at once. Up close a face fills hundreds of screen pixels, so what a magnification
+filter does to sixteen texels is now the difference between a visible pattern and a coloured square.
+Far away a face falls under a pixel, so what a minification filter does decides whether a distant
+hillside is stable or shimmers as the camera moves. The sampler had been nearest on all three
+filters and the array texture had declared one mip level, which is the right answer for neither end.
+
+wgpu offers a third knob — `anisotropy_clamp` — and it is the one that cannot be had. Its
+validation refuses a clamp above one unless magnification, minification **and** mip interpolation
+are all `Linear`, in three separate arms
+(`wgpu-core-30.0.0/src/device/resource.rs:2288-2316`). Anisotropy and crisp voxel magnification are
+therefore mutually exclusive at the vendor, not at our discretion.
+
+**Decision.**
+
+- **Magnification is `Nearest`.** Linear magnification interpolates between texel centres, so a
+  magnified face becomes a blend of its own colours — which is its own mean, which is the value the
+  probes cluster against. A filtered frame would then agree with the probes for a reason that has
+  nothing to do with the texture being right.
+- **Minification is `Linear`, interpolation between mip levels is `Linear`, and the array texture
+  declares a full chain** — five levels for a sixteen-texel edge, derived from the edge rather than
+  written as a literal.
+- **The chain is averaged in linear light, not over the stored bytes.** The array texture is
+  `Rgba8UnormSrgb`, so a texel is decoded on sample; averaging the stored bytes puts 0 and 255 at
+  128, which decodes to 0.216 rather than 0.5, and every level comes out darker than the one above
+  it. Decoding, averaging and re-encoding puts the same pair at 188. The transfer pair is
+  IEC 61966-2-1 itself and not an approximation: a gamma-2.2 curve answers 186 for that pair, which
+  is close enough to look right and is a different function.
+- **Anisotropy is refused, and the refusal is the device's.** `terrain_sampler` builds the request
+  inside a `wgpu::ErrorFilter::Validation` scope and maps a captured error to
+  `RendererError::TerrainSampler`, which carries the whole request because the vendor's rule is over
+  the combination and names no single field. There is no pre-check on our side: a rule copied out of
+  a vendor is a second copy that goes on agreeing with itself the day the vendor changes it.
+
+**Consequences.** This is a one-way door in the sense that matters: every committed golden frame is
+now a picture taken through this sampler, so reversing it is a re-shoot. It is recorded here rather
+than left in a constant so that nobody re-opens "why is anisotropic filtering off" as a bug — the
+answer is that this project bought crisp magnification with it, deliberately, and the vendor priced
+the trade.
+
+The sampler is a **value** (`mc_render::texture::sampler::SamplerRequest`) rather than a descriptor
+built inside a private function, and that is load-bearing rather than tidy. What a sampler *asks
+for* and what a sampled frame *looks like* are different claims; a test that reads back the
+descriptor it caused to be built is agreement between two copies of one decision. Threading the
+request from the composition root is what lets a capture ask for a **second** configuration —
+unfiltered minification — so the difference linear minification makes is measured against a run that
+does not have it rather than asserted. `crates/mc-render/tests/terrain_sampling.rs` is where that is
+done, and `crates/mc-render/src/texture/sampler_test.rs` is the other half.
+
+`pollster` moves into `mc-render` as an optional dependency under the `gpu` feature, and the
+manifest comment reserving device acquisition to the client and the harness is **amended** in the
+same commit rather than contradicted silently. Popping an error scope the driver has already
+recorded into is not device acquisition, but the rule as written forbade it. It stays featureless
+and stays under the feature, so `--no-default-features` resolves neither it nor `wgpu`;
+`crates/mc-render/tests/dependency_graph.rs` asserts both directions.
+
+**Rejected.**
+
+- **Linear magnification throughout.** Consistent, one fewer thing to explain, and it blurs a
+  sixteen-texel pattern towards its own mean. The whole reason the art exists is that a player can
+  see it.
+- **Nearest minification, keeping today's sampler and adding no mip chain.** Free, and it shimmers:
+  a distant face samples one texel, so a sub-texel camera movement flips whichever pixels crossed a
+  texel boundary by the whole contrast between two texels. That is precisely the observable
+  FR-6.2-S2 measures, and it measures it because the alternative was believing it.
+- **A pure pre-check that refuses an invalid combination before the device sees it.** Faster to
+  fail, and it is a second copy of `wgpu`'s validation living on this side of the boundary. The
+  scenario's subject is the device.
+- **Anisotropy with linear magnification.** The combination the vendor accepts, and it costs exactly
+  the property this decision is about.
+
+---
+
+## ADR-028 — An image's basis is not the geometry's plane pair, and both image tables are derived
+
+**Status**: Accepted · **Date**: 2026-08-19 · **Extends ADR-013** ·
+**Found by the project owner looking at a frame, after 1370 green tests**
+
+**Context.** The terrain shader needs, per facing, the two components of a corner's position that
+its texture coordinates are read from. `mc_render::geometry::PLANE_AXES` already held a pair of axis
+indices per facing, so the shader read that pair — primary into the image's horizontal, secondary
+into its vertical — and had done for five increments.
+
+**`PLANE_AXES` is the geometry's table and it answers a different question.** `placed()` reads it to
+put a quad's primary and secondary extents into world components, honouring `mc_world`'s definition
+of those extents as the facing's other two axes in `x < y < z` order. A row changed in it *moves the
+mesh*, not the texture. That was tried as the fix and is what proved the point:
+`a_drawn_side_shows_turf_above_dirt` kept east and west red at 1104 of 1104 while north and south
+went green — one table serving two masters, and correcting it for one breaks the other.
+
+**A pair of axis indices cannot express an image's basis.** It names two axes and an order; it
+cannot say which of the two the image's *own* horizontal runs along, nor which way either of the
+image's coordinates runs down the axis it was matched to. All three differ per facing:
+
+- An image's rows run **downward** while the world's vertical axis runs up, so every face with world
+  up in it needs its vertical coordinate negated.
+- Two faces looking at each other along one axis see their in-plane axes in **opposite** horizontal
+  order, so one of each pair needs its horizontal negated — without which north and south are forced
+  to share a horizontal direction and one of them draws laterally reversed.
+- An `X` face's pair is `(y, z)` with `y` primary, so its image's horizontal runs along the
+  **secondary**.
+
+Reading the pair alone as though it were an image basis therefore drew five of the six faces wrong:
+east and west a quarter turn out, north and south and the underside flipped, north laterally
+reversed as well. Only the top was right, which is why FR-8.1-S5 was green and honestly so. Nothing
+in the suite could see the rest, because every reading measured *which colours* a face holds and a
+rotation or a reflection changes none of them — the reasoning is written out in
+`technical/rendering.md` beside the re-shoot it forced.
+
+**Decision.**
+
+- **The image basis is its own thing.** `IMAGE_SWAPS` says whether a facing's image runs its
+  horizontal along the plane pair's secondary rather than its primary; `IMAGE_SIGNS` says whether
+  each of the image's two coordinates runs against its axis. `PLANE_AXES` is left untouched and
+  keeps its single meaning. A future reader who finds a face's texture turned changes an image
+  table; one who finds a face in the wrong place changes the plane pair.
+- **Both image tables are derived, not tabulated.** A viewer standing outside a face looks along the
+  face's inward direction with the world's up as their up, and the image's right edge is then
+  forward crossed with up. That is two lines of vector arithmetic over each facing's own outward
+  normal (`geometry::image_basis`), and the tables are `const fn` results rather than literals.
+- **Derivation was chosen over a hand-written table because a table of conventions cannot be checked
+  by reading it.** That is not a preference for elegance: a six-row table of swaps and signs is
+  exactly the artefact this project already got wrong and then held wrong mechanically for five
+  increments. A normal, by contrast, says which way a face points and carries no convention at all,
+  so there is nothing in the input to get wrong. What remains hand-written is the six normals, named
+  at the call sites rather than walked, so the declaration order the rows depend on is visible in
+  the source instead of implied by an index.
+- **The two horizontal facings' convention is chosen, and written down.** A top or bottom texture
+  has no world up in it, so no derivation can settle its orientation. The choice is to match what
+  `voxforge` bakes — the top image's top edge toward `-z`, the bottom image's toward `+z` — and both
+  halves of that contract are now stated: `modding/voxel-models.md` for the baker, this record and
+  `technical/rendering.md` for the renderer. The sentence that used to stand in the baker's
+  documentation, leaving the match "to whoever consumes the texture", is the record of how the
+  defect shipped: an orientation contract neither side states is one neither side can be wrong
+  about, so both were.
+- **The bottom row was corrected on the strength of the bake rather than of any test, and that is
+  recorded rather than smoothed over.** A block's underside is never seen in this world, so it was
+  measured wrong and no reading complained. **No test discriminates either horizontal row today** —
+  every orientation of a top or bottom texture looks equally plausible, and `base:grass_top`'s noise
+  is near-uniform under rotation. The first anisotropic top or bottom texture owes a scenario, and
+  until then those two rows rest on the bake and on this paragraph.
+
+**Consequences.** The fix re-shoots every golden frame that shows terrain, which is the second
+re-shoot of that set; it was forced by a defect rather than chosen, and `technical/rendering.md`
+carries the procedure and the reasoning. The shader now holds three hand-written tables where it
+held one, and the two new ones are the only hand-written copies of values that are derived on the
+Rust side.
+
+**`build/validate.rs` compares all three against the shader's literals, and that comparison is not
+evidence that any of them is right.** It text-compared the plane pair for five increments while
+three hand-written copies of it agreed with each other and all three agreed on the wrong answer. A
+mechanical check that two copies of a constant match closes drift between the copies and says
+nothing whatever about the constant. This is stated here because the check reads like a guard and
+will be mistaken for one: what can say a table is right is a reading of a drawn face — FR-8.1-S7 for
+where a face's bands sit, FR-8.1-S8 for which way it runs, and FR-8.1-S6 for the bake against the
+model it is a view of, under all eight dihedral transforms.
+
+**Rejected.**
+
+- **Exchanging the two `X` rows of `PLANE_AXES`.** The first fix attempted, and the one that looks
+  right from the shader's side. It moves the mesh: north and south went green while east and west
+  stayed red at 1104 of 1104. The symptom it treats is real and the table it treats is not the one
+  that holds the fault.
+- **A hand-written six-row table of swaps and signs.** Shorter, and readable in the sense that all
+  twelve numbers are visible at once — which is precisely the property the shipped defect also had.
+  Nobody can check twelve convention bits by looking at them, and a build-time comparison against a
+  second copy of them cannot either.
+- **Leaving the top and bottom convention unstated because nothing can see it.** What actually
+  happened: unobservable is not the same as free, the bottom row was wrong for five increments, and
+  the first texture with a direction in it inherits the error as a mystery rather than as a
+  decision.
+- **Treating `build/validate.rs` as the guard and adding a fourth copy to it.** More agreement
+  between copies, no more evidence about the values. The scenarios above are what the tables are
+  answerable to.

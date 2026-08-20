@@ -6,6 +6,15 @@ which texels take an accent tone. Three hand-written attempts at that noise
 produced, in order, a plain band, a vertical stripe and a diagonal lattice,
 which is a good argument that a hand is the wrong instrument for the job.
 
+Provenance, not a build step. This script ran once, writing `grass_layers.txt`
+for the assembler beside it; between them they produced the grass model the
+repository tracks, and that model is the source of truth for the art. Nothing in
+the build, the gate or the client runs this script and a contributor never needs
+to. It is not maintained: `grass_layers.txt` is an intermediate that is not in
+the repository, and the salt below is chosen by a search, so a later edit could
+change what it produces without touching a grid. It is a record of how the model
+was made rather than a way to remake it.
+
 The rule the last two failures share: any speck placement derived from the
 previous row by a shift is still correlated, it has only changed direction. A
 constant shift per row turns a column stripe into a diagonal one, and a column

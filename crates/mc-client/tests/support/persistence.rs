@@ -39,7 +39,7 @@ use glam::Vec3;
 use mc_client::startup::PreparationError;
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockId, BlockRegistry, DefinitionOrigin};
-use mc_core::content::{LayerAssignment, ResolvedBlock, ResolvedContent};
+use mc_core::content::{FaceTextures, LayerAssignment, ResolvedBlock, ResolvedContent};
 use mc_core::id::{BlockName, TextureKey};
 use mc_render::window::{Ending, report};
 use mc_sim::action::default_held_block;
@@ -125,7 +125,7 @@ const FIRST_FEW: usize = 5;
 pub fn declared(name: &str, is_solid: bool) -> Result<BlockDefinition, Box<dyn Error>> {
     Ok(BlockDefinition {
         name: BlockName::parse(name)?,
-        texture: TextureKey::parse(name)?,
+        textures: FaceTextures::uniform(TextureKey::parse(name)?),
         is_solid,
         replaceable: !is_solid,
         breakable: true,
@@ -434,7 +434,7 @@ pub fn published_content(registry: &BlockRegistry) -> Result<PublishedContent, B
         let declared = registry.definition(BlockId::from_raw(u32::try_from(position)?))?;
         blocks.push(ResolvedBlock {
             name: declared.name.clone(),
-            texture: declared.texture.clone(),
+            textures: declared.textures.clone(),
             is_solid: declared.is_solid,
         });
     }

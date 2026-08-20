@@ -70,15 +70,6 @@ const OPAQUE: u8 = 255;
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-/// The edge of one placeholder texture, in texels.
-///
-/// Sixteen square, one array layer each. Named here rather than written at each
-/// call site because the array texture is allocated to it and its texels are
-/// generated to it, and a texture whose allocation and whose content disagreed
-/// about its size would be a copy that either overruns or leaves a band
-/// unwritten.
-pub const PLACEHOLDER_SIZE: u32 = 16;
-
 /// The texels of `key`'s placeholder layer, row-major, `size` by `size`.
 ///
 /// Deterministic in the key and the size alone: no clock, no address, no

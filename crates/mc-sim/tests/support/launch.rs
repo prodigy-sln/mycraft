@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::persistence::{LaunchError, Launching};
 use mc_sim::player::{BlockPos, PlayerState};
@@ -81,7 +82,7 @@ pub fn registry_with_the_marker() -> Result<BlockRegistry, Box<dyn Error>> {
         origin.clone(),
         vec![Ok(BlockDefinition {
             name: BlockName::parse(MARKER)?,
-            texture: TextureKey::parse(MARKER)?,
+            textures: FaceTextures::uniform(TextureKey::parse(MARKER)?),
             is_solid: true,
             replaceable: false,
             breakable: true,

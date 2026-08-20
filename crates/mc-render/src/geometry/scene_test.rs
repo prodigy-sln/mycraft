@@ -15,11 +15,10 @@
 //! it, an `assemble` that refused every scene it was ever handed would satisfy
 //! the refusal below and pass forever.
 
-use std::collections::BTreeSet;
 use std::error::Error;
 
 use crate::geometry::{SectionGeometry, SectionOrigin, build_section_geometry};
-use crate::texture::TextureLayers;
+use crate::texture::TextureResolution;
 
 use super::{SceneError, SceneGeometry};
 
@@ -38,14 +37,14 @@ const SOMEWHERE: [i32; 3] = [0, 0, 0];
 /// this scene can exceed.
 fn empty_sections(
     count: usize,
-    layers: &TextureLayers,
+    resolution: &TextureResolution,
 ) -> Result<Vec<SectionGeometry>, Box<dyn Error>> {
     let mut sections = Vec::with_capacity(count);
     for _ in 0..count {
         sections.push(build_section_geometry(
             &[],
             SectionOrigin::new(SOMEWHERE),
-            layers,
+            resolution,
         )?);
     }
     Ok(sections)
@@ -53,16 +52,16 @@ fn empty_sections(
 
 #[test]
 fn assembling_more_sections_than_the_scene_holds_names_the_count_and_the_capacity() -> TestResult {
-    let layers = TextureLayers::resolve(&BTreeSet::new());
+    let resolution = TextureResolution::default();
 
-    SceneGeometry::assemble(empty_sections(SECTION_CAPACITY, &layers)?).map_err(|refusal| {
+    SceneGeometry::assemble(empty_sections(SECTION_CAPACITY, &resolution)?).map_err(|refusal| {
         format!(
             "a scene of exactly {SECTION_CAPACITY} sections must assemble, or the refusal \
              below proves nothing: {refusal}"
         )
     })?;
 
-    let over_capacity = empty_sections(SECTION_CAPACITY + 1, &layers)?;
+    let over_capacity = empty_sections(SECTION_CAPACITY + 1, &resolution)?;
     let refusal = SceneGeometry::assemble(over_capacity).err().ok_or(
         "a scene holding more sections than the visible-set buffer can address must be \
          refused, not truncated to the sections that fit",

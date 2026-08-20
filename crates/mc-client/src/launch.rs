@@ -33,7 +33,7 @@ use mc_core::content::LayerAssignment;
 use mc_core::hud::HudLayout;
 use mc_core::id::BlockName;
 use mc_render::geometry::scene::SceneGeometry;
-use mc_render::texture::TextureLayers;
+use mc_render::texture::TextureResolution;
 use mc_sim::action::default_held_block;
 use mc_sim::content::LoadedContent;
 use mc_sim::persistence::{Launching, simulation_at_launch};
@@ -42,8 +42,11 @@ use mc_sim::simulation::{PublishedContent, Seated, Simulation};
 use mc_sim::world::Clearing;
 use mc_world::persistence::Acceptance;
 
+use mc_render::texture::supplied::SuppliedTexels;
+
 use crate::content::ContentView;
 use crate::startup::{PreparationError, scene_of};
+use crate::textures::{built_set, refusal_for};
 
 /// Where the client keeps its save, relative to the directory it was started in
 /// — the same convention the content root follows.
@@ -91,7 +94,7 @@ pub struct PreparedLaunch {
     /// those are the same value by construction is here.
     pub root: PathBuf,
     pub scene: SceneGeometry,
-    pub layers: TextureLayers,
+    pub resolution: TextureResolution,
     pub meshed: Vec<SectionQuads>,
     pub simulation: Simulation,
     /// What seating the player in that simulation did about where they stood.
@@ -104,6 +107,63 @@ pub struct PreparedLaunch {
 /// The worker preparing a launch, until there is a window to draw what it
 /// produces.
 pub type PreparationHandle = JoinHandle<Result<PreparedLaunch, PreparationError>>;
+
+/// What a run is started with, before there is a window to draw it in.
+///
+/// **One value rather than two arguments**, because the two are handed together
+/// from the process's own environment all the way to the frame path and a caller
+/// holding one without the other has not made a mistake this signature should
+/// let it express.
+///
+/// **The texels are read here and never again.** The renderer takes them at
+/// construction and holds them for the whole run: the built set is a pre-build
+/// artefact that does not change while the client runs, so a reload appending a
+/// key finds either art that was already read or no art at all. A supply the
+/// reload path carried would be a value that can arrive empty, and a world
+/// drawing its baked art would go back to generated colours the moment somebody
+/// saved a block file.
+pub struct Starting {
+    /// The level-zero texels the content root's built art offers.
+    pub texels: SuppliedTexels,
+    /// The worker turning that root into a drawable world.
+    pub preparation: PreparationHandle,
+}
+
+impl std::fmt::Debug for Starting {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Starting")
+            .field("texels", &self.texels)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Judges the built set under `root`, then starts preparing the launch it
+/// belongs to.
+///
+/// **The set is judged before the window opens and before a world is generated**,
+/// so a contributor who has not run the art build reads one sentence naming the
+/// command rather than waiting out a world they will not be shown.
+///
+/// # Errors
+///
+/// Returns the refusal the set's verdict becomes — see [`refusal_for`] — and
+/// [`PreparationError::TextureSetUnreadable`] where the set admits no verdict at
+/// all or offers an image no layer can be filled from.
+pub fn start(
+    root: PathBuf,
+    save: PathBuf,
+    accepting: Acceptance,
+) -> Result<Starting, PreparationError> {
+    let (verdict, texels) = built_set(&root)?;
+    if let Some(refused) = refusal_for(&verdict) {
+        return Err(refused);
+    }
+    Ok(Starting {
+        texels,
+        preparation: spawn_preparation(root, save, accepting),
+    })
+}
 
 /// Where this client keeps its save.
 ///
@@ -212,7 +272,7 @@ pub fn prepare_launch(
     // Asked of the registry and never of what was just meshed: a layer index
     // rides inside every packed vertex, so a key set read off the played world
     // would let a save renumber the array texture.
-    let layers = ContentView::of(&resolved).into_layers();
+    let resolution = ContentView::of(&resolved).into_resolution();
     let content = PublishedContent::first(resolved, hud);
     let hud = Arc::clone(&content.hud);
 
@@ -230,8 +290,8 @@ pub fn prepare_launch(
 
     Ok(PreparedLaunch {
         root: root.to_path_buf(),
-        scene: scene_of(&meshed, &layers)?,
-        layers,
+        scene: scene_of(&meshed, &resolution)?,
+        resolution,
         meshed,
         clearing: seated.clearing,
         simulation: seated.simulation,

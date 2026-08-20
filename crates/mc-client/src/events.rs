@@ -44,7 +44,7 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 
 use crate::app::App;
 use crate::gpu_startup::{Gpu, create_surface};
-use crate::launch::{PreparationHandle, save_path};
+use crate::launch::{Starting, save_path};
 use crate::session::{KeyKind, MouseButtonKind, PointerPlatform, Session, ending_after_saving};
 
 /// What the window is called, and how large it opens.
@@ -64,7 +64,7 @@ const INITIAL_HEIGHT: u32 = 720;
 /// **The save is written on the way out of here**, once the loop has stopped and
 /// before the ending is reported: what a clean close does, and what a failed
 /// write makes of it, are decided in `session.rs` and only called from here.
-pub fn run(gpu: Gpu, preparation: PreparationHandle) -> Ending {
+pub fn run(gpu: Gpu, starting: Starting) -> Ending {
     let event_loop = match EventLoop::new() {
         Ok(event_loop) => event_loop,
         Err(failure) => {
@@ -78,7 +78,7 @@ pub fn run(gpu: Gpu, preparation: PreparationHandle) -> Ending {
 
     let mut client = Client {
         gpu: Some(gpu),
-        preparation: Some(preparation),
+        starting: Some(starting),
         window: None,
         app: None,
         session: None,
@@ -98,7 +98,7 @@ pub fn run(gpu: Gpu, preparation: PreparationHandle) -> Ending {
 struct Client {
     /// Taken when the window arrives and the app is built from it.
     gpu: Option<Gpu>,
-    preparation: Option<PreparationHandle>,
+    starting: Option<Starting>,
     window: Option<Arc<Window>>,
     app: Option<App>,
     /// Everything the client decides about input, once there is a window to ask
@@ -158,7 +158,7 @@ impl Client {
     /// Opens the window, makes a surface for it, and builds everything that draws
     /// into that surface.
     fn start(&mut self, event_loop: &ActiveEventLoop) -> Result<App, Ending> {
-        let (gpu, preparation) = self.taken()?;
+        let (gpu, starting) = self.taken()?;
         let window = Arc::new(
             event_loop
                 .create_window(window_attributes())
@@ -176,22 +176,22 @@ impl Client {
             window: Arc::clone(&window),
         })));
         self.window = Some(window);
-        App::new(gpu, surface, size, preparation)
+        App::new(gpu, surface, size, starting)
             .map_err(|failure| Ending::failed_under("the client could not be built", &failure))
     }
 
-    /// The device and the worker preparing the launch, each of which is handed on
+    /// The device and what the run was started with, each of which is handed on
     /// exactly once.
-    fn taken(&mut self) -> Result<(Gpu, PreparationHandle), Ending> {
+    fn taken(&mut self) -> Result<(Gpu, Starting), Ending> {
         let gpu = self
             .gpu
             .take()
             .ok_or_else(|| Ending::stated("the device was already handed to a window"))?;
-        let preparation = self
-            .preparation
+        let starting = self
+            .starting
             .take()
             .ok_or_else(|| Ending::stated("the launch was already handed to a window"))?;
-        Ok((gpu, preparation))
+        Ok((gpu, starting))
     }
 
     fn on_resize(&mut self, size: SurfaceSize) {

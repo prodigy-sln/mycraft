@@ -40,14 +40,19 @@ Four kinds of file, and they do not all reach the same place:
 |---|---|---|---|
 | **A block** — a thing that occupies a cell, with solidity, replaceability and what it drops | `content/base/blocks/*.luau` | the running game | `blocks-items.md` |
 | **A HUD element** — a rectangle drawn on top of the world, filled or showing a block's texture | `content/base/hud/*.toml` | the running game | `hud.md` |
-| **A voxel model** — a door, a torch, a prop, described as text | `content/base/models/*.mcvox` | the `voxforge` tool only | `voxel-models.md` |
-| **A material** — a named colour a voxel model's palette refers to | `content/base/materials/*.toml` | the `voxforge` tool only | `voxel-models.md` |
+| **A voxel model** — a door, a torch, a prop, described as text | `content/base/models/*.mcvox` | the `voxforge` tool, and the running game once baked | `voxel-models.md` |
+| **A material** — a named colour a voxel model's palette refers to | `content/base/materials/*.toml` | the `voxforge` tool, and the running game once baked | `voxel-models.md` |
 
-**Nothing in the engine loads, meshes or draws a `.mcvox` file.** Models and
-materials are authoring and preview tooling — you write one, run `voxforge
-preview`, and look at it. They reach no player. Blocks and HUD elements are the
-two kinds that a player can actually see, which is why the walkthrough below is
-about a block.
+**Nothing in the engine loads, meshes or draws a `.mcvox` file** — and a model
+still reaches a player, by being **baked** first. You write one, run `voxforge
+preview` to look at it, then `voxforge build` to bake its faces into the images a
+texture key draws from; the game reads those images and never the model. So the
+tool is the only thing that reads your model, and a player sees the result of it.
+The base game's grass, dirt and stone are exactly that path
+(`voxel-models.md`).
+
+Blocks and HUD elements are still the two kinds a player sees *directly*, which is
+why the walkthrough below is about a block.
 
 Items, tools, recipes, NPCs, quests and dialogue have no format at all yet.
 There is nothing to write for them and nothing hidden that would accept it.
@@ -75,11 +80,13 @@ Both ids follow one rule: **exactly one `:`, with non-empty text either side.**
 `example:amber` is fine, `example:amber:top` is refused by name, and `amber` is
 refused for having no namespace at all.
 
-**Declare `texture` equal to `name`, as this example does.** The two are separate
-fields and the loader will accept different values, but the renderer picks a
-block's image by its **name** today — so a block whose `texture` differs loads
-and then does not draw, with nothing on your terminal to say why. See "Texture
-keys today" in `blocks-items.md`.
+**`texture` equal to `name` is the simplest thing to write, not a requirement.**
+The two are separate fields and they mean different things: `name` is what the
+block is called, `texture` is what it is drawn from. Name any key you like and
+that is the key the block draws — and a table naming a key per facing gives a
+block six different pictures. What a key resolves to in pixels depends on whether
+you have baked art for it; a key nothing has baked draws a generated stand-in
+rather than failing. See "Texture keys today" in `blocks-items.md`.
 
 Your file is a Luau chunk that **returns a table**, not a document that gets
 parsed. That mostly does not matter on your first block, and then one day it
@@ -118,8 +125,8 @@ were standing in is untouched, you are where you left yourself, and nothing was
 restarted. Change it back and save again, and it stops you again.
 
 That is the shortest complete loop this project has: write, save, see. What is
-visible, what is accepted and invisible, and every refusal you can meet on the way
-are on `hot-reload.md`.
+visible, the one thing a reload cannot pick up, and every refusal you can meet on
+the way are on `hot-reload.md`.
 
 ## Why that worked, and how to make it work for your block
 

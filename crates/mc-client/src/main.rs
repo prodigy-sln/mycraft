@@ -21,16 +21,17 @@ use mc_render::window::{Ending, exit_code, report};
 
 /// What the player is told before the window opens.
 ///
-/// **The textures are placeholders and they do not look like the blocks they are
-/// on.** Stone and dirt are teal, grass is tan. That is correct: this increment
-/// asks the textures to be deterministic, distinguishable and non-flat, and never
-/// to be plausible — and correcting a colour per block name would be block content
-/// hardcoded in the engine, which is the one thing the base game is not allowed to
-/// be. Real textures are content, and content arrives as content.
+/// **The shipped blocks draw baked art now, and a key nothing baked still
+/// draws a generated stand-in.** That second half is the sentence worth
+/// printing: a mod author's first block declares a texture key nobody has drawn
+/// yet, and what they get is a deterministic, distinguishable, deliberately
+/// implausible texture derived from the key itself rather than a refusal. Saying
+/// so here is what stops the stand-in reading as a fault in the art build they
+/// have just run.
 const PALETTE_NOTICE: &str = "\
-mycraft: the block textures in this build are placeholders — stone and dirt draw teal and grass
-         draws tan. That is expected, not a fault: the textures are generated to be
-         deterministic and distinguishable, not lifelike. Real artwork ships as content.";
+mycraft: blocks whose art has been baked draw it; a texture key nothing has baked yet draws a
+         generated stand-in instead of refusing the launch. A stand-in is deterministic and
+         distinguishable, never lifelike, and it means nothing is wrong.";
 
 fn main() -> ExitCode {
     println!("{PALETTE_NOTICE}");
@@ -56,14 +57,22 @@ fn run() -> Ending {
     // place it is started from. The save is located here for the same reason:
     // both are inputs the process's own environment supplies, and the worker
     // below is handed answers rather than the means to go looking for them.
-    let preparation = launch::spawn_preparation(
+    //
+    // The built set is judged on the way through, which is why this can refuse
+    // before a device is opened: a contributor who has not run the art build
+    // reads the command to run rather than waiting out a world they will not be
+    // shown.
+    let starting = match launch::start(
         root,
         launch::save_path(),
         startup::acceptance_from(std::env::args()),
-    );
+    ) {
+        Ok(starting) => starting,
+        Err(failure) => return Ending::failed(&failure, &failure.way_out()),
+    };
 
     match gpu_startup::open() {
-        Ok(gpu) => events::run(gpu, preparation),
+        Ok(gpu) => events::run(gpu, starting),
         Err(ending) => ending,
     }
 }

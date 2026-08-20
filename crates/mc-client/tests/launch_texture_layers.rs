@@ -35,6 +35,7 @@
 #[path = "support/handed.rs"]
 mod handed;
 
+use std::collections::BTreeSet;
 use std::error::Error;
 
 use mc_client::launch::prepare_launch;
@@ -57,19 +58,45 @@ const ACCEPTING: Acceptance = Acceptance::OnlyUnchangedBlocks;
 /// that derived the names from the registry could not tell one block's layer from
 /// another's.
 const DIRT: &str = "base:dirt";
-const GRASS: &str = "base:grass";
+const GRASS_TOP: &str = "base:grass_top";
+const GRASS_SIDE_EAST: &str = "base:grass_side_east";
+const GRASS_SIDE_NORTH: &str = "base:grass_side_north";
+const GRASS_SIDE_SOUTH: &str = "base:grass_side_south";
+const GRASS_SIDE_WEST: &str = "base:grass_side_west";
 const STONE: &str = "base:stone";
 const WATER: &str = "base:water";
 
 /// Every texture key the shipped content declares, in the order layers are handed
 /// out in — which is lexicographic order of the key, by the renderer's own
 /// declaration.
-const SHIPPED_TEXTURE_KEYS: [&str; 4] = [DIRT, GRASS, STONE, WATER];
+///
+/// **`base:grass` is not one of them and that is the change this spec makes.**
+/// The grass block declares a key per facing, so the key its *name* used to spell
+/// is gone and six keys stand where one did: `base:grass_top` upward,
+/// `base:dirt` downward — the same image the dirt block draws — and four side
+/// keys. Dirt and stone keep one key across all six of their own facings.
+const SHIPPED_TEXTURE_KEYS: [&str; 8] = [
+    DIRT,
+    GRASS_SIDE_EAST,
+    GRASS_SIDE_NORTH,
+    GRASS_SIDE_SOUTH,
+    GRASS_SIDE_WEST,
+    GRASS_TOP,
+    STONE,
+    WATER,
+];
 
-/// The three layers every committed golden frame was shot with.
+/// The three layers the committed golden frames were shot with.
+///
+/// **All three moved in this spec and the goldens were re-shot for it.** Six keys
+/// where one stood renumbers everything after `base:dirt`, which keeps layer 0
+/// because it still sorts first. That renumbering is *why* the set was re-shot,
+/// and these three literals are what say the re-shoot is the only reason any
+/// golden moved: a later change to the key set that moved them again would have
+/// to say so here.
 const DIRTS_LAYER: u16 = 0;
-const GRASSES_LAYER: u16 = 1;
-const STONES_LAYER: u16 = 2;
+const GRASS_TOPS_LAYER: u16 = 5;
+const STONES_LAYER: u16 = 6;
 
 #[test]
 fn a_launch_puts_the_terrain_blocks_on_the_layers_the_committed_frames_were_shot_with() -> TestResult
@@ -81,11 +108,15 @@ fn a_launch_puts_the_terrain_blocks_on_the_layers_the_committed_frames_were_shot
 
     assert_eq!(
         [
-            layer_of(&prepared.layers, DIRT)?,
-            layer_of(&prepared.layers, GRASS)?,
-            layer_of(&prepared.layers, STONE)?,
+            layer_of(prepared.resolution.layers(), DIRT)?,
+            layer_of(prepared.resolution.layers(), GRASS_TOP)?,
+            layer_of(prepared.resolution.layers(), STONE)?,
         ],
-        [Some(DIRTS_LAYER), Some(GRASSES_LAYER), Some(STONES_LAYER)],
+        [
+            Some(DIRTS_LAYER),
+            Some(GRASS_TOPS_LAYER),
+            Some(STONES_LAYER)
+        ],
         "these three indices are packed into the vertices of every golden frame this repository \
          has committed, so they are written out here rather than derived: if the definition of the \
          texture key set moves any of them, four golden sets depict a world drawn with the wrong \
@@ -106,7 +137,7 @@ fn a_launch_gives_the_one_block_no_quad_draws_a_layer_of_its_own() -> TestResult
     assert_eq!(
         (
             declared_texture_keys(&prepared.registry)?,
-            layer_of(&prepared.layers, WATER)?
+            layer_of(prepared.resolution.layers(), WATER)?
         ),
         (declared_keys_the_fixture_expects(), Some(waters_layer()?)),
         "the shipped water block is not solid, so the mesher emits no face for it and no quad \
@@ -114,7 +145,7 @@ fn a_launch_gives_the_one_block_no_quad_draws_a_layer_of_its_own() -> TestResult
          therefore leaves it with no layer at all, and anything that ever drew water would fail \
          its whole section with an unresolved texture. Which layer it should occupy is derived \
          rather than remembered: layers are handed out in lexicographic order of the key, and the \
-         first half of this assertion is what pins the four keys that order is over — a root \
+         first half of this assertion is what pins the eight keys that order is over — a root \
          declaring some other set would fail here rather than quietly agree"
     );
     Ok(())
@@ -129,32 +160,27 @@ fn layer_of(layers: &TextureLayers, key: &str) -> Result<Option<u16>, Box<dyn Er
     Ok(layers.layer_of(&TextureKey::parse(key)?))
 }
 
-/// Every texture key the content root a launch read declares, in lexicographic
-/// order.
+/// Every distinct texture key the content root a launch read declares, in
+/// lexicographic order.
 ///
 /// Enumerated from the definitions one at a time rather than through whatever
 /// accessor the registry offers for exactly this: that accessor is the subject of
 /// the change these scenarios grade, and a fixture built out of it would agree with
-/// it however wrong it was. It also reads `texture` and never `name` — the two
-/// agree for all four shipped blocks, so a fixture reading the wrong one would look
-/// perfectly healthy until the day a mod declares them differently.
+/// it however wrong it was. It reads `texture` and never `name`, and it reads
+/// **all six facings** of every block — the two used to agree for all four shipped
+/// blocks, and the grass block is why they no longer do.
 ///
 /// # Errors
 ///
 /// Returns an error if the registry cannot produce a definition it counted.
 fn declared_texture_keys(registry: &BlockRegistry) -> Result<Vec<String>, Box<dyn Error>> {
-    let mut keys = Vec::with_capacity(registry.registered_count());
+    let mut keys = BTreeSet::new();
     for raw in 0..u32::try_from(registry.registered_count())? {
-        keys.push(
-            registry
-                .definition(BlockId::from_raw(raw))?
-                .texture
-                .as_str()
-                .to_owned(),
-        );
+        for key in registry.definition(BlockId::from_raw(raw))?.textures.keys() {
+            keys.insert(key.as_str().to_owned());
+        }
     }
-    keys.sort();
-    Ok(keys)
+    Ok(keys.into_iter().collect())
 }
 
 /// The keys the fixture says the shipped root declares, in the same shape the
@@ -169,7 +195,7 @@ fn declared_keys_the_fixture_expects() -> Vec<String> {
 /// Which layer water occupies, derived from the declared key set.
 ///
 /// Layers are assigned positionally over the keys in lexicographic order, so a
-/// key's layer *is* its position among them, and water sorts last of the four.
+/// key's layer *is* its position among them, and water sorts last of them all.
 ///
 /// # Errors
 ///

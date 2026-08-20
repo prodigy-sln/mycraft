@@ -1,0 +1,59 @@
+# The base game's texture set: which face of which model becomes which key.
+#
+# This file is content. The images beside it, under `textures/`, are derived —
+# built by `voxforge build content/base/textures.toml` and never committed.
+#
+# `pixels_per_voxel` is stated rather than defaulted so the size of a block
+# texture is visible in a reviewable file: every model here declares sixteen
+# voxels to a block edge, and one pixel per voxel is what makes that the
+# sixteen-texel edge the renderer allocates for.
+#
+# A face word is one of the six a block has — `front`, `back`, `left`, `right`,
+# `top`, `bottom` — and it names the side of the *model* the camera sees. The
+# world's compass sits on top of that: `front` looks along −z and so shows the
+# +z side, which is south; `back` shows north; `right` shows east; `left` shows
+# west.
+#
+# One model paints two blocks. The grass block's underside is plain dirt, so
+# `base:dirt` is baked from that face rather than from a dirt model that would
+# be a second copy of the same voxels.
+
+output           = "textures"
+materials        = "materials"
+blocks           = "blocks"
+pixels_per_voxel = 1
+
+[[texture]]
+key   = "base:grass_top"
+model = "models/grass-block.mcvox"
+face  = "top"
+
+[[texture]]
+key   = "base:dirt"
+model = "models/grass-block.mcvox"
+face  = "bottom"
+
+[[texture]]
+key   = "base:grass_side_north"
+model = "models/grass-block.mcvox"
+face  = "back"
+
+[[texture]]
+key   = "base:grass_side_south"
+model = "models/grass-block.mcvox"
+face  = "front"
+
+[[texture]]
+key   = "base:grass_side_east"
+model = "models/grass-block.mcvox"
+face  = "right"
+
+[[texture]]
+key   = "base:grass_side_west"
+model = "models/grass-block.mcvox"
+face  = "left"
+
+[[texture]]
+key   = "base:stone"
+model = "models/stone-block.mcvox"
+face  = "front"

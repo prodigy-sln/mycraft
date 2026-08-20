@@ -3,7 +3,7 @@
 //!
 //! **The worker hands back a finished scene rather than a bag of quads**, and
 //! that is the whole shape of this module. It owns the meshed sections and the
-//! texture layers for the run, so it meshes, splices *and*
+//! texture resolution for the run, so it meshes, splices *and*
 //! packs, and the frame path's entire share of an edit is one `upload_scene`.
 //! Splicing and packing on the frame path instead would put a whole-scene
 //! rebuild — every section packed again and a fresh byte pass over some eleven
@@ -28,7 +28,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 use mc_core::content::ContentSerial;
 use mc_render::geometry::scene::SceneGeometry;
-use mc_render::texture::TextureLayers;
+use mc_render::texture::TextureResolution;
 use mc_sim::replay::{PrepareError, SectionQuads, SpliceError, remesh, splice};
 use mc_sim::world::{RemeshWork, SectionKey};
 use thiserror::Error;
@@ -123,17 +123,17 @@ pub struct Remesher {
     in_flight: Option<(Vec<SectionKey>, ContentSerial)>,
     /// Which accepted content set is serving now.
     ///
-    /// Held here rather than beside the retained layers: `Retained` is moved into
+    /// Held here rather than beside the retained resolution: `Retained` is moved into
     /// the worker, and a serial the worker only updates when it dequeues would
     /// make the mismatch branch unreachable.
     serving: ContentSerial,
 }
 
-/// What the worker is sent, on one ordered channel so that layers retired before
-/// a batch was queued are in place before that batch is meshed.
+/// What the worker is sent, on one ordered channel so that a resolution retired
+/// before a batch was queued is in place before that batch is meshed.
 enum Message {
     Batch(RemeshWork),
-    Retire(TextureLayers),
+    Retire(TextureResolution),
 }
 
 /// What the worker sends back: a scene, or the reason there is none.
@@ -168,15 +168,15 @@ impl Remesher {
         }
     }
 
-    /// Retires the layers a scene is packed against, and records which content
-    /// set is serving now.
+    /// Retires the resolution a scene is packed against, and records which
+    /// content set is serving now.
     ///
-    /// The layers travel on the **same ordered channel** the batches use, which
-    /// is what makes "the worker was told before it meshed anything with them"
-    /// true of the next batch without a handshake.
-    pub fn retire(&mut self, layers: TextureLayers, serial: ContentSerial) {
+    /// It travels on the **same ordered channel** the batches use, which is what
+    /// makes "the worker was told before it meshed anything with it" true of the
+    /// next batch without a handshake.
+    pub fn retire(&mut self, resolution: TextureResolution, serial: ContentSerial) {
         self.serving = serial;
-        drop(self.batches.send(Message::Retire(layers)));
+        drop(self.batches.send(Message::Retire(resolution)));
     }
 
     /// Whether a batch may be handed over, which it may not while one is still
@@ -235,9 +235,14 @@ impl Remesher {
 /// before.
 ///
 /// The meshed sections are the list a re-meshed section is spliced back into and
-/// the layers are what a scene is packed against. Both are handed to the worker
-/// rather than kept beside it: they are what it works on, and a copy on each side
-/// is a second answer waiting to disagree.
+/// the resolution is what a scene is packed against. Both are handed to the
+/// worker rather than kept beside it: they are what it works on, and a copy on
+/// each side is a second answer waiting to disagree.
+///
+/// **The whole retained list is re-packed on every batch, against whatever
+/// resolution the worker currently holds.** That is what makes a section nobody
+/// re-meshed draw the keys the content serving now declares, and it is the one
+/// path on which quads outlive the resolution they were meshed under.
 ///
 /// **No registry here, and that absence is load-bearing.** A batch carries the
 /// registry its own world was resolved against, so meshing against a second
@@ -245,7 +250,7 @@ impl Remesher {
 #[derive(Debug)]
 pub struct Retained {
     pub meshed: Vec<SectionQuads>,
-    pub layers: TextureLayers,
+    pub resolution: TextureResolution,
 }
 
 impl Retained {
@@ -256,7 +261,7 @@ impl Retained {
     /// Returns [`RemeshError`] naming which of the three steps refused.
     fn rebuilt(&mut self, work: &RemeshWork) -> Result<Arc<SceneGeometry>, RemeshError> {
         splice(&mut self.meshed, remesh(work)?)?;
-        Ok(Arc::new(scene_of(&self.meshed, &self.layers)?))
+        Ok(Arc::new(scene_of(&self.meshed, &self.resolution)?))
     }
 }
 
@@ -264,8 +269,8 @@ impl Retained {
 fn rebuild_batches(mut retained: Retained, work: &Receiver<Message>, finished: &Sender<Rebuilt>) {
     while let Ok(message) = work.recv() {
         let batch = match message {
-            Message::Retire(layers) => {
-                retained.layers = layers;
+            Message::Retire(resolution) => {
+                retained.resolution = resolution;
                 continue;
             }
             Message::Batch(batch) => batch,

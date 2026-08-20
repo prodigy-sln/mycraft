@@ -33,7 +33,7 @@ use std::sync::Arc;
 use glam::Vec3;
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockId, BlockRegistry, DefinitionOrigin};
-use mc_core::content::{LayerAssignment, ResolvedBlock, ResolvedContent};
+use mc_core::content::{FaceTextures, LayerAssignment, ResolvedBlock, ResolvedContent};
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::action::default_held_block;
 use mc_sim::player::PlayerState;
@@ -137,7 +137,7 @@ fn published_content(registry: &BlockRegistry) -> Result<PublishedContent, Box<d
         let declared = registry.definition(BlockId::from_raw(u32::try_from(position)?))?;
         blocks.push(ResolvedBlock {
             name: declared.name.clone(),
-            texture: declared.texture.clone(),
+            textures: declared.textures.clone(),
             is_solid: declared.is_solid,
         });
     }
@@ -162,7 +162,7 @@ fn declared_registry() -> Result<BlockRegistry, Box<dyn Error>> {
         .map(|(name, is_solid)| {
             Ok(BlockDefinition {
                 name: BlockName::parse(name)?,
-                texture: TextureKey::parse(name)?,
+                textures: FaceTextures::uniform(TextureKey::parse(name)?),
                 is_solid,
                 // The open block is what a placement may be built over and what
                 // a break empties a cell back to; the ground is neither. That is

@@ -35,8 +35,11 @@ bindings once behaviour lands), never inline in engine code.
 namespaced-id rule, all-or-nothing loading, how a refusal reads, and the four
 bounds a content root carries — is `docs/modding/blocks-items.md` and is not
 repeated here. HUD elements remain TOML under `content/<mod>/hud/`; voxel models
-and materials are tooling formats that reach no player. Items, recipes, NPCs,
-biomes, quests and dialogue have no format at all yet.
+and materials are read by `voxforge` alone, but they **do** reach a player now —
+`voxforge build` bakes a model's faces into the images a texture key draws from,
+and the base game's grass, dirt and stone are drawn from that bake
+(`docs/modding/voxel-models.md`). Items, recipes, NPCs, biomes, quests and
+dialogue have no format at all yet.
 
 Blocks are read through `DefinitionSource`, a Rust trait (`mc_core::block::source`)
 that the engine consumes without ever learning whether a definition came from a

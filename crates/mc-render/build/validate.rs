@@ -64,7 +64,103 @@ pub const QUAD_INDEX_PATTERN: [u32; 6] = [0, 1, 2, 0, 2, 3];
 /// runs a texture *across* a face instead of along it: the face's mean colour is
 /// unchanged, so no probe over a captured frame can see it, and a golden minted
 /// from that renderer records the drift as ground truth.
+///
+/// **This is the geometry's table and not an image basis.** It says where a
+/// quad's two extents go, which is a different question from where an image's
+/// own left-to-right and top-to-bottom run — and reusing it for the second was
+/// the defect that drew five of six faces wrong. That question is
+/// [`IMAGE_SWAPS`] and [`IMAGE_SIGNS`].
 pub const PLANE_AXES: [[u32; 2]; 6] = [[1, 2], [1, 2], [0, 2], [0, 2], [0, 1], [0, 1]];
+
+/// Whether a face's image runs its horizontal along the **secondary** of
+/// [`PLANE_AXES`]' pair rather than the primary, `1` for exchanged.
+///
+/// The build script cannot depend on the crate it builds, so this is its own
+/// answer to `mc_render::geometry::IMAGE_SWAPS`. **Derived rather than
+/// tabulated**, for the reason the geometry builder's own comment gives: a
+/// six-row table of conventions cannot be checked by reading it, and this
+/// project shipped one whose three hand-written copies agreed and were wrong.
+pub const IMAGE_SWAPS: [u32; 6] = [
+    image_swap([-1, 0, 0], [1, 2]),
+    image_swap([1, 0, 0], [1, 2]),
+    image_swap([0, -1, 0], [0, 2]),
+    image_swap([0, 1, 0], [0, 2]),
+    image_swap([0, 0, -1], [0, 1]),
+    image_swap([0, 0, 1], [0, 1]),
+];
+
+/// Whether each of an image's two coordinates runs against its axis rather than
+/// along it, horizontal first, `1` for negated. Same row order.
+pub const IMAGE_SIGNS: [[u32; 2]; 6] = [
+    image_sign([-1, 0, 0]),
+    image_sign([1, 0, 0]),
+    image_sign([0, -1, 0]),
+    image_sign([0, 1, 0]),
+    image_sign([0, 0, -1]),
+    image_sign([0, 0, 1]),
+];
+
+/// The world directions a face's image runs its right edge and its top edge
+/// toward, for a viewer standing outside it.
+///
+/// A viewer outside a face looks along its inward direction with the world's up
+/// as their up, and the image's right edge is then forward crossed with up. The
+/// two horizontal faces have no world up in them, so theirs is chosen to match
+/// what `voxforge` bakes: the top image's top edge runs toward `-z`, the bottom
+/// image's toward `+z`.
+///
+/// The six outward normals are written at the call sites above and are the only
+/// hand-written input here. A normal says which way a face points and nothing
+/// about how an image sits on it, so there is no convention in one to get wrong.
+const fn image_basis(normal: [i32; 3]) -> ([i32; 3], [i32; 3]) {
+    let forward = [-normal[0], -normal[1], -normal[2]];
+    let up = if normal[1] == 0 {
+        [0, 1, 0]
+    } else {
+        [0, 0, -normal[1]]
+    };
+    (cross(forward, up), up)
+}
+
+/// Whether the face with this `normal` and this plane `pair` runs its image's
+/// horizontal along the pair's secondary.
+const fn image_swap(normal: [i32; 3], pair: [u32; 2]) -> u32 {
+    let (right, _) = image_basis(normal);
+    let (horizontal, _) = axis_of(right);
+    let [_, secondary] = pair;
+    (horizontal == secondary) as u32
+}
+
+/// Whether each of this face's image coordinates is negated.
+const fn image_sign(normal: [i32; 3]) -> [u32; 2] {
+    let (right, up) = image_basis(normal);
+    let (_, horizontal_is_negative) = axis_of(right);
+    let (_, up_is_negative) = axis_of(up);
+    // An image's rows run downward, so its vertical coordinate always runs
+    // against the direction its top edge points.
+    [horizontal_is_negative as u32, !up_is_negative as u32]
+}
+
+/// The cross product of two unit axis directions.
+const fn cross(one: [i32; 3], other: [i32; 3]) -> [i32; 3] {
+    [
+        one[1] * other[2] - one[2] * other[1],
+        one[2] * other[0] - one[0] * other[2],
+        one[0] * other[1] - one[1] * other[0],
+    ]
+}
+
+/// The axis index a unit `direction` lies along, and whether it points the
+/// negative way down it.
+const fn axis_of(direction: [i32; 3]) -> (u32, bool) {
+    if direction[0] != 0 {
+        (0, direction[0] < 0)
+    } else if direction[1] != 0 {
+        (1, direction[1] < 0)
+    } else {
+        (2, direction[2] < 0)
+    }
+}
 
 /// How many storage buffers one shader stage may bind.
 const STORAGE_BUDGET: usize = 4;
@@ -87,6 +183,12 @@ const INDEX_PATTERN_DECLARATION: &str = "const QUAD_INDEX_PATTERN";
 
 /// How the plane-axis table's declaration begins.
 const PLANE_AXES_DECLARATION: &str = "const PLANE_AXES";
+
+/// How the image-swap table's declaration begins.
+const IMAGE_SWAPS_DECLARATION: &str = "const IMAGE_SWAPS";
+
+/// How the image-sign table's declaration begins.
+const IMAGE_SIGNS_DECLARATION: &str = "const IMAGE_SIGNS";
 
 /// Why the shipped shaders are not acceptable.
 #[derive(Debug, Error)]
@@ -135,6 +237,17 @@ pub enum ShaderError {
         found: Vec<u32>,
         expected: Vec<u32>,
     },
+    #[error(
+        "{file}: the image basis {found:?} disagrees with the geometry builder's {expected:?}; \
+         a face whose image is exchanged or runs the wrong way down an axis draws its texture \
+         turned or laterally reversed, which leaves every colour in the face unchanged and no \
+         reading over means, histograms or set membership able to see it"
+    )]
+    ImageBasisMismatch {
+        file: String,
+        found: Vec<u32>,
+        expected: Vec<u32>,
+    },
 }
 
 /// Validates every `.wgsl` source in `directory`, returning their file names in
@@ -149,7 +262,8 @@ pub enum ShaderError {
 /// [`ShaderError::IndexPatternMismatch`] when the cull shader's winding literal
 /// has drifted from the geometry builder's, and
 /// [`ShaderError::PlaneAxesMismatch`] when the terrain shader's plane-axis table
-/// has.
+/// has, and [`ShaderError::ImageBasisMismatch`] when either of its image-basis
+/// tables has.
 pub fn validate_shader_directory(directory: &Path) -> Result<Vec<String>, ShaderError> {
     let sources = read_sources(directory)?;
     if sources.is_empty() {
@@ -221,7 +335,13 @@ fn validate_source(file: &str, source: &str) -> Result<(), ShaderError> {
         check_index_pattern(file, source)?;
     }
     if file == TERRAIN_SHADER {
+        // The plane pair before the image basis, so a shader whose geometry
+        // table has drifted is reported as that rather than as whichever of the
+        // three faults is noticed first.
         check_plane_axes(file, source)?;
+        check_image_basis(file, source, IMAGE_SWAPS_DECLARATION, IMAGE_SWAPS.to_vec())?;
+        let signs: Vec<u32> = IMAGE_SIGNS.into_iter().flatten().collect();
+        check_image_basis(file, source, IMAGE_SIGNS_DECLARATION, signs)?;
     }
     Ok(())
 }
@@ -296,6 +416,33 @@ fn check_plane_axes(file: &str, source: &str) -> Result<(), ShaderError> {
         return Ok(());
     }
     Err(ShaderError::PlaneAxesMismatch {
+        file: file.to_owned(),
+        found,
+        expected,
+    })
+}
+
+/// One of the terrain shader's image-basis tables against the geometry
+/// builder's, named by its `declaration`.
+///
+/// Flat and flattened for the reasons [`check_plane_axes`] gives. **And the
+/// reason these checks exist rather than trust is worth a sentence: none of them
+/// is evidence that the values are right.** They close a drift between two
+/// copies, and this project shipped a table on which all three copies agreed and
+/// all three were wrong. What can say the values are right is a reading of a
+/// drawn face — FR-8.1-S7 for where its bands sit, FR-8.1-S8 for which way it
+/// runs.
+fn check_image_basis(
+    file: &str,
+    source: &str,
+    declaration: &str,
+    expected: Vec<u32>,
+) -> Result<(), ShaderError> {
+    let found = declared_values(source, declaration);
+    if found == expected {
+        return Ok(());
+    }
+    Err(ShaderError::ImageBasisMismatch {
         file: file.to_owned(),
         found,
         expected,

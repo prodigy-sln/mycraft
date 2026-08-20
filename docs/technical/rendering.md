@@ -152,20 +152,103 @@ predicate, changes quad counts, and invalidates every golden frame captured
 against today's mesh.** A renderer capturing goldens today is capturing them
 against a merge predicate that is already known to be going to change.
 
-### Terrain sampling is `Nearest`, and switching to filtered invalidates goldens
+### Terrain magnifies with `Nearest` and minifies with `Linear`
 
-The terrain sampler is `Nearest` on minification, magnification and mipmaps,
-with `Repeat` addressing. That is not a preference about sharpness. A
-placeholder texture is sixteen texels of deliberate pattern whose **declared
-mean colour** is the value the frame probes cluster captured pixels against;
-linear filtering blurs a face towards that mean, so a filtered frame would
-agree with the probes for a reason that has nothing to do with the texture
-being correct — passing while carrying no evidence.
+`mc_render::texture::sampler::TERRAIN_SAMPLER` is the whole of it: `Nearest`
+magnification, `Linear` minification, `Linear` interpolation between mip levels,
+an anisotropy clamp of one, and `Repeat` addressing on every axis. ADR-027 holds
+the reasoning; what matters when reading a frame is the two halves.
 
-Same shape as the AO warning above, and it belongs beside it: **a later switch
-to filtered sampling changes every terrain pixel and invalidates every golden
-frame captured against today's renderer.** It is a deliberate, measured change
-that re-shoots the goldens and says so, never a quiet quality improvement.
+**Nearest magnification** because a block texture is sixteen texels of
+deliberate pattern, and linear magnification interpolates between texel centres
+— which blurs a near face towards its own mean, and the mean is the value the
+frame probes cluster captured pixels against. A magnification-filtered frame
+would agree with the probes for a reason that has nothing to do with the texture
+being right. `crates/mc-render/tests/terrain_sampling.rs` measures the
+consequence rather than the request: a scanline across a face magnified to 9.2
+screen pixels a texel shows both of the layer's colours and **nothing between
+them**, where linear magnification turns 116 of 116 scanned pixels into blends
+that are neither.
+
+**Linear minification with a full mip chain** because a distant face falls under
+a pixel, and point sampling then answers with *one* texel — so a sub-texel camera
+movement flips whichever pixels crossed a texel boundary by the whole contrast
+between two texels. That is a shimmering hillside. The same suite measures it
+from the other side: two captures half a texel apart move far fewer pixels past
+ΔE 10 through the terrain sampler than through a request that minifies without
+filtering, and the unfiltered pair is **required to move at all** before the
+comparison is read, so a fixture that drifted out of the regime fails loudly
+instead of reporting that filtering helped when neither configuration could see
+anything.
+
+**Anisotropy is refused, and the device is what refuses it.** wgpu accepts an
+`anisotropy_clamp` above one only when magnification, minification and mip
+interpolation are all `Linear`, in three separate arms of its own validation, so
+anisotropy and crisp voxel magnification cannot both be had. `terrain_sampler`
+builds the request inside a `wgpu::ErrorFilter::Validation` scope and maps a
+captured error to `RendererError::TerrainSampler { requested }`, which carries
+the **whole** request because the vendor's rule is over the combination and names
+no single field. There is deliberately no pre-check on this side: a rule copied
+out of a vendor is a second copy that drifts silently the day the vendor changes
+it.
+
+**The sampler is a value, and that is what makes the pair above writable.**
+`SamplerRequest` is threaded from the composition root as one half of
+`gpu::TerrainTextures`, so a capture can ask for a *second* configuration and the
+difference filtering makes is measured against a run that does not have it.
+Without the parameter, `buffers::terrain_sampler` would be a private free
+function reaching for a constant, and a test could only read back the descriptor
+it caused to be built — which is agreement between two copies of one decision,
+not a statement about a picture. Both halves are owed:
+`crates/mc-render/src/texture/sampler_test.rs` asserts what is asked for, with a
+positive control on the anisotropy inspection; `tests/terrain_sampling.rs`
+asserts what a device does with it.
+
+#### An image's basis is not the geometry's plane pair
+
+`PLANE_AXES` says which two components of a corner's position a quad's primary
+and secondary extents were written into. **It is the geometry's table**, read by
+`placed()`, so a row changed in it moves the mesh rather than the texture.
+
+Where an image's own left-to-right and top-to-bottom directions go is a separate
+question, and `IMAGE_SWAPS` and `IMAGE_SIGNS` answer it: whether a face's image
+runs its horizontal along the pair's secondary rather than its primary, and
+whether either coordinate runs against its axis. **A pair of axis indices cannot
+express either**, and reading the pair alone as though it were an image basis is
+what drew five of six faces turned.
+
+Three facts make all three tables differ per facing, and each is why one of them
+exists:
+
+- An image's rows run **downward** while the world's vertical axis runs up, so
+  every face with world up in it needs its vertical coordinate negated.
+- Two faces looking at each other along one axis see their in-plane axes in
+  **opposite** horizontal order, so one of each pair needs its horizontal
+  negated — without which north and south are forced to share a direction and
+  one of them draws laterally reversed.
+- An `X` face's plane pair is `(y, z)` with `y` primary, so its image's
+  horizontal runs along the **secondary**.
+
+Both image tables are **derived** from each facing's own outward normal rather
+than tabulated: a viewer outside a face looks along its inward direction with the
+world's up as their up, and the image's right edge is forward crossed with up.
+The two horizontal facings have no world up in them, so theirs is chosen to match
+what `voxforge` bakes — top image's top edge toward `-z`, bottom image's toward
+`+z` — and **the bottom row was measured wrong and corrected on the strength of
+the bake rather than of any test**, because a block's underside is never seen in
+this world. No test discriminates either horizontal row today; the first
+anisotropic top or bottom texture owes one.
+
+**`build/validate.rs` checks all three against the shader's literals and that is
+not evidence they are right.** It text-compared one of them for five increments
+while three hand-written copies agreed with each other and all three were wrong.
+What can say a table is right is a reading of a drawn face: FR-8.1-S7 for where
+its bands sit, FR-8.1-S8 for which way it runs.
+
+**Changing any of this re-shoots every golden.** Same shape as the AO warning
+above and it belongs beside it: a sampler change moves every terrain pixel. It
+is a deliberate, measured change that re-shoots the set and says so in its commit
+message, never a quiet quality improvement.
 
 Texture coordinates are a corner's two in-plane axes in **whole blocks**, so a
 face merged across four blocks shows the texture four times rather than
@@ -436,12 +519,148 @@ downstream may reproduce it. The shipped root declares four blocks, all with `te
 `name`: `base:dirt`, `base:grass` and `base:stone` sort before `base:water`, so water appends at layer
 3 and the other three keep 0/1/2 — the fact every committed golden's layer indices depend on.
 
-**A block whose declared `texture` is not its own name is refused at packing time rather than drawn
-from another block's layer**, because the entry is selected by the block's *name* today while the
-assignment is keyed by the declared `texture`. The two agree only because every shipped block declares
-them identically. That gap and its two call sites are recorded in `technical/architecture.md`
-§"Making an edit visible: the remesh transport"; `modding/blocks-items.md` states the consequence in
-an author's own terms.
+### Mip levels are averaged in linear light, and every one of them is uploaded
+
+**Status: wired.** The array texture is created with `mip_level_count:
+MIP_LEVELS` and `write_layer` writes **every** level of the chain, each at its
+own edge — a level nobody wrote is whatever the allocator left there, and a
+minified face samples it. The sampler interpolates between the two levels either
+side of the detail it wants, so the whole chain is live in every frame a distant
+face appears in.
+
+**The rule the arithmetic exists to enforce, and item 4 of what a future change
+must not break.** The array texture is `Rgba8UnormSrgb`, so a texel is decoded
+to linear light on sample. A level averaged over the **stored** bytes is
+therefore not the average of what the sampler will see. Stored 0 and 255 average
+to stored 128, which decodes to linear 0.216 rather than 0.5; every level comes
+out darker than the one above it, and a minified surface darkens as it recedes.
+Decoding first, averaging in linear light, and re-encoding puts the same pair at
+stored **188**. The fault is plausible-looking and wrong in the direction
+nothing notices, which is why the byte is pinned exactly rather than as "midway
+between": a test written to accept anything in the middle accepts both
+implementations.
+
+**188 separates three implementations, not two.** Averaging the stored bytes
+gives 128. A gamma-2.2 approximation of the transfer function — the shortcut
+that looks close enough — gives 186. Only IEC 61966-2-1 itself gives 188, and
+`to_linear`/`to_stored` implement that curve including its linear segment near
+black. The pair round-trips all 256 stored bytes exactly, which is what lets a
+uniform image survive every level unchanged; `to_stored` rounds to nearest and
+clamps, because truncating loses that round trip and darkens a flat colour by up
+to a byte per level.
+
+**Why exact byte equality is safe here, and what the margin is against.** These
+are `f32` round trips through a transfer function, so the assertions rest on a
+measurement rather than on the arithmetic looking clean. The **tightest margin in
+the whole chain is 0.016 of a byte**: 188's pre-rounding value is 187.516, and
+187.5 is the boundary that would round it to 187 instead. What that is a margin
+*against* is the transfer pair's own error — the worst pre-rounding error over a
+round trip of all 256 stored bytes is **1.53e-5 of a byte**, at stored 132. Three
+orders of magnitude, so exact equality is what the arithmetic supports and a
+tolerance would have to span 187 to 188 to matter — which would then admit the
+stored-byte fault this whole section exists to exclude. **Anyone changing the
+transfer functions has 0.016 of a byte of room at that point**, not the byte a
+reader might assume.
+
+**Colour is averaged in linear light; alpha is not.** `Rgba8UnormSrgb` decodes
+RGB through the transfer function and alpha linearly, so averaging alpha where
+it stands is what the format means rather than what anybody preferred. Nothing
+in the test suite discriminates the two treatments, because every texture the
+project ships is fully opaque and both answer 255 for a constant 255. **The
+first translucent texture must bring a test with it.**
+
+**Why the chain is built on the CPU.** wgpu has no built-in mip generation, so
+the alternative is a blit or a compute pass — which would put the arithmetic
+inside `src/gpu/`, the one subtree excluded from coverage thresholds
+(ADR-008, narrowed by ADR-013), where golden frames are the only defence. A box
+filter over a 16×16 chain is five levels of trivial arithmetic and a pure
+function, so it sits outside `src/gpu/` under normal coverage and its correctness
+is read directly rather than inferred from a picture. `crates/mc-render/CLAUDE.md`:
+anything expressible as a pure function is not exempt.
+
+**The surface, as built.**
+
+| Item | What it is |
+|---|---|
+| `texture::MIP_LEVELS: u32` | `TEXTURE_EDGE.ilog2() + 1`, five for a 16-texel edge. **Derived, never written as `5`** — a size and a level count that can disagree is a copy that overruns |
+| `to_linear(stored: u8) -> f32` | one stored sRGB byte as linear light on `0.0..=1.0` |
+| `to_stored(linear: f32) -> u8` | the inverse, rounding to nearest and clamping |
+| `reduced(level, size) -> Vec<[u8; 4]>` | one level below `level`, where `size` is the **source** edge. Row-major: the output texel at `(r, c)` covers sources `(2r, 2c)`, `(2r, 2c+1)`, `(2r+1, 2c)` and `(2r+1, 2c+1)`, and no other four |
+| `chain(level_zero, size) -> Vec<Vec<[u8; 4]>>` | every level, the first being `level_zero` **verbatim**, halving to a single texel |
+| `levels_for(key, supplied, size)` | the levels a layer is filled from: the built set's art where it covers `key`, and `placeholder_texels(key, size)` where it does not |
+
+**An uncovered key is an ordinary answer, not a failure.** A mod author's first
+block declares a texture nothing has drawn yet, and `levels_for` generates one
+from the key rather than refusing the launch. The refusal a launch does make is
+about the *set*, and it is the client's. This is why `placeholder_texels` is not
+deleted when real art arrives: it becomes the documented per-key fallback.
+
+**The two refusals, both naming the key.** `TextureError::WrongTexelCount`
+answers supplied texels whose count is not `size · size`, and
+`TextureError::TooFewLevels` answers a chain shorter than the array texture
+declares. Both carry `{ key, offered, declared }`, where `offered` is what the
+layer has and `declared` is what was wanted — two different questions that
+happen to share a shape, since one counts levels and the other counts texels. A
+layer refused without its key leaves a reader with every key in the content root
+to choose from.
+
+**Where the texels come from.** `SuppliedTexels` — a key, and the `[R, G, B, A]`
+stored bytes of its level zero — is the only thing that crosses between the
+client's decoder and this arithmetic. `mc-render` has no `std::fs`, no `PathBuf`
+and no image decoder anywhere in `src/`; it is *handed* level-zero texels and
+computes the rest. The read and the PNG decode live in
+`crates/mc-client/src/textures/decode.rs`, the one file of the composition root
+that names `image::`, and
+`crates/mc-client/tests/the_decode_stays_at_the_composition_root.rs` holds both
+halves of that boundary with a positive control on each scan.
+
+**The supply is given once, at construction, and no reload carries one.**
+`TerrainRenderer::new` takes `gpu::TerrainTextures` — the texels and the sampler
+request together — and `SceneBuffers` keeps the texels for the whole run. A
+reload hands over *layers*, never a supply, so the second upload re-fills every
+layer from the same texels the first did. The alternative was a value that can
+arrive **empty**: a world drawing its baked art would go back to hash-derived
+colours the moment somebody saved a block file, and no reading that takes its
+texels from a launch would report it.
+
+### A face draws what its block declared, and a `Quad` carries no key
+
+`build_section_geometry` takes a `TextureResolution` — every registered block's six declared keys
+beside the layer assignment, as one value — and answers block + facing → key → layer. **Nothing on
+this path parses a block's name.** The facing is carried into the vocabulary a declaration writes by
+`Facing::face` (`mc-world`), which is the one place in the workspace where a compass word meets an
+axis; the key comes out of the block's own declaration; the layer comes out of the assignment.
+
+**A `Quad` carries no resolved texture key, and that absence is the load-bearing part of the design.**
+Resolution happens where vertices are built, not where quads are meshed, **because a retained mesh is
+re-packed and never re-resolved at mesh time**: `Retained::rebuilt` re-packs the *entire* retained
+list on every batch, against whatever resolution the re-mesh worker currently holds. Stamping a key
+into a `Quad` when it is meshed re-introduces a stale key on the one path built not to re-mesh —
+silently, as a plausible wrong picture, with no error anywhere. A future change may add fields to a
+`Quad`; a resolved key or layer is not one of them.
+
+For the same reason `TextureResolution` carries **no `ContentSerial`**. A bundled value invites being
+stamped with one so that "packed against the content serving" becomes checkable, and it must not be:
+retained quads are packed against a *newer* resolution than the one they were meshed under on
+purpose, and a serial checked at the packer would refuse exactly the case that path exists for.
+
+**The refusal names the block, the facing and the key**, and fails the whole section:
+`GeometryError::UnresolvedTexture { block, face, key }`, where `key: None` means the content states no
+such block at all — a section still holding quads for a block a reload dropped — and `Some` means the
+key that block declares there occupies no layer. Falling back to layer 0 would draw whichever block
+owns layer 0, which is the plausible wrong picture nothing downstream can report.
+
+**One question, two consumers.** The held-block indicator resolves through the same
+`TextureResolution`, at `INDICATOR_FACE = Face::North` (`src/hud/held.rs`) — a side face, because a
+side is what makes the canonical block recognisable, and stated once rather than implied by whichever
+facing a lookup happened to reach for. `FrameRenderer::texture_resolution()` is what a swatch is
+looked up in, lent from the renderer, because it has to be what the array texture was filled from.
+Closing one site and leaving the other would draw a block correctly in the world with a blank
+indicator beside it, which reads as a HUD fault and sends whoever chases it to the wrong module.
+
+What a key's *pixels* are is a separate question and is still answered by the procedural placeholder
+generator, one texture per key from the key's own spelling. Baked art from disk arrives later in this
+spec.
 
 The `Srgb` in the format is load-bearing: a texel is decoded to linear on sample
 and the sRGB colour target encodes it back on write, so the byte a capture reads
@@ -490,9 +709,14 @@ re-mesh worker will accept runs through the upload.
 ### A reload that changes what is drawn re-meshes the whole world
 
 The rule is **binary**: a candidate that changes some block's declared solidity or
-declared texture key, or adds or removes a block, marks every section; one that
-changes neither marks none. `replaceable`, `breakable` and `breaks_into` change no
-geometry.
+**any of the six keys its faces draw from**, or adds or removes a block, marks every
+section; one that changes neither marks none. `replaceable`, `breakable` and
+`breaks_into` change no geometry.
+
+All six and not one: a block whose `north` alone was re-pointed is a block that
+draws differently, and a comparison reading a single key would accept that edit and
+mark nothing at all — the reload would succeed and the world would never be built
+again to show it.
 
 **Selective marking was measured and refused, and the measurement is the reason.**
 The shipped world's highest occupied section is 3 in fifteen columns and 4 in one, so
@@ -508,6 +732,23 @@ assertions are the guard.** Marking only the lowest four sections of each column
 that watches a culled face appear once stone stops being solid passes against a
 selective rule. Measured. Anything that weakens the section-count assertions removes
 the only instrument that can see this.
+
+**Two facts together are what make a retained-but-not-re-packed section unreachable
+today, and only one of them is this rule.** A texture-key change marks every section,
+and `Session::take_remesh_work` drains the whole dirty set into **one** batch — so
+there is not even a partial-drain window in which a section is retained, not
+re-meshed, and drawn against the new resolution. Neither fact on its own is enough.
+
+**Bounding the re-mesh batch turns that state into a production path.** A whole-world
+re-mesh measured at 9.1 ms is exactly the thing somebody will one day bound, and the
+moment a batch is capped, sections retained out of it are drawn while the content
+they were meshed under has stopped serving. **Whoever bounds it must make the
+retained sections re-pack against the serving resolution before that batch is
+drawn.** `Retained::rebuilt` does that today by re-packing the whole retained list on
+every batch; a bounded batch that re-packed only what it re-meshed would leave the
+rest drawing keys nobody is playing, with no error anywhere. That is why resolution
+lives where vertices are built and not in a `Quad` — see §"A face draws what its
+block declared, and a `Quad` carries no key".
 
 ### The compute cull pass and the single indirect draw
 
@@ -980,6 +1221,106 @@ change to the mesh contract rather than to the renderer, bump
 `mc_render::capture::SCENE_REVISION` instead of overwriting: the ids carry the
 revision, so the set is *renamed*, the commit shows added and removed files, and
 the inventory test forces the previous set out rather than letting it linger.
+
+### Re-shoots on record
+
+**2026-08-19, the spec that gave the base game's blocks real art.** All four
+committed captures were re-shot at `r1`, in place, and **`SCENE_REVISION` was not
+bumped.** Neither half of that is a shortcut and both are worth the paragraph.
+
+**Why the pixels moved.** Two independent changes, landed together. The shipped
+key set went from four keys to eight — `grass.luau` declares six facings, so
+`base:grass` stopped being a key at all and every layer index after `base:dirt`
+renumbered: stone 2 to 6, water 3 to 7. A layer index rides inside every packed
+vertex, so that alone re-shoots the set. And every one of those layers is now
+filled from a baked PNG rather than from the generator, read through a sampler
+that magnifies with nearest and minifies with linear over a full mip chain
+(ADR-027).
+
+**Why `SCENE_REVISION` stayed at 1.** It identifies the *scene contract* — pose,
+world, camera path, tick list, merge predicate, vertex format — and this spec
+changes none of them. Bumping it would redefine the revision as "something
+visible changed" and oblige a bump for every future art edit, which is exactly
+the reading the ids exist not to carry. The set is therefore overwritten rather
+than renamed, and the diff shows four modified files and no added or removed
+directory. `golden_inventory` was run after the mint and reports the committed
+directories as exactly the ones the current revision declares.
+
+**What was verified before the mint, in the order this section prescribes**, all
+at `861d093`: `terrain_probes`, `replay_oracle` and `hud_prediction` — nineteen
+tests, nineteen passed. Then the mint, naming only the two golden binaries. Then
+the set re-verified with the opt-in unset and `golden_mismatch` selected — four
+passed — and `golden_inventory` — three passed. The provenance sidecars are
+byte-identical: the same adapter, backend and driver produced both sets.
+
+#### The second re-shoot, 2026-08-19, and why there was one
+
+**The first mint of this set photographed a renderer drawing five of its six
+faces turned.** East and west were a quarter turn out, north and south and the
+underside were flipped, north was laterally reversed as well, and only the top
+was right. The goldens then enshrined it, which is the exact failure the
+procedure above exists to prevent — arriving through the procedure, with every
+step of it followed.
+
+**No stage could see it, and that is the part worth keeping.** Every reading this
+spec built measures *which colours* a face holds: FR-8.1-S3 asks the four side
+images to be pairwise unequal, and a rotation keeps them unequal; FR-8.1-S5
+judges the top face's colour, and the top face was correct; the terrain probes
+compare means, and a mean is invariant under rotation, reflection and
+permutation; so are the distinct-colour counts, the pairwise ΔE figures and the
+landmark shares. **None of them measured where a colour sits.** The one property
+that mattered — which edge of a side face carries the turf — had no witness
+anywhere in 1370 tests. Not a defect in any test: a hole in the scenario set.
+
+**It was found by the project owner looking at the picture.** That is the
+standing rule in `technical/testing.md` about a green suite being no evidence,
+collecting on the largest thing this project has built.
+
+`FR-8.1-S6`, `S7` and `S8` are what close it: the bake against the model it is a
+view of under all eight dihedral transforms, where a drawn face's bands sit, and
+which way a drawn face runs. The fix is `IMAGE_SWAPS` and `IMAGE_SIGNS`, and
+`decisions.md` ADR-028 records why an image basis is not the geometry's plane
+pair.
+
+**This re-shoot was forced by a defect and not chosen**, which is the difference
+from the first one and the reason the one-re-shoot bound was not violated by it:
+the bound exists so that a set is never minted from a renderer nobody has judged,
+and re-minting is what serves that rather than what breaks it. Same procedure,
+same order, `SCENE_REVISION` again untouched, four files modified and no directory
+added or removed.
+
+#### Why no reference capture was taken between the two pixel changes, this once
+
+The paragraph above names two independent changes, and this section's own advice
+would be to land one, capture an uncommitted reference frame, then land the other
+— so a bad diff has a bisect point. **That was not done, and the reason is
+recorded here rather than left to read as a step somebody skipped.**
+
+The two do not compile apart. `gpu::TerrainTextures` is one borrowed parameter
+carrying both the texels a layer is filled from and the sampler request it is
+read through, and it is the parameter that makes either of them expressible: the
+sampler was a private free function taking no request, so nothing under `tests/`
+could build a renderer that sampled any other way. Splitting the commit would
+have meant an intermediate tree whose sampler constant is still the old one,
+reddening the scenario that asserts the new one, for no gain — the reference
+frame would have been a picture of a tree the branch never had.
+
+**What stands in its place is stronger than a bisect point, and that is the part
+worth keeping.** A reference capture is unattributable on its own: it tells you
+the two frames differ and nothing about which is right.
+`crates/mc-client/tests/the_grass_top_the_camera_sees_is_its_baked_image.rs`
+marches a ray through the world's own voxels from the declared pose, picks the
+first pixel whose ray — and all four of its neighbours' — meets the upward face of
+one `base:grass` voxel, and judges the colour there against a mean computed from
+the built PNG, **decoded by the client's decoder and never by the draw**. It was
+green before the mint. So was every probe, over strata re-derived from the real
+art. That is an independent judgement of *this* picture, made before any golden
+existed to agree with — which is the thing a reference frame cannot give you and
+the thing the ordering rule at the top of this section is really about.
+
+**The advice is not withdrawn.** Where two pixel changes *can* be landed apart,
+land them apart. Where they cannot, the substitute is a judgement of the picture
+that shares no path with the golden — not a frame nobody can attribute.
 
 ## What golden-frame verification cannot see
 

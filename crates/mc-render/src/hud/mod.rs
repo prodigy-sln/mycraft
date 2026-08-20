@@ -14,6 +14,6 @@ mod held;
 mod plan;
 mod uniform;
 
-pub use held::{HeldSwatch, held_swatch};
+pub use held::{HeldSwatch, INDICATOR_FACE, held_swatch};
 pub use plan::{HudFrame, Painted, PaintedRect, compose};
 pub use uniform::{HUD_UNIFORM_BYTES, HudUniform, MAX_HUD_RECTS, hud_uniform};

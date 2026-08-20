@@ -53,7 +53,7 @@ use mc_client::remesh::{Collecting, Remeshed, Remesher, Retained};
 use mc_client::session::reload::Remeshing;
 use mc_core::block::BlockRegistry;
 use mc_core::content::ContentSerial;
-use mc_render::texture::TextureLayers;
+use mc_render::texture::TextureResolution;
 use mc_render::window::rendered;
 use mc_sim::player::PlayerState;
 use mc_sim::replay::world::FOOTPRINT_COLUMNS;
@@ -439,11 +439,11 @@ pub fn reported(finished: Collected, block: &str) -> Reported {
 pub fn retained_at_launch(
     blocks: VoxelWorld,
     registry: Arc<BlockRegistry>,
-    layers: TextureLayers,
+    resolution: TextureResolution,
 ) -> Result<Retained, Box<dyn Error>> {
     Ok(Retained {
         meshed: World::new(blocks, registry)?.mesh()?,
-        layers,
+        resolution,
     })
 }
 
@@ -452,9 +452,9 @@ pub fn retained_at_launch(
 /// # Errors
 ///
 /// Returns an error where the client publishes nothing.
-pub fn layers_serving(client: &InputHarness) -> Result<TextureLayers, Box<dyn Error>> {
+pub fn resolution_serving(client: &InputHarness) -> Result<TextureResolution, Box<dyn Error>> {
     let published = client.content().ok_or(NOTHING_IS_SERVING)?;
-    Ok(ContentView::of(&published.resolved).into_layers())
+    Ok(ContentView::of(&published.resolved).into_resolution())
 }
 
 /// The serial the content `client` is publishing was published under.

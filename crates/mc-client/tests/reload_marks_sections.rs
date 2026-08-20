@@ -54,7 +54,7 @@ use glam::Vec3;
 use input::InputHarness;
 use reload::{
     DIRT, DIRT_FILE, Declaration, GRASS, GRASS_FILE, STONE, STONE_FILE, WATER, WATER_FILE,
-    accepted, adoption, candidate, restating, shipped, shipped_restating_stone,
+    accepted, adoption, candidate, declaring, restating, shipped, shipped_restating_stone,
     stone_that_is_not_solid,
 };
 use reload_remesh::{Marking, a_client_over, every_section_once, marked, require};
@@ -73,6 +73,24 @@ const IN_OPEN_AIR: Vec3 = Vec3::new(8.5, 70.0, 8.5);
 /// More than one, so a boundary really was crossed while the re-mesh was
 /// outstanding; the number itself carries nothing else.
 const TICKS_ACROSS_THE_RELOAD: u32 = 3;
+
+/// A block declared per facing, and the file it arrives in.
+///
+/// **The file sorts after all four the game ships**, so it is registered last and
+/// the block a player holds is still `base:dirt` — which is what every other
+/// scenario in this file expects, and what keeps this pair comparable with them.
+const ZIRCON: &str = "base:zircon";
+const ZIRCON_FILE: &str = "zircon.luau";
+
+/// The key [`ZIRCON`]'s `north` draws from while the content is serving, and the
+/// key a candidate re-points it to.
+///
+/// **Neither is the block's own name and both are keys nothing else declares.**
+/// The other five facings hold the name, so the block still resolves a layer
+/// under the name-parsing the mesher has not stopped doing yet; `north` is the one
+/// that moves, and it is the only difference between the two roots.
+const NORTHS_OWN_KEY: &str = "base:zircon_north";
+const A_DIFFERENT_NORTH: &str = "base:zircon_north_reworked";
 
 #[test]
 fn a_candidate_touching_neither_solidity_nor_a_texture_key_leaves_no_section_to_mesh() -> TestResult
@@ -154,6 +172,49 @@ fn a_candidate_changing_all_four_declarations_leaves_each_section_of_the_world_o
 }
 
 #[test]
+fn a_candidate_re_pointing_one_facing_of_a_block_leaves_every_section_of_the_world_to_mesh()
+-> TestResult {
+    let (_serving, mut client) = a_client_over_content_declaring_six_facings()?;
+    require_nothing_outstanding(&mut client)?;
+    let repointed = shipped_declaring_zircon(A_DIFFERENT_NORTH)?;
+
+    let answered = adoption(client.adopt(candidate(repointed.path())?));
+    let left_to_mesh = marked(&mut client);
+
+    assert_eq!(
+        (answered, left_to_mesh),
+        (accepted(DIRT), every_section_once()),
+        "a block whose `north` alone was re-pointed is a block that draws differently, and the \
+         whole world has to be built again to show it. **This is the only edit that separates a \
+         comparison over six keys from one over a single key**: every other fixture in this suite \
+         states its texture as one string, so a comparison reading `up` alone agrees with all of \
+         them. Reading one key here accepts the edit and marks nothing at all — the reload \
+         succeeds, the world is never meshed again, and there is no error anywhere"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_candidate_restating_the_same_six_facing_keys_leaves_no_section_to_mesh() -> TestResult {
+    let (_serving, mut client) = a_client_over_content_declaring_six_facings()?;
+    require_nothing_outstanding(&mut client)?;
+    let unchanged = shipped_declaring_zircon(NORTHS_OWN_KEY)?;
+
+    let answered = adoption(client.adopt(candidate(unchanged.path())?));
+    let left_to_mesh = marked(&mut client);
+
+    assert_eq!(
+        (answered, left_to_mesh),
+        (accepted(DIRT), Marking::NoSectionAtAll),
+        "the control the scenario above cannot supply for itself. A comparison that answered \
+         `changed` for any table-formed declaration — one that compared the six keys by identity, \
+         or gave up and marked whenever a block states a table — would satisfy the re-pointing \
+         reading and be caught only here. The two roots differ in one key and in nothing else"
+    );
+    Ok(())
+}
+
+#[test]
 fn a_reload_that_changes_no_geometry_and_one_that_does_are_told_apart_on_one_instrument()
 -> TestResult {
     let mut client = a_client_over_the_shipped_world()?;
@@ -200,6 +261,35 @@ fn ticks_between(before: Option<u32>, after: Option<u32>) -> Option<u32> {
 /// A client playing the world it launches into, over the shipped content root.
 fn a_client_over_the_shipped_world() -> Result<InputHarness, Box<dyn Error>> {
     a_client_over(&content_root()?, standing_at(IN_OPEN_AIR), shipped_world)
+}
+
+/// A client serving content that declares a block per facing, and the root it is
+/// serving.
+///
+/// **The root travels back with the client** because it lives in a temporary
+/// directory: dropped one line early it takes the content the client is serving
+/// with it, and the failure reads as a missing content root.
+///
+/// The block is declared in a file sorting after all four the game ships, so
+/// registration order is unchanged and the block a player holds is still the one
+/// every other scenario in this file expects. It is never placed in the world
+/// either, so nothing meshes it — what these two scenarios read happens at
+/// admission, before a single section is built.
+fn a_client_over_content_declaring_six_facings()
+-> Result<(ContentRoot, InputHarness), Box<dyn Error>> {
+    let serving = shipped_declaring_zircon(NORTHS_OWN_KEY)?;
+    let client = a_client_over(serving.path(), standing_at(IN_OPEN_AIR), shipped_world)?;
+    Ok((serving, client))
+}
+
+/// A copy of the shipped root that also declares [`ZIRCON`], its six facings
+/// holding its own name except `north`, which holds `north`.
+fn shipped_declaring_zircon(north: &str) -> Result<ContentRoot, Box<dyn Error>> {
+    declaring(
+        shipped()?,
+        ZIRCON_FILE,
+        &Declaration::of(ZIRCON).repointing_north(north),
+    )
 }
 
 /// Refuses unless the client has nothing outstanding to mesh.

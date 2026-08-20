@@ -54,8 +54,9 @@
 # noise; not safe as a pass/fail gate over authored content without
 # recalibrating against best-of-N.
 #
-# `scratchpad/gen_grass.py` and `assemble_grass.py` hold the generator and the
-# assembler.
+# `generators/gen_grass.py` and `generators/assemble_grass.py` hold the generator
+# and the assembler. Both ran once and are kept as provenance; this file is the
+# source of truth for the art, and neither script is re-run to produce it.
 #
 # ## Tiling, which is the arithmetic half
 #

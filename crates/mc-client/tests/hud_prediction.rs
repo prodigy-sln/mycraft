@@ -75,7 +75,7 @@ mod support;
 
 use std::error::Error;
 
-use mc_core::id::BlockName;
+use mc_render::hud::held_swatch;
 use mc_render::surface::SurfaceSize;
 use mc_testkit::frame::Rgba8Image;
 use mc_testkit::frame::gpu::CaptureContext;
@@ -85,8 +85,31 @@ use support::hud_frames::{
     hud_of, no_hud,
 };
 use support::prediction::{PixelVerdict, PredictedPaint, Prediction, per_pixel_reading};
-use support::swatch::{SwatchReading, require, swatch_reading, texel_colors};
+use support::swatch::{SwatchReading, drawn_colors_of, require, swatch_reading};
 use support::{TestResult, content, content_root, frames};
+
+/// The block declarations moved aside so that a client holds **stone**.
+///
+/// **A fixture the shipped art forced, and the reason is worth keeping.** A
+/// client holds the first solid block in registration order, which is dirt, and
+/// the indicator then draws the baked dirt palette — three browns that are also
+/// four fifths of every grass side, and the terrain behind the indicator at this
+/// pose is grass side. So every pixel of the footprint already read as a colour
+/// the indicator draws, and `every pixel of the footprint moves` was red against
+/// a correct renderer.
+///
+/// Moving dirt and grass aside leaves `stone`, `water`, `zz-dirt`, `zz-grass`
+/// and a client holding stone. Stone's greys share no colour with anything the
+/// ground is made of: the nearest pair stands ΔE 21.13 apart, against the ΔE 2.0
+/// that calls two colours the same.
+///
+/// **The assertion did not move and must not.** What moved is which block is
+/// held, which this file has no claim about at all — its subject is where the
+/// indicator lands and what it covers.
+const HELD_MOVED_ASIDE: [(&str, &str); 2] = [
+    ("dirt.luau", "zz-dirt.luau"),
+    ("grass.luau", "zz-grass.luau"),
+];
 
 /// The tick every frame here is drawn at.
 const TICK: u32 = 0;
@@ -301,7 +324,13 @@ fn shipped_prediction() -> Result<Prediction, Box<dyn Error>> {
 struct Shot {
     declared: Rgba8Image,
     bare: Rgba8Image,
-    held: BlockName,
+    /// The colours the held block's indicator is drawn from.
+    ///
+    /// **Carried rather than derived later, because deriving it needs the
+    /// content root that took this shot.** A key the built set covers draws its
+    /// image and a key it does not draws the generated texture, and only the
+    /// preparation behind these two frames knows which of the two this block is.
+    drawn: Vec<[u8; 3]>,
 }
 
 /// The two frames every comparison here is between.
@@ -316,17 +345,24 @@ struct Shot {
 /// Returns the preparation, pipeline, upload or capture failure, or the refusal
 /// when the shipped declarations do not load.
 fn captured(context: &CaptureContext) -> Result<Shot, Box<dyn Error>> {
-    let mut frames_of = HudCapture::ready(context, TICK)?;
+    let holding_stone = content::shipped_renaming_blocks(&HELD_MOVED_ASIDE)?;
+    let mut frames_of = HudCapture::over(context, TICK, holding_stone.path())?;
     let held = default_block_held(&frames_of.content)?;
     let shipped = hud_holding_default_block(&content_root()?, &frames_of.content)?;
     let request = frames::request(context, "hud-prediction-declared")?;
     let declared = frames_of.capture(&shipped, &request)?;
     let request = frames::request(context, "hud-prediction-nothing-declared")?;
     let bare = frames_of.capture(&no_hud()?, &request)?;
+    let drawn = drawn_colors_of(
+        &held_swatch(Some(&held), &frames_of.content.resolution)
+            .texture()
+            .ok_or("the block a client holds has to resolve to a key for its indicator to draw")?,
+        &frames_of.content.texels,
+    )?;
     Ok(Shot {
         declared,
         bare,
-        held,
+        drawn,
     })
 }
 
@@ -454,7 +490,7 @@ fn require_nothing_already_reads_as_the_indicator(
     shot: &Shot,
     prediction: &Prediction,
 ) -> Result<(), Box<dyn Error>> {
-    let mut drawn = texel_colors(&shot.held)?;
+    let mut drawn = shot.drawn.clone();
     drawn.push(outline_colour(prediction, INDICATOR)?);
     let seen: SwatchReading = swatch_reading(&shot.bare, INDICATOR_FOOTPRINT, &drawn)?;
     require(

@@ -109,7 +109,20 @@ const NOT_STONE: &str = "base:dirt";
 /// Written out rather than derived, because that is what "the save cannot move a
 /// layer index" means when written down: derived from the code that assigns it, this
 /// assertion would agree with whatever that code did today.
-const STONES_LAYER: u16 = 2;
+///
+/// **It was 2 and it is 6, and the sentence above is true for a different reason
+/// than it used to be.** It was 2 because the goldens had never moved. It is 6
+/// because they were deliberately re-shot: the grass block now declares a key per
+/// facing, which takes the shipped set from four keys to eight and renumbers
+/// everything after `base:dirt`. So this number is the re-shot set's, and a
+/// reader meeting a 6 where a 2 is recorded elsewhere is meeting that decision
+/// rather than a defect.
+///
+/// **What this assertion is about did not change at all.** It is about a *save*
+/// being unable to move a layer index — a world holding no stone still leaves
+/// stone where the frames were shot with it. A re-shoot moves the number this is
+/// compared against; nothing about a save may.
+const STONES_LAYER: u16 = 6;
 
 /// The one block the stone-free world holds, somewhere the generator draws nothing.
 const WHERE_THE_ONE_BLOCK_STANDS: (u32, u32, u32) = (8, 40, 8);
@@ -251,7 +264,7 @@ fn a_world_without_stone(registry: &BlockRegistry) -> Result<VoxelWorld, Box<dyn
 fn layer_of(launched: &Launched, key: &str) -> Result<Option<u16>, String> {
     let prepared = launched.as_ref().map_err(PreparationError::to_string)?;
     let key = TextureKey::parse(key).map_err(|refusal| refusal.to_string())?;
-    Ok(prepared.layers.layer_of(&key))
+    Ok(prepared.resolution.layers().layer_of(&key))
 }
 
 /// How many quads the scene a launch handed over holds for the section whose near

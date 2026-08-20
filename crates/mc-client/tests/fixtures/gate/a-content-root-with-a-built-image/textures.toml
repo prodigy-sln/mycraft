@@ -1,0 +1,19 @@
+# The same content root as `a-content-root`, and one built image committed beside
+# it under `textures/`.
+#
+# The pair differs in exactly that one file, so a stage that stops reporting it
+# is the only thing that can make the two answers agree.
+#
+# Only the image is committed and not the index the build writes with it: the
+# scenario is about a built *image* reaching version control, and one tracked
+# path makes the refusal's naming exact.
+
+output           = "textures"
+materials        = "materials"
+blocks           = "blocks"
+pixels_per_voxel = 16
+
+[[texture]]
+key   = "fixture:block"
+model = "models/block.mcvox"
+face  = "top"

@@ -81,6 +81,7 @@ use std::sync::Arc;
 
 use mc_render::camera::{CameraView, camera_view};
 use mc_render::color::CLEAR_COLOR_SRGB;
+use mc_render::texture::supplied::SuppliedTexels;
 use mc_testkit::frame::Rgba8Image;
 
 use support::frames::ReplayFrame;
@@ -225,7 +226,7 @@ fn all_three_declared_block_colours_reach_the_frame() -> TestResult {
     let Some(frame) = observed_frame("terrain-probe-textures")? else {
         return Ok(());
     };
-    let outcome = probe::texture_variety(&frame)?;
+    let outcome = probe::texture_variety(&frame, &art_of_the_shipped_root()?)?;
 
     assert!(
         outcome.failures.is_empty(),
@@ -244,7 +245,7 @@ fn a_frame_of_nothing_but_sky_fails_every_probe_at_a_pixel_each_of_them_names() 
     let size = support::frames::CAPTURE_SIZE;
     let blank = probe::uniform(size.width, size.height, CLEAR_COLOR_SRGB)?;
 
-    let outcomes = probe::suite(&blank, &declared_camera())?;
+    let outcomes = probe::suite(&blank, &declared_camera(), &art_of_the_shipped_root()?)?;
     let silent = quiet_probes(&outcomes);
     let unlocated = outcomes
         .iter()
@@ -269,7 +270,7 @@ fn flipping_the_frame_upside_down_turns_the_orientation_probe_red() -> TestResul
     };
     let flipped = probe::flipped_vertically(&frame)?;
 
-    let outcomes = probe::suite(&flipped, &declared_camera())?;
+    let outcomes = probe::suite(&flipped, &declared_camera(), &art_of_the_shipped_root()?)?;
     let reported = pixels_reported_by(&outcomes, probe::ORIENTATION);
 
     assert!(
@@ -290,7 +291,7 @@ fn mirroring_the_frame_left_to_right_turns_only_the_landmark_probe_red() -> Test
     };
     let mirrored = probe::mirrored_horizontally(&frame)?;
 
-    let outcomes = probe::suite(&mirrored, &declared_camera())?;
+    let outcomes = probe::suite(&mirrored, &declared_camera(), &art_of_the_shipped_root()?)?;
     let loud = noisy_probes(&outcomes);
     let reported = pixels_reported_by(&outcomes, probe::LANDMARK);
 
@@ -304,6 +305,18 @@ fn mirroring_the_frame_left_to_right_turns_only_the_landmark_probe_red() -> Test
          reported {reported:?} and the suite reported {outcomes:#?}"
     );
     Ok(())
+}
+
+/// The texels the shipped root's built set offers, read through the client's own
+/// reader.
+///
+/// **A file on disk, never a frame.** The strata a correct picture shows are the
+/// art the manifest bakes, and the three colours a pixel is clustered against
+/// have to come from that art rather than from a generator that no longer
+/// describes it — the generated mean for `base:dirt` stands ΔE 62.94 from the
+/// dirt this root actually draws.
+fn art_of_the_shipped_root() -> Result<SuppliedTexels, Box<dyn Error>> {
+    support::art::built_texels(&support::content_root()?)
 }
 
 /// The camera the frames above are seen from, written out rather than imported.

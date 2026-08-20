@@ -82,8 +82,8 @@ use reload::{AMBER, AMBER_FILE, Adoption, accepted, adoption, amber, declaring, 
 use reload_content::candidate_against;
 use reload_remesh::{
     Collected, EVERY_SECTION_OF_THE_SHIPPED_WORLD, Marking, NOTHING_WAS_LEFT_TO_MESH,
-    a_client_over, collected, every_section_once, keys_of, layers_serving, marked, marking_of,
-    require, retained_at_launch, serial_serving,
+    a_client_over, collected, every_section_once, keys_of, marked, marking_of, require,
+    resolution_serving, retained_at_launch, serial_serving,
 };
 use reload_world::{published_tick, registry_of, shipped_world, standing_and_facing, standing_at};
 use support::{TestResult, content_root};
@@ -222,7 +222,7 @@ fn a_worker_a_launch_would_have_spawned(
 ) -> Result<Remesher, Box<dyn Error>> {
     let registry = registry_of(root)?;
     let blocks = shipped_world(&registry)?;
-    let retained = retained_at_launch(blocks, registry, layers_serving(client)?)?;
+    let retained = retained_at_launch(blocks, registry, resolution_serving(client)?)?;
     Ok(Remesher::spawn(retained, serial_serving(client)?))
 }
 
@@ -259,7 +259,7 @@ fn whole_world_batch_in_flight(
     client: &mut InputHarness,
     worker: &mut Remesher,
 ) -> Result<Marking, Box<dyn Error>> {
-    worker.retire(layers_serving(client)?, serial_serving(client)?);
+    worker.retire(resolution_serving(client)?, serial_serving(client)?);
     let batch = client.take_remesh_work().ok_or(NOTHING_WAS_LEFT_TO_MESH)?;
     let marking = marking_of(&keys_of(&batch));
     worker.submit(batch);

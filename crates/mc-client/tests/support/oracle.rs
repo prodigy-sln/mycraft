@@ -56,6 +56,7 @@ use mc_render::surface::SurfaceSize;
 use mc_sim::camera::CameraPose;
 use mc_sim::replay::ReplayWorld;
 use mc_testkit::frame::Rgba8Image;
+use mc_world::mesh::Facing;
 use mc_world::section::Contents;
 
 use super::probe::{DIFFERENT_COLOR, distance, pixel_color};
@@ -283,6 +284,45 @@ impl Lens {
     }
 }
 
+/// The first solid voxel a ray cast from `camera` through `pixel` meets on a
+/// frame of `size`, and the facing of it the ray came in through.
+///
+/// **The independent answer to "what is this pixel looking at".** It reads the
+/// world's own voxels and the registry's own solidity and consults nothing the
+/// renderer produced, which is what lets a reading assert a colour at a pixel
+/// *and* say which block face that pixel is of without one of the two coming
+/// from the other.
+///
+/// The facing is the one the ray entered by, taken from the axis the march last
+/// crossed a boundary on — a march that steps one boundary at a time cannot
+/// enter a voxel by two faces at once. `None` where the ray met nothing, and
+/// also where the eye already stands inside a solid voxel: there is no face to
+/// have entered by, and answering one would be an invention.
+///
+/// # Errors
+///
+/// Returns [`RegistryError`] when the world holds a block `voxels`' registry
+/// does not register.
+pub fn first_solid_face(
+    camera: &CameraPose,
+    size: SurfaceSize,
+    pixel: (u32, u32),
+    voxels: &Voxels<'_>,
+) -> Result<Option<(IVec3, Facing)>, RegistryError> {
+    let basis = Basis::of(camera);
+    let mut march = March::of(basis.eye, basis.ray_through(pixel, &Lens::of(size)));
+    if voxels.is_solid(march.voxel)? {
+        return Ok(None);
+    }
+    while march.travelled <= MARCH_LIMIT {
+        let entered = march.step();
+        if voxels.is_solid(march.voxel)? {
+            return Ok(Some((march.voxel, entered)));
+        }
+    }
+    Ok(None)
+}
+
 /// Whether a ray leaving `origin` along `direction` meets a solid voxel.
 fn marches_into_terrain(
     origin: Vec3,
@@ -294,9 +334,20 @@ fn marches_into_terrain(
         if voxels.is_solid(march.voxel)? {
             return Ok(true);
         }
-        march.step();
+        let _entered = march.step();
     }
     Ok(false)
+}
+
+/// The facing a voxel was entered by, given which way the march is travelling on
+/// that axis: `lower` where it moves towards higher coordinates, and `higher`
+/// where it moves the other way.
+///
+/// A march never steps zero on the axis it chose, so the middle case is
+/// unreachable; it answers `lower` rather than carrying a fourth state nothing
+/// can produce.
+const fn entered_by(towards: i32, lower: Facing, higher: Facing) -> Facing {
+    if towards < 0 { higher } else { lower }
 }
 
 /// A ray walking the voxel grid one boundary crossing at a time.
@@ -341,21 +392,28 @@ impl March {
     }
 
     /// Crosses into the next voxel, which is the one on whichever axis's
-    /// boundary stands nearest.
-    fn step(&mut self) {
+    /// boundary stands nearest, and answers the facing of it that was entered
+    /// through.
+    ///
+    /// A ray moving towards higher x enters the voxel it reaches by that
+    /// voxel's **negative** x side, which is what the pairing below says.
+    fn step(&mut self) -> Facing {
         let next = self.next;
         if next.x <= next.y && next.x <= next.z {
             self.travelled = next.x;
             self.voxel.x += self.towards.x;
             self.next.x += self.between.x;
+            entered_by(self.towards.x, Facing::NegX, Facing::PosX)
         } else if next.y <= next.z {
             self.travelled = next.y;
             self.voxel.y += self.towards.y;
             self.next.y += self.between.y;
+            entered_by(self.towards.y, Facing::NegY, Facing::PosY)
         } else {
             self.travelled = next.z;
             self.voxel.z += self.towards.z;
             self.next.z += self.between.z;
+            entered_by(self.towards.z, Facing::NegZ, Facing::PosZ)
         }
     }
 }

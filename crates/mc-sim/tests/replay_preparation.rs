@@ -20,6 +20,7 @@ use std::error::Error;
 
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::replay::{PrepareError, mesh_all};
 
@@ -78,7 +79,7 @@ fn foreign_registry() -> Result<BlockRegistry, Box<dyn Error>> {
     let origin = DefinitionOrigin::new(FIXTURE_ORIGIN);
     let definition = BlockDefinition {
         name: BlockName::parse(FOREIGN)?,
-        texture: TextureKey::parse(FOREIGN)?,
+        textures: FaceTextures::uniform(TextureKey::parse(FOREIGN)?),
         is_solid: true,
         replaceable: false,
         breakable: true,

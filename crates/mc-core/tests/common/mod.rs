@@ -13,6 +13,7 @@ pub mod hud;
 
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin, RegistryError};
+use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, NamespacedIdError, TextureKey};
 
 /// The error type every test in this suite propagates with `?`.
@@ -39,7 +40,7 @@ pub fn definition(
 ) -> Result<BlockDefinition, NamespacedIdError> {
     Ok(BlockDefinition {
         name: BlockName::parse(name)?,
-        texture: TextureKey::parse(texture)?,
+        textures: FaceTextures::uniform(TextureKey::parse(texture)?),
         is_solid: true,
         replaceable: false,
         breakable: true,

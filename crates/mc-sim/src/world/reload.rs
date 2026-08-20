@@ -10,7 +10,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use mc_core::block::{BlockId, BlockRegistry, RegistryError};
-use mc_core::id::{BlockName, TextureKey};
+use mc_core::content::FaceTextures;
+use mc_core::id::BlockName;
 
 use crate::reload::ReloadRefusal;
 use crate::world::World;
@@ -61,11 +62,11 @@ pub(crate) fn adopt_candidate(
 
 /// Whether replacing `serving` with `candidate` changes what is drawn.
 ///
-/// Binary, and the marking it drives is all-or-nothing: solidity, texture key,
-/// or the set of names. `replaceable`, `breakable` and `breaks_into` change no
-/// geometry. Narrowing this to the sections that hold a changed name marks about
-/// 82 of 256 in the shipped world and fails the spec's stated bound, so it is a
-/// spec change rather than an optimisation.
+/// Binary, and the marking it drives is all-or-nothing: solidity, the keys the
+/// six faces draw from, or the set of names. `replaceable`, `breakable` and
+/// `breaks_into` change no geometry. Narrowing this to the sections that hold a
+/// changed name marks about 82 of 256 in the shipped world and fails the spec's
+/// stated bound, so it is a spec change rather than an optimisation.
 fn changes_geometry(serving: &BlockRegistry, candidate: &BlockRegistry) -> bool {
     drawn_of(serving) != drawn_of(candidate)
 }
@@ -74,11 +75,16 @@ fn changes_geometry(serving: &BlockRegistry, candidate: &BlockRegistry) -> bool 
 ///
 /// A map rather than a list, so a re-ordered declaration is not mistaken for a
 /// geometry change.
-fn drawn_of(registry: &BlockRegistry) -> BTreeMap<&BlockName, (bool, &TextureKey)> {
+///
+/// **All six keys and not one.** A block whose `north` alone was re-pointed is a
+/// block that draws differently, and comparing a single key would leave such a
+/// reload marking nothing at all — the edit would be accepted and no section
+/// would be built again to show it.
+fn drawn_of(registry: &BlockRegistry) -> BTreeMap<&BlockName, (bool, &FaceTextures)> {
     (0..registry.registered_count())
         .filter_map(|position| u32::try_from(position).ok())
         .filter_map(|raw| registry.definition(BlockId::from_raw(raw)).ok())
-        .map(|declared| (&declared.name, (declared.is_solid, &declared.texture)))
+        .map(|declared| (&declared.name, (declared.is_solid, &declared.textures)))
         .collect()
 }
 

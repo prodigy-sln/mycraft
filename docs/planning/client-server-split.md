@@ -313,6 +313,15 @@ rather than drawn as layer zero.
 itself, 16×16, in the GPU layer — same key, same texels, forever. The key *is* the
 image. Real art has not landed.
 
+> **Landed, 2026-08-20 (SPEC-019).** The paragraph above is false as of that spec
+> and is kept because the reasoning after it does not depend on it. A key the
+> content root's built set covers now draws a PNG baked from a voxel model, read at
+> launch; a key nothing has baked still gets the generated texels described above,
+> so the fallback is per key rather than universal. Which key a face draws also
+> comes out of the block's declaration rather than its name, per facing — see
+> `technical/rendering.md` §"A face draws what its block declared, and a `Quad`
+> carries no key".
+
 **A layer index rides inside every packed vertex.** This is the sharpest fact in
 this document. **Insert one block the server does not have, and every layer index
 after it shifts by one — the entire world is textured wrong, silently, with no

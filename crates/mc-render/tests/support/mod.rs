@@ -32,17 +32,20 @@ pub mod hud;
 
 use std::collections::BTreeSet;
 use std::error::Error;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
+use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_render::camera::{CameraView, Frustum, projection_for, view_projection, visible_sections};
 use mc_render::geometry::scene::SceneGeometry;
 use mc_render::geometry::{SectionOrigin, build_section_geometry};
-use mc_render::gpu::{RecordTarget, TerrainRenderer};
+use mc_render::gpu::{RecordTarget, TerrainRenderer, TerrainTextures};
 use mc_render::pass::TerrainPassConfig;
 use mc_render::snapshot::{FrameStats, ScenePhase, TerrainSnapshot};
 use mc_render::surface::SurfaceSize;
-use mc_render::texture::TextureLayers;
+use mc_render::texture::sampler::TERRAIN_SAMPLER;
+use mc_render::texture::supplied::SuppliedTexels;
+use mc_render::texture::{TextureLayers, TextureResolution};
 use mc_testkit::frame::gpu::{
     AcquireOptions, Acquisition, CAPTURE_FORMAT, CaptureContext, CaptureRequest, draw_fn,
 };
@@ -126,7 +129,7 @@ pub fn request(
 #[derive(Debug)]
 pub struct Fixture {
     pub scene: Arc<SceneGeometry>,
-    pub layers: TextureLayers,
+    pub resolution: TextureResolution,
 }
 
 /// Assembles `sections` — each an origin and the quads it shows — into one
@@ -136,23 +139,52 @@ pub struct Fixture {
 ///
 /// Returns the parse, geometry or assembly failure.
 pub fn assemble(sections: &[(SectionOrigin, Vec<Quad>)]) -> Result<Fixture, Box<dyn Error>> {
-    let keys = sections
-        .iter()
-        .flat_map(|(_, quads)| quads.iter())
-        .map(|quad| TextureKey::parse(quad.block.as_str()))
-        .collect::<Result<BTreeSet<_>, _>>()?;
-    let layers = TextureLayers::resolve(&keys);
+    let mut keys = BTreeSet::new();
+    let mut stated = Vec::new();
+    for quad in sections.iter().flat_map(|(_, quads)| quads.iter()) {
+        // These fixtures declare `texture` equal to `name`, which is what every
+        // block in this repository does; the readings that are about the two
+        // differing state them apart for themselves.
+        let key = TextureKey::parse(quad.block.as_str())?;
+        keys.insert(key.clone());
+        stated.push((quad.block.clone(), FaceTextures::uniform(key)));
+    }
+    let resolution = TextureResolution::stating(stated, TextureLayers::resolve(&keys));
     let built = sections
         .iter()
-        .map(|(origin, quads)| build_section_geometry(quads, *origin, &layers))
+        .map(|(origin, quads)| build_section_geometry(quads, *origin, &resolution))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Fixture {
         scene: Arc::new(SceneGeometry::assemble(built)?),
-        layers,
+        resolution,
     })
 }
 
-/// A renderer with `fixture`'s textures and scene already uploaded.
+/// What the composition root hands a renderer when no content root has offered
+/// any texels: the terrain sampler, and an empty supply.
+///
+/// Every layer is then filled from the generator, which is what this crate's own
+/// fixtures want — they name `example:` blocks that no built set covers, and a
+/// renderer test may not read a content root at all.
+#[must_use]
+pub fn production_textures() -> TerrainTextures<'static> {
+    TerrainTextures {
+        supplied: NO_TEXELS.get_or_init(SuppliedTexels::none),
+        sampler: TERRAIN_SAMPLER,
+    }
+}
+
+/// The empty supply every renderer above borrows from.
+static NO_TEXELS: OnceLock<SuppliedTexels> = OnceLock::new();
+
+/// A renderer with `fixture`'s textures and scene already uploaded, drawing
+/// through the sampler the composition root asks for and supplied no texels.
+///
+/// Every scenario but the two about sampling wants exactly this: the production
+/// request, and layers filled from the generator. Those two reach for
+/// [`prepared_renderer_through`] instead, and the fact that they are the only
+/// two is what keeps the second sampler configuration from leaking into readings
+/// that are about something else.
 ///
 /// # Errors
 ///
@@ -161,12 +193,33 @@ pub fn prepared_renderer(
     context: &CaptureContext,
     fixture: &Fixture,
 ) -> Result<TerrainRenderer, Box<dyn Error>> {
+    prepared_renderer_through(context, fixture, &production_textures())
+}
+
+/// That same renderer, built through `textures` — a sampler request and the
+/// texels its array texture is filled from.
+///
+/// **The parameter is the decision, not a convenience.** `buffers` is private
+/// and its sampler is a free function taking no request, so without a request
+/// threaded from here nothing under `tests/` can build a renderer that samples
+/// any other way — and a scenario comparing filtered minification against
+/// unfiltered minification cannot be written at all.
+///
+/// # Errors
+///
+/// Returns the pipeline, sampler or upload failure.
+pub fn prepared_renderer_through(
+    context: &CaptureContext,
+    fixture: &Fixture,
+    textures: &TerrainTextures<'_>,
+) -> Result<TerrainRenderer, Box<dyn Error>> {
     let mut renderer = TerrainRenderer::new(
         context.device(),
         context.queue(),
         &TerrainPassConfig::offscreen(),
+        textures,
     )?;
-    renderer.upload_textures(context.queue(), &fixture.layers)?;
+    renderer.upload_textures(context.queue(), fixture.resolution.layers())?;
     renderer.upload_scene(context.queue(), &fixture.scene)?;
     Ok(renderer)
 }

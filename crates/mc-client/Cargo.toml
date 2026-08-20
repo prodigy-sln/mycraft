@@ -25,6 +25,12 @@ wgpu = { workspace = true }
 # `request_device` and `enumerate_adapters` are async and resolve immediately, so
 # the executor's whole job is to stop pretending otherwise.
 pollster = { workspace = true }
+# The built set's images. Confined to `src/textures/decode.rs` by the same rule
+# winit and wgpu are confined by their own files, and asserted by
+# `tests/the_decode_stays_at_the_composition_root.rs`: swapping the decoder is
+# then one edit, and every other file here stays a file about content rather
+# than about a format.
+image = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

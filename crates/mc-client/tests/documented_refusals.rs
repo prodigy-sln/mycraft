@@ -119,10 +119,14 @@
 //! because whoever next meets a red here needs to know which half a parser can
 //! reach.
 
+#[path = "support/built_set_refusals.rs"]
+mod built_set_refusals;
 #[path = "support/entry.rs"]
 mod entry;
 #[path = "support/input/mod.rs"]
 mod input;
+#[path = "support/per_facing_refusals.rs"]
+mod per_facing_refusals;
 #[path = "support/persistence.rs"]
 mod persistence;
 #[path = "support/printed_refusals.rs"]
@@ -283,6 +287,159 @@ fn pages_quoting_the_printed_refusals_verbatim_agree_and_their_other_blocks_are_
          somebody deletes the guard instead of the drift"
     );
     Ok(())
+}
+
+/// The page a mod author writes a block declaration against, below [`PAGES`].
+const BLOCKS_PAGE: &str = "blocks-items.md";
+
+/// The page a mod author reads about the built texture set on, below [`PAGES`].
+const MODELS_PAGE: &str = "voxel-models.md";
+
+/// The six fields a declaration may state, in the order the guide introduces
+/// them.
+///
+/// Written out here rather than read from the loader, which is the point: an
+/// expectation derived from the value under test agrees with whatever that value
+/// becomes. `documented_refusals` is the one guard where the page and the program
+/// are compared against each other rather than each against a third copy, and this
+/// list is the page's own order.
+const FIELDS_IN_THE_ORDER_THE_GUIDE_STATES: [&str; 6] = [
+    "name",
+    "texture",
+    "solid",
+    "replaceable",
+    "breakable",
+    "breaks_into",
+];
+
+/// What a page says about a set of refusals the client raises.
+///
+/// **Four arms rather than a count**, so that "the page states them all" and "the
+/// page states none" can never compare equal, and so that a scan which stopped
+/// finding quotations reports that rather than borrowing the good answer.
+#[derive(Debug, PartialEq, Eq)]
+enum GuideListing {
+    /// Every refusal raised is quoted, and the fields the page's quotations name
+    /// run in the order the guide states them.
+    ///
+    /// **The ordering half is only meaningful where the refusals name a
+    /// declaration field.** A set of refusals that name none — the ones a built
+    /// texture set raises — satisfies it vacuously, and what the verdict carries
+    /// for those is the coverage half. Said here rather than split into two
+    /// verdicts, because a second enum whose arms differed by one would be two
+    /// things a reader has to tell apart.
+    EveryRefusalIsQuotedInFieldOrder,
+    /// This refusal is raised and the page does not carry it.
+    NotQuoted { refusal: String },
+    /// A quotation naming this field is quoted after one naming a field the guide
+    /// introduces later.
+    OutOfFieldOrder { field: String, after: String },
+    /// The page was read and quotes no refusal at all.
+    NoRefusalIsQuoted,
+}
+
+#[test]
+fn the_modding_guide_states_every_per_facing_refusal_in_the_recognised_field_order() -> TestResult {
+    let raised = per_facing_refusals::per_facing_refusals()?;
+
+    let listing = listing_of(&pages()?.join(BLOCKS_PAGE), &raised)?;
+
+    assert_eq!(
+        listing,
+        GuideListing::EveryRefusalIsQuotedInFieldOrder,
+        "a mod author meets these seven by writing a texture table slightly wrong, which is what \
+         everybody does on their first one, and each has to be findable on the page they are \
+         already reading — quoted from a real run rather than described, so that what they see on \
+         their terminal is what they can search the page for. The field order is the page's own: \
+         a refusal about `texture` filed after one about `breakable` is a page a reader scans past"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_voxel_model_guide_states_every_refusal_a_built_texture_set_raises() -> TestResult {
+    let raised = built_set_refusals::built_set_refusals()?;
+
+    let listing = listing_of(&pages()?.join(MODELS_PAGE), &raised)?;
+
+    assert_eq!(
+        listing,
+        GuideListing::EveryRefusalIsQuotedInFieldOrder,
+        "a contributor who has not run the art build reads one of these six and then goes \
+         looking for it here. The scan above asks only that what a page quotes is real; without \
+         this one a page quoting three of the six passes, and an instrument that checks every \
+         quotation is real while nothing checks every real thing is quoted reports its own blind \
+         spot as zero"
+    );
+    Ok(())
+}
+
+/// What `page` makes of the refusals in `raised`.
+///
+/// # No positive control, and this is what that leaves undetected
+///
+/// A `listing_of` that came to report every raised refusal as quoted would answer
+/// [`GuideListing::EveryRefusalIsQuotedInFieldOrder`] forever, and both guards
+/// above with it — the other arms rule out a scan that *cannot* look, never one
+/// that looks and always approves. **Both guards share this and neither
+/// introduced it**: the per-facing listing has never had a control either, so one
+/// test closes two. It was built and measured, and is absent only for this file's
+/// size limit; the split that would make room is unrelated scope, for `main`
+/// between specs.
+///
+/// # Errors
+///
+/// Returns an error if the page cannot be read, or if nothing was raised for it to
+/// be compared against — neither is one of the four verdicts, for the reason
+/// [`verdict_over`] refuses to let a vanished directory borrow one.
+fn listing_of(page: &Path, raised: &[String]) -> Result<GuideListing, Box<dyn Error>> {
+    if raised.is_empty() {
+        return Err("no per-facing refusal was raised for the guide to be compared against".into());
+    }
+    let quoted = quoted_refusals_in(&fs::read_to_string(page)?);
+    if quoted.is_empty() {
+        return Ok(GuideListing::NoRefusalIsQuoted);
+    }
+    if let Some(refusal) = raised.iter().find(|refusal| !quoted.contains(refusal)) {
+        return Ok(GuideListing::NotQuoted {
+            refusal: refusal.clone(),
+        });
+    }
+    Ok(fields_in_order(&quoted))
+}
+
+/// Whether the fields the page's quotations name run in the guide's own order.
+///
+/// A quotation whose field is not one of the six is passed over rather than
+/// ranked: `slid` is the misspelling one of them is *about*, and giving it a
+/// position would rank a word the guide never introduces.
+fn fields_in_order(quoted: &[String]) -> GuideListing {
+    let mut furthest: Option<(usize, String)> = None;
+    for refusal in quoted {
+        let Some((at, field)) = ranked_field(refusal) else {
+            continue;
+        };
+        match &furthest {
+            Some((reached, after)) if at < *reached => {
+                return GuideListing::OutOfFieldOrder {
+                    field,
+                    after: after.clone(),
+                };
+            }
+            _ => furthest = Some((at, field)),
+        }
+    }
+    GuideListing::EveryRefusalIsQuotedInFieldOrder
+}
+
+/// Where in the guide's own order the field `refusal` blames sits, and what it is
+/// called.
+fn ranked_field(refusal: &str) -> Option<(usize, String)> {
+    FIELDS_IN_THE_ORDER_THE_GUIDE_STATES
+        .into_iter()
+        .enumerate()
+        .find(|(_, field)| refusal.contains(&format!("field `{field}`")))
+        .map(|(at, field)| (at, field.to_owned()))
 }
 
 /// The first of the printed refusals — the one about a block declaration.

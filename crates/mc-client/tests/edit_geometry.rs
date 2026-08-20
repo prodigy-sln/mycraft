@@ -96,7 +96,7 @@ use mc_client::startup::scene_of;
 use mc_core::block::{BlockId, BlockRegistry};
 use mc_core::id::BlockName;
 use mc_render::geometry::scene::SceneGeometry;
-use mc_render::texture::TextureLayers;
+use mc_render::texture::TextureResolution;
 use mc_sim::action::{ActionIntent, EditReport, TickIntent};
 use mc_sim::player::{BlockPos, MovementIntent, PlayerState};
 use mc_sim::replay::{SectionQuads, remesh, splice};
@@ -280,7 +280,7 @@ fn breaking_a_block_where_the_footprint_ends_leaves_its_faces_absent_and_reports
 struct Handed {
     simulation: Simulation,
     meshed: Vec<SectionQuads>,
-    layers: TextureLayers,
+    resolution: TextureResolution,
     registry: Arc<BlockRegistry>,
     scene: SceneGeometry,
 }
@@ -300,7 +300,7 @@ impl Handed {
         Ok(Self {
             simulation: seat(looking_down_from(feet), world, content).simulation,
             meshed: prepared.meshed,
-            layers: prepared.layers,
+            resolution: prepared.resolution,
             registry: prepared.registry,
             scene: prepared.scene,
         })
@@ -325,7 +325,7 @@ impl Handed {
         if let Some(work) = self.simulation.take_remesh_work() {
             splice(&mut self.meshed, remesh(&work)?)?;
         }
-        self.scene = scene_of(&self.meshed, &self.layers)?;
+        self.scene = scene_of(&self.meshed, &self.resolution)?;
         Ok(report)
     }
 

@@ -33,6 +33,22 @@ thiserror = { workspace = true }
 # ignore that would outlive its reason.
 wgpu = { workspace = true, optional = true }
 
+# The GPU layer blocks on an already-resolved validation error scope, and that
+# is the whole of what this is for. **The rule this manifest carried until this
+# spec -- device acquisition belongs to the client and to the harness, never to
+# this crate's library -- is amended rather than contradicted silently.**
+# Acquiring a device is still not this crate's business; popping a scope the
+# driver has already recorded into is not acquisition, and the alternative was
+# re-implementing wgpu's own sampler validation on this side, which is a second
+# copy of a vendor constraint that drifts the day the vendor changes it.
+#
+# Optional under `gpu` and featureless, which is load-bearing on both counts: a
+# `pollster` outside the feature would be resolved by `--no-default-features`
+# into a layer that never touches a device, and a default-featured one would
+# drag `wgpu` into that same graph. `tests/dependency_graph.rs` asserts both
+# directions.
+pollster = { workspace = true, optional = true }
+
 # The debug overlay's text, and nothing else. Both are optional under `gpu` for
 # the same reason wgpu is: `--no-default-features` has to remove them from the
 # graph rather than leave them unused, so a stray `use egui::` in the pure layer
@@ -69,11 +85,13 @@ tempfile = { workspace = true }
 # The `gpu` feature seam is asserted against cargo's own resolution rather than
 # against this manifest, so the walk reads `cargo metadata`'s JSON.
 serde_json = { workspace = true }
-# The capability assertion enumerates adapters itself, because it asks about
-# adapters the capture harness deliberately does not retain — and enumeration is
-# a future. Dev-only: adapter and device acquisition belongs to the client and to
-# the harness, never to this crate's library.
-pollster = { workspace = true }
+# `pollster` is deliberately not declared here. The capability assertion
+# enumerates adapters itself and needs to block on that future, and it takes the
+# executor from this package's own `[dependencies]` under `gpu` -- the feature
+# it already requires. A second entry here would be an edge cargo resolves for
+# every configuration, the pure one included, and `tests/dependency_graph.rs`
+# fails the build over exactly that.
+
 # Featureless by default, which is load-bearing rather than tidiness: dev-
 # dependencies are edges cargo resolves, so a default-featured harness would drag
 # wgpu into this crate's `--no-default-features` graph and fail the seam's own
@@ -87,7 +105,7 @@ mc-testkit = { workspace = true }
 # exercise this crate's GPU layer need the harness's own device half.
 [features]
 default = ["gpu"]
-gpu = ["dep:wgpu", "dep:egui", "dep:egui-wgpu", "mc-testkit/gpu"]
+gpu = ["dep:wgpu", "dep:egui", "dep:egui-wgpu", "dep:pollster", "mc-testkit/gpu"]
 
 # The one test that has to name a wgpu type without needing a device: the
 # offscreen pass's colour format against the harness's own. `required-features`
@@ -118,6 +136,11 @@ required-features = ["gpu"]
 [[test]]
 name = "hud_offscreen"
 path = "tests/hud_offscreen.rs"
+required-features = ["gpu"]
+
+[[test]]
+name = "terrain_sampling"
+path = "tests/terrain_sampling.rs"
 required-features = ["gpu"]
 
 [lints]

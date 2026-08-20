@@ -33,9 +33,18 @@
 // Each test binary links this whole module and uses a subset of it.
 #![allow(dead_code)]
 
+/// What a texture key's layer is filled with, and the colours a frame drawn
+/// from it may hold.
+pub mod art;
+/// Content roots whose built texture set has been put into one particular
+/// state, for scenarios about what the client makes of the set it is handed.
+pub mod built_sets;
 /// Content roots built from the shipped one, for scenarios about what a root
 /// declares and about what it stops declaring.
 pub mod content;
+/// Standing square in front of one face of one block in the replay world, shared
+/// by the readings that ask where a drawn face's colours sit.
+pub mod faces;
 /// Rendering one tick of the replay offscreen, at the declared capture size.
 pub mod frames;
 /// Judging a rendered capture against a committed golden, shared by the two
@@ -44,6 +53,9 @@ pub mod goldens;
 /// Rendering one tick of the replay with a HUD over it, through the frame call
 /// the windowed client makes.
 pub mod hud_frames;
+/// The voxel model a texture was baked from, read independently of the baker, so
+/// a baked image can be judged against the plane it is a view of.
+pub mod model;
 /// An independent prediction of what the player's camera sees, marched through
 /// the world's own voxels.
 pub mod oracle;
@@ -153,7 +165,7 @@ pub fn published_content(registry: &BlockRegistry) -> Result<PublishedContent, B
         let definition = registry.definition(BlockId::from_raw(u32::try_from(position)?))?;
         blocks.push(ResolvedBlock {
             name: definition.name.clone(),
-            texture: definition.texture.clone(),
+            textures: definition.textures.clone(),
             is_solid: definition.is_solid,
         });
     }
@@ -189,7 +201,23 @@ pub fn prepare() -> Result<RenderInput, Box<dyn Error>> {
 /// Returns an error if the content cannot be read, or the world cannot be
 /// generated, meshed, packed or assembled.
 pub fn prepare_scene() -> Result<PreparedScene, Box<dyn Error>> {
-    Ok(mc_client::startup::prepare_scene(&content_root()?)?)
+    prepare_scene_at(&content_root()?)
+}
+
+/// That same preparation, over a content root a fixture built.
+///
+/// **The root is a parameter and the shipped one is one value of it.** Every
+/// reading about what a launch makes of a *particular* texture set needs a root
+/// it can put into a particular state, and going through the client's own
+/// preparation rather than through its parts is what keeps those readings about
+/// the sequence a window opens on.
+///
+/// # Errors
+///
+/// Returns the refusal preparing the scene raised — which for these fixtures is
+/// most often the texture set's own.
+pub fn prepare_scene_at(root: &Path) -> Result<PreparedScene, Box<dyn Error>> {
+    Ok(mc_client::startup::prepare_scene(root)?)
 }
 
 /// What a run ending in `ending` writes to the error stream, captured whole.

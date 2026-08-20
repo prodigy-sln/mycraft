@@ -30,6 +30,7 @@ use std::error::Error;
 
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::replay::{BlockVolume, Extent};
 use mc_world::section::Contents;
@@ -119,7 +120,7 @@ pub fn registry_declaring(blocks: &[(&str, bool)]) -> Result<BlockRegistry, Box<
         // the fixtures that do break blocks declare their own registry.
         declared.push(Ok(BlockDefinition {
             name: BlockName::parse(name)?,
-            texture: TextureKey::parse(name)?,
+            textures: FaceTextures::uniform(TextureKey::parse(name)?),
             is_solid,
             replaceable: false,
             breakable: true,

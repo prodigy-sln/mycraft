@@ -312,6 +312,39 @@ pub fn shipped_renaming_block(from: &str, to: &str) -> Result<ContentRoot, Box<d
     Ok(copied)
 }
 
+/// The shipped content root copied with several block declarations renamed, in
+/// the order given.
+///
+/// **More than one, because which block a client holds is the *first solid* one
+/// in file-name order** — so moving one declaration out of the way only reaches
+/// the second, and reaching the third needs two moved. A scenario needing two
+/// blocks whose textures share no colour cannot always take the first two it is
+/// offered.
+///
+/// # Errors
+///
+/// Returns an error if any named declaration is not there to rename, for the
+/// reason [`shipped_renaming_block`] gives.
+pub fn shipped_renaming_blocks(renames: &[(&str, &str)]) -> Result<ContentRoot, Box<dyn Error>> {
+    let copied = shipped_copy()?;
+    let blocks = copied.path().join(BLOCK_DIRECTORY);
+    for (from, to) in renames {
+        let declared = blocks.join(from);
+        if !declared.is_file() {
+            return Err(format!(
+                "this fixture has to rename `{BLOCK_DIRECTORY}/{from}` inside a copy of the \
+                 shipped content root, but the shipped root does not declare it. What it would \
+                 build is a root that registers the same blocks in the same order, and the two \
+                 frames a scenario compares would then hold the same block for a reason nothing \
+                 states"
+            )
+            .into());
+        }
+        fs::rename(&declared, blocks.join(to))?;
+    }
+    Ok(copied)
+}
+
 /// The shipped content root copied with one more declaration written into
 /// `hud/`.
 ///

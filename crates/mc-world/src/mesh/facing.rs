@@ -14,8 +14,17 @@
 //! inversion, a read from the wrong side, and a primary/secondary swap, each of
 //! which produces a mesh that looks entirely plausible for the five facings
 //! somebody did check.
+//!
+//! [`Facing::face`] is the one exception and it has to be: the compass word a
+//! declaration writes has nothing to derive it from, which is the whole reason
+//! content states the mapping instead of the engine inferring it. What holds
+//! that table is a round trip over both `ALL` arrays rather than a reading of
+//! it — see `tests/mesh_facing_faces.rs`, which also says what such a round trip
+//! cannot see.
 
 use std::fmt;
+
+use mc_core::content::Face;
 
 use crate::section::{Axis, LocalPos, SECTION_SIZE};
 
@@ -59,6 +68,32 @@ impl Facing {
     #[must_use]
     pub const fn axis(self) -> Axis {
         self.axis_and_sign().0
+    }
+
+    /// This facing in the vocabulary a declaration writes.
+    ///
+    /// **The one place in the workspace where a compass word meets an axis.** A
+    /// mod author writes `up`, `down`, `north`, `south`, `east` and `west`; a
+    /// mesher writes an axis and a sign. Content states which is which and the
+    /// engine never infers it, so this `match` is the contract itself rather than
+    /// an implementation of one — the published mapping is that `north` faces
+    /// along negative Z, which is the direction a player looking down the axis
+    /// from the origin faces.
+    ///
+    /// Written out per facing, which everything else in this module is
+    /// deliberately not: there is nothing to derive it from. The completeness of
+    /// the mapping is held by a round trip over both `ALL` arrays rather than by
+    /// this list being read carefully.
+    #[must_use]
+    pub const fn face(self) -> Face {
+        match self {
+            Self::NegX => Face::West,
+            Self::PosX => Face::East,
+            Self::NegY => Face::Down,
+            Self::PosY => Face::Up,
+            Self::NegZ => Face::North,
+            Self::PosZ => Face::South,
+        }
     }
 
     /// The one authored fact about a facing beyond where it sits in the

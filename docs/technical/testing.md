@@ -13,7 +13,8 @@ ADR-013, in `decisions.md`.
 PowerShell 7 is cross-platform, so this is the only gate script — there is no `.sh` twin to drift
 out of sync.
 
-Every stage runs even when an earlier one fails, so one invocation reports every problem.
+Every stage runs even when an earlier one fails, so one invocation reports every problem — **with
+one exception, stated below: a refused art build stops stage 9 from running.**
 
 | # | Stage | Tool | Fails on |
 |---|-------|------|----------|
@@ -24,10 +25,16 @@ Every stage runs even when an earlier one fails, so one invocation reports every
 | 4 | deps | `cargo machete` | any unused dependency |
 | 5 | sast | `cargo deny` | vulnerabilities, bad licenses, banned crates, untrusted sources |
 | 6 | secrets | `gitleaks` | credentials in the working tree |
-| 7 | tests + coverage | `cargo llvm-cov nextest` | test failure, or lines < 80% |
+| 7 | art (generated set not committed) | `git ls-files -- <ContentRoot>/textures` | any tracked file under the output directory, or `git` failing to look at all |
+| 8 | art (voxforge build) | `cargo run -p voxforge -- build <Manifest>` | a non-zero exit from the build |
+| 9 | tests + coverage | `cargo llvm-cov nextest` | test failure, or lines < 80% |
 
 Flags: `-Quick` runs stages 1–3 only, for tight edit loops. `-SkipCoverage` runs tests without
-instrumentation. Neither is valid at a phase boundary or in CI.
+instrumentation. `-ArtOnly` runs stages 7 and 8 and nothing else. None of the three is valid at a
+phase boundary or in CI. `-ContentRoot` (default `content/base`) and `-Manifest` (default
+`content/base/textures.toml`) name the paths stages 7 and 8 look at, and are used exactly as given —
+a relative value is relative to the repository, which the script has already pushed into, and an
+absolute one is left alone.
 
 **Stage 2c runs `rustdoc`, because nothing else resolves intra-doc links.** A `[`Type`]` or
 `[`module::func`]` naming an item that does not exist compiles, tests, lints and ships in silence —
@@ -39,6 +46,113 @@ The stage runs `cargo doc --workspace --no-deps` under
 the whole workspace already passed the day it went in — so it never needed a grace period, and a
 failure here is always something introduced rather than something inherited. Verified to bite by
 planting an unresolved link (rustdoc exits 101) and reverting by hand.
+
+### The two art stages, and the one exception to "every stage runs"
+
+The base game's texture set is derived from `content/base/textures.toml` by `voxforge build`
+(`modding/voxel-models.md`), and the repository carries the sources rather than the images
+(ADR-026). Two stages hold both halves of that up.
+
+**Stage 7 asks `git ls-files -- <ContentRoot>/textures` and fails on anything it reports, naming
+each path.** It is what keeps the `.gitignore` entry for the output directory from quietly drifting
+back out: delete the line and the next commit that sweeps the tree fails here with an address
+rather than passing silently. Both of its halves are load-bearing. A pathspec naming a directory
+that does not exist is not an error to git — it reports nothing and exits 0, which is exactly what
+a clean tree looks like — so the stage reads git's exit code to decide whether it could look at
+all, and what git reported to decide the verdict. Reading only the output would let a stage aimed
+at a path nobody has, since a typo, certify the repository forever.
+
+**Stage 8 runs `cargo run -p voxforge --quiet -- build <Manifest>` and keys on the exit code,
+never on the output being empty.** `voxforge build` reports every manifest key that no block
+declaration names, and that report is advisory by design: at the time of writing the shipped
+manifest bakes five such keys — `base:grass_top` and the four `base:grass_side_*` — for a per-face
+declaration nobody has written yet. The build says so and exits 0. A stage reading a non-empty
+report, or a non-silent stderr, as a failure would have taken the gate down on the base game's own
+art the day it landed. Its output is written straight through, so what the tool refused is what the
+reader sees; a stage that swallowed it would still fail, and would stop saying why.
+
+**Both sit after the `-Quick` early exit and outside the `if ($SkipCoverage)` choice.** That is one
+placement doing two jobs. After the early exit, because `-Quick` is the tight edit loop and a bake
+on its way past would be paid for on every iteration. Outside the coverage choice, because the
+suite grades whatever set is on disk and both coverage paths are owed the same build — a build
+placed inside one branch is reached one way only, and which of the two paths still works is what
+tells you which branch it landed in.
+
+**The exception.** When stage 8 refuses, stage 9 does not run. A refused build leaves the set
+written by the *previous* run on disk (`voxforge` writes nothing on a refusal), so running the
+suite anyway would grade stale art and report a green that is about nothing. The skip is **recorded**
+— `$Failures.Add('tests (not run: art build failed)')` — and not merely performed: a summary that
+simply listed one stage fewer cannot tell "the tests did not run" from "the tests are not in this
+list". **A gate that omits a stage silently is one step from a gate that skips its way to green.**
+
+The record is added whenever the build refused, whatever stages the run selected — including under
+`-ArtOnly`, where stage 9 was never going to run. That reads like a bug the first time somebody
+meets it, and the obvious repair is to make the record conditional on stage 9 having been selected.
+It is not a bug: both statements are true either way, and the conditional version leaves the
+scenario about the skip with nothing any bounded test can observe. The warning lives on the
+`$Failures.Add` line in the script, where the dangerous edit gets made.
+
+**The fixture parameters are parameters on paths, never on a repository root.** `-ContentRoot` and
+`-Manifest` exist so the stages' own tests can point them somewhere other than `content/base`.
+There is deliberately no `-RepoRoot`: aim the whole script at a temporary tree and `git ls-files`
+fails with "not a git repository" while `cargo run -p voxforge` fails with "no such package", so a
+clean fixture and a broken one both fail for reasons unrelated to what is being tested — and stage
+8's test asks it to *reproduce the build's refusal*, which "no such package" is not.
+
+The same finding reaches one level further down, and it is why the fixture content roots are
+committed rather than temporary: **`-ContentRoot` cannot be a temporary tree either.** Measured on
+this checkout, `git ls-files` on a pathspec outside the worktree exits 128 with `is outside
+repository at 'E:/…'`, so a clean fixture and a dirty one fail identically. A pathspec *inside* the
+repository naming a directory that does not exist is not refused, which is what makes a clean
+fixture legitimate. So `crates/mc-client/tests/fixtures/gate/` carries two content roots differing
+by exactly one tracked file — the built image — and nothing asserts that they differ by exactly
+one. Give the clean one a `textures/` of its own and the passing test goes red for a reason that
+has nothing to do with the gate.
+
+**`-ArtOnly` is a stage selector, exactly as `-Quick` is.** It runs stages 7 and 8 and then prints
+the same summary shape the gate always prints, so a test can read one verdict off it. It exists
+because a bounded test cannot afford a full gate run: observing these stages inside the suite would
+mean a clippy pass over the workspace, a documentation build, two supply-chain scans and a second
+complete run of the suite, inside the suite. The selector restates no stage — there is one
+implementation of each, and what it changes is which of them run.
+
+**How the two stages are tested, and what is left to a person.** `crates/mc-client/tests/` holds
+the first tests this repository has ever had for `sdd-gate.ps1`, and they are split by what each
+instrument can honestly answer. `gate_art_stages.rs` *runs* `-ArtOnly` against the committed
+fixtures and reads an enumerated verdict — every stage passed, these named stages failed, or no
+summary was printed at all — which is what distinguishes a passing stage from one that never ran.
+`gate_stage_order.rs` *reads the script's text* for the questions no bounded run can reach: that the
+set is built before the tests on both coverage paths, and that the test stage is unreachable after a
+refused build. A scan is the weaker instrument and is paired with control fixtures that are wrong in
+each way it is supposed to tell apart. What neither can see is the **composition** — that the guard
+the scan reads actually stops the suite in a real run — so that is confirmed by hand. Confirmed on
+2026-08-19 against a manifest declaring `pixels_per_voxel = 0`: stages 1 through 7 ran and passed,
+stage 8 printed `voxforge`'s own refusal, no test command ran after it, and the summary read
+`GATE FAILED — 2 stage(s): art (voxforge build)` and `tests (not run: art build failed)`, exit 1.
+
+### A bare `cargo nextest run` now needs the art built first
+
+The client judges the built texture set at every launch and refuses to prepare a scene without one
+(`architecture.md`, "The client's verdict on a built set"). Every fixture that copies the shipped
+content root copies its `textures/` with it, so **a checkout that has never run `voxforge build`
+fails a plain `cargo nextest run --workspace`** — measured at eight verdict scenarios plus every
+suite that prepares a scene over a copied root.
+
+**That is the refusal working, not a regression.** The gate is green because stage 8 bakes the set
+before stage 9 runs anything; a bare `nextest` invocation has no such stage in front of it. Run
+
+```bash
+cargo run -p voxforge -- build content/base/textures.toml
+```
+
+once after a fresh clone, and again after touching a model, a material or the manifest. Over
+unchanged sources it opens no file.
+
+This is written down because the obvious repair is the wrong one. Making the client tolerate an
+absent set to get the suite green deletes the refusal and the fallback distinction together — the
+whole of what the launch check is for — and it would do so while every remaining test passed. The
+fixture that copies the shipped root says the same thing in one sentence at the point of failure,
+naming the command, so eight verdict mismatches do not read as a broken client.
 
 ### Never read the gate's result through a pipe
 
@@ -415,6 +529,12 @@ things that look alike apart:
   reached its verdict by editing `content/base/` would be a test that can only
   pass while the product is broken — the temptation is live, because the
   shipped directory is read two functions away.
+- **A control for a path rule must be shaped like the platform's own paths.** A
+  control built on a POSIX literal — a leading `/` — goes green on a Windows
+  checkout against the very literal the rule exists to catch, because the
+  absolute paths that actually occur here are drive-letter (`E:\...`) and UNC
+  (`\\...`) forms. A control fed the one shape the defect does not take
+  certifies the instrument instead of testing it.
 
 **Two mutation-testing results are worth keeping as illustrations of what
 "looks correct but isn't" can survive a full green suite:**
@@ -610,6 +730,132 @@ resolved a name wrongly cannot make both sides wrong the same way, which is exac
 happen if the invariant borrowed `SolidVoxels` itself. A resting height is checked the same way:
 against `surface_height(x, z) + 1`, read from the world's heightmap at the position the player
 actually stopped, never against a coordinate committed from a run of the code under test.
+
+### An independent oracle is not a checked one
+
+`standards/global/testing.md` §2 says no expected quantity may be copied from a
+run of the code under test, and prescribes deriving it by arithmetic or from an
+independent oracle sharing no code with the subject. **That rule keeps the
+subject from contaminating the expectation. It says nothing about the oracle
+being right** — and an oracle written once, run once and never re-run is the
+least checked instrument in a phase that otherwise measures everything.
+
+Measured here rather than reasoned about. A phase's expected texel bytes were
+derived offline by a standalone program implementing the sRGB transfer function,
+sharing no code with the crate. The bytes were correct. What was wrong was the
+figure recorded beside them: how close each expected value sat to the boundary
+where rounding flips, which is the entire argument for asserting exact equality
+instead of a tolerance. The program printed `0.5 − min|v − round(v)|`, and
+minimising the distance to the nearest *integer* maximises the distance to the
+nearest *boundary* — so the number published as the closest approach was the
+farthest of the set, four times the true margin. One inverted extremum, and the
+output went into prose that afterwards read as a measurement.
+
+- **It survived because it was the one instrument nothing checked.** Every test
+  in that phase was falsified against four throwaway skeletons and a full
+  workspace run before the implementation existed. The program that produced
+  their expected values was run once, by the person who wrote it.
+- **It was wrong in the direction that reads as reassuring**, which is why no
+  reader was going to stop on it. Had it erred the other way the assertion would
+  have looked marginal and somebody would have re-derived it the same afternoon.
+  **An error that flatters its own safety has no reader.**
+- **What made it recoverable is that the derivation was written down, not only
+  the answer.** A second party re-derived the values through the shipped
+  arithmetic path, got the same numbers and a different minimum, and could
+  therefore say which of the two was wrong. Had only the figure been recorded,
+  the disagreement would have been unresolvable and the published number would
+  have won on nothing but having been there first.
+
+The sentence worth keeping: **what made it recoverable is that the derivation was
+written down; what made it happen is that nothing was ever going to redo it
+unprompted.**
+
+So an offline derivation owes three things and not one:
+
+1. **The numbers.**
+2. **The command that reproduces them**, so redoing it is a minute rather than a
+   reconstruction.
+3. **A second check on whatever figure is load-bearing** — a different route to
+   the same value, or a property that must hold if it is right — together with a
+   statement of what that check would have caught. **Where a figure has no such
+   check, write "no check" beside it** rather than leaving a reader to assume
+   there is one.
+
+And record beside the numbers themselves that they are offline-computed and
+verified by no test, because whoever inherits them meets them there and nowhere
+else.
+
+One further habit the same episode paid for: **state the figure that binds, not
+a set the reader must minimise over.** The sentence carrying the wrong margin
+quoted it for "any expected value below", which swept in a second value whose own
+margin was ten times tighter — so the number actually deciding whether exact
+equality was safe was not the one written down, and it was recoverable only by
+comparing two paragraphs. **A reader should never have to do arithmetic across
+two bullets to find the number that matters.**
+
+**The rule holds for any figure a reader will trust without re-deriving — not
+only for numbers an assertion uses. A descriptive figure in prose has no test at
+all, so it is the one most in need of the discipline.** A tolerance at least sits
+beside an assertion that exercises it; a figure in a doc comment is load-bearing
+for the next reader and answerable to nothing.
+
+It was written narrowly and read narrowly, and the second instance is what showed
+that. Four of one shape now:
+
+- **A margin reported as the farthest approach rather than the closest.** One
+  inverted extremum, in the sentence arguing for exact equality over a tolerance.
+- **A four-way figure condensed to one.** "0% of a grass side's texels sit within
+  ΔE 10 of that side's mean" is true of **three** of the four sides; the fourth is
+  **43.36%**. The source carried the parenthetical and the summary dropped it. A
+  sibling figure in the same paragraph — "81.6%" for a share that runs 81.25% to
+  82.81% across the four — went the same way.
+- **A figure that was never derived at all, only relayed.** An orientation
+  scenario argued that the shipped art can see a lateral reversal, and quoted
+  "224 of 256" texels differing from each image's own horizontal mirror. **No
+  shipped image gives that number.** The real spread runs **82 to 170 of 256**,
+  and the figure had arrived in a report, gone into a specification unmeasured,
+  and been read past by everybody afterwards — including by the person who wrote
+  the sentence it was supporting.
+- **A figure carried through a chain of briefs and into a report.** A validation
+  report opened its coverage section with "the spec carries 108 scenarios". The
+  spec's own prescribed command gives **104**. The 108 had lived in a
+  coordinating agent's working notes, been repeated into brief after brief for
+  days, and was then written into a permanent record as though it had been
+  measured. **This is a different failure from the one above it**, and the
+  difference is the lesson: the third was one relayed report, while this was
+  **repetition laundering a figure into apparent fact.** Nothing was ever
+  fabricated; a number simply got said often enough to stop looking like a claim.
+
+None of the four was asserted by any test and none changed a conclusion. **What
+was wrong was the record, which is worse in one respect, because a record is what
+somebody trusts without re-deriving.** The first two were caught the same way and
+by somebody who was not looking for them: **re-running the derivation instead of
+reading the number.**
+
+**The third and fourth name the only mechanism that finds these reliably, and it
+has now caught two: the figure became load-bearing for somebody else's
+purpose.** A test author writing an orientation fixture had to compute the mirror
+difference in order to assert on it, measured it, and got a different answer. A
+closing agent writing the spec's registry entry had to compute the scenario count
+in order to state it, ran the prescribed command, and got 104. Neither was
+auditing the number. Both needed it.
+
+So the practical rule is narrower than "check your numbers" and worth stating as
+such: **a figure nothing computes is a figure nothing checks, and the cheapest way
+to check one is to make something need it.** Where a number cannot be made
+load-bearing, it is a relayed claim until somebody re-derives it — which is item 6
+of [§"Eight things this seam cost"](#eight-things-this-seam-cost-kept-in-general-terms)
+arriving from the other direction: *a report of a measurement and a measurement
+are separate artifacts.*
+
+**One last thing about this list, because it is evidence and not decoration.** The
+fourth entry was added within the hour of the third, by which time this section
+already said "three" — and the missing instance was sitting in a spec folder due
+to be archived and pruned, where it would have gone with it. A section written to
+correct an undercount undercounted, in the one direction it exists to watch. That
+is the residue argument that produced this page arriving inside the page itself:
+**the count on a list like this is the least trustworthy thing on it, and the
+entries are what matter.**
 
 ### Assertions that are unfalsifiable alone and load-bearing together
 
@@ -858,6 +1104,95 @@ Two standing consequences:
 - **When a measured figure lands under its threshold, the model is wrong and the work escalates.**
   The threshold does not quietly move to accommodate the measurement; that is how a derived bound
   decays into a snapshot.
+
+#### What the probes cluster against, once the art is real
+
+The paragraph above says "declared placeholder mean colour" and that was the whole story only while
+every layer was filled by the generator. A key the built texture set covers is now filled from a
+**PNG on disk**, and the two are different colours entirely — the generated mean for `base:dirt`
+stands **ΔE 62.94** from the baked dirt that replaced it. So "what is this layer made of" became a
+question with two answers depending on the key, and the probes were re-derived rather than
+re-tolerated. The re-derivation is worth recording in three parts, because each was a *premise* that
+turned out false rather than a number that drifted.
+
+- **The strata are texture keys, not block names.** The grass block declares six facings, so there
+  is no key called `base:grass` at all: its top draws `base:grass_top`, its underside draws
+  `base:dirt`, and its four sides draw four keys of their own. The three strata are `base:dirt`,
+  `base:grass_top` and `base:stone`, whose means stand ΔE 26.89 to 53.70 apart. **A grass side must
+  not become a fourth**: a grass side *is* mostly dirt, and `base:dirt` against
+  `base:grass_side_west` measures **ΔE 9.59** — already under the ΔE 10 that tells two textures
+  apart — so adding one would redden the distinctness probe against a *correct* renderer, and the
+  cheapest way to green it would be to raise the constant the whole suite tells textures apart by.
+- **"Pixels cluster near their layer's mean" was measured false.** It held for a two-colour
+  checkerboard whose mean sits between its own colours by a hair. It does not hold for art: **0%** of
+  the texels of three of the four grass sides lie within ΔE 10 of their own mean (43.36% for the
+  fourth), and only **66.41%** of stone's do, because a mean falls in the gap between the colours it
+  averages. The reading is now *near any landmark* — every colour the layer holds, **and** its mean,
+  since a minified face converges to the mean while a magnified one shows a texel. A blend between
+  two landmarks stays inside the set: the widest a midpoint strays from the nearest landmark, over
+  the three strata, is **ΔE 5.70** on `base:stone` — the one figure here with a single route behind
+  it rather than three.
+- **The three coverage floors did not move.** They are geometric bounds derived from the declared
+  pose — what fraction of the frame a stratum must occupy — and no colour bears on them. That they
+  survived a wholesale change of palette is the evidence that they were derived rather than
+  snapshotted.
+
+**One floor is now weaker than it reads, and that is stated rather than left to be found.**
+`base:dirt`'s floor is presence — dirt was exposed only on the side of a two-block step, 7 pixels of
+921 600 from this pose, so emptiness was the only threshold the geometry supported. Dirt's *palette*
+is now also what four fifths of every grass side is made of: **81.25% to 82.81%** of a grass side's
+texels sit within ΔE 10 of a `base:dirt` landmark, over all four sides — east lowest, west highest.
+A range and not one side's figure, for the reason the section above gives: the claim is about every
+side. So that reading witnesses that the dirt palette reaches the
+frame, not that the dirt texture specifically does. A floor that is easy to satisfy and reads as
+though it were hard is worse than no floor.
+
+**Where every one of those figures comes from, and what checks it.** They are computed offline, from
+the built set, and **no test asserts one of them** — which is exactly the shape this document warns
+about elsewhere, so what stands behind them is that there are **three** independent routes to the
+same numbers rather than one:
+
+1. A program written for the measurement, with `mc-testkit`'s `color.rs` copied verbatim.
+2. A check binary calling the *shipped* `compare`, `chain` and `placeholder_mean_color` over
+   `content/base/materials/`.
+3. `content/base/models/generators/measure_built_textures.py` — a hand-written PNG reader (zlib plus
+   all five filter types), the sRGB transfer function, the sRGB→XYZ(D65) matrix and CIE76, every one
+   of them written from the published formulae and sharing no line with the other two. It is
+   committed beside the model generators and under the same terms: provenance, not a build step, run
+   by nothing and asserted by nothing. It needs no third-party package and derives the set's path
+   from its own location, so `python content/base/models/generators/measure_built_textures.py`
+   reproduces every figure on any checkout that has run the art build.
+
+Routes 1 and 2 share their CIELAB conversion, so between them they establish that the figures
+predict what the probes compute. **Route 3 is the one that establishes the colour maths is right
+rather than merely consistent**, because it agrees with them having been written from the
+specification instead. It reproduces every figure of route 1 to the last printed decimal.
+
+**An expectation read from the palette beats a committed triple.** Measured across all seven shipped
+images, every distinct texel colour is byte-identical to a material declared in
+`content/base/materials/` — a face bakes its material colour **unshaded**. So the test asking what
+`base:stone`'s image is made of names the three *materials* `stone-block.mcvox` is built from and
+reads `#7d7d7d`, `#606060` and `#9a9a9a` out of the TOML a person wrote. That is a stronger
+expectation and a weaker commitment at once: a decoder that swapped two channels, applied a transfer
+function it should not have, or shaded a face lands on colours no material declares, and **not one
+of those three would have moved a committed triple** — while a deliberate palette edit flows through
+both sides at once, which is correct, because the image is rebuilt from those same files.
+
+**The one judgement of the picture that is neither a golden nor a probe.**
+`crates/mc-client/tests/the_grass_top_the_camera_sees_is_its_baked_image.rs` marches a ray through
+the world's own voxels from the declared pose, picks the first pixel whose ray — and all four of its
+neighbours' — meets the upward face of one `base:grass` voxel, and judges the colour there against a
+mean computed from the built PNG, **decoded by the client's decoder and never by the draw**. The
+tolerance is ΔE 12, derived from both directions: every texel of the built `base:grass_top` sits
+within **ΔE 9.09** of that image's linear-light mean, and the nearest wrong answer is a grass side at
+**ΔE 38.00**, the generated stand-in at 42.35 and `base:dirt` at 48.49.
+
+**What it cannot do, because an instrument whose limit is unwritten gets read as stronger than it
+is:** it cannot tell one grass-top texel from another, and would not notice the image reflected,
+rotated or shuffled. What it tells apart is grass-top art from every other thing that pixel could be
+showing. **It must never come to share a path with the golden it pairs with** — if a refactor lets it
+read a value the frame produced, the pair collapses into one snapshot. No mutation detects that; it
+is reviewer-held, and it is written here for the same reason it is written in the file's own header.
 
 #### The scene contract, and the golden inventory
 
@@ -2198,6 +2533,69 @@ expensive. Build `--all-targets` before believing a retirement inventory.
 The general form: **a count can be accurate about what it counted and silent
 about what governs.** A search sees names; a retirement is about reachability.
 
+### Reading the tree found three of twelve; running it found twelve
+
+A change that invalidates a premise has to be surveyed for before it lands and
+met after it lands, and the two find different things. A block declaration
+gaining a texture key per facing took a content root from four texture keys to
+eight and renumbered every layer after the first. Reading the tree for what would
+break found **three files**. Landing it reddened **twenty-three tests across
+twelve**.
+
+**The nine that were missed had no literal to find**, and that is the whole of
+it. The survey searched for the spelling that was going away — one key's name —
+which is the only handle a search has. It cannot see:
+
+- a fixture computing its expectation from `SHIPPED_KEYS.len()`, whose every
+  number is right until the list's length changes and which names nothing that
+  moved;
+- a fixture treating a list of texture keys as a list of block names, **because
+  the two vocabularies used to coincide**. Nothing in it is wrong to read. It
+  refuses the day they part, naming a block nobody declared.
+
+Neither is a careless fixture. Both are fixtures written well — derived rather
+than committed, in the first case exactly as this document asks — and being
+derived is precisely what makes them invisible to a search.
+
+**So the remedy is not to survey harder. Land the change and read the failures.**
+A survey is worth doing for the ones it can find, because meeting a premise
+before it breaks is cheaper than meeting it inside a red suite; it is not worth
+trusting as an inventory. This is the same result as the retirement above, from
+the other direction: a search sees **names**, and what governs is reachability
+and derivation, neither of which is a name.
+
+**The corollary is where the cost actually lives.** Nineteen of the twenty-three
+came back on **one edit**, because the fixture module they share derives every
+layer expectation from a single list and spells no index as a digit anywhere. A
+fixture that had written `4` in twenty places would have had to be found in
+twenty places, and each of those twenty would have been a decision somebody made
+under the pressure of a red suite.
+
+> **The cost of a change is set by how the fixtures were written, long before the
+> change arrives.** A derived fixture is expensive to survey and cheap to
+> repair; a committed one is the reverse, and a red suite is the worse of the two
+> moments to be doing the work.
+
+Two further observations from the four that needed judgement rather than
+arithmetic, because both run against the expectation that a turned premise
+weakens a suite:
+
+- **A premise turned by a real change often widens the claim.** Removing one
+  declaration used to retire one key and now retires five, so "the remaining keys
+  keep the layers they held" became a statement about five keys not sliding
+  rather than one.
+- **A fixture passing for a reason that has quietly stopped being true is what a
+  coincidence between two vocabularies leaves behind.** The key-list-as-block-list
+  fixture was correct for as long as a block's name was its texture key. Repairing
+  it meant routing through the join the code under test actually crosses — block,
+  then facing, then key — which is a better test than the one that broke.
+
+And when a committed number moves, **check whether its reason moved too**. A
+layer index recorded as "the layer every committed frame was shot with" was true
+because no golden had ever moved; after a deliberate re-shoot it is true because
+they were all re-minted. Same sentence, different warrant. Updating only the
+number leaves a reader unable to tell a decision from a defect.
+
 ### Run a phase's verification instrument where its answer is still attributable
 
 The golden-frame suites were run **twice** during one spec: once after the content
@@ -2243,6 +2641,44 @@ The other half is knowing when *not* to strengthen. A scenario green on arrival
 whose only available strengthening would re-prove a neighbouring scenario's
 property **through the same code path** is left alone: that is a second witness
 that witnesses nothing.
+
+### A mutation that misses has two causes, and they have different owners
+
+Five mutations across one spec were mis-aimed, and the repair was the same for four
+of them and different for the fifth. Telling the two apart is the judgement, and
+picking wrongly is how a fixture that cannot see a property comes to look like a
+property the code does not have.
+
+- **The mutation was too broad.** It broke more than the scenario is about, so the
+  scenario reddened for a reason other than the one being measured — or reddened
+  alongside forty others and said nothing. **Narrow the mutation.** The
+  implementer does this; nothing about the tests is at fault.
+- **The fixture cannot see the property.** The mutation is aimed correctly and the
+  scenario stays green because nothing in its setup can distinguish the mutated
+  behaviour from the real one. **The fixture changes, and the fixture belongs to
+  the test author** (rigor `medium+`). An implementer re-spelling the mutation
+  until something goes red is fitting the instrument to the answer.
+
+The tell for the second is that the scenario's green was never *about* the
+property. A test asserting which verdict comes back is green under a skeleton
+returning that verdict for a constant reason, and a mutation to the *fold* behind
+that verdict leaves it green for the same constant reason — the reading depended on
+the arm and never on how the arm was arrived at.
+
+The worked example is a client that re-folds a recorded source list rather than
+re-deriving one from the manifest. The mutation was predicted to redden the
+scenario about a manifest that gained an entry. It did not, **and that was not a
+gap**: the gained entry named a model the manifest already reached, so a re-derived
+list is the same list and the manifest's own changed bytes make the fold differ
+either way. Nothing about that scenario could ever have separated the two routes.
+What reddened was a test written for exactly this — a fixture adding a source the
+index never recorded, which only a re-derived list folds — and, unpredicted, the
+scenario about a source that has *gone*, since a directory scan cannot see a file
+that is no longer there.
+
+If you cannot tell which cause you have, that is the question to ask rather than
+the one to decide. A mutation narrowed until it bites and a fixture left unable to
+see anything both end in green, and only one of them is evidence.
 
 ### A guard that names a specific dependency silently narrows as the set it guards grows
 
@@ -2561,7 +2997,7 @@ than a fixture's file write, the watcher running against a real filesystem under
 real working directory, and the frame path — which nothing in this workspace
 constructs — actually uploading and drawing the result.
 
-### One reload fixture is marginal rather than fixed, and the three readings say so
+### One reload fixture is marginal rather than fixed, and the readings say so
 
 `reload_remesh_blocks_no_tick` waits for a whole-world re-mesh, and its history is worth
 keeping side by side because no single reading shows what it is:
@@ -2573,6 +3009,33 @@ keeping side by side because no single reading shows what it is:
 | the test alone, uninstrumented | PASS, 0.3 s |
 | full workspace, instrumented, again | PASS, 1190 of 1190 |
 | full workspace, instrumented, at the gate | PASS at 17.7 s |
+| full workspace, uninstrumented, ×3 during a phase | PASS, 1261 of 1261 each time |
+| full workspace, instrumented, at the gate | **FAIL** at 26.4 s, past the same 15 s bound |
+| the test alone, uninstrumented, straight afterwards | PASS, 0.235 s |
+| full workspace, instrumented, at the gate, again | PASS, 1261 of 1261 |
+| full workspace, instrumented, at the gate, **nothing else building** | **FAIL** at 23.310 s, past the same 15 s bound |
+
+**The seventh reading is withdrawn as evidence about this fixture's timing, and the tenth is
+why it had to be.** The seventh was taken with a second agent building in the same checkout,
+which is the condition §"Two gate runs in one checkout fail as defects" below describes, and
+its stderr was not captured — only the `FAIL [` line — so a starved worker and a relink
+underneath a running binary cannot be told apart in it. **Read it as one more occurrence under
+concurrent load, not as a reading of the fixture's own timing.** Whoever meets the next one
+should widen the filter first: `FAIL [` gives the name and nothing that distinguishes a panic
+that unwound from starvation.
+
+**But contention is not the whole story, and the tenth reading is what settles that.** It failed
+at 23.310 s against the same 15 s bound with **nothing else building in the checkout** — no
+second runner, no competing link. So the two failures cannot both be filed under "another agent
+was building", and a future reader must not file them there by default.
+
+**What that leaves is an open question rather than a diagnosis, and it is stated as one.** Under
+coverage instrumentation the gate marks four tests slow, and this one now looks **systematically
+marginal rather than occasionally unlucky** — three failures at 28.6 s, 26.4 s and 23.310 s
+against a bound of 15 s, against passes at 17.7 s and 4.1 s. **Is the 15 s collect bound simply
+too tight under `llvm-cov`?** Nobody has established that. It is the first thing to measure and
+it is not what any reading here shows. Tracked as **PRO-954**; the bound is not to be loosened to
+make a run green, which is the repair this section exists to prevent.
 
 **Instrumentation alone does not reproduce it** — 4.1 s against a 15 s bound — so it needs
 the concurrent workspace run. That fits a starved or a dead worker and does not fit a
@@ -2601,6 +3064,55 @@ assertion failing in a second suite, both of which read as a catastrophic render
 regression. Measured, twice — once from an edit left behind and once from one in flight.
 The instruments that tell the two apart are file mtimes and a clean content diff, not
 anything in the failure text. `working-in-this-repo.md` holds the operational rule.
+
+### Two gate runs in one checkout fail as defects, and `cargo-llvm-cov` will not tell you
+
+**`cargo-llvm-cov` takes no lock and prints no warning.** Two agents running the gate against
+one working tree share `target/llvm-cov-target`, and the second run relinks test binaries and
+rewrites coverage objects underneath the first. What comes back is not a contention error. It is
+a **failing test**, in a suite neither agent touched, shaped exactly like a real defect.
+
+Both observed shapes, measured in this checkout:
+
+| What the gate says | What it actually was |
+|---|---|
+| `mc-client::shipped_binary the_shipped_binary_started_away_from_its_content_says_why_on_its_error_stream` fails with `Error: Os { code: 2, kind: NotFound }` — and passes alone in 0.239 s | the test binary was being relinked while the run tried to execute it |
+| `error: failed to load coverage: hud_held_block-….exe: permission denied`, preceded by several `profile data may be out of date - object is newer` warnings | a coverage object was rewritten while the run tried to read it |
+
+**Neither message names contention and neither names the other agent.** A `NotFound` on a test
+binary reads as a missing fixture path; a `permission denied` on a coverage object reads as a
+broken toolchain or a virus scanner holding a handle. The `profile data may be out of date -
+object is newer` warnings are the only honest tell, and they scroll past above the failure rather
+than beside it.
+
+**A red stage with no `FAIL [` line anywhere is this until proven otherwise, and the mechanism is
+why.** The coverage half runs *after* the tests, so it fails once every test has already passed —
+the stage goes red with no failing test to name. That is exactly what makes the shape
+unrecognisable from filtered output, and it is a strong signal for contention rather than for a
+test defect: a test defect has a name.
+
+**The diagnosis is the process table, not the output.** Before treating any of the above as a
+defect:
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='cargo.exe' OR Name='cargo-llvm-cov.exe'" |
+    Select-Object ProcessId, ParentProcessId, CreationDate, CommandLine
+```
+
+A second `cargo llvm-cov nextest` with a **different `--output-path` UUID** is another agent's
+gate run. Every reading taken while it lives — yours and theirs — is a reading of two mutually
+interfering trees, and **neither of you can tell from inside which one to believe**. That is
+`git-workflow.md` §5's rule about the tree, applied to the runner: a gate reading is a statement
+about a moment, and a moment holding two runners is not a gate reading at all. The two are
+distinguished by asking, not by inference — an unknown runner is somebody, and which somebody is
+a question with an answer.
+
+**Capture the whole run rather than filtering it.** Filtering on `FAIL [` is right for finding a
+failing test's name and useless for everything above, and it cost two diagnoses in one phase:
+
+```powershell
+pwsh -NoProfile -File scripts/sdd-gate.ps1 > gate.log 2>&1; $LASTEXITCODE
+```
 
 ### The one question the eight below are instances of
 
@@ -3015,6 +3527,169 @@ names the exact set of files that may mention the type, with no count — so a *
 it is caught and a second mention inside an already-named file is not. That is why the rules that
 must not be said twice carry `times: 1` instead. Both shapes are correct; which one a needle wants
 depends on whether repetition inside the right file is itself the defect.
+
+### A statistic over what is present cannot see where it sits
+
+**A grass block shipped with turf along the bottom edge of two faces and running
+vertically up the other two, and 1366 tests were green.** It was found by the
+project owner looking at a golden frame. Nothing in the suite was broken; nothing
+in it was pointed at the question.
+
+The cause is one property, and it is worth stating in the general form because
+nothing about it is specific to textures. **Means, histograms, sums, extrema,
+distinct-value counts and set membership are all invariant under permutation of
+their input.** A face's colours are the same set of colours after any of the eight
+dihedral transforms of that face, so *every* reading built out of those operators
+reports the same answer for a correct face and for a rotated one. The spec that
+shipped the defect had built eleven such instruments, each careful, each
+independently checked, and their union had **exactly zero** discriminating power
+on orientation. A twelfth would have added none.
+
+Two consequences that are easy to get wrong:
+
+- **Pairwise inequality is not orientation.** "The four side images are pairwise
+  unequal" survives rotating all four. A scenario of that shape reads as though it
+  pins the faces down and pins nothing.
+- **A correct neighbour hides the gap.** The one face the renderer drew correctly
+  was the *top*, and the top was the face a scenario had been written for — because
+  a plan view has no vertical axis to get wrong. The scenario was green and
+  honestly so, which is worse than a false green: it makes the covered case look
+  representative.
+
+**The remedy is not a tolerance and not another colour reading.** It is to assert
+against a *position*: compare the artefact to an independently authored oracle
+element by element, or sample two places chosen by position and ask a different
+question of each. Concretely, what closed this:
+
+- The baked images were compared to the hand-written voxel model's own outermost
+  plane, **texel for texel**, rather than colour set to colour set.
+- The drawn faces were read in two bands chosen by position — topmost and
+  bottommost texel row — with turf demanded above and dirt below.
+- A third reading covered the axis the second could not: **a pure lateral reversal
+  preserves "turf above dirt"**, so the horizontal half of a face's orientation
+  needed its own claim. Reducing each column to a count that a vertical flip
+  leaves untouched keeps the two readings orthogonal instead of making one a
+  weaker copy of the other.
+
+**Ask which symmetries your assertion is invariant under.** For any group of
+transforms a defect could apply, an assertion that is invariant under one of them
+cannot see it — and the enumeration is short enough to do by hand: for a square
+image it is eight, for an ordered sequence it is reversal, for a set of records it
+is permutation.
+
+### An agreement test needs a discrimination proof, not only a positive control
+
+The comparison above **arrived green**, because the bake was correct and only the
+renderer was wrong. A green agreement test raises a question a positive control
+alone does not answer: is the artefact equal to the oracle, or is this comparison
+*unable to tell the alternatives apart*? A laterally symmetric image agrees with
+its own mirror, and a comparison that has quietly stopped looking agrees with
+everything.
+
+So an equality assertion against an oracle carries a **second number: how many of
+the alternatives this comparison separates from the one asserted.** Two rules make
+that number evidence rather than decoration:
+
+- **Derive its expectation from the artefact, never write it down.** Here the
+  expectation is *how many transforms move the image off itself*, measured from the
+  image alone. Demanding all seven would have been an over-tight assertion that
+  reddens a correct bake the day the art becomes symmetric — the failure mode
+  §2 already warns about, arriving through a door that looks like rigour.
+- **Compute it from a different comparison than the one being certified.** The
+  reading measures oracle against artefact; the expectation measures artefact
+  against itself. If the two came from one comparison the second number would be a
+  restatement of the first and would hold for an implementation that emits nothing.
+
+Both are then backed by an ordinary positive control as a separate test function:
+transform each real artefact and assert the comparison reports disagreement. That
+control is what distinguishes this from a means-based reading, which would report
+**no** disagreement for every transform of every face — and stating that in the
+control's own failure message is what makes the file explain itself to whoever
+sees it fail.
+
+### A mechanical check that two copies of a constant agree is not evidence about the constant
+
+The table that carried the defect above had a guard: a build script text-compares
+the Rust constant against its shader copy and fails the build if they differ. It
+worked exactly as designed for the whole life of the defect. **Both copies agreed,
+and both were wrong.**
+
+This is the same family as *policy is not wiring* and *agreement between two wrong
+things is not evidence*, with a twist worth naming separately: the guard here is
+**mechanical, deterministic and impossible to fool**, which is precisely why it
+reads as stronger evidence than it is. A duplication guard answers "are these two
+in sync"; it cannot answer "is either right". When a constant encodes a decision
+about the outside world — an axis order, a byte layout, a unit — the only
+instrument that can judge it is one that observes the consequence.
+
+The practical rule: **for every duplicated constant, name the test that would
+redden if both copies changed together.** If the answer is "the build script", the
+constant is unguarded.
+
+### A rule recorded in one file's header does not reach the next file
+
+`crates/mc-client/tests/terrain_goldens.rs` carries a doc comment over its
+message helper saying, in the imperative, **never `{outcome:?}`**: a mismatched
+`GoldenOutcome` carries a per-pixel failing mask, and debug-printing one buries
+the sentence a reader needs under eleven megabytes of booleans. It says
+"measured, on the first run of this test", and it says what to do instead —
+`GoldenFailure`'s hand-written `Display`, which names the golden, the pixel
+count past tolerance, the worst distance and where the evidence was written.
+
+**A second file made the same mistake anyway.** A later test comparing an art
+refusal against a golden verdict debug-printed a whole `GoldenOutcome` in its
+own failure path; under a mutation the message came to 5.5 MB and said nothing.
+Nobody had read the header of the other file, because nothing sends you there.
+
+Three things follow, and the third is the one worth acting on:
+
+- **A convention written in a file's header is scoped to that file in practice,
+  whatever its wording claims.** The same rule needed for two files needs a home
+  neither of them owns — this page, or a helper both call.
+- **What found it was a mutation, not a reading.** The message had been written,
+  reviewed and committed without ever being printed once. A failure path is dead
+  code until something fails, so **a mutation is the only routine occasion on
+  which this project reads its own failure output** — which makes "does the
+  message say anything" a thing
+  worth noticing while a mutation row is red, rather than a separate review pass.
+- **The repair is structural, not editorial.** Both sites now name the verdict
+  through a small total function over `GoldenOutcome`'s arms
+  (`reported`, `said_about`) and delegate the failed arm to `Display`. A rule
+  that reads "do not use `{:?}` here" is followed by whoever read it; a helper
+  that has no `{:?}` in it is followed by whoever calls it.
+
+### An oracle that shares production's fallback moves with the draw
+
+`crates/mc-client/tests/support/art.rs` answers "what should this layer hold" by
+calling `SuppliedTexels::covering` and falling back to the generated placeholder
+where it answers `None` — **deliberately**, because that is the decision the
+product makes, so the oracle states what a layer is actually filled from rather
+than what somebody assumed.
+
+The consequence is a measurement, and it is the shape §2 warns about arriving
+through a door built on purpose. Killing `covering` outright moved the oracle and
+the draw **together**: 1352 passed, 14 failed, and `terrain_probes` was **green**
+— the frame and the expectation had both fallen back, so they agreed by sharing a
+computation rather than because anything was drawn from a supply.
+
+**The fix is a narrower mutation, not a different oracle.** Filling every layer
+from `SuppliedTexels::none()` in the *device* path only, leaving the pure value
+intact, reddens 8 of 1366 and **every one of the eight is a frame**: both golden
+suites, the reload-supply guard, the held-block indicator, two probes, and the
+two frame-based art readings. Every pure reading stays green, which is the point —
+they cannot see a device. That is *policy is not wiring* asked directly, and the
+answer here was that the wiring has **six witnesses besides the goldens**.
+
+So, for any probe whose expectation is computed by calling into the product:
+
+- **Say which step is shared**, in the fixture, beside the call. It is not a
+  defect, and it is not visible from the assertion.
+- **Mutate the impure half alone** when the question is whether the draw consults
+  the value. A mutation that hits the shared step answers a different question and
+  looks like an answer to this one.
+- **Do not conclude "only a golden sees this" from a mutation that moved the
+  oracle.** That conclusion was available and wrong, and the narrowed run is what
+  refused it.
 
 ### The entry door's mutation tables, including the ones that did not bite
 

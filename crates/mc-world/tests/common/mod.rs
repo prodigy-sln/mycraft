@@ -36,6 +36,7 @@ use std::path::{Path, PathBuf};
 
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockId, BlockRegistry, DefinitionOrigin};
+use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, NamespacedIdError, TextureKey};
 use mc_world::section::{Contents, LocalPos, SECTION_SIZE, Section};
 use tempfile::TempDir;
@@ -172,7 +173,7 @@ pub fn registry_from(
         // each is left at what a declaration saying nothing about it means.
         declared.push(Ok(BlockDefinition {
             name: BlockName::parse(name)?,
-            texture: TextureKey::parse(texture)?,
+            textures: FaceTextures::uniform(TextureKey::parse(texture)?),
             is_solid,
             replaceable: false,
             breakable: true,

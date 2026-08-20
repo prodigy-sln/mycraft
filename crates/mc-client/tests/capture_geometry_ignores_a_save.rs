@@ -55,6 +55,7 @@ use mc_client::launch::save_path;
 use mc_client::startup::{PreparationError, PreparedScene, prepare_scene};
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_render::geometry::scene::SceneGeometry;
 use mc_world::persistence::{Acceptance, SavedPlayer, load_world, save_world};
@@ -127,7 +128,7 @@ fn a_registry_holding_the_marker() -> Result<BlockRegistry, Box<dyn Error>> {
         origin.clone(),
         vec![Ok(BlockDefinition {
             name: BlockName::parse(MARKER)?,
-            texture: TextureKey::parse(MARKER)?,
+            textures: FaceTextures::uniform(TextureKey::parse(MARKER)?),
             is_solid: true,
             replaceable: false,
             breakable: true,

@@ -1,7 +1,8 @@
 //! What a block definition is, where it was declared, and the dense id a
 //! registry assigns it.
 
-use crate::id::{BlockName, TextureKey};
+use crate::content::FaceTextures;
+use crate::id::BlockName;
 
 /// Where a definition was declared, as an opaque human-readable label.
 ///
@@ -33,7 +34,12 @@ impl DefinitionOrigin {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockDefinition {
     pub name: BlockName,
-    pub texture: TextureKey,
+    /// The key each of its six faces draws from.
+    ///
+    /// A declaration states one key for all six or a key per facing, and the two
+    /// forms arrive here as one value — so nothing downstream branches on which
+    /// of them was written.
+    pub textures: FaceTextures,
     /// Whether this block stops a player who walks into it.
     ///
     /// A fact about physics and nothing else. Whether a *new* block may be built

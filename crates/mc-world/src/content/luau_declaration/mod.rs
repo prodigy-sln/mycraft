@@ -14,6 +14,15 @@
 //! `deny_unknown_fields` was TOML's, and a host that can read a named field but
 //! cannot ask what fields exist can never tell a typo from an absence.
 //!
+//! # What a `texture` may say is a module of its own
+//!
+//! [`texture`] holds the reading of that one field and the refusals it raises:
+//! it is the field with two forms, one of which is a table with a shape of its
+//! own, and it is most of what a declaration can get wrong. A child module
+//! rather than a sibling because it constructs this module's own [`FieldFault`]
+//! — the refusals a mod author reads are one vocabulary, and a second one would
+//! be a second thing to keep in step with the modding guide.
+//!
 //! # Nothing here runs the mod's code
 //!
 //! Every read goes through [`ScriptHost::read_field`] and every enumeration
@@ -27,13 +36,15 @@ use std::num::NonZeroUsize;
 
 use mc_core::block::source::DefinitionFault;
 use mc_core::block::{BlockDefinition, DefinitionOrigin};
-use mc_core::id::{BlockName, TextureKey};
+use mc_core::id::BlockName;
 use mc_script::{FieldNames, ScriptHost, ScriptTable, ScriptValue};
+
+mod texture;
 
 /// The key a declaration names itself by.
 const NAME_FIELD: &str = "name";
 /// The key a declaration names its texture by.
-const TEXTURE_FIELD: &str = "texture";
+pub(super) const TEXTURE_FIELD: &str = "texture";
 /// The key a declaration states its solidity in.
 const SOLID_FIELD: &str = "solid";
 /// The key a declaration states being buildable-over in.
@@ -65,7 +76,7 @@ const RECOGNISED_FIELDS: [&str; 6] = [
 /// a table of a hundred thousand one-character keys would otherwise be allocated
 /// in full before the refusal that names one of them. That is why the bound is a
 /// parameter of the enumeration rather than a check applied to its result.
-const FIELD_NAMES_READ: NonZeroUsize = match NonZeroUsize::new(64) {
+pub(super) const FIELD_NAMES_READ: NonZeroUsize = match NonZeroUsize::new(64) {
     Some(bound) => bound,
     // Unreachable for a non-zero literal, and written rather than unwrapped
     // because this crate denies panicking conversions at its root.
@@ -133,7 +144,7 @@ fn check(
 ) -> Result<BlockDefinition, FieldFault> {
     only_recognised_fields(host, declaration)?;
     let name = declared_text(host.read_field(declaration, NAME_FIELD), NAME_FIELD)?;
-    let texture = declared_text(host.read_field(declaration, TEXTURE_FIELD), TEXTURE_FIELD)?;
+    let textures = texture::declared_textures(host, declaration)?;
     let is_solid = required_boolean(host.read_field(declaration, SOLID_FIELD), SOLID_FIELD)?;
     let replaceable = optional_boolean(
         host.read_field(declaration, REPLACEABLE_FIELD),
@@ -148,8 +159,7 @@ fn check(
     let breaks_into = optional_residue(host.read_field(declaration, BREAKS_INTO_FIELD))?;
     Ok(BlockDefinition {
         name: BlockName::parse(&name).map_err(|error| FieldFault::invalid(NAME_FIELD, &error))?,
-        texture: TextureKey::parse(&texture)
-            .map_err(|error| FieldFault::invalid(TEXTURE_FIELD, &error))?,
+        textures,
         is_solid,
         replaceable,
         breakable,
@@ -234,15 +244,15 @@ fn optional_residue(declared: Option<ScriptValue>) -> Result<Option<BlockName>, 
 /// holding more fields than the loader will read is wrong as a whole, and there
 /// is no single key to send its author to.
 #[derive(Debug)]
-struct FieldFault {
-    field: Option<String>,
-    cause: String,
+pub(super) struct FieldFault {
+    pub(super) field: Option<String>,
+    pub(super) cause: String,
 }
 
 impl FieldFault {
     /// A field that is present and of the right kind, but whose value is not
     /// acceptable.
-    fn invalid(field: &str, cause: &impl fmt::Display) -> Self {
+    pub(super) fn invalid(field: &str, cause: &impl fmt::Display) -> Self {
         Self {
             field: Some(field.to_owned()),
             cause: cause.to_string(),
@@ -250,7 +260,7 @@ impl FieldFault {
     }
 
     /// A required field that was not declared at all.
-    fn missing(field: &str) -> Self {
+    pub(super) fn missing(field: &str) -> Self {
         Self {
             field: Some(field.to_owned()),
             cause: format!("`{field}` is required and was not declared"),
@@ -259,7 +269,7 @@ impl FieldFault {
 
     /// A field holding something other than the kind of value it is declared
     /// in.
-    fn wrong_kind(field: &str, found: &ScriptValue, expected: &str) -> Self {
+    pub(super) fn wrong_kind(field: &str, found: &ScriptValue, expected: &str) -> Self {
         Self {
             field: Some(field.to_owned()),
             cause: format!("`{field}` must be {expected}, but is {}", kind_of(found)),
@@ -320,7 +330,7 @@ impl FieldFault {
 
 /// `values` as a comma-separated list, each quoted the way a declaration writes
 /// it.
-fn listed<S: AsRef<str>>(values: &[S]) -> String {
+pub(super) fn listed<S: AsRef<str>>(values: &[S]) -> String {
     values
         .iter()
         .map(|value| format!("`{}`", value.as_ref()))
@@ -337,7 +347,7 @@ fn listed<S: AsRef<str>>(values: &[S]) -> String {
 /// reason — that would honour `__tostring`, which is the mod's own code running
 /// on the host's schedule at the moment the host is reporting the mod's
 /// mistake.
-fn kind_of(value: &ScriptValue) -> &'static str {
+pub(super) fn kind_of(value: &ScriptValue) -> &'static str {
     match value {
         ScriptValue::Nil => "nil",
         ScriptValue::Boolean(_) => "a boolean",
@@ -360,7 +370,7 @@ fn declared_text(declared: Option<ScriptValue>, field: &str) -> Result<String, F
 /// Counted in characters rather than bytes; see
 /// [`CHARACTERS_A_DECLARED_VALUE_MAY_HOLD`]. Both quantities reach the refusal,
 /// so an author is told the length they wrote and the length they may write.
-fn within_the_text_bound(text: String, field: &str) -> Result<String, FieldFault> {
+pub(super) fn within_the_text_bound(text: String, field: &str) -> Result<String, FieldFault> {
     let characters = text.chars().count();
     if characters <= CHARACTERS_A_DECLARED_VALUE_MAY_HOLD {
         return Ok(text);
@@ -373,7 +383,10 @@ fn within_the_text_bound(text: String, field: &str) -> Result<String, FieldFault
 /// A field a declaration left out and one holding nothing are one state in
 /// script and are one answer here, which is what the host's `None` already
 /// means.
-fn required_text(declared: Option<ScriptValue>, field: &str) -> Result<String, FieldFault> {
+pub(super) fn required_text(
+    declared: Option<ScriptValue>,
+    field: &str,
+) -> Result<String, FieldFault> {
     match declared.ok_or_else(|| FieldFault::missing(field))? {
         ScriptValue::Text(text) => Ok(text),
         found => Err(FieldFault::wrong_kind(field, &found, "a string")),

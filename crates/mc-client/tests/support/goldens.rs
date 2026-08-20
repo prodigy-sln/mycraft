@@ -23,14 +23,14 @@
 //! recorded below `App::draw` would never have seen a HUD.
 
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use mc_render::capture::{SCENE_REVISION, capture_id};
 use mc_testkit::frame::{CaptureId, GoldenOutcome, GoldenSettings, OptIns, Thresholds};
 
 use super::frames::ReplayFrame;
-use super::{prepare_scene, repository_root};
+use super::repository_root;
 
 /// The three ticks `spec.md` declares captures for: the spawn before it has
 /// fallen, the end of the straight walk, and the last tick of the script.
@@ -51,6 +51,23 @@ pub fn verified(tick: u16) -> Result<Option<GoldenOutcome>, Box<dyn Error>> {
     judged(tick, tick, artifact_root()?)
 }
 
+/// That same verdict, over a content root a fixture built.
+///
+/// **The root is a parameter so that a reading about the art's *sources* can be
+/// taken through the golden path rather than beside it.** A model edited since
+/// the set was built has to stop a golden run before any pixel is compared, and
+/// a test asking that of `prepare_scene` alone would prove nothing about the
+/// suites the goldens are actually shot by — those go through here.
+///
+/// # Errors
+///
+/// Returns the preparation, pipeline, spawn or capture failure. For a root whose
+/// set is not current that failure is the set's own, raised before a device is
+/// asked for, which is why this answers without one.
+pub fn verified_over(root: &Path, tick: u16) -> Result<Option<GoldenOutcome>, Box<dyn Error>> {
+    judged_over(root, tick, tick, artifact_root()?)
+}
+
 /// The verdict on `tick`'s capture against the golden committed for
 /// `judged_against`, with the evidence written under `artifact_root`.
 ///
@@ -62,7 +79,21 @@ pub fn judged(
     judged_against: u16,
     artifact_root: PathBuf,
 ) -> Result<Option<GoldenOutcome>, Box<dyn Error>> {
-    let prepared = prepare_scene()?;
+    judged_over(&super::content_root()?, tick, judged_against, artifact_root)
+}
+
+/// That same verdict, prepared from the content root at `root`.
+///
+/// # Errors
+///
+/// Returns the preparation, pipeline, spawn or capture failure.
+pub fn judged_over(
+    root: &Path,
+    tick: u16,
+    judged_against: u16,
+    artifact_root: PathBuf,
+) -> Result<Option<GoldenOutcome>, Box<dyn Error>> {
+    let prepared = super::prepare_scene_at(root)?;
     let Some(context) = super::frames::device()? else {
         return Ok(None);
     };

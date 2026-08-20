@@ -12,6 +12,7 @@ use std::error::Error;
 
 use common::{TestResult, definition, registry_from, source};
 use mc_core::block::{BlockDefinition, BlockRegistry, RegistryError};
+use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, NamespacedIdError, TextureKey};
 
 /// A registry holding three blocks, registered in the order they are written.
@@ -241,7 +242,7 @@ fn a_rejected_duplicate_leaves_the_first_definition_resolvable() -> TestResult {
 
     let stone = BlockName::parse("base:stone")?;
     assert_eq!(
-        registry.resolve(&stone)?.texture.as_str(),
+        textured(&registry.resolve(&stone)?.textures),
         "base:stone_a",
         "a rejected registration leaves the definition registered first in place"
     );
@@ -296,7 +297,7 @@ fn a_texture_key_is_reported_exactly_as_the_definition_declared_it() -> TestResu
 
     let cobblestone = BlockName::parse("fixture:cobblestone")?;
     assert_eq!(
-        registry.resolve(&cobblestone)?.texture.as_str(),
+        textured(&registry.resolve(&cobblestone)?.textures),
         "base:stone",
         "a block's texture key is reported as declared, character for character"
     );
@@ -318,4 +319,21 @@ fn a_texture_given_as_a_file_path_is_rejected_naming_the_value() -> TestResult {
         "the rejection names the value it refused"
     );
     Ok(())
+}
+
+/// Every key a block's six facings draw from, joined — one key where all six
+/// agree, and a list where they do not.
+///
+/// **Total over the six rather than a reading of one of them.** Every fixture in
+/// this file states its texture as a single string, so the answer is one key; a
+/// resolver that lost five facings, or that answered one facing's key for all six
+/// while the declaration said otherwise, changes this string rather than hiding
+/// behind whichever facing happened to be read.
+fn textured(textures: &FaceTextures) -> String {
+    textures
+        .keys()
+        .iter()
+        .map(TextureKey::as_str)
+        .collect::<Vec<_>>()
+        .join(", ")
 }

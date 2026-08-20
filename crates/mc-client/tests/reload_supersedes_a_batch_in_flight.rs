@@ -69,7 +69,7 @@ mod support;
 use std::error::Error;
 
 use mc_client::remesh::Remesher;
-use mc_render::texture::TextureLayers;
+use mc_render::texture::TextureResolution;
 use mc_sim::world::SectionKey;
 
 use input::InputHarness;
@@ -80,9 +80,9 @@ use reload::{
 use reload_content::candidate_against;
 use reload_remesh::{
     Collected, Handled, NOTHING_WAS_LEFT_TO_MESH, Reported, a_client_over, a_scene_of_one_column,
-    breaking_the_far_cell, collected, handled, keys_of, layers_serving,
-    placing_over_the_near_cell_after_the_far_aim, reported, require, retained_at_launch,
-    serial_serving,
+    breaking_the_far_cell, collected, handled, keys_of,
+    placing_over_the_near_cell_after_the_far_aim, reported, require, resolution_serving,
+    retained_at_launch, serial_serving,
 };
 use reload_world::{
     Edit, NOTHING, OVER_THE_NEAR_CELL, THE_FAR_CELL, floor_of, registry_of, standing, wrote,
@@ -226,9 +226,9 @@ fn a_reload_declaring_the_new_block(playing: &mut Playing) -> Result<Adoption, B
 ///
 /// Returns an error where the client publishes nothing.
 fn retiring(playing: &mut Playing) -> Result<(), Box<dyn Error>> {
-    let layers = layers_serving(&playing.client)?;
+    let resolution = resolution_serving(&playing.client)?;
     let serial = serial_serving(&playing.client)?;
-    playing.remesher.retire(layers, serial);
+    playing.remesher.retire(resolution, serial);
     Ok(())
 }
 
@@ -266,20 +266,24 @@ fn playing_with_a_worker() -> Result<Playing, Box<dyn Error>> {
 /// The same, with a worker that was handed no texture layers at all — so every batch
 /// it finishes refuses at the packing.
 fn playing_with_a_worker_that_holds_no_layers() -> Result<Playing, Box<dyn Error>> {
-    spawning(|_| TextureLayers::default())
+    spawning(|_| TextureResolution::default())
 }
 
 /// A client and a worker over one stone floor, with the worker's layers decided by
 /// `worker_layers` from the ones the client is publishing.
 fn spawning(
-    worker_layers: impl FnOnce(TextureLayers) -> TextureLayers,
+    worker_layers: impl FnOnce(TextureResolution) -> TextureResolution,
 ) -> Result<Playing, Box<dyn Error>> {
     let root = content_root()?;
     let registry = registry_of(&root)?;
     let blocks = floor_of(&registry, STONE)?;
     let client = a_client_over(&root, standing(), |declared| floor_of(declared, STONE))?;
     let serving = serial_serving(&client)?;
-    let retained = retained_at_launch(blocks, registry, worker_layers(layers_serving(&client)?))?;
+    let retained = retained_at_launch(
+        blocks,
+        registry,
+        worker_layers(resolution_serving(&client)?),
+    )?;
     Ok(Playing {
         client,
         remesher: Remesher::spawn(retained, serving),

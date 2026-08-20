@@ -161,7 +161,7 @@ fn resolved_from(
         .filter_map(|raw| registry.definition(BlockId::from_raw(raw)).ok())
         .map(|definition| ResolvedBlock {
             name: definition.name.clone(),
-            texture: definition.texture.clone(),
+            textures: definition.textures.clone(),
             is_solid: definition.is_solid,
         })
         .collect::<Vec<_>>();

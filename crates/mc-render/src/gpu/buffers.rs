@@ -13,15 +13,28 @@
 //! placeholder generator produced. An `Rgba8Unorm` texture would skip the decode
 //! and the frame would come back lighter than any declared mean colour —
 //! plausible-looking, and wrong in the direction nothing notices.
+//!
+//! **The texels a content root's art offers are held here for the whole run**,
+//! taken at construction from what the composition root read. They are not
+//! carried by a reload: the built set is a pre-build artefact that does not
+//! change while the client runs, so a reload appending a key finds either art
+//! that was already read or no art at all — and the second of those is the
+//! ordinary per-key fallback reached by a second road. A supply threaded through
+//! the reload path would be a value that can arrive empty, and a world drawing
+//! its baked art would go back to generated colours the moment somebody saved a
+//! block file.
 
+use mc_core::content::TEXTURE_EDGE;
 use mc_core::id::TextureKey;
 
 use crate::geometry::scene::{MAX_QUADS, MAX_SECTIONS, SceneGeometry};
 use crate::geometry::vertex::MAX_LAYER;
-use crate::texture::TextureLayers;
-use crate::texture::placeholder::{PLACEHOLDER_SIZE, placeholder_texels};
+use crate::texture::mip::levels_for;
+use crate::texture::sampler::{Filter, SamplerRequest};
+use crate::texture::supplied::SuppliedTexels;
+use crate::texture::{MIP_LEVELS, TextureLayers};
 
-use super::RendererError;
+use super::{RendererError, TerrainTextures};
 
 /// How many corners one quad has.
 const CORNERS_PER_QUAD: u64 = 4;
@@ -77,6 +90,9 @@ pub(super) struct SceneBuffers {
     pub(super) args: wgpu::Buffer,
     pub(super) texture: wgpu::TextureView,
     pub(super) sampler: wgpu::Sampler,
+    /// The texels each key's layer is filled from, where the built set covered
+    /// it. Held for the whole run: see this module's header.
+    supplied: SuppliedTexels,
 }
 
 impl SceneBuffers {
@@ -89,8 +105,14 @@ impl SceneBuffers {
     ///
     /// # Errors
     ///
-    /// Returns [`RendererError`] when a declared capacity cannot be built.
-    pub(super) fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Result<Self, RendererError> {
+    /// Returns [`RendererError`] when a declared capacity cannot be built, and
+    /// [`RendererError::TerrainSampler`] when the device refuses the sampler
+    /// `textures` asks for.
+    pub(super) fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        textures: &TerrainTextures<'_>,
+    ) -> Result<Self, RendererError> {
         let texture = array_texture(device);
         let buffers = Self {
             frame: uniform(device, "frame", FRAME_UNIFORM_BYTES),
@@ -103,7 +125,8 @@ impl SceneBuffers {
                 dimension: Some(wgpu::TextureViewDimension::D2Array),
                 ..wgpu::TextureViewDescriptor::default()
             }),
-            sampler: sampler(device),
+            sampler: terrain_sampler(device, &textures.sampler)?,
+            supplied: textures.supplied.clone(),
         };
         buffers.reset_draw(queue);
         queue.write_buffer(
@@ -149,12 +172,15 @@ impl SceneBuffers {
         Ok(())
     }
 
-    /// Writes each resolved key's placeholder texels into the layer it occupies.
+    /// Writes each resolved key's texels into the layer it occupies: the built
+    /// set's art where it covers the key, and the generated texture where it
+    /// does not.
     ///
     /// # Errors
     ///
     /// Returns [`RendererError::TextureLayerOutOfRange`] when a key resolved to
-    /// a layer the array does not hold.
+    /// a layer the array does not hold, and [`RendererError::Texture`] when a
+    /// layer's levels cannot be prepared.
     pub(super) fn write_textures(
         &self,
         queue: &wgpu::Queue,
@@ -166,7 +192,11 @@ impl SceneBuffers {
         Ok(())
     }
 
-    /// Writes one key's placeholder texels into the layer it occupies.
+    /// Writes one key's whole mip chain into the layer it occupies.
+    ///
+    /// Every level is written, not only the first: the array texture declares
+    /// [`MIP_LEVELS`] and a level nobody wrote is whatever the allocator left
+    /// there, which a minified face samples.
     fn write_layer(
         &self,
         queue: &wgpu::Queue,
@@ -180,20 +210,26 @@ impl SceneBuffers {
                 capacity: TEXTURE_LAYERS as u16,
             });
         }
-        let texels: Vec<u8> = placeholder_texels(key, PLACEHOLDER_SIZE)
+        for (level, texels) in levels_for(key, &self.supplied, TEXTURE_EDGE)?
             .into_iter()
-            .flatten()
-            .collect();
-        queue.write_texture(
-            layer_origin(&self.texture, layer),
-            &texels,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(PLACEHOLDER_SIZE * TEXEL_BYTES),
-                rows_per_image: Some(PLACEHOLDER_SIZE),
-            },
-            one_layer(),
-        );
+            .enumerate()
+            .take(MIP_LEVELS as usize)
+        {
+            // The chain halves from the declared edge, so a level's edge is the
+            // edge shifted by its own index and never a second count.
+            let edge = TEXTURE_EDGE >> level;
+            let bytes: Vec<u8> = texels.into_iter().flatten().collect();
+            queue.write_texture(
+                layer_origin(&self.texture, layer, level as u32),
+                &bytes,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(edge * TEXEL_BYTES),
+                    rows_per_image: Some(edge),
+                },
+                one_layer(edge),
+            );
+        }
         Ok(())
     }
 }
@@ -211,11 +247,15 @@ fn fits(found: usize, capacity: u64, resource: &'static str) -> Result<(), Rende
     })
 }
 
-/// Where one array layer's texels are copied to.
-fn layer_origin(view: &wgpu::TextureView, layer: u16) -> wgpu::TexelCopyTextureInfo<'_> {
+/// Where one mip level of one array layer's texels are copied to.
+fn layer_origin(
+    view: &wgpu::TextureView,
+    layer: u16,
+    level: u32,
+) -> wgpu::TexelCopyTextureInfo<'_> {
     wgpu::TexelCopyTextureInfo {
         texture: view.texture(),
-        mip_level: 0,
+        mip_level: level,
         origin: wgpu::Origin3d {
             x: 0,
             y: 0,
@@ -225,11 +265,11 @@ fn layer_origin(view: &wgpu::TextureView, layer: u16) -> wgpu::TexelCopyTextureI
     }
 }
 
-/// The extent of exactly one array layer.
-const fn one_layer() -> wgpu::Extent3d {
+/// The extent of exactly one array layer, at a level `edge` texels on a side.
+const fn one_layer(edge: u32) -> wgpu::Extent3d {
     wgpu::Extent3d {
-        width: PLACEHOLDER_SIZE,
-        height: PLACEHOLDER_SIZE,
+        width: edge,
+        height: edge,
         depth_or_array_layers: 1,
     }
 }
@@ -239,11 +279,11 @@ fn array_texture(device: &wgpu::Device) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("mycraft terrain textures"),
         size: wgpu::Extent3d {
-            width: PLACEHOLDER_SIZE,
-            height: PLACEHOLDER_SIZE,
+            width: TEXTURE_EDGE,
+            height: TEXTURE_EDGE,
             depth_or_array_layers: TEXTURE_LAYERS,
         },
-        mip_level_count: 1,
+        mip_level_count: MIP_LEVELS,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -252,25 +292,70 @@ fn array_texture(device: &wgpu::Device) -> wgpu::Texture {
     })
 }
 
-/// The sampler every terrain fragment reads through.
+/// The sampler `requested` describes, or the device's refusal of it.
 ///
-/// Nearest and repeating. Nearest because a placeholder texture is sixteen
-/// texels of deliberate pattern and filtering would blur it towards its own mean
-/// — which is the very value the probes cluster against, so a filtered frame
-/// would agree with them for a reason that has nothing to do with the texture
-/// being right. Repeating because a merged quad's texture coordinates run in
-/// whole blocks, so a face four blocks wide shows the texture four times.
-fn sampler(device: &wgpu::Device) -> wgpu::Sampler {
-    device.create_sampler(&wgpu::SamplerDescriptor {
+/// **The refusal is the device's and is not re-derived here.** wgpu accepts an
+/// anisotropy clamp above one only beside a fully linear filter triple, in three
+/// separate arms of its own validation; a pre-check written on this side would
+/// be a second copy of a vendor constraint that goes on agreeing with itself the
+/// day the vendor changes it. So the request is made inside a validation error
+/// scope and what comes back out of the scope is the answer.
+///
+/// Repeating on every axis whatever else is asked for: a merged quad's texture
+/// coordinates run in whole blocks, so a face four blocks wide shows the texture
+/// four times, and that is a property of this renderer's geometry rather than
+/// anything a caller chooses.
+///
+/// # Errors
+///
+/// Returns [`RendererError::TerrainSampler`] naming the whole combination, which
+/// is what a caller has to change: the device's refusal names no single field
+/// because its rule is over all four together.
+pub fn terrain_sampler(
+    device: &wgpu::Device,
+    requested: &SamplerRequest,
+) -> Result<wgpu::Sampler, RendererError> {
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let built = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("mycraft terrain sampler"),
         address_mode_u: wgpu::AddressMode::Repeat,
         address_mode_v: wgpu::AddressMode::Repeat,
         address_mode_w: wgpu::AddressMode::Repeat,
-        mag_filter: wgpu::FilterMode::Nearest,
-        min_filter: wgpu::FilterMode::Nearest,
-        mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+        mag_filter: filter_mode(requested.magnify),
+        min_filter: filter_mode(requested.minify),
+        mipmap_filter: mipmap_mode(requested.between_levels),
+        anisotropy_clamp: requested.anisotropy,
         ..wgpu::SamplerDescriptor::default()
-    })
+    });
+    // wgpu's own words: "the pop takes effect immediately; the future does not
+    // need to be awaited before doing work that is outside of this error scope".
+    // So this blocks on a future that is already resolved, and nothing has to
+    // poll a device for it — which is the whole of `architecture.md`'s
+    // Assumption 5, and `tests/terrain_sampling.rs` reaches this arm on a real
+    // device.
+    match pollster::block_on(scope.pop()) {
+        None => Ok(built),
+        Some(_refused) => Err(RendererError::TerrainSampler {
+            requested: *requested,
+        }),
+    }
+}
+
+/// How wgpu spells the filter `chosen` states.
+const fn filter_mode(chosen: Filter) -> wgpu::FilterMode {
+    match chosen {
+        Filter::Nearest => wgpu::FilterMode::Nearest,
+        Filter::Linear => wgpu::FilterMode::Linear,
+    }
+}
+
+/// How wgpu spells the interpolation between two mip levels that `chosen`
+/// states.
+const fn mipmap_mode(chosen: Filter) -> wgpu::MipmapFilterMode {
+    match chosen {
+        Filter::Nearest => wgpu::MipmapFilterMode::Nearest,
+        Filter::Linear => wgpu::MipmapFilterMode::Linear,
+    }
 }
 
 /// The packed vertex buffer, at the capacity assembly enforces.

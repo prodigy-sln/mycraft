@@ -32,11 +32,11 @@ pub struct Cli {
     pub command: Command,
 }
 
-/// The three things this tool does.
+/// The four things this tool does.
 ///
 /// Each variant carries its own arguments as a struct rather than as inline
 /// fields, so that a dispatcher stays a dispatcher: `texture` alone spells eight
-/// arguments, and destructuring three subcommands in one match makes the one
+/// arguments, and destructuring four subcommands in one match makes the one
 /// function that chooses between them longer than the ones doing the work.
 #[derive(Debug, Subcommand)]
 pub enum Command {
@@ -46,6 +46,8 @@ pub enum Command {
     Inspect(InspectArgs),
     /// Emit a model as a block texture, one face or all six.
     Texture(TextureArgs),
+    /// Bake a manifest's entries into a named texture set.
+    Build(BuildArgs),
 }
 
 /// What `preview` was asked for.
@@ -68,6 +70,13 @@ pub struct PreviewArgs {
     /// Which state a part takes, as `part=state`. Repeatable.
     #[arg(long = "state")]
     pub states: Vec<String>,
+}
+
+/// What `build` was asked for.
+#[derive(Debug, Args)]
+pub struct BuildArgs {
+    /// The manifest naming what to bake, and where it goes.
+    pub document: PathBuf,
 }
 
 /// What `inspect` was asked for.
@@ -116,6 +125,7 @@ impl Command {
             Self::Preview(asked) => &asked.document,
             Self::Inspect(asked) => &asked.document,
             Self::Texture(asked) => &asked.document,
+            Self::Build(asked) => &asked.document,
         }
     }
 
@@ -141,6 +151,9 @@ impl Command {
             Self::Preview(asked) => &asked.states,
             Self::Inspect(asked) => &asked.states,
             Self::Texture(asked) => &asked.states,
+            // A manifest states no part states: what it names is a whole model
+            // per entry, and a face of it.
+            Self::Build(_) => &[],
         }
     }
 }

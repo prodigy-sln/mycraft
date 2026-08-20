@@ -39,6 +39,8 @@
 //! any of its chunk data" would stop being true.
 
 use mc_core::block::BlockDefinition;
+use mc_core::content::Face;
+use mc_core::hash::fnv_1a_64;
 use mc_core::id::BlockName;
 use serde::{Deserialize, Serialize};
 
@@ -240,29 +242,48 @@ impl DefinitionHash {
     }
 }
 
-/// Which revision of the canonical field lists below a hash was folded over.
+/// Which revision of each canonical field list below a hash was folded over.
 ///
 /// Its own leading byte, so that adding a field to one of them is a deliberate
 /// act that says so in the value rather than silently reinterpreting every hash
 /// already stored.
-const INPUT_VERSION: u8 = 1;
-
-/// Where an FNV-1a 64 fold starts, and what it multiplies by.
 ///
-/// Published constants, fixed for good: a hash that moved would report every
-/// block of every existing save as changed.
-const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
-const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+/// **One number per list, never one shared between them, and do not unify them.**
+/// Two constants where there could be one reads as duplication, which is why the
+/// reason is here and not only in the design notes. The two lists grow for
+/// unrelated reasons, and a shared byte would move every block's *behaviour* hash
+/// in every save in existence the moment the appearance list gained a field.
+///
+/// Measured when the appearance list grew to six keys: the committed pre-spec
+/// save reports all four of its blocks `changed` under a shared byte and
+/// `retextured` under this arrangement. Those are not two shades of one answer —
+/// a non-empty `changed` **refuses the load** under
+/// [`Acceptance::OnlyUnchangedBlocks`](super::table::Acceptance), and
+/// `retextured` never refuses at all. Unifying these turns every world saved
+/// before a retexture into a refused one.
+///
+/// The appearance list gained five keys and says so in its own byte; the
+/// behaviour list gained nothing and its byte has not moved since the format was
+/// written. `docs/technical/world-format.md` carries the numbers.
+///
+/// **Only a test that states the byte sequence can see one of these move.**
+/// Measured: leaving the appearance byte at 1 while its list grew reddens the two
+/// guards that build the expected bytes by hand and nothing else in the
+/// workspace. Every other witness compares one fold to another, and that cannot
+/// see a leading byte which moved in both — so a green suite is no evidence a
+/// revision is right.
+const BEHAVIOUR_REVISION: u8 = 1;
+const APPEARANCE_REVISION: u8 = 2;
 
-/// The declared behaviour of a block, as version 1 of this format defines it.
+/// The declared behaviour of a block, as revision 1 of this list defines it.
 ///
 /// **Written out by hand rather than derived from [`BlockDefinition`], and that
 /// is the whole of it.** A derive over that type would bind every save to a
 /// struct which exists for other reasons and changes for other reasons, so a
 /// field added to it in a later engine version would invalidate every world in
 /// existence. This list *is* the specification: a new definition field does not
-/// reach it, and putting one here bumps [`INPUT_VERSION`] and the format version
-/// together.
+/// reach it, and putting one here bumps [`BEHAVIOUR_REVISION`] and the format
+/// version together.
 ///
 /// **The origin is excluded, and it is the field that would have broken
 /// everything.** It is a human-readable label derived from the *file path* a
@@ -296,17 +317,28 @@ struct DeclaredBehaviour<'a> {
 /// The name is in both lists, so that the two hashes of one block cannot be
 /// swapped for each other and a block's appearance cannot collide with some
 /// other block's behaviour.
+///
+/// **Six keys, in [`Face::ALL`] order, and the order is part of the record.** A
+/// block whose `north` alone was re-pointed looks different and must fold
+/// differently, so the keys are folded where they were declared rather than
+/// sorted or reduced to the distinct ones — two blocks that swapped their `east`
+/// and `west` art are not the same block seen twice.
+///
+/// A fixed-size array rather than six named fields: the canonical encoding
+/// writes a tuple as its elements and nothing else, so the two shapes fold
+/// identically, and this one cannot have a face left out of it.
 #[derive(Serialize)]
 struct DeclaredAppearance<'a> {
     input_version: u8,
     name: &'a str,
-    texture: &'a str,
+    textures: [&'a str; 6],
 }
 
-/// What version 1 of this format records as `definition`'s declared behaviour.
+/// What revision 1 of the behaviour list records as `definition`'s declared
+/// behaviour.
 pub(crate) fn behaviour_of(definition: &BlockDefinition) -> DefinitionHash {
     folded(&DeclaredBehaviour {
-        input_version: INPUT_VERSION,
+        input_version: BEHAVIOUR_REVISION,
         name: definition.name.as_str(),
         is_solid: definition.is_solid,
         replaceable: definition.replaceable,
@@ -315,12 +347,19 @@ pub(crate) fn behaviour_of(definition: &BlockDefinition) -> DefinitionHash {
     })
 }
 
-/// What version 1 of this format records as `definition`'s declared appearance.
+/// What revision 2 of the appearance list records as `definition`'s declared
+/// appearance.
+///
+/// **Every save written before this revision reports every block as retextured
+/// on its next load, and that is correct rather than a migration defect**: every
+/// block's appearance really did change, from one key to six. A retexture is
+/// loadable without asking anybody anything, which is exactly why the two lists
+/// carry separate revision bytes.
 pub(crate) fn appearance_of(definition: &BlockDefinition) -> DefinitionHash {
     folded(&DeclaredAppearance {
-        input_version: INPUT_VERSION,
+        input_version: APPEARANCE_REVISION,
         name: definition.name.as_str(),
-        texture: definition.texture.as_str(),
+        textures: Face::ALL.map(|face| definition.textures.at(face).as_str()),
     })
 }
 
@@ -341,25 +380,6 @@ fn folded(declaration: &impl Serialize) -> DefinitionHash {
     DefinitionHash::from_raw(fnv_1a_64(&canonical))
 }
 
-/// `bytes` folded with FNV-1a 64.
-///
-/// Hand-written, and deliberately not the standard library's default hasher:
-/// that algorithm is documented as unspecified and may change between compiler
-/// releases, and a hash that moves with the toolchain invalidates every save on
-/// an upgrade. Not a cryptographic hash either — forgery resistance buys nothing
-/// for a local file a player can already edit, and it would make the expected
-/// value of a hash impossible to derive by hand, which is the one thing the
-/// version-stability test cannot do without.
-///
-/// Nothing here parses: these are bytes this module produced a line earlier,
-/// from its own registry through its own record. There is no length to trust, no
-/// allocation to drive and no index to bound, which is why hand-writing *this*
-/// is not the thing hand-writing a decoder would have been.
-fn fnv_1a_64(bytes: &[u8]) -> u64 {
-    let mut folded = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        folded ^= u64::from(*byte);
-        folded = folded.wrapping_mul(FNV_PRIME);
-    }
-    folded
-}
+#[cfg(test)]
+#[path = "format_test.rs"]
+mod tests;

@@ -51,6 +51,7 @@ use std::path::Path;
 
 use mc_core::block::source::{DefinitionFault, DefinitionSource, DefinitionSourceError};
 use mc_core::block::{BlockId, BlockRegistry, RegistryError};
+use mc_core::content::{Face, FaceTextures};
 use mc_core::id::BlockName;
 use mc_world::content::{LuauFileDefinitionSource, Printed};
 
@@ -311,9 +312,76 @@ pub fn registered(registry: &BlockRegistry, name: &str) -> Result<String, Box<dy
     let definition = registry.resolve(&BlockName::parse(name)?)?;
     Ok(format!(
         "textured {}, solid {}",
-        definition.texture.as_str(),
+        textured(&definition.textures),
         definition.is_solid
     ))
+}
+
+/// The six facing words, in the order a refusal lists them.
+///
+/// Written out here rather than read from [`Face::ALL`], for the reason every
+/// other expectation in this suite is written out: a list derived from the value
+/// under test agrees with whatever that value becomes.
+pub const SIX_FACINGS: [&str; 6] = ["up", "down", "north", "south", "east", "west"];
+
+/// A `texture` field stating a table, each word holding the key written against
+/// it.
+///
+/// Takes pairs rather than six keys, because most of what this builds is a table
+/// that is **wrong** — three facings, none, one spelled `top` — and a fixture
+/// that could only express a well-formed one could not write the refusals.
+#[must_use]
+pub fn facing_table(facings: &[(&str, &str)]) -> String {
+    let stated: String = facings
+        .iter()
+        .map(|(word, key)| format!("\t\t{word} = '{key}',\n"))
+        .collect();
+    format!("texture = {{\n{stated}\t}}")
+}
+
+/// How a block's six facing keys read in a comparison.
+///
+/// One key where all six agree, and the six words with their keys where they do
+/// not. **The collapse is deliberate and it is what keeps every fixture that
+/// states one string reading exactly as it did before a block had six facings**;
+/// the expansion is what stops a set that lost five of its six from rendering as
+/// the one it kept.
+#[must_use]
+pub fn textured(textures: &FaceTextures) -> String {
+    let uniform = textures.at(Face::Up);
+    if Face::ALL.iter().all(|face| textures.at(*face) == uniform) {
+        return uniform.as_str().to_owned();
+    }
+    Face::ALL
+        .iter()
+        .map(|face| format!("{} {}", face.as_str(), textures.at(*face).as_str()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Which key `registry` holds against each of `name`'s six facings, in
+/// [`Face::ALL`] order.
+///
+/// One line per facing rather than a map, so a mismatch reads as the table a mod
+/// author wrote — and so that a loader which resolved five facings correctly is
+/// not mistaken for one that resolved them all correctly.
+///
+/// # Errors
+///
+/// Returns an error if `name` is not a namespaced id or the registry does not
+/// hold it.
+pub fn facings_of(registry: &BlockRegistry, name: &str) -> Result<Vec<String>, Box<dyn Error>> {
+    let definition = registry.resolve(&BlockName::parse(name)?)?;
+    Ok(Face::ALL
+        .iter()
+        .map(|face| {
+            format!(
+                "{} = {}",
+                face.as_str(),
+                definition.textures.at(*face).as_str()
+            )
+        })
+        .collect())
 }
 
 /// What a declaration said about how the world may be changed around a block:

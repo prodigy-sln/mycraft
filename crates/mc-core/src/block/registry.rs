@@ -44,18 +44,19 @@ impl BlockRegistry {
     /// Asking the registry instead cannot move with a world, because it never sees
     /// one.
     ///
-    /// It reads each definition's `texture` and never its `name`. The two coincide
-    /// across the blocks the base game happens to ship, which is exactly why the
-    /// distinction has to be made here rather than discovered the first time a mod
-    /// declares them differently.
+    /// It reads each definition's declared keys and never its `name`. The two
+    /// coincide across the blocks the base game happens to ship, which is exactly
+    /// why the distinction has to be made here rather than discovered the first
+    /// time a mod declares them differently.
     ///
-    /// A set rather than a list: two blocks may legitimately draw the same texture,
-    /// and they then share its layer.
+    /// A set rather than a list, and a union rather than one key per block: two
+    /// blocks may legitimately draw the same texture and so may two faces of one
+    /// block, and each such pair shares a layer.
     #[must_use]
     pub fn texture_keys(&self) -> BTreeSet<TextureKey> {
         self.definitions
             .iter()
-            .map(|definition| definition.texture.clone())
+            .flat_map(|definition| definition.textures.keys())
             .collect()
     }
 

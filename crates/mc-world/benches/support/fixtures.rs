@@ -31,6 +31,7 @@ use std::error::Error;
 
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, NamespacedIdError, TextureKey};
 use mc_world::section::{Contents, LocalPos, PaletteIndex, SECTION_SIZE, Section, SectionData};
 
@@ -219,7 +220,7 @@ fn fixture_registry() -> Result<BlockRegistry, Box<dyn Error>> {
 fn definition(name: &str, is_solid: bool) -> Result<BlockDefinition, NamespacedIdError> {
     Ok(BlockDefinition {
         name: BlockName::parse(name)?,
-        texture: TextureKey::parse(name)?,
+        textures: FaceTextures::uniform(TextureKey::parse(name)?),
         is_solid,
         replaceable: false,
         breakable: true,

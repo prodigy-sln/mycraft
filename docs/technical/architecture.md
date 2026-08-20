@@ -28,6 +28,282 @@ Putting the contract in `mc-core` — whose whole purpose is primitives other
 crates share — avoids that inversion without adding an eleventh crate to
 the workspace's fixed ten-crate map.
 
+## The stable byte fold lives in `mc-core`, and only the fold does
+
+`mc_core::hash::fnv_1a_64` is FNV-1a-64 over a byte slice, hand-written and
+deliberately not the standard library's default hasher — that algorithm is
+documented as unspecified and may change between compiler releases, and a hash
+that moves with the toolchain invalidates every save on an upgrade.
+
+That same property is why it sits in `mc-core` rather than beside its first
+caller. Two programs have to fold identically and forever: the save format in
+`mc-world`, which records a behaviour hash and an appearance hash per block
+declaration (`docs/technical/world-format.md`), and `voxforge`, the art build
+under `tools/`, whose texture-set index must fold to the value the client
+computes when it reads the same bytes. `tools/` may depend inward on `crates/`
+and the reverse never holds — an invariant a test enforces (see "Mechanically
+enforced invariants"), so `tools/voxforge` cannot host the shared copy. `mc-core`
+is the one place both sides already reach.
+
+**The failure this arrangement exists to make unspellable is not a hash that is
+wrong. It is two hashes that were each computed correctly and do not match** —
+an index a build declares current and a client declares stale, with no error
+anywhere and nothing to read. A second implementation on either side of the
+`crates/`–`tools/` line reintroduces exactly that, which is why the rule is that
+there is one, in `mc-core`, and everything else calls it.
+
+**Only the fold moved, and two things that look like it deliberately stayed
+put.** `folded()` and `DefinitionHash` remain in `mc_world::persistence::format`,
+because `folded` names `postcard` and that crate's manifest confines `postcard`
+to `mc-world/src/persistence/`. And `mc_render::texture::placeholder` keeps its
+own inlined copy of the same two constants: it hashes a block name to a debug
+colour, which is not a value two programs must agree on, and folding it in would
+change golden frames for no correctness gain. A future change may consolidate it,
+but it is not the same obligation and nothing breaks if it never does.
+
+## The texture-set index, and the byte sequence its fold runs over
+
+`mc_core::art` is the whole of the agreement between the art build and the client:
+a `parse`/`rendered` pair over `&str`/`String`, plus `folded_sources`, plus the
+rule for what a set's image may be named. **It opens no file.** The writer renders
+a `String` and writes it; the reader reads bytes and parses them; both hand the
+bytes they read to the fold. That is what keeps `mc-core` free of I/O while still
+being the only place the agreement is written down, and it is why `toml` is not
+reachable from here — the index is a line format, not a document.
+
+An index is text, one record to a line:
+
+```text
+mycraft-texture-set 1
+fold 00008f14e45fceea
+source models/grass-block.mcvox
+source materials/dirt.toml
+key base__grass_top.png base:grass_top
+```
+
+Three things about that shape are load-bearing and a future change must not break
+any of them.
+
+- **The fold is padded to sixteen hex digits.** A value with a high zero byte
+  written unpadded is a shorter line a strict reader refuses, and the value it
+  would parse as is a different one.
+- **A `key` record is written image first, key last.** A `TextureKey` may contain
+  whitespace and an image file name may not (`is_an_ordinary_image_name`), so only
+  one of the two can be the rest of the line and it has to be the one with no
+  character set imposed on it.
+- **Any ASCII control character in a key or a source path is refused on both
+  sides, render and parse.** A key has no character set, so
+  `base:a\nfold 0000000000000000` is a spellable manifest entry whose rendered
+  index a reader would otherwise accept with a fold nobody folded. Refusing only
+  on parse leaves a writer that can emit the forgery; refusing only on render
+  leaves a reader that believes one.
+
+The fold's byte sequence is stated rather than inherited, so that a test can build
+an oracle sharing no code with either side: for each source in order, the recorded
+path as UTF-8 bytes preceded by its length as a little-endian `u64`, then the
+file's bytes preceded by theirs; FNV-1a-64 over the concatenation. **Length
+prefixes rather than separators**, so a file holding whatever byte a separator
+used cannot forge a boundary — the source `ab` holding nothing and the source `a`
+holding `b` would otherwise fold over the same two bytes.
+
+**Recorded paths are relative to the manifest's own directory and `/`-separated.**
+That is what lets a copied content root re-fold to the same value somewhere else
+on disk, which every fixture in the build's test suite depends on; absolute paths
+would make a copied root permanently stale and would put developer home
+directories into a file the gate builds.
+
+## `voxforge build` in the topology
+
+`voxforge` gained a fourth subcommand: `build <manifest>` reads a texture manifest
+(`content/base/textures.toml`), bakes the faces it names, and writes the images and
+the index into the manifest's `output` directory. It is the first thing on the
+non-committed side of ADR-026 — deterministic and free to reproduce, so the tree
+carries the models and the manifest and regenerates the images.
+
+Three shape decisions the as-built record needs to keep:
+
+- **Entries are grouped by model, and each model is emitted whole.** Not an
+  optimisation. The cubic precondition — a face set is a block's six faces — lives
+  in `emit`'s whole-set arm only, so a per-entry emission of one face would never
+  ask it and a model that is not a cube would bake a "block texture set" that is
+  not one. Six faces from one load and one render pass is the side benefit.
+- **The seam verdict binds only on the faces some entry selected.** Every face is
+  rendered and judged, and a failing verdict on a face no entry asked for is passed
+  over: refusing on one would refuse a set for a picture nobody is going to draw,
+  and no positive scenario would notice.
+- **The cache key is the fold, and it is whole-set.** Matching value plus every
+  image the index names present means nothing is opened; anything else rebuilds
+  the whole set. Per-entry caching would need a second, finer-grained record that
+  every reader of the index would then also have to understand, for seven 16x16
+  images. The images are checked for presence and not content, so a hand-edited
+  image survives a build — the stated consequence of a whole-set key.
+
+Everything a refusal can be about is settled before the first file is opened, which
+is what makes a build refused on its fourth entry leave the previous set intact.
+That property is what P6's gate stage will lean on: a refused art build leaves a
+stale set on disk, so the gate must not then test against it.
+
+## The client's verdict on a built set
+
+`mc_client::textures` is the reader half of the agreement above, and the whole of
+what a launch does about art. Both launch doors ask it one question before a world
+is generated, and either start or turn the run away with one sentence.
+
+```rust
+pub fn built_set(root: &Path) -> Result<(SetVerdict, SuppliedTexels), TextureSetError>;
+pub fn refusal_for(verdict: &SetVerdict) -> Option<PreparationError>;
+```
+
+**The verdict is a total enumeration returned in `Ok`, never an error and never an
+absence check.** `SetVerdict` has six arms — `NoArtDeclared`, `Absent`,
+`StaleAgainstSources`, `SourceMissing { source }`, `ImageMissing { key, image }`,
+`Current` — and every test that reads one compares the whole of it. That is the
+property a future change must not give up, and the reasoning is the one this
+project has now paid for twice: `assert!(nothing_was_refused)` cannot tell a
+healthy set from a client that has lost the ability to check, because both say
+nothing. `assert_eq!(verdict, Current)` rejects every other arm *including* the
+ones that mean "I could not look", so a check that stops checking reddens for
+free.
+
+Returning it only as an error would undo that. Three of the six arms let a launch
+continue, so they would be unconstructible in `Ok` and the totality the suite
+holds would not be the one the reasoning claims.
+
+**`refusal_for` lives beside the enum it is total over**, in `textures/mod.rs`
+rather than in `startup.rs`. Adding an arm and forgetting to say what it means is
+then a non-exhaustive match in the file that declared it, rather than a silent
+`None` in another one.
+
+### Two arms let a launch through, and they are not the same thing
+
+`NoArtDeclared` is separated from `Absent` by the presence of `textures.toml` and
+by nothing else. Applied literally to four verdicts, a content root with no
+manifest at all has an absent index and would be told to run the art build before
+content that declares no art will load — which blames the wrong party, and every
+mod author's first root is exactly that shape.
+
+`Current` while covering no key a block declares is the other one. A key the set
+does not cover is not a refusal at any point: it costs a generated texture, not a
+launch. The two messages — *the build step was not run* and *this key was never
+authored* — must never collapse into one, and a test holds them apart.
+
+### The sources are re-folded as the index recorded them
+
+The client reads the index's recorded source list, in the recorded order, resolves
+each relative path against the content root it was given, and folds those bytes
+again. **It never reads the manifest.** Two independent derivations of one source
+list agree on the shipped tree and part company the first time a build changes
+what it reaches — the drift `mc_core::art` exists to make unspellable, one level
+up. The witness is a test that drops a `materials/*.toml` the index never
+recorded: a client re-deriving its list from the manifest folds it and calls the
+set stale; one re-folding the recorded list cannot see it.
+
+Resolving against the root the client was given, rather than against anything
+absolute, is what keeps every `copy_tree`'d fixture in this workspace current.
+
+### The order of the questions is the order of the answers
+
+A root that declares no art is never stale. A set that was never built has no
+sources to check. A set whose sources have moved is not judged on images it may
+not have baked. And an image *name* is checked against
+`mc_core::art::is_an_ordinary_image_name` **before** anything looks for the file,
+because looking means joining that name onto a path first — this is the reader
+half of the rule the build applies when it derives the name, and this client is
+that function's first caller inside `crates/`.
+
+### `<root>/textures/` is hard-coded, and that is a known dead end
+
+A manifest states its own `output`; the client does not read the manifest, so it
+looks under `textures/` and nothing tells it otherwise. A root whose manifest says
+`output = "art"` therefore builds cleanly and is judged `Absent` at every launch,
+told to run the build it has just run, with nothing in either message naming
+`output`.
+
+That is stated plainly in `modding/voxel-models.md` rather than left to be
+discovered. Closing it means recording the output directory *in the index*, which
+changes a format two programs share and belongs to the spec that makes that
+change.
+
+### `TextureSetError` is the other axis, and one of its arms was added late
+
+`SetVerdict` answers "what is the state of this set". `TextureSetError` is a set
+that admits no answer: `Unreadable { path, cause }`, `Index { path, cause }`, and
+`UnusableImageName { key, image }`.
+
+The third was not in the architecture plan and is not a verdict, and it is here
+because the client takes an image name **out of a file** and joins it onto a path.
+`TextureSetIndex::parse` accepts `elsewhere/base__stone.png` — relative,
+`/`-separated, naming no parent — and it is still not an image name. Without this
+arm, a set built by an older or a patched tool is a set whose index the client
+believes.
+
+`Unreadable` carries what the filesystem said as a `#[source]` and never inside
+its own message. A message interpolating its cause reports one flattened sentence
+and drops whatever sits under it, which is the defect `tests/reporting_seam.rs`
+exists over — and that guard caught this variant's first spelling.
+
+### Five `PreparationError` variants, and the field that could not be called `source`
+
+`PreparationError` gains `TextureSetAbsent`, `TextureSetStale`,
+`TextureSetSourceMissing { missing }`, `TextureSetImageMissing { key, image }` and
+`TextureSetUnreadable(#[from] TextureSetError)`.
+
+Five and not four: an `Option<PathBuf>` cannot be rendered conditionally inside
+one `thiserror` format string, so the stale case and the missing-source case are
+separate variants rather than one with a hole in its sentence.
+
+The field is `missing` and not `source`. `thiserror` reads any field named
+`source` as the error's cause, and the variant does not compile with it — *the
+method `as_dyn_error` exists for reference `&PathBuf`, but its trait bounds were
+not satisfied*. The `Display` text is unaffected.
+
+`BUILD_THE_TEXTURE_SET` is a `pub const` beside `LOAD_CHANGED_BLOCKS` in
+`startup.rs`, spelled once, for the reason that constant carries: a message
+quoting a command nothing accepts reads as a way out and is not one. It is `pub`
+so that the four places which must agree — the constant, `README.md`,
+`modding/voxel-models.md`, and the test that compares them — can be compared
+against each other rather than against a second copy of the string.
+
+### The texels are decoded once, at the composition root, and held for the run
+
+`built_set` hands back a `SuppliedTexels` alongside the verdict, and it is filled:
+one entry per key the index names, holding that image's level-zero texels in
+`[R, G, B, A]` stored bytes. **Only a `Current` set is decoded** — every other
+verdict either refuses the launch or says there is no art, so decoding first
+would report a broken image out of a set the client was about to refuse for a
+reason its author can act on.
+
+**The decode is the client's and the renderer may not acquire one.** `mc-render`
+names no `std::fs`, no `PathBuf` and no image decoder anywhere in `src/`; it is
+*handed* level-zero texels and computes the mip chain from them.
+`crates/mc-client/src/textures/decode.rs` is the one file of this workspace's
+composition root that may name `image::`, and
+`crates/mc-client/tests/the_decode_stays_at_the_composition_root.rs` holds both
+halves with a positive control on each scan. Pixels are the client's side of the
+snapshot split: a server that needed them would break the asymmetry that makes a
+texture pack a legal client modification and a block declaration not.
+
+**Two doors read a set and there are exactly two, one per launch shape.**
+`startup::prepare_scene` — the capture path every golden is shot through — asks
+for the root it is given. `launch::start` — the player path — asks before the
+window opens and before the preparation worker is spawned, so a contributor who
+has not run the art build reads one sentence instead of waiting out a world
+nobody will show them. Each shape reads once; neither reads twice.
+
+**The supply is given to the renderer at construction and is held for the whole
+run.** `launch::Starting` carries it from the composition root into
+`App::new`, which hands it to `FrameRenderer::new` inside a `gpu::TerrainTextures`
+alongside the sampler request. It is deliberately **not** carried by `Unuploaded`
+or by the re-mesh worker's retirement: the built set is a pre-build artefact that
+does not change while the client runs, so a reload appending a key finds either
+art that was already read or no art at all — and the second is the ordinary
+per-key fallback reached by a second road. Threading a supply through the reload
+path would create a value that can arrive *empty*, and a world drawing its baked
+art would go back to hash-derived colours the moment somebody saved a block file.
+`crates/mc-client/tests/a_reload_keeps_the_supply_the_renderer_was_built_with.rs`
+is the only guard on that, and it needs one renderer living through two uploads
+to be one at all.
+
 ## The registry/loader seam
 
 `BlockRegistry::apply` is the **only** way to populate a registry:
@@ -598,27 +874,21 @@ draws at all.** The assignment is **stated** by the simulation when it reads the
 direction is the whole point. It covers every block the content registers, never the meshed world's
 quads (`technical/rendering.md` §"Textures are array layers, never an atlas"), so an edit or a
 resumed save can add a block a world had none of without shifting anything already assigned.
-Re-resolving on every remesh is unnecessary rather than deferred: nothing about which blocks are
-registered changes mid-session in MVP 2. Hot-reloadable content reopens the question, and the failure
-mode if a quad ever named an unresolved key is a loud error at packing time
-(`GeometryError::UnresolvedTexture`) rather than a wrong texture — which is a separate gap, recorded
-in `crates/mc-render/CLAUDE.md`: a quad is still matched to a key by the block's *name*, not through
-the registry.
+Re-resolving the *assignment* on every remesh is unnecessary rather than deferred: nothing about
+which blocks are registered changes mid-session. The failure mode if a quad ever names a key the
+assignment does not cover is a loud error at packing time (`GeometryError::UnresolvedTexture`,
+naming the block, the facing and the key) rather than a wrong texture.
 
-**That substitution lives in two places, and this record used to name only one.** `layer_for`
-(`crates/mc-render/src/geometry/mod.rs`) parses a quad's block name as a texture key, and
-`hud::held::held_swatch` (`crates/mc-render/src/hud/held.rs`) does the same for the held-block
-indicator. Both agree with the assignment — whose entries are keyed by each block's declared
-`texture` — only because every shipped block declares the two identically. **A declaration whose
-`texture` differs from its `name` therefore loads and then does not draw**, and because a failed
-remesh batch is logged and dropped rather than failing the run, an author sees their block simply not
-appear. `docs/modding/blocks-items.md` states that in an author's own terms rather than leaving it to
-be discovered, and both substitution sites are pinned by a test rather than by a comment — **a test
-that expires when the per-face texture work closes the gap, and whose red is the success signal**.
-**The layer index is nonetheless the only content-derived value inside a packed vertex**: a vertex is
-three section-local coordinates, a facing, the layer, and a scene section index assigned at assembly.
-So closing the gap is a change to how an entry is *selected*, in two call sites, and not to what a
-vertex carries.
+**Which key a face draws is resolved at packing time, out of the block's declaration.** `layer_for`
+(`crates/mc-render/src/geometry/mod.rs`) and `hud::held::held_swatch`
+(`crates/mc-render/src/hud/held.rs`) both take a `TextureResolution` — every registered block's six
+declared keys beside the assignment — and neither parses a block's name. A declaration whose
+`texture` differs from its `name`, and a table naming six different keys, therefore draw what they
+declare. **The layer index remains the only content-derived value inside a packed vertex**: a vertex
+is three section-local coordinates, a facing, the layer, and a scene section index assigned at
+assembly. A `Quad` carries no resolved key and must not gain one —
+`technical/rendering.md` §"A face draws what its block declared, and a `Quad` carries no key" says
+why.
 
 **A failed remesh batch is dropped and reported once — the opposite rule from scene preparation,
 deliberately.** Preparation fails the whole run if it cannot build a scene at all; a remesh that cannot
@@ -1331,8 +1601,8 @@ never naming the simulation — putting it in `mc-sim` would have made the rende
 reach for a crate the dependency rules forbid it — and because it is a content
 primitive with no I/O, which is what `mc-core` is for.
 
-It carries each block's **name**, its **texture key** and its **solidity**, in
-registration order, plus the **layer assignment**. It carries none of
+It carries each block's **name**, the **key each of its six faces draws from** and
+its **solidity**, in registration order, plus the **layer assignment**. It carries none of
 `replaceable`, `breakable` or `breaks_into`: those are the rules by which a world
 is *mutated*, the simulation recomputes every one of them, and a client holding
 them would be holding rules it may not apply. **That absence is asserted by
@@ -1348,6 +1618,56 @@ field, and a test that cannot fail reads as evidence and is not. It becomes
 falsifiable the moment a second participant exists. That is the exact opposite of
 the layer assignment below, which is here precisely because its consumer exists
 today.
+
+### The six facing words are `mc-core`'s; the one mapping to axes is `mc-world`'s
+
+A block declares a texture key per face, and the two crates that have to agree on
+what a face *is* cannot both own the word. `mc_core::content::Face` is the
+vocabulary content writes — `up`, `down`, `north`, `south`, `east`, `west` — with
+`FaceTextures` carrying one key per face. `mc_world::mesh::Facing` is the
+vocabulary a mesher writes: an axis and a sign. `Facing::face` is the single
+total mapping between them and is **the one place in the workspace where a
+compass word meets an axis**: `up` is +Y, `down` −Y, `north` −Z, `south` +Z,
+`east` +X, `west` −X.
+
+**The split is forced rather than chosen.** `mc-core` cannot see `Facing`,
+because `Facing` is defined in terms of a section's coordinate system and
+`mc-core` performs no I/O and knows nothing of chunks; and `Facing` cannot move
+into `mc-core`, because its declaration order is simultaneously the face emission
+order, the neighbour slot order and its `Ord`. So the published vocabulary lives
+where every crate can reach it and the exhaustive `match` lives in the only crate
+that can see both types.
+
+**Two enums for six directions reads as duplication on sight**, and the drift is
+closed mechanically rather than by anybody keeping two lists in step: a round trip
+over both `ALL` arrays asserts that the six facings name six distinct faces and
+leave none unnamed. That guard is a completeness one and says so — swapping
+`north` and `south` is still a bijection, and the only witness for such a swap is
+a block placed in a world with its faces read back by axis.
+
+`FaceTextures::at` is **total**: a face always has a key, so there is no `None` to
+handle at any call site and no index to get wrong. `FaceTextures::stating` takes
+its six keys positionally in `Face::ALL` order rather than paired with their
+faces, because a list of pairs could name one face twice and leave another
+unnamed, which would put the missing case back.
+
+### `TEXTURE_EDGE` is a contract constant, on `LAYERS_A_SESSION_MAY_ASSIGN`'s terms
+
+`mc_core::content::TEXTURE_EDGE` is the edge of one block texture in texels. Like
+the layer bound beside it, it is a property of the content-to-renderer contract
+and not of either side: `mc-render` allocates its array texture to it and fills
+every layer to it, and an art build has to bake to it. **It is never restated
+elsewhere** — an allocation and a fill that disagreed about the size would be a
+copy that either overruns or leaves a band unwritten, which is a defect no test of
+either side alone can see.
+
+`voxforge build` enforces it from the other end: a model's declared `scale` times
+the manifest's `pixels_per_voxel` must equal `TEXTURE_EDGE`, refused naming the
+model, the product and the edge. Three numbers with nothing connecting them is how
+a 32x32 set builds cleanly, commits cleanly, passes the gate, and refuses a launch
+with a message about an *image* — pointing a mod author at a file they never
+authored. The build tool depends on `mc-core` already, so this costs one constant
+and no new edge.
 
 ### The layer assignment is stated, not derived
 

@@ -36,6 +36,7 @@ use std::sync::Arc;
 use mc_client::launch::simulation_to_play;
 use mc_client::startup::acceptance_from;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::persistence::Launching;
 use mc_world::persistence::{SavedPlayer, save_world};
@@ -220,7 +221,7 @@ fn as_written() -> Result<Vec<BlockDefinition>, Box<dyn Error>> {
 fn block(name: &str, is_solid: bool, breakable: bool) -> Result<BlockDefinition, Box<dyn Error>> {
     Ok(BlockDefinition {
         name: BlockName::parse(name)?,
-        texture: TextureKey::parse(name)?,
+        textures: FaceTextures::uniform(TextureKey::parse(name)?),
         is_solid,
         replaceable: !is_solid,
         breakable,

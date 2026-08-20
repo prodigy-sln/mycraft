@@ -52,7 +52,7 @@ use std::path::Path;
 
 use mc_core::id::{BlockName, TextureKey};
 use mc_render::hud::{HudFrame, held_swatch};
-use mc_render::texture::TextureLayers;
+use mc_render::texture::TextureResolution;
 use mc_testkit::frame::Rgba8Image;
 use mc_testkit::frame::gpu::CaptureContext;
 
@@ -81,13 +81,13 @@ fn the_held_block_indicator_draws_the_new_block_from_the_layer_the_reload_append
     let indicator = the_indicators_fill(root.path())?;
     let Shown {
         held,
-        layers,
+        resolution,
         frame,
     } = a_run_that_declares_the_new_block(&context, &root)?;
 
     let seen = swatch_reading(&frame, indicator, &texel_colors(&BlockName::parse(AMBER)?)?)?;
     let holds = held.as_ref().map(BlockName::as_str);
-    let appended = layers.layer_of(&TextureKey::parse(AMBER)?);
+    let appended = resolution.layers().layer_of(&TextureKey::parse(AMBER)?);
     let read = (holds, appended, seen.strayed, seen.shown, seen.considered);
     let owed = (
         Some(AMBER),
@@ -111,7 +111,7 @@ fn the_held_block_indicator_draws_the_new_block_from_the_layer_the_reload_append
 /// and the frame drawn with both.
 struct Shown {
     held: Option<BlockName>,
-    layers: TextureLayers,
+    resolution: TextureResolution,
     frame: Rgba8Image,
 }
 
@@ -140,14 +140,14 @@ fn a_run_that_declares_the_new_block(
     // The product's own route, and the only one there is: an owned `TextureLayers`
     // can be had no other way, so a frame path that forgot the upload could not
     // reach the line below either.
-    let layers = unuploaded.uploaded_to(&mut frames_of.renderer, context.queue())?;
+    let resolution = unuploaded.uploaded_to(&mut frames_of.renderer, context.queue())?;
     let held = client.held_block();
-    let showing = held_swatch(held.as_ref(), &layers).texture();
+    let showing = held_swatch(held.as_ref(), &resolution).texture();
     let request = frames::request(context, "reload-held-block-appended-layer")?;
     let frame = frames_of.capture(&holding(root.path(), showing)?, &request)?;
     Ok(Shown {
         held,
-        layers,
+        resolution,
         frame,
     })
 }

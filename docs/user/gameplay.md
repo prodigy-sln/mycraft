@@ -4,6 +4,98 @@ Player-facing behaviour as built. This describes what a player experiences; see
 `docs/technical/architecture.md` §"The player: intent, physics and collision" for how it is
 implemented and why.
 
+## Two commands, not one, if you run from source
+
+The block art is generated, so a fresh clone has none of it, and the game will
+not start until it has been made. Run this once, from the folder you cloned into:
+
+```
+cargo run -p voxforge -- build content/base/textures.toml
+```
+
+then start the game as usual. If you forget, nothing crashes and nothing opens —
+the terminal you started from says exactly what to run:
+
+```
+mycraft: the generated texture set is not there; run `cargo run -p voxforge -- build content/base/textures.toml`
+```
+
+Run it again after changing anything the art is made from, and the same terminal
+tells you when that is needed: *the generated texture set is stale against its
+sources*, with the same command to fix it. Over unchanged files the command
+finishes instantly and writes nothing, so there is no harm in running it every
+time.
+
+**This is what the world is made of**, so the check is not a formality: if you
+skip the build you get a sentence in the terminal instead of a game, and if you
+edit a model and forget to rebuild you get a different sentence instead of a
+world that quietly shows you last week's art.
+
+**If you played a build from before this one, this is new and you will meet it on
+your first run.** The window used to open regardless and draw the placeholder
+colours; the check existed but only the test suite went through it. Now the game
+itself refuses, before the window opens and before it generates a world, and the
+refusal above is the whole of what you get. A sentence naming the one command to
+run is a better first run than a window full of art that is not the art.
+
+## What the world looks like
+
+The ground is **grass over dirt**, and below and through it there is **stone**.
+Not coloured squares standing in for them — actual pictures, baked from voxel
+models under `content/base/models/`:
+
+- **Grass** has turf on top, bare dirt underneath, and a band of turf spilling
+  over dirt on each of its four sides. Walk around one block and the four sides
+  are four different pictures rather than the same one repeated, because the
+  model is not symmetrical and each side of it is baked separately.
+- **Dirt** is the same image the grass block wears on its underside. There is one
+  picture and two blocks use it, which is why a grass block never sits on ground
+  of a slightly different colour.
+- **Stone** is grey with lighter and darker grain scattered through it.
+
+Stand close to a face and you see the individual texels with hard edges between
+them — that is deliberate, not a missing filter. Look at a hillside in the
+distance and it stays still as you move instead of crawling and sparkling.
+
+**Water** is declared by the world's content and draws nothing: no face of it is
+ever emitted, so it has no picture on screen even though it holds a place in the
+texture set like every other block.
+
+**A block whose art nobody has drawn still works.** If you install a mod that
+declares a block and ships no picture for it, that block draws a generated
+stand-in — a two-colour pattern derived from the texture's name, deterministic
+and unmistakably not real art — and the game runs. The terminal says so on
+startup, so a stand-in never reads as something you did wrong.
+
+## A save from before this build opens, and looks different
+
+Every block's appearance really did change with this build — grass, dirt and
+stone draw pictures now where they drew generated stand-ins before, and grass
+draws six of them where it drew one. A save records what each block looked like
+when it was written, so a world saved before this build **does** come back with
+every block reported as retextured.
+
+**Nothing stops you and nothing asks you.** The world opens as normal: your
+terrain, your edits and where you were standing all come back exactly as you left
+them, and what changed is what they are painted with. That is deliberate. The
+game asks before opening a save whose blocks *behave* differently — a mod
+rebalanced under you is a judgement about your world that only you can make —
+and it does not ask when they merely look different, because prompting on every
+texture edit is what teaches people to click through prompts without reading.
+
+`--load-changed-blocks` is the flag for the first case and it has nothing to do
+with this one:
+
+```
+cargo run -p mc-client -- --load-changed-blocks
+```
+
+You would need it if a mod changed what a block *is* — whether it is solid,
+whether it can be broken, what it drops. You do not need it to open a world whose
+grass now has grass on it. There is no flag to decline the new art, and no
+mechanism keeps a save on the old pictures: what a block looks like comes from
+the content the game is running, not from the save.
+
 ## Controls
 
 | Input | Action |
@@ -101,6 +193,14 @@ all, or leave it off and the game keeps refusing until you either restore the mo
 the flag. A block that only *looks* different — a retextured mod, with nothing about how it behaves
 changed — never triggers this at all; that world loads normally, without asking.
 
+**A world you saved before this build records every one of its blocks as having been
+retextured**, and that is expected rather than a sign anything is wrong: the game
+changed how it records what a block looks like, so the old record and the new one
+are not comparable and the honest answer is that they all look different. Looking
+different is the case that never asks you anything, so such a world opens exactly
+as it did before, with no prompt and no flag — and nothing on screen is different
+either. What blocks actually look like has not changed yet.
+
 A save that loads can still put you somewhere that stopped being standable while the
 game was off. That is answered rather than refused, and "Coming back to a save never
 leaves you inside a block" below says what happens and what you read.
@@ -174,11 +274,26 @@ ground that is left is solid too, you get the same answer as anyone else with no
 to go: you stay where you are and are told so. Stuck but standing on the world is the
 better of the two outcomes — the other one is falling with nothing underneath you.
 
-**One thing to expect that looks like a bug and is not.** Changing a block's
-*texture* is read and accepted, and you will not see it: what a block is drawn with
-is still chosen by the block's name. Changing whether a block is solid, or adding a
-block, does show. The rest of `docs/modding/hot-reload.md` says which edits are
-visible today.
+**Changing a block's *texture* now shows.** Save a new texture key against a block
+and the world comes back drawing it — and a block may name a different key on each
+of its six faces, so a block's top, bottom and four sides can differ. Changing
+whether a block is solid, or adding a block, shows as it did before. The rest of
+`docs/modding/hot-reload.md` says which edits are visible today.
+
+**What the face comes back as depends on the key you pointed it at.** Point a face
+at a key the art build has baked — anything under "What the world looks like"
+above — and the face comes back drawing that picture. Point it at a key nothing
+has baked and it comes back drawing a generated stand-in: a flat two-colour
+pattern derived from the key's own spelling. Both are ordinary, and which one you
+get is decided one key at a time, so re-pointing one face of one block never
+changes what anything else is drawing.
+
+**Art baked while the game is running needs a restart, not a reload.** The
+pictures are read from disk once, when the game starts. A reload re-points faces
+among the pictures that were already read; it does not go looking for new ones. So
+if you bake art for a key mid-session, the face keeps its stand-in until you quit
+and start again — and a key that was already drawing its picture goes on drawing
+it across every reload, rather than dropping back to a stand-in.
 
 ## Coming back to a save never leaves you inside a block
 
@@ -224,3 +339,13 @@ resume, and only when the world you saved into stopped being somewhere you could
 
 This is walking, looking, jumping and saving on a fixed, already-generated world. It does not
 include an inventory or other players — those are separate, not-yet-built pieces of the game.
+
+**Authored block art has landed, and "What the world looks like" above is what it looks like.**
+Grass, dirt and stone draw pictures baked from voxel models under `content/base/models/`
+(`docs/modding/voxel-models.md` is how that tooling works), and the game checks that art at every
+launch and will not start without it — the section at the top of this page is what that costs you.
+
+What is *not* here is art for everything. A block nobody has baked a picture for draws a generated
+stand-in derived from its key's spelling, and that is the ordinary answer rather than a gap being
+worked on — so a mod adding a block gets a stand-in until it ships a model. Baking one mid-session
+needs a restart before the game reads it, as the section on live edits above says.

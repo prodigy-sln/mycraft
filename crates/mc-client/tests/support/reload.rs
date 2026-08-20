@@ -68,6 +68,50 @@ pub const GRASS: &str = "base:grass";
 pub const STONE: &str = "base:stone";
 pub const WATER: &str = "base:water";
 
+/// The texture keys the shipped root declares, ascending — which is **not** the
+/// same list as its block names any more.
+///
+/// The grass block states a key per facing: `base:grass_top` upward,
+/// `base:dirt` downward — the same image the dirt block draws — and four side
+/// keys of its own. So `base:grass` is a *block* name that no longer spells a
+/// texture key at all, and a root that declared four keys now declares eight.
+///
+/// **Every layer expectation in these suites is a position in this list**, so it
+/// is stated once here and derived everywhere else. Dirt and stone still state
+/// one key across all six of their own facings.
+pub const SHIPPED_TEXTURE_KEYS: [&str; 8] = [
+    DIRT,
+    GRASS_SIDE_EAST,
+    GRASS_SIDE_NORTH,
+    GRASS_SIDE_SOUTH,
+    GRASS_SIDE_WEST,
+    GRASS_TOP,
+    STONE,
+    WATER,
+];
+
+/// The five keys **only** the grass block declares, ascending.
+///
+/// `base:dirt` is deliberately not among them. The grass block's underside draws
+/// it and the dirt block draws it on all six of its own facings, so a root that
+/// stops declaring grass retires these five and leaves dirt exactly where it
+/// was — which is what makes "one declaration away, several keys retired" a
+/// thing a fixture can state.
+pub const GRASS_ONLY_KEYS: [&str; 5] = [
+    GRASS_SIDE_EAST,
+    GRASS_SIDE_NORTH,
+    GRASS_SIDE_SOUTH,
+    GRASS_SIDE_WEST,
+    GRASS_TOP,
+];
+
+/// The six keys the grass block declares, one per facing.
+pub const GRASS_TOP: &str = "base:grass_top";
+pub const GRASS_SIDE_NORTH: &str = "base:grass_side_north";
+pub const GRASS_SIDE_SOUTH: &str = "base:grass_side_south";
+pub const GRASS_SIDE_EAST: &str = "base:grass_side_east";
+pub const GRASS_SIDE_WEST: &str = "base:grass_side_west";
+
 /// A block no declaration declares, named by one that does.
 ///
 /// It exists so that a `breaks_into` can name something the registry will never
@@ -98,6 +142,9 @@ pub const WATER_FILE: &str = "water.luau";
 pub struct Declaration {
     name: String,
     texture: String,
+    /// The key `north` draws from, where this declaration states its texture as a
+    /// table rather than as one string. See [`Declaration::repointing_north`].
+    north: Option<String>,
     solid: bool,
     replaceable: Option<bool>,
     breakable: Option<bool>,
@@ -107,22 +154,43 @@ pub struct Declaration {
 impl Declaration {
     /// A block of `name`, drawn from a texture key equal to it.
     ///
-    /// **The texture is equal to the name and no fixture here may change that.**
-    /// The mesher resolves a quad's layer by parsing the block's *name* as a
-    /// texture key, and SPEC-016's pin on that substitution turns red the day
-    /// PRO-902 closes the gap — which is its success signal. A declaration whose
-    /// texture differed would need that gap closed to draw, and greening the pin
-    /// early destroys the only instrument that will announce the fix landed.
+    /// **The texture is equal to the name, and that is now a convenience rather
+    /// than a constraint.** It used to be neither: a quad's layer was resolved by
+    /// parsing the block's *name*, so a declaration naming a different texture
+    /// loaded and then drew nothing. A face draws the key its block declared now,
+    /// on every facing, so a fixture here may state the two apart wherever a
+    /// scenario needs it to — and the ones whose subject is the difference do.
     #[must_use]
     pub fn of(name: &str) -> Self {
         Self {
             name: name.to_owned(),
             texture: name.to_owned(),
+            north: None,
             solid: true,
             replaceable: None,
             breakable: None,
             breaks_into: None,
         }
+    }
+
+    /// The same declaration, stating its texture as a table of six facings, all
+    /// holding the block's own name except `north`, which holds `key`.
+    ///
+    /// **Five of the six keep the block's own name, and that is a constraint on
+    /// the fixture rather than a convenience.** It is no longer about what draws:
+    /// a face resolves the key its block declared. It is about what the block's
+    /// key set *is* — the five that keep the name keep the layer a launch already
+    /// gave them, so the one facing that moved is the only thing a reading has to
+    /// account for, and the only key a reload has to find room for.
+    ///
+    /// **One facing and not two**, because a block whose `north` alone moved is
+    /// exactly the edit a comparison reading a single key would accept while
+    /// marking nothing — and it is the only edit that separates the six-key
+    /// comparison from a one-key one.
+    #[must_use]
+    pub fn repointing_north(mut self, key: &str) -> Self {
+        self.north = Some(key.to_owned());
+        self
     }
 
     /// The same declaration, stating `solid` as given.
@@ -158,7 +226,20 @@ impl Declaration {
     pub fn text(&self) -> String {
         let mut chunk = String::from("return {\n");
         chunk.push_str(&format!("\tname = \"{}\",\n", self.name));
-        chunk.push_str(&format!("\ttexture = \"{}\",\n", self.texture));
+        match &self.north {
+            None => chunk.push_str(&format!("\ttexture = \"{}\",\n", self.texture)),
+            Some(north) => chunk.push_str(&format!(
+                "\ttexture = {{\n\
+                 \t\tup = \"{own}\",\n\
+                 \t\tdown = \"{own}\",\n\
+                 \t\tnorth = \"{north}\",\n\
+                 \t\tsouth = \"{own}\",\n\
+                 \t\teast = \"{own}\",\n\
+                 \t\twest = \"{own}\",\n\
+                 \t}},\n",
+                own = self.texture
+            )),
+        }
         chunk.push_str(&format!("\tsolid = {},\n", self.solid));
         if let Some(replaceable) = self.replaceable {
             chunk.push_str(&format!("\treplaceable = {replaceable},\n"));

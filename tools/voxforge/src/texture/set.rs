@@ -60,6 +60,17 @@ impl AxisAlignedView {
         self.0
     }
 
+    /// The face `word` names, or nothing where it names none.
+    ///
+    /// The six words a block face has, and not the fourteen a view has: a
+    /// caller selecting a face from a written vocabulary must not be offered an
+    /// isometric one, since [`parse`](Self::parse) would then refuse what this
+    /// had just accepted.
+    #[must_use]
+    pub fn named(word: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|face| face.as_str() == word)
+    }
+
     /// The face as a caller spells it.
     #[must_use]
     pub fn as_str(self) -> &'static str {

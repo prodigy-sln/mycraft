@@ -19,6 +19,7 @@
 //! inventing a rule its author never asked for.
 
 mod emit;
+pub mod manifest;
 mod seam;
 mod set;
 

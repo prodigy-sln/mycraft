@@ -3,9 +3,9 @@
 //!
 //! # What this carries, and what it deliberately does not
 //!
-//! A block's **name**, its **texture key** and its **solidity**, plus the
-//! **layer assignment** the renderer draws against. Those are what a client
-//! draws and predicts with.
+//! A block's **name**, the **key each of its six faces draws from** and its
+//! **solidity**, plus the **layer assignment** the renderer draws against. Those
+//! are what a client draws and predicts with.
 //!
 //! It carries none of `replaceable`, `breakable` or `breaks_into`. Those are the
 //! rules by which a world is **mutated**, the server recomputes every one of
@@ -58,6 +58,150 @@ use crate::id::{BlockName, TextureKey};
 /// agreement with its own bound at compile time; **it is never restated
 /// elsewhere.**
 pub const LAYERS_A_SESSION_MAY_ASSIGN: usize = 256;
+
+/// The edge of one block texture, in texels.
+///
+/// A property of the content-to-renderer contract rather than of either side, on
+/// the same terms as [`LAYERS_A_SESSION_MAY_ASSIGN`]: the renderer allocates its
+/// array texture to it and fills every layer to it, and an art build has to bake
+/// to it. **It is never restated elsewhere** — an allocation and a fill that
+/// disagreed about the size would be a copy that either overruns or leaves a
+/// band unwritten.
+pub const TEXTURE_EDGE: u32 = 16;
+
+/// One of a block's six faces, in the vocabulary a declaration writes.
+///
+/// The words content spells, not the axes a mesher works in: `mc-world` holds
+/// the single total mapping between the two, because this crate cannot see a
+/// section's coordinate system and must not learn one. A declaration states
+/// which face draws what, and nothing infers it from a block's name or shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Face {
+    Up,
+    Down,
+    North,
+    South,
+    East,
+    West,
+}
+
+impl Face {
+    /// Every face, in the order a refusal lists them and a declaration is read
+    /// in.
+    ///
+    /// The order is fixed because a refusal quotes it back and a save folds by
+    /// it: an order that could vary would make one refusal unquotable on a page
+    /// and the other a hash that moves for no reason.
+    pub const ALL: [Self; 6] = [
+        Self::Up,
+        Self::Down,
+        Self::North,
+        Self::South,
+        Self::East,
+        Self::West,
+    ];
+
+    /// The word a declaration spells this face with.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Up => "up",
+            Self::Down => "down",
+            Self::North => "north",
+            Self::South => "south",
+            Self::East => "east",
+            Self::West => "west",
+        }
+    }
+
+    /// The face `word` names, or nothing where it names none.
+    ///
+    /// **Exact, and never case-folded.** `Up` is not `up`: accepting it would
+    /// register a block whose `up` facing nobody declared, drawing whatever the
+    /// capitalised entry happened to be read as. Derived from
+    /// [`as_str`](Self::as_str) rather than written out again, so the two
+    /// spellings of one fact cannot drift.
+    #[must_use]
+    pub fn named(word: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|face| face.as_str() == word)
+    }
+}
+
+/// Which texture key each of a block's six faces draws from.
+///
+/// Six fields rather than an array, because [`at`](Self::at) is **total** — a
+/// face always has a key, there is no `None` to handle and no index to get
+/// wrong. [`stating`](Self::stating) takes the keys positionally in
+/// [`Face::ALL`] order rather than paired with their faces: a list of pairs
+/// could name one face twice and leave another unnamed, which would put the
+/// missing case back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FaceTextures {
+    up: TextureKey,
+    down: TextureKey,
+    north: TextureKey,
+    south: TextureKey,
+    east: TextureKey,
+    west: TextureKey,
+}
+
+impl FaceTextures {
+    /// One key on all six faces.
+    ///
+    /// What a declaration stating its texture as a single string means, and what
+    /// every block this repository ships states.
+    #[must_use]
+    pub fn uniform(key: TextureKey) -> Self {
+        Self {
+            up: key.clone(),
+            down: key.clone(),
+            north: key.clone(),
+            south: key.clone(),
+            east: key.clone(),
+            west: key,
+        }
+    }
+
+    /// A key per face, positionally in [`Face::ALL`] order.
+    #[must_use]
+    pub fn stating(keys: [TextureKey; 6]) -> Self {
+        let [up, down, north, south, east, west] = keys;
+        Self {
+            up,
+            down,
+            north,
+            south,
+            east,
+            west,
+        }
+    }
+
+    /// The key `face` draws from.
+    #[must_use]
+    pub fn at(&self, face: Face) -> &TextureKey {
+        match face {
+            Face::Up => &self.up,
+            Face::Down => &self.down,
+            Face::North => &self.north,
+            Face::South => &self.south,
+            Face::East => &self.east,
+            Face::West => &self.west,
+        }
+    }
+
+    /// Every distinct key these faces draw from.
+    ///
+    /// A set, because two faces of one block may legitimately share a key and
+    /// they then share its array-texture layer — a grass block naming `base:dirt`
+    /// above and below costs five layers and not six.
+    #[must_use]
+    pub fn keys(&self) -> BTreeSet<TextureKey> {
+        Face::ALL
+            .into_iter()
+            .map(|face| self.at(face).clone())
+            .collect()
+    }
+}
 
 /// A content set needs more array-texture layers than a session has left.
 ///
@@ -206,9 +350,9 @@ impl ContentSerial {
 pub struct ResolvedBlock {
     /// What the block is called.
     pub name: BlockName,
-    /// The key its faces are drawn from. **Never a file path**: what pixels a
-    /// key resolves to is the renderer's concern.
-    pub texture: TextureKey,
+    /// The key each of its faces is drawn from. **Never a file path**: what
+    /// pixels a key resolves to is the renderer's concern.
+    pub textures: FaceTextures,
     /// Whether it stops a player, which is also what the mesher culls faces by.
     pub is_solid: bool,
 }

@@ -4,8 +4,9 @@ Save a declaration while the game is running and it is in the world about a sixt
 a second later. No restart, no reloading a save, nothing to press.
 
 This page is the whole contract: what triggers a reload, what a reload reads, which
-edits you will see and which are accepted and invisible, what survives it, and every
-refusal you can meet with the words it prints.
+edits you will see — every declared field, as it turns out — and the one thing a
+reload cannot pick up, what survives it, and every refusal you can meet with the
+words it prints.
 
 ## The loop, start to finish
 
@@ -144,27 +145,49 @@ loads and does nothing.
 | `solid` | **yes** — the world is re-meshed and you can walk into, or through, what changed |
 | adding a declaration | **yes** — a new solid block sorting first arrives in your hand |
 | removing a declaration | only if the world holds none of that block; otherwise the candidate is refused |
-| `texture` | **accepted and invisible** — see below |
+| `texture`, as one string | **yes** — all six faces redraw from the new key |
+| `texture`, as a table of six facings | **yes**, and it spends a layer per distinct key |
+| one facing's key inside a table | **yes** — that face alone redraws, and the world is re-meshed for it |
 | `replaceable` | **yes**, in behaviour: whether a placement builds straight through it |
 | `breakable` | **yes**, in behaviour: whether it can be broken at all |
 | `breaks_into` | **yes**, in behaviour: what the cell holds afterwards |
 
-### Editing `texture` is accepted and does not change what you see
+### Editing `texture` changes what you see
 
-**A standing limitation, not a bug.** What layer of the array texture a block draws
-from is selected by the block's **name** today, not by its declared `texture` key.
-So an edit to `texture` is read, validated and taken up, and the block goes on
-drawing what it drew before.
+Save a new key against a facing and that face redraws. It holds for both forms of
+the field: a single key repoints all six faces, and a table naming a key against
+each of the six facings — see
+[A texture per face](blocks-items.md#a-texture-per-face) — repoints exactly the ones
+you changed.
 
-What the field does do is take up an array-texture layer — see the budget below — so
-declaring a texture key nothing else declares is not free even though it is not
-visible.
+**Re-pointing one facing is noticed.** The comparison that decides whether a reload
+changes what is drawn reads all six keys, so editing `north` alone marks the world
+for a re-mesh rather than passing as no change at all. The whole world is re-meshed
+and re-drawn, and the face you changed comes back different.
 
-**Declare `texture` equal to `name`.** Every shipped declaration does. A declaration
-whose `texture` differs from its `name` loads, is accepted, and then cannot be
-packed: the affected re-mesh batch fails, the failure is logged, and the picture you
-are looking at simply stops being updated for those sections. That is a confusing
-half-state to debug and it is entirely avoidable.
+What the edit costs is an array-texture layer — see the budget below — so naming a
+key nothing else declares is not free. Two facings naming one key share one layer.
+
+**What the facing comes back as is decided per key, not for the reload as a whole.**
+Re-point a facing at a key your content root's built texture set covers and it comes
+back drawing that key's image; re-point it at a key nothing has baked and it comes
+back drawing a generated stand-in derived from the key's own spelling. Both answers
+are ordinary and they can sit on two facings of one block — see
+[Texture keys today](blocks-items.md#texture-keys-today).
+
+**A reload draws from the art the launch read, and never bakes or re-reads any.**
+The built set is handed to the renderer once, when the client starts, so the
+pictures a reload can choose among are exactly the ones that were on disk then. Two
+consequences, and the first is the one worth relying on: a facing already drawing
+its baked image goes on drawing it across every reload, rather than falling back to
+a stand-in. The second is the cost: run `voxforge build` while the client is up and
+the new image is not picked up until you restart, so the facing keeps its stand-in
+even though the file is there.
+
+**A key the session cannot give a layer to refuses the whole reload**, and nothing
+on screen moves — the sections you are looking at go on drawing exactly what they
+drew. That is the budget refusal below, reached by re-pointing one facing rather
+than by adding a block.
 
 ### `breaks_into` naming nothing is accepted, and fails when you break it
 
@@ -191,6 +214,12 @@ with somebody else's texture.
 So the budget is spent by the number of **distinct texture keys the session has ever
 seen**, not by the number live at once. Rename a key back and forth twenty times and
 you have spent twenty layers.
+
+**Distinct keys, not faces.** A block declaring six facings spends one layer per
+distinct key among them, so a grass block naming one key above and below and one
+across its four sides costs five and not six. There is no per-block allowance: six
+facing keys come out of the same 256 a single key comes out of, and the last layer
+a session has is the last layer whichever kind of declaration wanted it.
 
 You are very unlikely to meet this by authoring. You can meet it by scripting an
 edit loop that renames a key.
@@ -404,9 +433,10 @@ From the checkout root, with a client already running.
 ```lua
 -- A new solid block, added while the game is running.
 --
--- `texture` is declared equal to `name` because the layer a block draws from is
--- selected by its name today. Declaring anything else here loads and then will
--- not pack.
+-- `texture` happens to equal `name` here; it need not. The key a face draws comes
+-- out of the declaration, so any key you name here is the key this block draws --
+-- and a key nothing has baked art for draws a generated stand-in rather than
+-- refusing. See "Which edits you will see" above.
 return {
 	name = "example:amber",
 	texture = "example:amber",

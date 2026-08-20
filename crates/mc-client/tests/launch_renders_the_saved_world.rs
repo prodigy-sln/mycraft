@@ -266,7 +266,7 @@ fn quads_in(launched: &Launched, origin: [i32; 3]) -> Result<Option<u32>, String
 /// that same launch retained — or the refusal it gave instead.
 fn repacked_compared(launched: &Launched) -> Result<String, String> {
     let prepared = prepared(launched)?;
-    let repacked = scene_of(&prepared.meshed, &prepared.layers)
+    let repacked = scene_of(&prepared.meshed, &prepared.resolution)
         .map_err(|refusal: PreparationError| refusal.to_string())?;
     Ok(how_it_compares(&repacked, &prepared.scene))
 }

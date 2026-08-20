@@ -64,6 +64,12 @@ const COMPOSITION_ROOT: &str = "mc-client";
 /// The GPU API the pure layer must be able to build without.
 const GPU_API: &str = "wgpu";
 
+/// The executor the GPU layer blocks a validation error scope on.
+///
+/// Featureless, so nothing about the crate itself keeps it out of the pure
+/// half — only where it is declared does.
+const BLOCKING_EXECUTOR: &str = "pollster";
+
 /// A dependency this crate genuinely has in *both* configurations — it is where
 /// `Quad` comes from, and geometry building is the pure layer's whole job. It is
 /// asserted present so that a walk which resolved nothing cannot satisfy the
@@ -232,6 +238,56 @@ fn the_renderer_resolves_the_gpu_api_with_its_default_features() -> TestResult {
         closure.iter().any(|name| name == GPU_API),
         "the default feature selection is the one that draws, so it must resolve `{GPU_API}`; \
          if it no longer does, the seam is measuring two identical configurations: {}",
+        own_crates_of(&closure)
+    );
+    Ok(())
+}
+
+/// The executor the GPU layer blocks an error scope on stays inside the GPU
+/// layer.
+///
+/// **`pollster` is featureless, so nothing about it stops it being pulled into
+/// the pure half by an entry outside the `gpu` feature** — and a `pollster`
+/// there would be a dependency the layer that never touches a device has no use
+/// for. It is asserted through the same feature-scoped walk the GPU API is,
+/// because the failure it guards against is the same one: an optional dependency
+/// declared unconditionally looks exactly like one declared correctly until
+/// somebody resolves the graph without the feature.
+///
+/// The gate's GPU-free stage is what would catch this eventually, by failing to
+/// build. This says which dependency it was.
+#[test]
+fn the_renderer_resolves_no_blocking_executor_without_its_default_features() -> TestResult {
+    let closure = feature_scoped_closure(Features::NoDefault)?;
+
+    assert!(
+        closure.iter().any(|name| name == KNOWN_DEPENDENCY),
+        "the walk resolved nothing recognisable — it never reached `{KNOWN_DEPENDENCY}` — \
+         so the check below would pass by finding nothing: {closure:?}"
+    );
+    assert!(
+        !closure.iter().any(|name| name == BLOCKING_EXECUTOR),
+        "the pure layer blocks on nothing and acquires no device, so `{BLOCKING_EXECUTOR}` has \
+         no business in its graph: {}",
+        own_crates_of(&closure)
+    );
+    Ok(())
+}
+
+/// The control for the assertion above.
+///
+/// Without it, an executor that stopped being a dependency at all — or a walk
+/// that stopped naming it — leaves the absence trivially true forever, and the
+/// day somebody puts it back outside the feature nothing reports it.
+#[test]
+fn the_renderer_resolves_the_blocking_executor_with_its_default_features() -> TestResult {
+    let closure = feature_scoped_closure(Features::Default)?;
+
+    assert!(
+        closure.iter().any(|name| name == BLOCKING_EXECUTOR),
+        "the GPU layer blocks on an already-ready validation error scope, so the default \
+         selection has to resolve `{BLOCKING_EXECUTOR}`; if it no longer does, the absence \
+         above is measuring two identical configurations: {}",
         own_crates_of(&closure)
     );
     Ok(())

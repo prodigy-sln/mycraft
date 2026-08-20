@@ -1,4 +1,18 @@
-"""Generate the stone block's noise fields, and prove they carry no grain."""
+"""Generate the stone block's noise fields, and prove they carry no grain.
+
+Provenance, not a build step. This script ran once and produced the stone model
+the repository tracks. That model is the source of truth for the art: nothing in
+the build, the gate or the client runs this script, a contributor never needs to,
+and re-running it is not a thing anybody should do.
+
+It is not maintained, and it does not run correctly as it stands: the two `open`
+calls below write `content/base/models/stone.mcvox`, while the model the
+repository actually tracks is `stone-block.mcvox`. That is left unrepaired
+deliberately. Repairing it would invite the belief this note exists to remove —
+that the script is a way to regenerate the model. It is a record of how the model
+was made, and the salt below was chosen by a search, so a later edit could change
+what it produces without touching a grid.
+"""
 
 import random
 

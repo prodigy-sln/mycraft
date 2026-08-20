@@ -67,7 +67,7 @@ Three are required and three are optional.
 | Field | Type | Required | Absent means | Bound |
 |---|---|---|---|---|
 | `name` | string, namespaced id | yes | — | 256 characters |
-| `texture` | string, namespaced id | yes | — | 256 characters |
+| `texture` | string, namespaced id, **or** a table of six facings | yes | — | 256 characters per key |
 | `solid` | boolean | yes | — | — |
 | `replaceable` | boolean | no | `false` | — |
 | `breakable` | boolean | no | `true` | — |
@@ -76,7 +76,7 @@ Three are required and three are optional.
 ```luau
 return {
 	name = "example:amber",        -- namespaced, required
-	texture = "example:amber",     -- namespaced key, required, never a path
+	texture = "example:amber",     -- one key for all six faces, or a table of six
 	solid = true,                  -- required boolean
 
 	replaceable = false,           -- optional, absent means false
@@ -87,10 +87,10 @@ return {
 
 - **`name`** — the block's namespaced id. This is what the block is called
   everywhere: in other declarations, in save data, and in refusals.
-- **`texture`** — a namespaced **key**, never a file path. What pixels a key
-  resolves to is the renderer's concern, not a declaration's. **Read
-  "Texture keys today", below, before you give a block a texture key that is not
-  its own name.**
+- **`texture`** — a namespaced **key**, never a file path, either as one string
+  for all six faces or as a table naming a key against each facing. What pixels a
+  key resolves to is the renderer's concern, not a declaration's. It need not be
+  the block's own name — see "A texture per face" and "Texture keys today", below.
 - **`solid`** — does this block stop a player. See "Solidity is data", below.
 - **`replaceable`** — may a placement overwrite this block. Absent means **not
   replaceable**, which is the conservative reading: forgetting the key loses you
@@ -143,28 +143,233 @@ would be a compatibility promise made blind. The direction is strict-now,
 permissive-later: a stricter rule can be relaxed without invalidating content
 already written against it, and the reverse breaks everything.
 
+## A texture per face
+
+`texture` takes one of two forms and there is no third.
+
+**One string** means all six faces draw that key. Every block the base game ships
+states its texture this way, and it is what you want for a block that looks the
+same all over:
+
+```luau
+texture = "example:amber",
+```
+
+**A table** names a key against each of the six facings, and it must state
+**exactly** those six — no more, no fewer:
+
+```luau
+texture = {
+	up = "example:grass_top",
+	down = "example:dirt",
+	north = "example:grass_side",
+	south = "example:grass_side",
+	east = "example:grass_side",
+	west = "example:grass_side",
+},
+```
+
+### The six words, and which way each of them points
+
+The words are the declaration's, the axes are the world's, and this table is the
+whole of the contract between them. Nothing is inferred from a block's name, its
+shape or its position.
+
+| Word | Axis | Which face |
+|---|---|---|
+| `up` | +Y | the top |
+| `down` | −Y | the bottom |
+| `north` | −Z | towards decreasing Z |
+| `south` | +Z | towards increasing Z |
+| `east` | +X | towards increasing X |
+| `west` | −X | towards decreasing X |
+
+The words are matched **exactly**. `Up` is not `up`, and `top` is not a facing at
+all — both are refused rather than guessed at, because a table whose word was
+quietly repaired would leave a face drawing a key you did not write.
+
+### Naming one key twice is ordinary, and it is cheaper
+
+A facing key is a key like any other, so two facings of one block may name the
+same one and they then **share its array-texture layer**. The grass declaration
+above states six facings and five distinct keys, and it spends five layers out of
+[the session's budget](hot-reload.md#the-array-texture-layer-budget), not six.
+
+There is no per-block allowance and no second pool: six facing keys come out of
+the same 256 layers a single key comes out of, and a content root that would push
+the session past the bound is refused whole, with every layer already assigned
+still holding the key it held.
+
+### A complete grass block
+
+`content/example/blocks/grass.luau`, written out in full and ready to run:
+
+```luau
+-- Grass: turf on top, bare dirt underneath, and the same turf-over-dirt band on
+-- all four sides. Five distinct keys across six faces.
+return {
+	name = "example:grass",
+	texture = {
+		up = "example:grass_top",
+		down = "example:dirt",
+		north = "example:grass_side",
+		south = "example:grass_side",
+		east = "example:grass_side",
+		west = "example:grass_side",
+	},
+	solid = true,
+	breaks_into = "example:dirt",
+}
+```
+
+It registers, it spends five layers, and it draws: put one in the world and its
+top, its bottom and its four sides each draw the key written against them. See
+"Texture keys today", immediately below, for what those keys resolve to.
+
+### Every refusal a texture table raises
+
+Seven, and you can trip all of them on your first table. Each is quoted from a
+real run.
+
+**A table that leaves facings out names the ones you left out**, because that is
+the edit you have to make:
+
+```
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `texture`: `texture` states no key for `south`, `east`, `west`; a texture table states all six of `up`, `down`, `north`, `south`, `east`, `west`
+```
+
+An empty table is the same refusal over all six:
+
+```
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `texture`: `texture` states no key for `up`, `down`, `north`, `south`, `east`, `west`; a texture table states all six of `up`, `down`, `north`, `south`, `east`, `west`
+```
+
+**A table carrying a name that is not a facing names the six you may write**,
+because a word is only recognisable as a near miss once you can see what it was
+nearly:
+
+```
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `texture`: `top` is not a facing a texture table may state; a texture table may state `up`, `down`, `north`, `south`, `east`, `west`
+```
+
+A capitalised facing is that same mistake, and is refused the same way — the
+words are not case-folded:
+
+```
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `texture`: `Up` is not a facing a texture table may state; a texture table may state `up`, `down`, `north`, `south`, `east`, `west`
+```
+
+**A facing holding something that is not a string** is refused naming that
+facing. The value is never rendered into the message: rendering it would run your
+own `__tostring` at the moment the engine is reporting your mistake.
+
+```
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `up`: `up` must be a string, but is a number
+```
+
+**A facing key that breaks the namespaced id rule** is refused by that rule, in
+the same sentence you would get anywhere else an id is stated:
+
+```
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `north`: `base:grass:top` has more than one namespace separator — a namespaced id is written `namespace:path`
+```
+
+**A `texture` that is neither form** is refused naming both of them:
+
+```
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `texture`: `texture` must be a string or a table of six facings, but is a boolean
+```
+
+Two things these have in common with every other refusal on this page. A root is
+refused **whole**, so a declaration with two mistakes in it is refused for
+whichever the loader reaches first — fix that one and run again to see the next.
+And a table's own metatable decides nothing: an `__index` supplying a facing you
+did not write, or an `__iter` hiding a name you did, changes neither what the
+loader sees nor what it refuses.
+
 ## Texture keys today
 
-**A block's texture is selected by its `name`, not by its `texture` key.** The
-two fields are genuinely independent at the loader — a declaration may state
-different values and will register — but the renderer looks a block up by its
-name when it decides which image to draw.
+**A face draws the key its block declared against that facing, and never the key
+its block's name spells.** Give a block a `texture` that is not its `name` and it
+draws that texture; give it a table and each of its six faces draws its own. The
+name is what the block is *called* and the key is what it is *drawn from*, and
+nothing in the engine confuses the two.
 
-What follows for you, plainly:
+**What a key resolves to in pixels depends on whether you have baked art for
+it**, and both answers are ordinary:
 
-- **A declaration whose `texture` differs from its `name` will load and then not
-  draw.** The block registers, the world accepts it, and the face simply does not
-  appear; its held-block indicator draws nothing either. There is no error on
-  your terminal, because a batch that could not be drawn is logged and dropped
-  rather than failing the run.
-- **So declare the two equal for now.** Every block the base game ships does.
-- Independent texture keys are coming, along with per-face keys — a distinct
-  top, side and bottom for a block like grass. Until they land, `texture` is a
-  field you state and the engine reads through your block's name.
+- **A key your content root's built texture set covers** draws that key's image.
+  You bake one by writing a voxel model, naming it in `textures.toml` against the
+  key and a face of it, and running `voxforge build` —
+  [`voxel-models.md`](voxel-models.md) is the whole of how, end to end.
+- **A key nothing has baked** draws a **generated stand-in**: a two-colour
+  pattern derived from the key's own spelling, deterministic and deliberately
+  implausible. This is what your first block draws, it is never a refusal, and
+  the client says so on startup so it does not read as something you did wrong.
 
-This is written down rather than left silent because nothing mechanical will tell
-you: the loader is perfectly happy, and the only symptom is a block you cannot
-see.
+The fallback is **per key**, not per set. One key baked and one not, in the same
+content root, gives you one block drawing its art and its neighbour drawing a
+stand-in — so you can add a model at a time.
+
+Two things follow that are worth knowing before you name anything:
+
+- **Two facings naming one key draw the same picture**, because they are one
+  layer. That is true of art and of stand-ins alike.
+- **Renaming a key you have not baked art for changes its colour**, because the
+  stand-in comes from the spelling. Renaming one you *have* baked art for makes
+  the set stale until you rebuild, and the client says so by name rather than
+  drawing the old picture.
+
+The base game's grass block is the worked example, and it is
+`content/base/blocks/grass.luau` exactly as shipped:
+
+```luau
+return {
+	name = "base:grass",
+	texture = {
+		up = "base:grass_top",
+		down = "base:dirt",
+		north = "base:grass_side_north",
+		south = "base:grass_side_south",
+		east = "base:grass_side_east",
+		west = "base:grass_side_west",
+	},
+	solid = true,
+}
+```
+
+Six facings and six distinct keys, because the model it is baked from is not
+symmetrical and `content/base/textures.toml` bakes each of its four sides
+separately. `down` names `base:dirt` — the block's underside *is* plain dirt, so
+it shares the dirt block's image rather than having one of its own, and no dirt
+model exists. That sharing costs a layer less than a seventh key would and is the
+same mechanism "Naming one key twice is ordinary" describes, used for a reason
+rather than for thrift.
+
+### What happens when a key has no layer
+
+A key the session could not assign a layer to — because the content root asked for
+more than [the budget](hot-reload.md#the-array-texture-layer-budget) has left — is
+**refused**, loudly, naming the block and the facing:
+
+> the block `example:banded` draws nothing on its `north` face: the key
+> `example:unlit` it declares there occupies no array layer
+
+That refusal fails the whole section rather than drawing something else. Resolving
+it to a fallback layer would draw whichever block owns that layer, which looks
+entirely deliberate and is wrong. **A refusal on one facing is about that facing**
+— the same block's other five keys still draw.
+
+The held-block indicator says the same thing, once per run rather than once per
+frame, and it names the facing it looked at — which is `north`:
+
+> the held block `example:banded` draws no indicator: the key `example:unlit` it
+> declares against `north` occupies no layer of the array texture
+
+**The indicator looks at `north` and only at `north`**, on every block. A side
+face is what makes a block recognisable in the hand — a grass block's side carries
+both the turf and the earth, where its top is a green square that means "grass"
+only to somebody who already knows.
 
 ## All-or-nothing loading
 
@@ -217,6 +422,7 @@ limit and refuses the value above it.
 | Bytes per declaration file | 256 KiB | the file, its size and the bound |
 | Characters per declared value | 256 | the field, the length and the bound |
 | Fields per declaration | 64 | the file and the bound |
+| Names in a texture table | 64 | the file and the bound |
 
 Two things worth knowing about how they are checked:
 
@@ -227,7 +433,14 @@ Two things worth knowing about how they are checked:
 
 Characters, not bytes: a 256-character id is accepted however many bytes it
 takes to spell, so non-ASCII ids refuse at the length this page states rather
-than at some shorter one.
+than at some shorter one. Each of a texture table's six keys is bounded on its
+own by the same 256, and the refusal names the **facing** it was written against.
+
+The last bound is a texture table's, and it is the same 64 a declaration's own
+fields get, for the same reason: it bounds what the engine copies out of your
+chunk. You will never meet it by writing six facings — it is there so that a
+table with a thousand names in it is refused before it is read, rather than
+after.
 
 A declared value one character too long is refused like this — here a `texture`
 key of 257 characters:
@@ -332,7 +545,7 @@ and that this is fine: a residue is resolved when a break happens.
 | File | `name` | `texture` | `solid` | `replaceable` | `breakable` | `breaks_into` |
 |------|--------|-----------|---------|---------------|-------------|---------------|
 | `dirt.luau` | `base:dirt` | `base:dirt` | `true` | *(absent)* | *(absent)* | *(absent)* |
-| `grass.luau` | `base:grass` | `base:grass` | `true` | *(absent)* | *(absent)* | *(absent)* |
+| `grass.luau` | `base:grass` | *(a table of six)* | `true` | *(absent)* | *(absent)* | *(absent)* |
 | `stone.luau` | `base:stone` | `base:stone` | `true` | *(absent)* | *(absent)* | *(absent)* |
 | `water.luau` | `base:water` | `base:water` | `false` | `true` | *(absent)* | *(absent)* |
 
@@ -341,10 +554,16 @@ is what a new player holds.
 
 `base:water` is the only base block declaring `replaceable = true`, which is what
 makes water placeable at all. No base block declares itself unbreakable or names
-a residue: breaking any of the four leaves the cell empty. And every one declares
-`texture` equal to `name`, for the reason under "Texture keys today".
+a residue: breaking any of the four leaves the cell empty.
 
-Every block has exactly one texture key today — there is no per-face texture yet.
+`base:grass` is the only one stating a table, and it is the block the table form
+exists for: six facings and six keys, five of them its own and one shared with
+`base:dirt`. The other three state one string, so all six faces of each hold the
+same key — the right shape for a block that looks the same all over.
+
+**`texture` equal to `name` is a convention of three shipped files and never a
+rule.** `base:grass` breaks it and nothing minds: a name is what a block is
+called and a key is what it is drawn from.
 
 ## What is not here yet
 
@@ -354,5 +573,5 @@ fields and inherits nothing.
 
 **Declarations now reload while the game is running.** Save a file in `blocks/` and
 the whole root is read again and taken up at the next tick boundary, or refused
-whole. Which edits are visible, which are accepted and invisible, what survives the
-swap and every refusal you can meet are on `hot-reload.md`.
+whole. Which edits are visible, the one thing a reload cannot pick up, what survives
+the swap and every refusal you can meet are on `hot-reload.md`.

@@ -158,6 +158,34 @@ is a boundary nobody will respect, and the usual next move — shaving a file he
 buy four lines — deletes the reason the file exists in order to satisfy a limit that
 was never about the header.
 
+### A split becomes `foo/mod.rs`, and that is not up for decision at the moment of a split
+
+Rust offers two layouts for the same module tree — `foo/mod.rs`, or `foo.rs` beside a
+`foo/` directory — and **this repository uses the first one everywhere it has a
+choice.** Measure it rather than taking it on trust:
+
+```bash
+find crates tools -name mod.rs | wc -l                      # 48 at the time of writing, 33 under a src/
+for d in $(find crates tools -type d -not -path '*/target/*'); do \
+  b=$(basename "$d"); p=$(dirname "$d"); \
+  [ -f "$p/$b.rs" ] && echo "$p/$b.rs + $d/"; done            # the sibling pairs
+```
+
+The second command reports exactly two, and **neither is a choice**:
+`crates/mc-render/build.rs`, where Cargo requires a build script to sit, and
+`crates/mc-client/tests/support/reload_watch.rs`, which is test support. There are
+none at all in a production `src/`.
+
+**Why this is written down rather than left to taste.** A split done to get under a
+line cap once landed as `luau_declaration.rs` + `luau_declaration/`, which was one
+style deviation in a tree that otherwise agrees with itself, and it was ruled back.
+The reasoning generalises: **both layouts give the identical module tree, so the
+load-bearing part of the split argues for neither** — which leaves consistency as the
+only live consideration, and consistency is not something a file wins by being the
+newest. Moving this repository to the sibling form is a call somebody takes
+deliberately, on its own, and never one made in passing while getting a file under a
+limit.
+
 ## A `pub` item on a `pub` type is invisible to dead-code lints
 
 **At a crate's public boundary, "does anything actually call this?" is a question only
@@ -220,3 +248,123 @@ the link is wrong rather than that the scope is somewhere else.
 unrelated reason. The instinct to write ``[`LocalItem`]`` in a module header is stronger
 than the memory of why it does not work there — which is the argument for this page
 existing rather than for anybody remembering.
+
+## A markdown-only change is not gate-neutral
+
+The natural assumption is that a commit touching nothing but `.md` cannot fail the gate,
+and it is *nearly* true, which is what makes it worth writing down. Every stage that
+parses Rust ignores markdown, and the size stage measures `*.rs` only
+(`sdd-gate.ps1`, `$SizeRoots` walk). **The secrets stage does not.** It runs
+`gitleaks dir .`, and `dir` scans the **working tree** — every file in it, whatever the
+extension, tracked or not.
+
+So a documentation change can fail the gate, and the realistic way is not a real
+credential. It is a **long high-entropy literal**: a sha256 digest recorded as evidence,
+a base64 fixture, an example token in a modding page. A 64-character hex string is the
+shape an entropy rule is built to notice, and whether a given one trips depends on the
+rule set rather than on the author's intent.
+
+Two consequences:
+
+- **Run the gate for a docs-only change too**, or at minimum
+  `gitleaks dir <path> --no-banner --redact --exit-code 1` over what you touched. The
+  surprising case is exactly the one where somebody skips the gate believing markdown
+  cannot fail it.
+- **gitleaks is optional in the gate**, so a missing binary is a warning rather than a
+  failure (`Test-ToolPresent 'gitleaks' … -Optional`). A docs-only change can therefore
+  pass on a machine without it and fail on one with it — the two readings are not the
+  same statement, which is the point [the section on a gate reading being about a tree
+  rather than a commit](#a-gate-reading-is-a-statement-about-a-tree-not-about-a-commit)
+  makes from the other side.
+
+## Lifting a limitation costs one grep per place it was stated
+
+A spec that *adds* a surface is documented by the obligation in `CLAUDE.md`'s Key
+Principle 3 — the author knows what they built and writes it down. A spec that
+**lifts a stated limitation** has no such prompt, and the work is the mirror image:
+the new surface documents itself, while every passage that recorded the old
+limitation goes silently false. Nobody is reading those passages, because the person
+who lifted the limitation was never in them.
+
+**So the closing step of such a spec is a grep for the limitation's own words**, not
+a re-read of the pages the spec touched. A limitation deliberately documented in
+several places — which is good practice, and the reason it was in several places — is
+one that costs several edits to lift.
+
+**The instance this comes from.** SPEC-019 lifted two stated limitations at once: that
+real art had not landed, and that a face's layer was selected by the block's *name*
+rather than by its declaration. Validation found **six findings over two passes, every
+one stale documentation and not one a code defect** — four in the first pass, two more
+in the second that the first had read past. Fixing those six by name and then grepping
+for the limitations' own words turned up **ten further stale passages neither pass had
+touched**, in a routing table, a first-block tutorial, a format-summary table, a
+directory `CLAUDE.md`, a planning document and four cross-reference sentences. The new
+surface had been documented correctly the whole time. Nobody asked *what did this
+change make untrue?*
+
+Two shapes are worth knowing because they are where the stale copies hide:
+
+- **An ADR whose Consequences name another document as their record.** ADR-024 said
+  the `texture` limitation "is stated in `modding/hot-reload.md` rather than papered
+  over" — so lifting it needed an edit *there* and an edit *in the ADR*, and the ADR
+  is precisely the file nobody re-reads. A pointer between two documents is a second
+  place the fact lives, not a way of having it in one place.
+- **A tutorial's worked example, and a routing table's summary of a page.** The
+  comment inside `modding/README.md`'s first block, and `docs/INDEX.md`'s one-line
+  digest of `hot-reload.md`, both restated the limitation in their own words. Neither
+  contains the phrase the as-built pages use, and `INDEX.md`'s rows are long enough
+  that a stale clause reads as prose rather than as a claim.
+
+The general falsifiability form of this — that a green suite is no evidence about a
+document — is in `technical/testing.md`. This section is about the habit that catches
+it: **when a spec removes a "today" or a "not yet", grep for the words it just made
+false before calling the spec done.**
+
+## A living page carries the command; a dated observation carries the number
+
+The same drift arrives a second way, and it is quieter because nothing was ever
+false when it was written.
+
+> **The durable form of a measurement is the command that reproduces it, not the
+> number it produced.**
+
+A recorded number has to be maintained, and **a number nobody maintains becomes a
+confident lie** — it goes on reading as a measurement long after it stopped being
+one. One spec met this at four levels inside a single day: a scenario count restated
+in prose and wrong twice over, a routing-table summary naming a count the page it
+described owned, an arithmetic total, and the digest table the rule was drawn from.
+None of the four was a careless entry. Each was correct when it was typed.
+
+**So the two kinds of document take numbers differently, and the difference is the
+rule:**
+
+- **`docs/` is maintained, so it carries the means of reproducing a figure** — the
+  command, the derivation, the file the number can be read out of. Where a figure
+  itself is load-bearing enough to state, state the command beside it, so the next
+  reader can find out in a minute whether it still holds. Several sections on this
+  page do exactly that.
+- **A spec folder is archived and pruned, so it is a *dated observation* and may
+  carry bare numbers freely.** Nobody is obliged to keep it current; that is what
+  makes its numbers honest.
+
+Applied concretely: the twelve sha256 digests taken while establishing that the
+shipped art reproduces from the checked-in voxel models **stayed in the spec folder
+and were deliberately not moved into `docs/`.** Their permanent successor is a claim
+a reader can re-run instead of compare against — the build's byte-identical rebuild
+plus the index fold (`modding/voxel-models.md`). A digest table in a maintained page
+is a second copy needing an update on every art change, and **the copy that stops
+being updated is the one a reader trusts.**
+
+**The one legitimate exception is a document that cannot change.**
+`technical/licensing.md` records hashes and byte counts for `LICENSE-MIT` and
+`LICENSE-APACHE` precisely because those texts are fixed upstream: there is no
+future edit for the figure to fall behind. That is the test to apply — not "is this
+number interesting" but **"what would change it, and would that change also update
+this line?"**
+
+One corollary that has cost an edit here: **a routing summary describes what a page
+answers, never how many answers it has.** A count in `INDEX.md` is a second copy of
+something the page itself owns, and it is fixed by deleting the number rather than by
+correcting it. The related trap on the other side — that an instruction to update a
+figure is itself a claim, measured before it is obeyed — is in `technical/testing.md`
+with the instance behind it.

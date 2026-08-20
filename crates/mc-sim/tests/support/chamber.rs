@@ -40,6 +40,7 @@ use std::sync::Arc;
 
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::player::{BlockPos, Solidity};
 use mc_sim::simulation::PublishedContent;
@@ -323,7 +324,7 @@ fn declaring(
     for block in batch {
         declared.push(Ok(BlockDefinition {
             name: BlockName::parse(block.name)?,
-            texture: TextureKey::parse(block.name)?,
+            textures: FaceTextures::uniform(TextureKey::parse(block.name)?),
             is_solid: block.is_solid,
             replaceable: block.replaceable,
             breakable: block.breakable,

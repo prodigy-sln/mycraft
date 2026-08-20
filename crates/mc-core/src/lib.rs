@@ -5,7 +5,9 @@
 //! a registry owned by the world crate would drag chunk storage and worldgen into
 //! the scripting host's graph.
 
+pub mod art;
 pub mod block;
 pub mod content;
+pub mod hash;
 pub mod hud;
 pub mod id;

@@ -26,12 +26,27 @@
 //! two questions that can be answered without one: which layer a key occupies,
 //! and whether every key a snapshot's blocks reference occupies one at all.
 
+pub mod mip;
 pub mod placeholder;
+pub mod resolution;
+pub mod sampler;
+pub mod supplied;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use mc_core::content::TEXTURE_EDGE;
 use mc_core::id::TextureKey;
 use thiserror::Error;
+
+pub use resolution::TextureResolution;
+
+/// How many mip levels the array texture declares, derived from the texture
+/// edge and never written as a literal.
+///
+/// A size and a level count that can disagree is a copy that overruns: halving
+/// a 16 x 16 image reaches 1 x 1 in four steps, so five levels exist, and the
+/// only place that fact is written down is the edge itself.
+pub const MIP_LEVELS: u32 = TEXTURE_EDGE.ilog2() + 1;
 
 /// The layer each texture key occupies in the array texture.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -121,6 +136,34 @@ impl TextureLayers {
 pub enum LayerError {
     #[error("the texture key `{key}` has no array layer", key = key.as_str())]
     UnresolvedKey { key: TextureKey },
+}
+
+/// Why a layer's texels cannot be prepared for upload.
+///
+/// Both arms carry `offered` — what the layer has — and `declared` — what the
+/// array texture wants — so one reading of the pair works for either. They are
+/// different questions that happen to share a shape: how many *levels* the
+/// texture declares, and how many *texels* one level holds.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum TextureError {
+    #[error(
+        "the texture key `{key}` offers {offered} mip levels, and the array texture declares {declared}",
+        key = key.as_str()
+    )]
+    TooFewLevels {
+        key: TextureKey,
+        offered: usize,
+        declared: usize,
+    },
+    #[error(
+        "the texture key `{key}` offers {offered} texels, and a layer holds {declared}",
+        key = key.as_str()
+    )]
+    WrongTexelCount {
+        key: TextureKey,
+        offered: usize,
+        declared: usize,
+    },
 }
 
 #[cfg(test)]

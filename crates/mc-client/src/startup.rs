@@ -18,10 +18,12 @@ use std::sync::Arc;
 use mc_core::block::{BlockRegistry, RegistryError};
 use mc_core::content::{LayerAssignment, LayerBudget};
 use mc_core::hud::{HudLayout, HudLoadError};
+use mc_core::id::TextureKey;
 use mc_render::geometry::scene::{SceneError, SceneGeometry};
 use mc_render::geometry::{GeometryError, SectionOrigin, build_section_geometry};
 use mc_render::gpu::RendererError;
-use mc_render::texture::TextureLayers;
+use mc_render::texture::TextureResolution;
+use mc_render::texture::supplied::SuppliedTexels;
 use mc_sim::content::{ContentError, LoadedContent};
 use mc_sim::persistence::LaunchError;
 use mc_sim::replay::{PrepareError, ReplayWorld, SectionQuads, WorldGenError, mesh_all};
@@ -29,6 +31,7 @@ use mc_world::persistence::{Acceptance, LoadError};
 use thiserror::Error;
 
 use crate::content::ContentView;
+use crate::textures::{TextureSetError, built_set, refusal_for};
 
 /// What a player types to load a save whose blocks are no longer what they were.
 ///
@@ -38,13 +41,23 @@ use crate::content::ContentView;
 /// and is not one.
 const LOAD_CHANGED_BLOCKS: &str = "--load-changed-blocks";
 
-/// What one preparation of the replay produces: the packed scene, the texture
-/// layers its blocks resolved to, and the world and registry both were built
+/// What a contributor runs to produce the texture set a launch reads.
+///
+/// **One spelling, named once**, for the reason `LOAD_CHANGED_BLOCKS` carries:
+/// a message quoting a command nothing accepts reads as a way out and is not
+/// one. `README.md` and `docs/modding/voxel-models.md` quote this same string,
+/// and `pub` is what lets a test compare the four rather than compare the
+/// constant with a copy of itself.
+pub const BUILD_THE_TEXTURE_SET: &str = "cargo run -p voxforge -- build content/base/textures.toml";
+
+/// What one preparation of the replay produces: the packed scene, the resolution
+/// its blocks were packed against, and the world and registry both were built
 /// from.
 ///
-/// The layers are carried alongside rather than discarded because a scene records
-/// which array *layer* each corner draws from and never which key that layer came
-/// from, so uploading the array texture needs both halves.
+/// The resolution is carried alongside rather than discarded because a scene
+/// records which array *layer* each corner draws from and never which key that
+/// layer came from, so uploading the array texture needs both halves — and a
+/// section re-packed later needs the declarations as well.
 ///
 /// The world and the registry are carried for a different reason: the player's
 /// spawn is derived from the world, so the simulation cannot exist until this
@@ -70,11 +83,20 @@ const LOAD_CHANGED_BLOCKS: &str = "--load-changed-blocks";
 #[derive(Debug)]
 pub struct PreparedScene {
     pub scene: SceneGeometry,
-    pub layers: TextureLayers,
+    pub resolution: TextureResolution,
     pub meshed: Vec<SectionQuads>,
     pub world: ReplayWorld,
     pub registry: Arc<BlockRegistry>,
     pub hud: Arc<HudLayout>,
+    /// The level-zero texels the content root's built art offers, one entry per
+    /// key it covers.
+    ///
+    /// Carried for the same reason the resolution is: a scene records which
+    /// array *layer* each corner draws from and never what fills that layer, so
+    /// whoever gives the array texture to a device needs both halves. A key the
+    /// set covers nothing for is filled from the texture generated for it, which
+    /// is a mod author's first block and never a refusal.
+    pub texels: SuppliedTexels,
 }
 
 /// Why a preparation — of the generated scene here, or of a launch in
@@ -161,6 +183,50 @@ pub enum PreparationError {
     /// total over what the one content door can refuse.
     #[error(transparent)]
     Layers(#[from] LayerBudget),
+    /// The content root states art and nothing has been built from it.
+    ///
+    /// **This and [`TextureSetImageMissing`](Self::TextureSetImageMissing) must
+    /// never come to be said the same way.** *The build step was not run* is a
+    /// refusal one command clears: nothing about the content is wrong, its
+    /// derived half simply is not there. *This key was never authored* is the
+    /// ordinary state of a mod author's first block and costs them a generated
+    /// texture rather than a launch, so it is never a refusal at all. A client
+    /// that said one sentence for both would send whoever forgot to run the
+    /// build looking for a declaration they never wrote.
+    #[error("the generated texture set is not there; run `{BUILD_THE_TEXTURE_SET}`")]
+    TextureSetAbsent,
+    #[error(
+        "the generated texture set is stale against its sources; run `{BUILD_THE_TEXTURE_SET}`"
+    )]
+    TextureSetStale,
+    /// A source the set was built from is no longer where the index recorded it.
+    ///
+    /// **Its own variant rather than an `Option<PathBuf>` inside the one above**,
+    /// because a `thiserror` format string cannot render a field conditionally
+    /// and a message ending in `built from ``None``` is worse than two variants.
+    ///
+    /// The field is `missing` and not `source`: `thiserror` reads a field of that
+    /// name as the error's cause, and the variant does not compile with it.
+    #[error(
+        "the generated texture set was built from `{missing}`, which is no longer there; run \
+         `{BUILD_THE_TEXTURE_SET}`",
+        missing = missing.display()
+    )]
+    TextureSetSourceMissing { missing: PathBuf },
+    #[error(
+        "the generated texture set names the art for `{key}` as `{image}`, which is not there; run \
+         `{BUILD_THE_TEXTURE_SET}`",
+        key = key.as_str(),
+        image = image.display()
+    )]
+    TextureSetImageMissing { key: TextureKey, image: PathBuf },
+    /// The set could not be read at all, which is not one of its verdicts.
+    ///
+    /// Transparent for the reason [`Launch`](Self::Launch) is: the refusal
+    /// underneath names the file and the record at fault, and a sentence here
+    /// restating it would be a second place for the two to disagree.
+    #[error(transparent)]
+    TextureSetUnreadable(#[from] TextureSetError),
 }
 
 impl PreparationError {
@@ -285,6 +351,13 @@ fn refused_only_for_changed_blocks(failure: &LaunchError) -> bool {
 /// Returns [`PreparationError`] for any step that could not complete. A failed
 /// mesh fails the replay: half a world is not a picture anybody should be shown.
 pub fn prepare_scene(root: &Path) -> Result<PreparedScene, PreparationError> {
+    // First, and before a world is generated: a contributor who has not run the
+    // art build is told which command to run rather than waiting out a world
+    // they will not be shown.
+    let (verdict, texels) = built_set(root)?;
+    if let Some(refused) = refusal_for(&verdict) {
+        return Err(refused);
+    }
     // Asked of the simulation, which is what reads a content root. A fault here
     // fails the preparation rather than being noted and skipped: see
     // `PreparationError::Hud`.
@@ -298,15 +371,16 @@ pub fn prepare_scene(root: &Path) -> Result<PreparedScene, PreparationError> {
 
     let world = ReplayWorld::generate(mc_sim::REPLAY_SEED, &registry)?;
     let meshed = mesh_all(&world, &registry)?;
-    let layers = ContentView::of(&resolved).into_layers();
+    let resolution = ContentView::of(&resolved).into_resolution();
 
     Ok(PreparedScene {
-        scene: scene_of(&meshed, &layers)?,
-        layers,
+        scene: scene_of(&meshed, &resolution)?,
+        resolution,
         meshed,
         world,
         registry: Arc::new(registry),
         hud: Arc::new(hud),
+        texels,
     })
 }
 
@@ -321,7 +395,7 @@ pub fn prepare_scene(root: &Path) -> Result<PreparedScene, PreparationError> {
 /// It touches no device, opens no window and spawns no thread, so what a scene
 /// is made of can be asserted with none of the three present.
 ///
-/// **The layers are a parameter and are never re-resolved here**, and the reason
+/// **The resolution is a parameter and is never re-resolved here**, and the reason
 /// has changed even though the rule has not. The registry *does* change
 /// mid-session now — hot reload replaces it whole — but a layer already assigned
 /// keeps its index for the run, because that index rides inside every packed
@@ -336,12 +410,16 @@ pub fn prepare_scene(root: &Path) -> Result<PreparedScene, PreparationError> {
 /// [`PreparationError::Scene`] when the packed sections cannot be assembled.
 pub fn scene_of(
     meshed: &[SectionQuads],
-    layers: &TextureLayers,
+    resolution: &TextureResolution,
 ) -> Result<SceneGeometry, PreparationError> {
     let geometry = meshed
         .iter()
         .map(|section| {
-            build_section_geometry(&section.quads, SectionOrigin::new(section.origin), layers)
+            build_section_geometry(
+                &section.quads,
+                SectionOrigin::new(section.origin),
+                resolution,
+            )
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(SceneGeometry::assemble(geometry)?)

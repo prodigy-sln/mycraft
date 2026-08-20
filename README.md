@@ -33,10 +33,14 @@ far:
 Not yet: breaking or placing blocks, an inventory, persistence (quit and the world is gone), a HUD,
 audio, or anything past the current session.
 
-**The textures are placeholders and do not look like the blocks they are on** — stone and dirt draw
-teal, grass draws tan. That is deliberate: this increment asks textures to be deterministic and
-distinguishable, never plausible, and correcting a colour per block name would be block content
-hardcoded in Rust, which is the one thing the base game may not be. Real artwork ships as content.
+**The shipped blocks draw real art now.** Grass, dirt and stone are baked from voxel models under
+`content/base/models/` by `cargo run -p voxforge -- build content/base/textures.toml`, which every
+`scripts/sdd-gate.ps1` run performs and which a fresh checkout has to run once — the images are
+derived and are not committed. **A texture key nothing has baked still draws a generated stand-in**:
+deterministic, distinguishable, deliberately implausible, and never a refusal, because a mod
+author's first block declares a key nobody has drawn yet. Correcting a colour per block name would
+be block content hardcoded in Rust, which is the one thing the base game may not be — so the art is
+content, built from content, and the stand-in is what the engine has to say when there is none.
 
 Blocks are content, and as of MVP 2 they are **content written in Luau** — `content/base/blocks/*.luau`,
 each a chunk the sandboxed scripting host evaluates, loaded through a `DefinitionSource` port with no
@@ -52,11 +56,26 @@ Needs Rust 1.97 (edition 2024) and a GPU and driver that `wgpu` 30 can open (Vul
 Metal).
 
 ```bash
+cargo run -p voxforge -- build content/base/textures.toml
 cargo run -p mc-client
 ```
 
-Run it from the repository root: the client resolves its content at `content/base`, relative to the
-working directory. The dev profile builds dependencies at `opt-level = 3` and the workspace at `1`,
+**Two commands, and the first one is not optional.** The base game's block art is baked from the
+voxel models under `content/base/models/` and is deterministic, so it is generated rather than
+committed (ADR-026). `cargo build` alone therefore no longer produces a complete game, and the
+client says so rather than starting without it:
+
+```
+mycraft: the generated texture set is not there; run `cargo run -p voxforge -- build content/base/textures.toml`
+```
+
+You need it once, and again whenever a model, a material or the manifest changes — the client folds
+those sources at every launch and refuses a set that no longer matches them. `voxforge build` over
+unchanged sources opens no file and writes nothing, so putting it in front of every run costs
+nothing.
+
+Run both from the repository root: the client resolves its content at `content/base`, relative to
+the working directory. The dev profile builds dependencies at `opt-level = 3` and the workspace at `1`,
 so it is playable without `--release`; voxel meshing and worldgen are unusably slow at
 `opt-level = 0`, which is why the profile is set that way.
 

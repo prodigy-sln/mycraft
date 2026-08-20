@@ -40,7 +40,7 @@ use std::time::Instant;
 use mc_client::session::reload::ReloadReport;
 use mc_client::upload::Unuploaded;
 use mc_render::geometry::{GeometryError, SectionGeometry, SectionOrigin, build_section_geometry};
-use mc_render::texture::TextureLayers;
+use mc_render::texture::TextureResolution;
 use mc_world::mesh::Quad;
 
 use crate::input::InputHarness;
@@ -197,22 +197,22 @@ pub enum Packed {
 /// failure the appended-never-renumbered policy exists to close, and an assertion
 /// that asked the assignment would agree with it whatever the packer wrote.
 #[must_use]
-pub fn packed(meshed: &Meshed, block: &str, layers: &TextureLayers) -> Packed {
+pub fn packed(meshed: &Meshed, block: &str, resolution: &TextureResolution) -> Packed {
     match meshed {
-        Meshed::Sections(sections) => packing(sections, block, layers),
+        Meshed::Sections(sections) => packing(sections, block, resolution),
         other => Packed::NotMeshed(format!("{other:?}")),
     }
 }
 
 /// The same, over sections a scenario is already holding.
 #[must_use]
-fn packing(sections: &Sections, block: &str, layers: &TextureLayers) -> Packed {
+fn packing(sections: &Sections, block: &str, resolution: &TextureResolution) -> Packed {
     let mut written: BTreeMap<String, Vec<u16>> = BTreeMap::new();
     for section in sections.values() {
         let origin = SectionOrigin::new(section.origin);
-        match build_section_geometry(&section.quads, origin, layers) {
+        match build_section_geometry(&section.quads, origin, resolution) {
             Ok(geometry) => record_corners(&mut written, &section.quads, &geometry),
-            Err(GeometryError::UnresolvedTexture { block: named }) => {
+            Err(GeometryError::UnresolvedTexture { block: named, .. }) => {
                 return Packed::RefusedNaming(named.as_str().to_owned());
             }
             Err(other) => return Packed::RefusedOtherwise(other.to_string()),

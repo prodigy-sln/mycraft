@@ -39,7 +39,8 @@
 use std::error::Error;
 use std::fs;
 
-use mc_core::content::{LayerAssignment, ResolvedContent};
+use mc_core::content::{FaceTextures, LayerAssignment, ResolvedContent};
+use mc_core::id::TextureKey;
 use tempfile::TempDir;
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -185,7 +186,7 @@ fn stated(content: &ResolvedContent) -> Stated {
         .map(|block| {
             (
                 block.name.as_str().to_owned(),
-                block.texture.as_str().to_owned(),
+                textured(&block.textures),
                 block.is_solid,
             )
         })
@@ -221,4 +222,21 @@ fn expected(blocks: &[Declared]) -> Stated {
     // unassigned is.
     let layers = (0..u16::try_from(keys.len()).unwrap_or(u16::MAX)).collect();
     (declared, keys, layers)
+}
+
+/// Every key a block's six facings draw from, joined — one key where all six
+/// agree, and a list where they do not.
+///
+/// **Total over the six rather than a reading of one of them.** Every fixture in
+/// this file states its texture as a single string, so the answer is one key; a
+/// resolver that lost five facings, or that answered one facing's key for all six
+/// while the declaration said otherwise, changes this string rather than hiding
+/// behind whichever facing happened to be read.
+fn textured(textures: &FaceTextures) -> String {
+    textures
+        .keys()
+        .iter()
+        .map(TextureKey::as_str)
+        .collect::<Vec<_>>()
+        .join(", ")
 }

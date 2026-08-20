@@ -46,14 +46,39 @@ use crate::geometry::scene::SceneGeometry;
 use crate::pass::{ColorFormat, DepthCompare, DepthFormat, TerrainPassConfig};
 use crate::snapshot::{FrameStats, ScenePhase, TerrainSnapshot, frame_stats};
 use crate::surface::SurfaceSize;
-use crate::texture::TextureLayers;
+use crate::texture::sampler::SamplerRequest;
+use crate::texture::supplied::SuppliedTexels;
+use crate::texture::{TextureError, TextureLayers};
 
 use buffers::SceneBuffers;
 use depth::DepthAttachment;
 use hud_pass::ArrayTexture;
 use pipeline::Pipelines;
 
+pub use buffers::terrain_sampler;
 pub use hud::{FrameRenderer, FrameSnapshot};
+
+/// What a renderer's array texture is filled from and read through.
+///
+/// **One borrowed parameter rather than two loose ones**, and the grouping is a
+/// decision rather than a tidiness: `TerrainRenderer::new` would otherwise take
+/// five arguments against a threshold of four, and the two travel together
+/// everywhere — a caller that has texels but no sampler request has not made a
+/// mistake this signature should let it express.
+///
+/// **It is also what makes the sampler a request at all.** Without it the
+/// terrain sampler is a free function reaching for a constant, nothing under
+/// `tests/` can build a renderer that samples any other way, and a scenario
+/// comparing filtered minification against unfiltered minification cannot be
+/// written.
+#[derive(Debug, Clone, Copy)]
+pub struct TerrainTextures<'a> {
+    /// The level-zero texels a content root's built art offers, per key. A key
+    /// nothing covers is filled from the texture generated for it.
+    pub supplied: &'a SuppliedTexels,
+    /// What the terrain sampler is asked to be.
+    pub sampler: SamplerRequest,
+}
 
 /// Everything one frame is recorded into and through.
 ///
@@ -89,7 +114,10 @@ pub enum FrameError {
 }
 
 /// Why a renderer could not be built or filled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+///
+/// **Not `Copy`**, because a layer refused without naming its key leaves a
+/// reader with 256 candidates and a `TextureKey` owns its text.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RendererError {
     #[error("texture layer {layer} is outside the {capacity} the array texture holds")]
     TextureLayerOutOfRange { layer: u16, capacity: u16 },
@@ -99,6 +127,20 @@ pub enum RendererError {
         found: usize,
         capacity: usize,
     },
+    /// A layer's texels could not be prepared for upload.
+    ///
+    /// The cause names the key and what disagreed about it, so this adds no
+    /// sentence of its own.
+    #[error("a texture layer could not be prepared")]
+    Texture(#[from] TextureError),
+    /// The device refused the terrain sampler.
+    ///
+    /// The whole request is carried because the device's own rule is over the
+    /// combination: it accepts an anisotropy clamp above one only beside a fully
+    /// linear filter triple, and a message naming one field would send whoever
+    /// meets it to change the wrong one.
+    #[error("the device will not build a terrain sampler that asks for {requested}")]
+    TerrainSampler { requested: SamplerRequest },
 }
 
 /// The terrain pass: its pipelines, its buffers, its array texture and the depth
@@ -117,18 +159,21 @@ pub struct TerrainRenderer {
 }
 
 impl TerrainRenderer {
-    /// Builds the pass `config` describes, with every buffer at capacity.
+    /// Builds the pass `config` describes, with every buffer at capacity and the
+    /// array texture ready to be filled from what `textures` supplies.
     ///
     /// # Errors
     ///
     /// Returns [`RendererError`] when a resource cannot be built to the declared
-    /// capacities.
+    /// capacities, and [`RendererError::TerrainSampler`] when the device refuses
+    /// the sampler asked for.
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         config: &TerrainPassConfig,
+        textures: &TerrainTextures<'_>,
     ) -> Result<Self, RendererError> {
-        let buffers = SceneBuffers::new(device, queue)?;
+        let buffers = SceneBuffers::new(device, queue, textures)?;
         let pipelines = Pipelines::new(device, config, &buffers);
         Ok(Self {
             config: *config,

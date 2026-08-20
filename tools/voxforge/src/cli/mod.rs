@@ -13,12 +13,13 @@
 //! — the file is opened once, with everything already in hand.
 
 mod args;
+mod build;
 mod report;
 
 use std::ffi::OsString;
 use std::io::Write;
 use std::num::NonZeroU32;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use args::{Cli, Command, PreviewArgs, TextureArgs};
 
@@ -62,6 +63,7 @@ fn dispatch(argv: Vec<OsString>, out: &mut dyn Write) -> Result<ExitCode, Fault>
         Command::Preview(asked) => preview(&Preview::of(asked), &states, out),
         Command::Inspect(asked) => inspect(&asked.document, &states, out),
         Command::Texture(asked) => texture(&Texture::of(asked), &states, out),
+        Command::Build(asked) => build::build(&asked.document, out),
     }
 }
 
@@ -264,7 +266,11 @@ fn deliver_faces(
     directory: &Path,
     out: &mut dyn Write,
 ) -> Result<ExitCode, Fault> {
-    written_together(encoded, directory)?;
+    let files: Vec<(PathBuf, Vec<u8>)> = encoded
+        .iter()
+        .map(|(face, bytes)| (directory.join(named(face.face)), bytes.clone()))
+        .collect();
+    written_together(&files)?;
     for (face, _) in encoded {
         let path = directory.join(named(face.face));
         said(
@@ -298,11 +304,10 @@ fn deliver_faces(
 /// file and still not atomic across six, so it would buy precision rather than
 /// the property. What is guaranteed is that this never leaves a partial set
 /// *quietly* — the refusal names the write that failed.
-fn written_together(encoded: &[(&EmittedFace, Vec<u8>)], directory: &Path) -> Result<(), Fault> {
-    let mut landed: Vec<std::path::PathBuf> = Vec::new();
-    for (face, bytes) in encoded {
-        let path = directory.join(named(face.face));
-        let Err(fault) = wrote(&path, bytes) else {
+pub(super) fn written_together(files: &[(PathBuf, Vec<u8>)]) -> Result<(), Fault> {
+    let mut landed: Vec<&PathBuf> = Vec::new();
+    for (path, bytes) in files {
+        let Err(fault) = wrote(path, bytes) else {
             landed.push(path);
             continue;
         };

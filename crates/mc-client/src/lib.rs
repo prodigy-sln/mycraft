@@ -56,6 +56,8 @@ pub mod session;
 pub mod startup;
 /// Configuring a surface for the window it came from, and why one cannot be.
 pub mod surface_setup;
+/// What the built texture set under a content root is, and what refuses a launch.
+pub mod textures;
 /// The obligation to give the device a reload's layers before anything packs
 /// against them.
 pub mod upload;

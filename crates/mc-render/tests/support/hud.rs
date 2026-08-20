@@ -26,7 +26,7 @@ use mc_render::hud::HudFrame;
 use mc_render::pass::TerrainPassConfig;
 use mc_render::snapshot::ScenePhase;
 use mc_render::surface::SurfaceSize;
-use mc_render::texture::TextureLayers;
+use mc_render::texture::TextureResolution;
 use mc_testkit::frame::gpu::{CaptureContext, draw_fn};
 use mc_testkit::frame::{Rgba8Image, wgpu};
 use mc_world::mesh::{Facing, PlaneExtent, PlanePos, Quad};
@@ -136,8 +136,9 @@ pub fn render_frame(
         context.device(),
         context.queue(),
         &TerrainPassConfig::offscreen(),
+        &super::production_textures(),
     )?;
-    renderer.upload_textures(context.queue(), &fixture.layers)?;
+    renderer.upload_textures(context.queue(), &fixture.resolution)?;
     renderer.upload_scene(context.queue(), &fixture.scene)?;
     let request = super::request(context, name, REFERENCE)?;
     let snapshot = super::snapshot(TICK, wall_camera(), fixture);
@@ -192,8 +193,9 @@ pub fn compose_over(
         context.device(),
         context.queue(),
         &TerrainPassConfig::offscreen(),
+        &super::production_textures(),
     )?;
-    renderer.upload_textures(context.queue(), &TextureLayers::default())?;
+    renderer.upload_textures(context.queue(), &TextureResolution::default())?;
     let request = super::request(context, name, REFERENCE)?;
     let mut composed = false;
     let captured;

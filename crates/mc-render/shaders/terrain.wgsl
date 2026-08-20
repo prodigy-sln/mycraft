@@ -95,37 +95,70 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
 }
 
 // Which two components of a corner's section-local position its face's plane
-// coordinates are read from: the primary first, then the secondary, one row per
-// facing in `mc_world::mesh::Facing`'s declaration order.
+// coordinates are read from -- the primary first, then the secondary -- and then
+// how an image sits on that pair: whether its own horizontal runs along the
+// secondary rather than the primary, and whether either coordinate runs against
+// its axis. One row per facing in `mc_world::mesh::Facing`'s declaration order,
+// in all three tables.
 //
-// This is `mc_render::geometry::PLANE_AXES`, written out because a shader cannot
-// read a Rust constant. `build/validate.rs` reads this literal as text and fails
-// the build when the two disagree -- the only mechanical check there can be, and
-// the reason the values are a literal rather than anything computed.
+// These are `mc_render::geometry::PLANE_AXES`, `IMAGE_SWAPS` and `IMAGE_SIGNS`,
+// written out because a shader cannot read a Rust constant. On the Rust side the
+// second and third are *derived* from each facing's own normal by two lines of
+// vector arithmetic; these literals are the only hand-written copies left, and
+// `build/validate.rs` compares all three against the Rust values and fails the
+// build when any disagrees.
 //
-// Indexed by the discriminant the vertex already carries, so nothing here
-// derives the facing's axis. `facing >> 1u` would be a second, unguarded copy of
-// the declaration order, and a reordering of the enum would move four of these
-// six rows while every Rust answer computed from `Facing::axis()` stayed
-// correct. The drift that produces runs a texture *across* a face instead of
-// along it, which leaves the face's mean colour untouched -- so no derived probe
-// reports it and a golden shot from the drifted renderer records it as truth.
+// **The plane pair is the geometry's and it is not an image basis.** It says
+// which components a quad's two extents were written into. Where an image's own
+// left-to-right and top-to-bottom go is a separate question, and reading the
+// pair alone as if it answered that question is what shipped: east and west
+// turned a quarter, north and south and the underside flipped, only the top
+// correct. Five of six faces, while three hand-written copies of one table
+// agreed with each other exactly.
+//
+// **A swap and a sign are what a pair of axis indices cannot express.** An
+// image's rows run downward while the world's vertical axis runs up, so every
+// face with world up in it needs its vertical coordinate negated; two faces
+// looking at each other along one axis see their in-plane axes in opposite
+// horizontal order, so one of each pair needs its horizontal negated; and an X
+// face's pair lists its vertical first, so its two coordinates are exchanged.
+//
+// **That is also why agreement is not the property to rest on.** A build-time
+// comparison between two copies says they match and says nothing about whether
+// either is right. What can say that is a reading of the picture: FR-8.1-S7 for
+// where a face's bands sit and FR-8.1-S8 for which way it runs.
 const PLANE_AXES: array<u32, 12> =
     array<u32, 12>(1u, 2u, 1u, 2u, 0u, 2u, 0u, 2u, 0u, 1u, 0u, 1u);
+const IMAGE_SWAPS: array<u32, 6> = array<u32, 6>(1u, 1u, 0u, 0u, 0u, 0u);
+const IMAGE_SIGNS: array<u32, 12> =
+    array<u32, 12>(0u, 1u, 1u, 1u, 0u, 1u, 0u, 0u, 1u, 1u, 0u, 1u);
 
-// A corner's coordinates within its own face's plane.
+// A corner's coordinates within its own face's image.
 //
-// The same convention the geometry builder places a corner under, so the texture
-// runs along the quad's primary axis and not across it. Coordinates are in whole
-// blocks and the sampler repeats, so a face merged across four blocks shows the
-// texture four times rather than stretched once.
+// The same convention the geometry builder places a corner under, so an image
+// arrives on a face the way a viewer standing outside it would see it: the
+// image's top edge toward the face's own up, its right edge toward that viewer's
+// right. Coordinates are in whole blocks and the sampler repeats, so a face
+// merged across four blocks shows the texture four times rather than stretched
+// once -- and a negated coordinate mirrors within each block, which is what
+// makes a sign expressible at all here.
 //
-// Both lookups go through function-scope copies: a constant array and a vector
+// Every lookup goes through a function-scope copy: a constant array and a vector
 // value cannot be indexed by anything but a constant, and the index here is the
 // facing the vertex was packed with.
 fn plane_coordinates(facing: u32, local: vec3<f32>) -> vec2<f32> {
     var axes = PLANE_AXES;
+    var swaps = IMAGE_SWAPS;
+    var signs = IMAGE_SIGNS;
     var corner = local;
     let row = facing * 2u;
-    return vec2<f32>(corner[axes[row]], corner[axes[row + 1u]]);
+    let primary = corner[axes[row]];
+    let secondary = corner[axes[row + 1u]];
+    let exchanged = swaps[facing] == 1u;
+    let horizontal = select(primary, secondary, exchanged);
+    let vertical = select(secondary, primary, exchanged);
+    return vec2<f32>(
+        select(horizontal, -horizontal, signs[row] == 1u),
+        select(vertical, -vertical, signs[row + 1u] == 1u),
+    );
 }

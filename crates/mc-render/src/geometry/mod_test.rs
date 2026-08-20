@@ -18,10 +18,19 @@
 //! is recomputed here from the emitted corners in the emitted order, for all six
 //! facings and both triangles, rather than assumed from the pattern.
 //!
-//! The fifth is the refusal. A quad naming a block whose texture never resolved
-//! has no honest layer index: substituting layer 0 draws stone-coloured grass
-//! and nothing downstream can tell that from a deliberate choice, so the whole
-//! section's build fails and the error names the block.
+//! The refusals are the same shape one level widened. A quad whose *facing* has
+//! no honest layer index has none for two distinct reasons — the content states
+//! no such block at all, or it states one whose key for that facing occupies no
+//! layer — and substituting layer 0 draws stone-coloured grass in both cases,
+//! which nothing downstream can tell from a deliberate choice. The whole
+//! section's build fails and the error names the block, the facing and, where
+//! there is one, the key.
+//!
+//! The two resolution readings are what say a face draws from its **declaration**
+//! and not from its block's name. Every block this repository ships spells the
+//! two alike, so the property is unobservable except against a fixture that
+//! deliberately does not — which is why the block in those two is named for one
+//! mineral and declares another.
 //!
 //! This is a sibling unit test and therefore sees the module's own fields. It
 //! uses that for the index buffer alone, which has no public accessor and is
@@ -30,10 +39,11 @@
 use std::collections::BTreeSet;
 use std::error::Error;
 
+use mc_core::content::{Face, FaceTextures};
 use mc_core::id::{BlockName, TextureKey};
 use mc_world::mesh::{Facing, PlaneExtent, PlanePos, Quad};
 
-use crate::texture::TextureLayers;
+use crate::texture::{TextureLayers, TextureResolution};
 
 use super::{GeometryError, SectionGeometry, SectionOrigin, build_section_geometry};
 
@@ -42,8 +52,52 @@ type TestResult = Result<(), Box<dyn Error>>;
 /// The block every quad below names, except the one that is supposed to fail.
 const DRAWN_BLOCK: &str = "base:stone";
 
-/// A block the resolved layers deliberately do not cover.
-const UNCOVERED_BLOCK: &str = "base:dirt";
+/// A block the resolution deliberately states nothing about at all, which is
+/// what a section still holding quads for a block a reload dropped would name.
+const UNSTATED_BLOCK: &str = "base:dirt";
+
+/// A block whose name is not the key it declares, and the key it declares.
+///
+/// The whole subject of the resolution readings: a packer that parses a block's
+/// name as a texture key resolves this one to nothing, or — worse — to whichever
+/// layer happens to sit where it looked.
+const RENAMED_BLOCK: &str = "example:amber";
+const ITS_DECLARED_KEY: &str = "example:gold";
+
+/// A second block beside it, so that the assignment holds more than one layer
+/// and "the layer it drew from" is a choice rather than the only answer there is.
+const NEIGHBOURING_BLOCK: &str = "example:jade";
+
+/// The layers those two keys hold, and they are deliberately not their sorted
+/// positions: `example:gold` sorts ahead of `example:jade` and holds the higher
+/// layer. Neither is layer zero for the renamed block, so an implementation
+/// falling back to zero fails rather than drawing something plausible.
+const SUBSTITUTED_ASSIGNMENT: [(&str, u16); 2] = [(ITS_DECLARED_KEY, 1), (NEIGHBOURING_BLOCK, 0)];
+
+/// A block declaring a different key on each of its six facings.
+const BANDED_BLOCK: &str = "example:banded";
+
+/// The six keys it declares, positionally in the order a declaration writes its
+/// facings: up, down, north, south, east and west.
+const SIX_DECLARED: [&str; 6] = [
+    "example:cap",
+    "example:floor",
+    "example:unlit",
+    "example:lit",
+    "example:dawn",
+    "example:dusk",
+];
+
+/// The one of the six the assignment deliberately does not cover, and the facing
+/// it is declared against.
+const UNCOVERED_KEY: &str = "example:unlit";
+const ITS_FACING: Face = Face::North;
+const ITS_QUADS_FACING: Facing = Facing::NegZ;
+
+/// A facing of the same block whose key *is* covered, so that a refusal about
+/// one facing is not satisfied by a block that refuses on all of them.
+const COVERED_KEY: &str = "example:cap";
+const A_COVERED_FACING: Facing = Facing::PosY;
 
 /// The section whose world origin the first two scenarios place their quads in.
 /// None of its three coordinates is zero or equal to another, so a build that
@@ -118,13 +172,114 @@ const fn spanning(primary: u32, secondary: u32) -> PlaneExtent {
     PlaneExtent { primary, secondary }
 }
 
-/// Layers resolved over exactly `keys`, and nothing else.
-fn layers_covering(keys: &[&str]) -> Result<TextureLayers, Box<dyn Error>> {
-    let mut resolved = BTreeSet::new();
-    for key in keys {
-        resolved.insert(TextureKey::parse(key)?);
+/// A resolution stating one block per entry, each declaring the key written
+/// beside it on all six of its facings, over layers covering exactly those keys.
+///
+/// The block and the key are two parameters because they are two things. Every
+/// fixture in this file that is not about the difference happens to spell them
+/// alike, and the ones that are about it pass two different strings.
+fn resolving(blocks: &[(&str, &str)]) -> Result<TextureResolution, Box<dyn Error>> {
+    let mut stated = Vec::new();
+    let mut keys = BTreeSet::new();
+    for (block, key) in blocks {
+        let parsed = TextureKey::parse(key)?;
+        keys.insert(parsed.clone());
+        stated.push((BlockName::parse(block)?, FaceTextures::uniform(parsed)));
     }
-    Ok(TextureLayers::resolve(&resolved))
+    Ok(TextureResolution::stating(
+        stated,
+        TextureLayers::resolve(&keys),
+    ))
+}
+
+/// A resolution over one block declaring `key` on all six facings, against the
+/// layers `assignment` states rather than the ones a sort would give.
+fn stating(
+    block: &str,
+    key: &str,
+    assignment: &[(&str, u16)],
+) -> Result<TextureResolution, Box<dyn Error>> {
+    let mut layers = Vec::new();
+    for (named, layer) in assignment {
+        layers.push((TextureKey::parse(named)?, *layer));
+    }
+    Ok(TextureResolution::stating(
+        [(
+            BlockName::parse(block)?,
+            FaceTextures::uniform(TextureKey::parse(key)?),
+        )],
+        TextureLayers::stated(layers),
+    ))
+}
+
+/// A resolution over [`BANDED_BLOCK`] declaring [`SIX_DECLARED`], covering every
+/// one of those keys except [`UNCOVERED_KEY`].
+fn banded_but_for_one_facing() -> Result<TextureResolution, Box<dyn Error>> {
+    let mut declared = Vec::with_capacity(SIX_DECLARED.len());
+    let mut covered = BTreeSet::new();
+    for key in SIX_DECLARED {
+        let parsed = TextureKey::parse(key)?;
+        if key != UNCOVERED_KEY {
+            covered.insert(parsed.clone());
+        }
+        declared.push(parsed);
+    }
+    let keys: [TextureKey; 6] = declared
+        .try_into()
+        .map_err(|_unexpected| "a declaration states exactly six facings")?;
+    Ok(TextureResolution::stating(
+        [(BlockName::parse(BANDED_BLOCK)?, FaceTextures::stating(keys))],
+        TextureLayers::resolve(&covered),
+    ))
+}
+
+/// The layer every emitted corner was packed with, in emission order.
+fn corner_layers(geometry: &SectionGeometry) -> Vec<u16> {
+    (0usize..)
+        .map_while(|corner| geometry.layer_at(corner))
+        .collect()
+}
+
+/// What packing `quads` against `resolution` came to.
+///
+/// A total verdict rather than a `Result` propagated out of a test: a build that
+/// accepted what it should refuse fails on its own comparison, naming what it
+/// produced, instead of ending the test before its assertion ran.
+#[derive(Debug, PartialEq, Eq)]
+enum Packed {
+    /// The layer every corner was packed with, in emission order.
+    Corners(Vec<u16>),
+    /// The section was refused, naming this block, this facing and this key.
+    Refused {
+        block: String,
+        face: Face,
+        key: Option<String>,
+    },
+    /// The section was refused for a reason that is not about a texture.
+    RefusedOtherwise(String),
+}
+
+fn packing(quads: &[Quad], resolution: &TextureResolution) -> Packed {
+    match build_section_geometry(quads, SectionOrigin::new(UNSHIFTED_SECTION), resolution) {
+        Ok(geometry) => Packed::Corners(corner_layers(&geometry)),
+        Err(GeometryError::UnresolvedTexture { block, face, key }) => Packed::Refused {
+            block: block.as_str().to_owned(),
+            face,
+            key: key.map(|key| key.as_str().to_owned()),
+        },
+        Err(other) => Packed::RefusedOtherwise(other.to_string()),
+    }
+}
+
+/// One quad of `block`, facing `facing`, covering a single voxel side.
+fn quad_of(facing: Facing, block: &str) -> Result<Quad, Box<dyn Error>> {
+    Ok(Quad {
+        facing,
+        plane: 3,
+        origin: at(0, 0),
+        extent: spanning(1, 1),
+        block: BlockName::parse(block)?,
+    })
 }
 
 /// One merged rectangle of the block the layers below do cover.
@@ -210,10 +365,11 @@ fn triangle_normals(geometry: &SectionGeometry) -> Result<Vec<[i64; 3]>, Box<dyn
 
 #[test]
 fn a_merged_top_face_becomes_four_world_corners_and_two_triangles() -> TestResult {
-    let layers = layers_covering(&[DRAWN_BLOCK])?;
+    let resolution = resolving(&[(DRAWN_BLOCK, DRAWN_BLOCK)])?;
     let quads = [drawn_quad(Facing::PosY, 3, at(2, 5), spanning(4, 2))?];
 
-    let geometry = build_section_geometry(&quads, SectionOrigin::new(SHIFTED_SECTION), &layers)?;
+    let geometry =
+        build_section_geometry(&quads, SectionOrigin::new(SHIFTED_SECTION), &resolution)?;
 
     let corners = world_corners(&geometry);
     assert_eq!(
@@ -238,10 +394,11 @@ fn a_merged_top_face_becomes_four_world_corners_and_two_triangles() -> TestResul
 
 #[test]
 fn a_bottom_face_sits_at_the_plane_of_the_voxel_that_emitted_it() -> TestResult {
-    let layers = layers_covering(&[DRAWN_BLOCK])?;
+    let resolution = resolving(&[(DRAWN_BLOCK, DRAWN_BLOCK)])?;
     let quads = [drawn_quad(Facing::NegY, 3, at(2, 5), spanning(1, 1))?];
 
-    let geometry = build_section_geometry(&quads, SectionOrigin::new(SHIFTED_SECTION), &layers)?;
+    let geometry =
+        build_section_geometry(&quads, SectionOrigin::new(SHIFTED_SECTION), &resolution)?;
 
     let ([_, lowest_y, _], [_, highest_y, _]) = corner_bounds(&world_corners(&geometry));
     assert_eq!(
@@ -255,10 +412,11 @@ fn a_bottom_face_sits_at_the_plane_of_the_voxel_that_emitted_it() -> TestResult 
 
 #[test]
 fn a_face_on_the_last_plane_reaches_the_far_edge_of_the_section() -> TestResult {
-    let layers = layers_covering(&[DRAWN_BLOCK])?;
+    let resolution = resolving(&[(DRAWN_BLOCK, DRAWN_BLOCK)])?;
     let quads = [drawn_quad(Facing::PosX, 15, at(0, 0), spanning(1, 1))?];
 
-    let geometry = build_section_geometry(&quads, SectionOrigin::new(UNSHIFTED_SECTION), &layers)?;
+    let geometry =
+        build_section_geometry(&quads, SectionOrigin::new(UNSHIFTED_SECTION), &resolution)?;
 
     let ([lowest_x, _, _], [highest_x, _, _]) = corner_bounds(&world_corners(&geometry));
     assert_eq!(
@@ -272,14 +430,14 @@ fn a_face_on_the_last_plane_reaches_the_far_edge_of_the_section() -> TestResult 
 
 #[test]
 fn every_facings_triangles_wind_so_that_their_normal_points_outward() -> TestResult {
-    let layers = layers_covering(&[DRAWN_BLOCK])?;
+    let resolution = resolving(&[(DRAWN_BLOCK, DRAWN_BLOCK)])?;
     let mut observed = Vec::new();
     let mut expected = Vec::new();
 
     for (facing, outward) in OUTWARD_NORMALS {
         let quads = [drawn_quad(facing, 5, at(2, 3), spanning(1, 1))?];
         let geometry =
-            build_section_geometry(&quads, SectionOrigin::new(UNSHIFTED_SECTION), &layers)?;
+            build_section_geometry(&quads, SectionOrigin::new(UNSHIFTED_SECTION), &resolution)?;
 
         observed.push((facing, triangle_normals(&geometry)?));
         expected.push((facing, vec![fixed_vector(outward); TRIANGLES_PER_QUAD]));
@@ -296,7 +454,7 @@ fn every_facings_triangles_wind_so_that_their_normal_points_outward() -> TestRes
 
 #[test]
 fn a_quads_longer_side_runs_along_its_facings_primary_plane_axis() -> TestResult {
-    let layers = layers_covering(&[DRAWN_BLOCK])?;
+    let resolution = resolving(&[(DRAWN_BLOCK, DRAWN_BLOCK)])?;
     let (primary, secondary) = OBLONG_EXTENT;
     let mut observed = Vec::new();
 
@@ -308,7 +466,7 @@ fn a_quads_longer_side_runs_along_its_facings_primary_plane_axis() -> TestResult
             spanning(primary, secondary),
         )?];
         let geometry =
-            build_section_geometry(&quads, SectionOrigin::new(UNSHIFTED_SECTION), &layers)?;
+            build_section_geometry(&quads, SectionOrigin::new(UNSHIFTED_SECTION), &resolution)?;
         observed.push((facing, corner_extents(&geometry)));
     }
 
@@ -329,32 +487,105 @@ fn a_quads_longer_side_runs_along_its_facings_primary_plane_axis() -> TestResult
 }
 
 #[test]
-fn a_quad_naming_an_unresolved_texture_fails_the_section_and_names_the_block() -> TestResult {
-    let layers = layers_covering(&[DRAWN_BLOCK])?;
-    let quads = [Quad {
-        facing: Facing::PosY,
-        plane: 3,
-        origin: at(0, 0),
-        extent: spanning(1, 1),
-        block: BlockName::parse(UNCOVERED_BLOCK)?,
-    }];
-
-    let refusal = build_section_geometry(&quads, SectionOrigin::new(UNSHIFTED_SECTION), &layers)
-        .err()
-        .ok_or(
-            "a quad naming a block with no resolved texture layer must fail the section's \
-             build; there is no geometry to hand back and no honest layer to substitute",
-        )?;
-
-    match refusal {
-        GeometryError::UnresolvedTexture { block } => assert_eq!(
-            block.as_str(),
-            UNCOVERED_BLOCK,
-            "the refusal must name the block whose texture never resolved"
-        ),
-        other => {
-            return Err(format!("expected an unresolved-texture refusal, got {other:?}").into());
-        }
+fn a_face_draws_the_key_its_block_declared_when_that_key_is_not_its_name() -> TestResult {
+    let resolution = stating(RENAMED_BLOCK, ITS_DECLARED_KEY, &SUBSTITUTED_ASSIGNMENT)?;
+    let mut quads = Vec::new();
+    for (facing, _) in OUTWARD_NORMALS {
+        quads.push(quad_of(facing, RENAMED_BLOCK)?);
     }
+
+    let packed = packing(&quads, &resolution);
+
+    assert_eq!(
+        packed,
+        Packed::Corners(vec![
+            layer_stated(ITS_DECLARED_KEY)?;
+            OUTWARD_NORMALS.len() * CORNERS_PER_QUAD
+        ]),
+        "a face draws the key its block declared, on every one of its six facings, and never the \
+         key its block's name spells. This block is called {RENAMED_BLOCK} and declares \
+         {ITS_DECLARED_KEY}: a packer parsing the name resolves nothing at all, and one falling \
+         back to layer zero draws whichever block owns layer zero — which is a picture that is \
+         wrong in an entirely plausible way"
+    );
     Ok(())
+}
+
+#[test]
+fn a_facing_key_outside_the_assignment_refuses_the_section_naming_the_block_and_the_facing()
+-> TestResult {
+    let resolution = banded_but_for_one_facing()?;
+
+    let uncovered = packing(&[quad_of(ITS_QUADS_FACING, BANDED_BLOCK)?], &resolution);
+    let covered = packing(&[quad_of(A_COVERED_FACING, BANDED_BLOCK)?], &resolution);
+
+    assert_eq!(
+        (uncovered, covered),
+        (
+            Packed::Refused {
+                block: BANDED_BLOCK.to_owned(),
+                face: ITS_FACING,
+                key: Some(UNCOVERED_KEY.to_owned()),
+            },
+            Packed::Corners(vec![layer_resolved(COVERED_KEY)?; CORNERS_PER_QUAD]),
+        ),
+        "a block with six keys refuses on the facing whose key occupies no layer, and the refusal \
+         has to name the facing as well as the block — otherwise a reader holding six keys is \
+         told one of them is wrong and left to guess which. Drawing layer zero instead would show \
+         a plausible picture and report nothing at all. The second half is what says the refusal \
+         is about that facing and not about that block: the same block's covered facing still packs"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_quad_naming_a_block_the_content_states_nothing_about_is_refused_with_no_key() -> TestResult {
+    let resolution = resolving(&[(DRAWN_BLOCK, DRAWN_BLOCK)])?;
+
+    let packed = packing(&[quad_of(Facing::PosY, UNSTATED_BLOCK)?], &resolution);
+
+    assert_eq!(
+        packed,
+        Packed::Refused {
+            block: UNSTATED_BLOCK.to_owned(),
+            face: Face::Up,
+            key: None,
+        },
+        "a section may still hold quads for a block the content no longer states — a reload that \
+         dropped it, a mesh that outlived its registry — and there is no key to name for one. The \
+         refusal carries `None` rather than inventing a key from the block's name, which is the \
+         habit this whole change exists to end"
+    );
+    Ok(())
+}
+
+/// The layer [`SUBSTITUTED_ASSIGNMENT`] states for `key`.
+///
+/// # Errors
+///
+/// Returns an error if the table names no layer for it.
+fn layer_stated(key: &str) -> Result<u16, Box<dyn Error>> {
+    SUBSTITUTED_ASSIGNMENT
+        .into_iter()
+        .find(|(named, _)| *named == key)
+        .map(|(_, layer)| layer)
+        .ok_or_else(|| format!("this fixture states no layer for `{key}`").into())
+}
+
+/// The layer a lexicographic assignment over the covered five of
+/// [`SIX_DECLARED`] gives `key`.
+///
+/// # Errors
+///
+/// Returns an error if `key` is not a namespaced id or is the uncovered one.
+fn layer_resolved(key: &str) -> Result<u16, Box<dyn Error>> {
+    let covered: BTreeSet<&str> = SIX_DECLARED
+        .into_iter()
+        .filter(|declared| *declared != UNCOVERED_KEY)
+        .collect();
+    covered
+        .iter()
+        .position(|declared| *declared == key)
+        .and_then(|position| u16::try_from(position).ok())
+        .ok_or_else(|| format!("`{key}` is not one of the covered five").into())
 }

@@ -1,0 +1,21 @@
+# A content root the gate's art stages are pointed at, and nothing else reads.
+#
+# It is deliberately not a copy of `content/base`: the stages under test are
+# about a *tree*, not about the base game, and a fixture cut from the shipped
+# content would move every time the shipped art does.
+#
+# One voxel at sixteen pixels to it bakes the sixteen-texel edge a block
+# texture has to be, which is the smallest tree `voxforge build` accepts.
+# There is no `blocks/` directory, so the key below is reported as declared by
+# nobody and the build still completes — which is the advisory report the gate
+# must not read as a failure.
+
+output           = "textures"
+materials        = "materials"
+blocks           = "blocks"
+pixels_per_voxel = 16
+
+[[texture]]
+key   = "fixture:block"
+model = "models/block.mcvox"
+face  = "top"

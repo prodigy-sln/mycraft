@@ -16,12 +16,13 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::sync::Arc;
 
+use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_render::camera::{Projection, camera_view};
 use mc_render::geometry::scene::SceneGeometry;
 use mc_render::geometry::{SectionOrigin, build_section_geometry};
 use mc_render::snapshot::{TerrainSnapshot, frame_stats};
-use mc_render::texture::TextureLayers;
+use mc_render::texture::{TextureLayers, TextureResolution};
 use mc_world::mesh::{Facing, PlaneExtent, PlanePos, Quad};
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -87,7 +88,14 @@ fn declared_projection() -> Projection {
 
 /// A scene of one section holding one upward-facing quad.
 fn one_section_scene() -> Result<SceneGeometry, Box<dyn Error>> {
-    let layers = TextureLayers::resolve(&BTreeSet::from([TextureKey::parse(PROBE)?]));
+    let key = TextureKey::parse(PROBE)?;
+    // This fixture declares `texture` equal to `name`, which is what every block
+    // in this repository does and what a scene about frame counts needs no more
+    // than.
+    let resolution = TextureResolution::stating(
+        [(BlockName::parse(PROBE)?, FaceTextures::uniform(key.clone()))],
+        TextureLayers::resolve(&BTreeSet::from([key])),
+    );
     let quad = Quad {
         facing: Facing::PosY,
         plane: 0,
@@ -101,6 +109,6 @@ fn one_section_scene() -> Result<SceneGeometry, Box<dyn Error>> {
         },
         block: BlockName::parse(PROBE)?,
     };
-    let section = build_section_geometry(&[quad], SectionOrigin::new([0, 0, 0]), &layers)?;
+    let section = build_section_geometry(&[quad], SectionOrigin::new([0, 0, 0]), &resolution)?;
     Ok(SceneGeometry::assemble(vec![section])?)
 }

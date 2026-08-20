@@ -197,7 +197,7 @@ pub fn printed_refusals() -> Result<Vec<String>, Box<dyn Error>> {
     let overlong = content::shipped_copy()?
         .declaring_block(BLOCK_FILE, &stating_a_texture_past_the_bound())?;
     let hud = content::shipped_with(HUD_FILE, REFUSED_HUD_DECLARATION)?;
-    Ok(vec![
+    let mut printed = vec![
         as_read_from_a_game_directory(&blocks)?,
         as_read_from_a_game_directory(&overlong)?,
         as_read_from_a_game_directory(&hud)?,
@@ -208,7 +208,23 @@ pub fn printed_refusals() -> Result<Vec<String>, Box<dyn Error>> {
         a_reload_over_the_layer_budget()?,
         an_entry_moving_a_trapped_player()?,
         an_entry_with_nowhere_to_put_them()?,
-    ])
+    ];
+    // The seven a texture table raises live in their own module: this file is
+    // within fifty non-blank lines of the size the gate allows a test file, and
+    // they are one requirement's refusals rather than a sample of many.
+    printed.extend(crate::per_facing_refusals::per_facing_refusals()?);
+    // The six a built texture set raises live in their own module for the same
+    // reason, and for one more: five of them name no path, so they are produced
+    // without the fixture-root rewrite that every producer above needs.
+    //
+    // **Both extends append, and that is load-bearing.** `the_block_refusal`
+    // takes `printed.first()`, so the drift control compares a *block
+    // declaration's* refusal against a page. Prepending either group here would
+    // hand it a texture-table or texture-set refusal instead, and the control
+    // would still pass — it would simply have stopped controlling the thing it
+    // was written for.
+    printed.extend(crate::built_set_refusals::built_set_refusals()?);
+    Ok(printed)
 }
 
 /// A block declaration stating a texture key one character longer than a declared
@@ -269,7 +285,9 @@ fn over_the_layer_budget() -> Result<String, Box<dyn Error>> {
 /// Returns an error if the root was accepted, or if what was written does not name
 /// the fixture root — in which case the rewrite below would be a silent no-op and the
 /// text compared against the pages would be one no page could ever carry.
-fn as_read_from_a_game_directory(root: &content::ContentRoot) -> Result<String, Box<dyn Error>> {
+pub fn as_read_from_a_game_directory(
+    root: &content::ContentRoot,
+) -> Result<String, Box<dyn Error>> {
     let printed = support::refusal_printed_over(root.path())?;
     Ok(normalised(&rewritten(&printed, root.path())?))
 }

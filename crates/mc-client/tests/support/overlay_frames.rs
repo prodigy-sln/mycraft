@@ -69,6 +69,7 @@ impl<'a> OverlayFrames<'a> {
                 context.device(),
                 context.queue(),
                 &TerrainPassConfig::offscreen(),
+                &super::frames::no_supplied_texels(),
             )?,
             snapshot: TerrainSnapshot {
                 tick: 0,

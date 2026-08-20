@@ -25,14 +25,13 @@
 //! the sorted answer and the stated answer happened to agree fails instead of
 //! passing for the wrong reason.
 //!
-//! # These blocks declare `texture` equal to `name`, and that is the fixture's
-//! constraint rather than the requirement's
+//! # These blocks declare `texture` equal to `name`, and nothing here turns on it
 //!
-//! The packer selects an entry of the assignment by parsing the block's own
-//! **name** as a texture key. A fixture whose blocks named a different texture
-//! would be refused for that reason instead — red for the wrong reason, reading as
-//! a defect in the assignment when it is not one. The pin on that substitution
-//! turns red the day the gap is closed, and that red is its success signal.
+//! The packer resolves a face's key from its block's declaration, so a fixture
+//! naming a different texture would pack perfectly well. These keep the two the
+//! same because what the readings below are about is *which layer* an assignment
+//! states, and a second difference between name and key would be one more thing
+//! a reader has to hold while following them.
 
 #[path = "support/input/mod.rs"]
 mod input;
@@ -49,14 +48,16 @@ use std::error::Error;
 use mc_client::content::ContentView;
 use mc_core::id::BlockName;
 use mc_render::geometry::{GeometryError, SectionGeometry, SectionOrigin, build_section_geometry};
-use mc_render::texture::TextureLayers;
+use mc_render::texture::TextureResolution;
 use mc_world::mesh::{Facing, PlaneExtent, PlanePos, Quad};
 
 use input::InputHarness;
-use reload::{AMBER, AMBER_FILE, STONE, accepted, adoption, amber, declaring, shipped};
+use reload::{
+    AMBER, AMBER_FILE, DIRT, GRASS, GRASS_TOP, STONE, WATER, accepted, adoption, amber, declaring,
+    shipped,
+};
 use reload_content::{
-    NOTHING_IS_SERVING, SHIPPED_KEYS, THE_NEXT_UNUSED_LAYER, candidate_against, fresh_layers,
-    publishing,
+    NOTHING_IS_SERVING, THE_NEXT_UNUSED_LAYER, candidate_against, fresh_layers, publishing,
 };
 use reload_world::{floor_of, playing, standing};
 use support::{TestResult, content_root};
@@ -99,21 +100,21 @@ enum Packed {
 fn a_section_not_meshed_again_packs_the_layers_it_carried_before_a_key_was_appended() -> TestResult
 {
     let mut client = a_client_over(STONE)?;
-    let before = packing(&SHIPPED_KEYS, &layers_of(&client)?)?;
+    let before = packing(&shipped_blocks(), &resolution_of(&client)?)?;
 
     let root = declaring(shipped()?, AMBER_FILE, &amber())?;
     let candidate = candidate_against(&root, client.content())?;
     let answered = adoption(client.adopt(candidate));
     let appended = publishing(client.content())?.layers.get(AMBER).copied();
-    let after = packing(&SHIPPED_KEYS, &layers_of(&client)?)?;
+    let after = packing(&shipped_blocks(), &resolution_of(&client)?)?;
 
     assert_eq!(
         (answered, appended, after, before),
         (
             accepted(AMBER),
             Some(THE_NEXT_UNUSED_LAYER),
-            Packed::Corners(corners_of_the_shipped_keys()?),
-            Packed::Corners(corners_of_the_shipped_keys()?)
+            Packed::Corners(corners_of_the_shipped_blocks()?),
+            Packed::Corners(corners_of_the_shipped_blocks()?)
         ),
         "a reload appended a layer, and the sections the world had already uploaded were not meshed \
          again. Re-packing one of them against the content now serving has to produce the bytes it \
@@ -136,7 +137,7 @@ fn a_reader_handed_the_published_content_packs_the_layer_that_assignment_states(
 
     let answered = adoption(client.adopt(candidate));
     let stated = publishing(client.content())?.layers;
-    let packed = packing(&[AMBER], &layers_of(&client)?)?;
+    let packed = packing(&[AMBER], &resolution_of(&client)?)?;
 
     assert_eq!(
         (answered, stated.keys().position(|key| key == AMBER), packed),
@@ -178,28 +179,51 @@ fn a_client_over(floor: &'static str) -> Result<InputHarness, Box<dyn Error>> {
 ///
 /// Returns an error where the client publishes nothing, which is a client with no
 /// world rather than one a reader could be handed anything from.
-fn layers_of(client: &InputHarness) -> Result<TextureLayers, Box<dyn Error>> {
+fn resolution_of(client: &InputHarness) -> Result<TextureResolution, Box<dyn Error>> {
     let published = client.content().ok_or(NOTHING_IS_SERVING)?;
-    Ok(ContentView::of(&published.resolved).into_layers())
+    Ok(ContentView::of(&published.resolved).into_resolution())
 }
 
-/// The layer every corner must carry for one quad per shipped key, in the order
-/// the keys are packed.
+/// Which key each shipped block draws on the facing these quads show.
 ///
-/// Derived from each key's position in the ascending list, so the third key is on
-/// the third layer because it is third and not because somebody wrote a two.
+/// **Stated, because a block's name is no longer its key.** Every quad below
+/// faces upward, and the grass block declares `base:grass_top` for that facing
+/// while dirt, stone and water each state one key across all six of theirs. A
+/// fixture that went on treating the two as the same word would build quads
+/// naming blocks no root declares — which is what this list was before the grass
+/// block gained facings, and it read as a packer refusal rather than as a stale
+/// fixture.
+const UPWARD: [(&str, &str); 4] = [
+    (DIRT, DIRT),
+    (GRASS, GRASS_TOP),
+    (STONE, STONE),
+    (WATER, WATER),
+];
+
+/// The blocks one quad each is packed for, in the order [`UPWARD`] states them.
+fn shipped_blocks() -> Vec<&'static str> {
+    UPWARD.iter().map(|(block, _)| *block).collect()
+}
+
+/// The layer every corner must carry for one quad per shipped block, in the order
+/// they are packed.
+///
+/// Derived twice over rather than written down: the block names its upward key,
+/// and that key's layer is its position in the ascending list. So the grass
+/// block's quad carries a five because `base:grass_top` is sixth among the eight
+/// keys, and not because anybody wrote a five.
 ///
 /// # Errors
 ///
 /// Returns an error if the shipped key list is not the ascending one this
-/// arithmetic rests on.
-fn corners_of_the_shipped_keys() -> Result<Vec<u16>, Box<dyn Error>> {
+/// arithmetic rests on, or if it does not hold a key a block draws.
+fn corners_of_the_shipped_blocks() -> Result<Vec<u16>, Box<dyn Error>> {
     let assigned = fresh_layers()?;
     let mut corners = Vec::new();
-    for key in SHIPPED_KEYS {
-        let layer = assigned
-            .get(key)
-            .ok_or_else(|| format!("a launch assigns no layer to `{key}`"))?;
+    for (block, key) in UPWARD {
+        let layer = assigned.get(key).ok_or_else(|| {
+            format!("a launch assigns no layer to `{key}`, which `{block}` draws upward")
+        })?;
         corners.extend(std::iter::repeat_n(*layer, CORNERS_PER_QUAD));
     }
     Ok(corners)
@@ -211,7 +235,7 @@ fn corners_of_the_shipped_keys() -> Result<Vec<u16>, Box<dyn Error>> {
 ///
 /// Returns an error if a fixture id is not a block name, or if a plane index does
 /// not fit.
-fn packing(blocks: &[&str], layers: &TextureLayers) -> Result<Packed, Box<dyn Error>> {
+fn packing(blocks: &[&str], resolution: &TextureResolution) -> Result<Packed, Box<dyn Error>> {
     let mut quads = Vec::new();
     for (plane, block) in blocks.iter().enumerate() {
         quads.push(Quad {
@@ -228,9 +252,9 @@ fn packing(blocks: &[&str], layers: &TextureLayers) -> Result<Packed, Box<dyn Er
             block: BlockName::parse(block)?,
         });
     }
-    match build_section_geometry(&quads, SectionOrigin::new(SECTION), layers) {
+    match build_section_geometry(&quads, SectionOrigin::new(SECTION), resolution) {
         Ok(geometry) => Ok(Packed::Corners(corner_layers(&geometry))),
-        Err(GeometryError::UnresolvedTexture { block }) => {
+        Err(GeometryError::UnresolvedTexture { block, .. }) => {
             Ok(Packed::RefusedNaming(block.as_str().to_owned()))
         }
         Err(other) => Ok(Packed::RefusedOtherwise(other.to_string())),

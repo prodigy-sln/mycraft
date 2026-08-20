@@ -63,14 +63,15 @@ pub enum ReloadReport {
     /// A candidate was refused, in the words a person reads — the whole chain,
     /// rendered by the one renderer.
     Refused(String),
-    /// A candidate was taken up: this is the content now serving, and these are
-    /// the array-texture layers it states.
+    /// A candidate was taken up: this is the content now serving, and this is
+    /// the resolution it states — its blocks' declared keys and the layers they
+    /// occupy.
     ///
     /// Built here rather than in the frame path so that the appended layer is a
     /// value something can read: nothing in this workspace constructs a window,
-    /// so a layer assembled in `App` is unassertable. Handed over as
+    /// so a resolution assembled in `App` is unassertable. Handed over as
     /// [`Unuploaded`] because nothing in this workspace can check that the frame
-    /// path uploads them either.
+    /// path uploads it either.
     Accepted {
         content: Arc<PublishedContent>,
         layers: Unuploaded,
@@ -138,7 +139,7 @@ impl Session {
                 self.holding = Some(accepted.holding.clone());
                 let content = simulation.content();
                 Some(ReloadReport::Accepted {
-                    layers: Unuploaded::of(ContentView::of(&content.resolved).into_layers()),
+                    layers: Unuploaded::of(ContentView::of(&content.resolved).into_resolution()),
                     clearing: accepted.clearing,
                     content,
                 })

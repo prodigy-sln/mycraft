@@ -33,7 +33,7 @@ use mc_core::hud::HudLayout;
 use mc_core::id::TextureKey;
 use mc_render::camera::{camera_view, waiting_view};
 use mc_render::geometry::scene::SceneGeometry;
-use mc_render::gpu::{FrameError, FrameRenderer, FrameSnapshot, RecordTarget};
+use mc_render::gpu::{FrameError, FrameRenderer, FrameSnapshot, RecordTarget, TerrainTextures};
 use mc_render::hud::{HudFrame, held_swatch};
 use mc_render::overlay::clock::SystemOverlayClock;
 use mc_render::pass::TerrainPassConfig;
@@ -41,13 +41,15 @@ use mc_render::snapshot::{ScenePhase, TerrainSnapshot};
 use mc_render::surface::{
     FrameAction, ResizeAction, SurfaceErrorKind, SurfaceSize, resize_action, surface_error_action,
 };
+use mc_render::texture::sampler::TERRAIN_SAMPLER;
 use mc_render::window::{Ending, rendered};
 use mc_sim::reload::watching_shipped_content;
 
 mod reload;
+mod report;
 
 use crate::gpu_startup::Gpu;
-use crate::launch::{PreparationHandle, collect};
+use crate::launch::{PreparationHandle, Starting, collect};
 use crate::notice;
 use crate::remesh::{Remesher, Retained};
 use crate::session::Session;
@@ -129,17 +131,23 @@ impl App {
         gpu: Gpu,
         surface: wgpu::Surface<'static>,
         size: SurfaceSize,
-        preparation: PreparationHandle,
+        starting: Starting,
     ) -> Result<Self, SetupError> {
         let capabilities = surface.get_capabilities(&gpu.adapter);
         let format = chosen_format(&capabilities.formats)?;
         let configuration = configuration_for(&surface, &gpu, size, format)?;
         surface.configure(&gpu.device, &configuration);
 
+        // The supply is given once and held for the whole run, which is what
+        // makes a reload unable to lose it.
         let renderer = FrameRenderer::new(
             &gpu.device,
             &gpu.queue,
             &TerrainPassConfig::windowed(color_format(format)?),
+            &TerrainTextures {
+                supplied: &starting.texels,
+                sampler: TERRAIN_SAMPLER,
+            },
         )?;
 
         Ok(Self {
@@ -147,7 +155,7 @@ impl App {
             surface,
             configuration,
             renderer,
-            preparation: Some(preparation),
+            preparation: Some(starting.preparation),
             phase: ScenePhase::Preparing,
             nothing: empty_scene(),
             hud: empty_hud()?,
@@ -331,15 +339,15 @@ impl App {
     /// Which texture this frame's held-block indicator draws from, stating once
     /// whatever leaves it drawing nothing.
     ///
-    /// The block is the session's answer and the layers are the renderer's, and
-    /// neither is second-guessed here: what is left is one lookup and one report,
+    /// The block is the session's answer and the resolution is the renderer's,
+    /// and neither is second-guessed here: one lookup and one report,
     /// both of which are somebody else's decision spelled out where a test can
     /// reach it. The lookup answers with an owned key, so the renderer's borrow is
     /// over before the report needs this type mutably.
     fn swatch(&mut self, session: &Session) -> Option<TextureKey> {
         let swatch = held_swatch(
             session.held_block().as_ref(),
-            self.renderer.texture_layers(),
+            self.renderer.texture_resolution(),
         );
         if let Some(report) = swatch.unresolved_report() {
             self.report_swatch(&report);
@@ -432,7 +440,7 @@ impl App {
         let serving = prepared.simulation.content().serial;
 
         self.renderer
-            .upload_textures(&self.gpu.queue, &prepared.layers)?;
+            .upload_textures(&self.gpu.queue, &prepared.resolution)?;
         let scene = Arc::new(prepared.scene);
         self.renderer.upload_scene(&self.gpu.queue, &scene)?;
         notice::say_entering(prepared.clearing);
@@ -442,14 +450,14 @@ impl App {
         // crosses its boundaries from the next tick on. Attached after the
         // simulation because a boundary needs one.
         session.attach_reload(watching_shipped_content(prepared.root));
-        // The meshed sections and the layers are handed to the worker rather than
-        // kept here: they are what a re-mesh works on, and a copy on each side
-        // would be a second answer waiting to disagree. No registry — a batch
-        // carries the one its own world was resolved against.
+        // The meshed sections and the resolution are handed to the worker rather
+        // than kept here: they are what a re-mesh works on, and a copy on each
+        // side would be a second answer waiting to disagree. No registry — a
+        // batch carries the one its own world was resolved against.
         self.remesher = Some(Remesher::spawn(
             Retained {
                 meshed: prepared.meshed,
-                layers: prepared.layers,
+                resolution: prepared.resolution,
             },
             serving,
         ));
@@ -469,50 +477,6 @@ impl App {
         self.configuration.height = size.height;
         self.surface
             .configure(&self.gpu.device, &self.configuration);
-    }
-
-    /// States a frame failure once, however many frames it goes on to affect.
-    fn report(&mut self, failure: FrameError) {
-        if self.reported != Some(failure) {
-            eprintln!("mycraft: a frame was dropped: {}", rendered(&failure));
-            self.reported = Some(failure);
-        }
-    }
-
-    /// States a held block that draws no indicator once, however many frames go
-    /// on to hold it.
-    ///
-    /// Separate from [`report_remesh`](Self::report_remesh) rather than folded
-    /// into it, and not only because a third recurring fault must not silence the
-    /// other two: that one's sentence begins "an edit could not be shown", and a
-    /// block whose texture occupies no layer is not an edit. The one message a
-    /// content author reads has to be about what is wrong.
-    ///
-    /// It never ends the run. A HUD element that cannot be drawn is the rest of
-    /// the game still being playable, which is the same trade a failed re-mesh
-    /// makes.
-    fn report_swatch(&mut self, report: &str) {
-        if self.reported_swatch.as_deref() != Some(report) {
-            eprintln!("mycraft: {report}");
-            self.reported_swatch = Some(report.to_owned());
-        }
-    }
-
-    /// States an edit that could not be shown once, however many edits go on to
-    /// meet the same fault.
-    ///
-    /// **It never ends the run**, which is the opposite of what a failed
-    /// preparation does and deliberately so: preparation has no previous picture
-    /// to fall back on, and a re-mesh has the one it drew a moment ago.
-    /// `reason` is text the renderer already produced, not a failure: both
-    /// callers hand it `rendered(..)`. Naming it after the value it carries
-    /// rather than after the value it came from is what keeps it out of the
-    /// guard that watches for an unrendered failure being interpolated.
-    fn report_remesh(&mut self, reason: &str) {
-        if self.reported_remesh.as_deref() != Some(reason) {
-            eprintln!("mycraft: an edit could not be shown: {reason}");
-            self.reported_remesh = Some(reason.to_owned());
-        }
     }
 }
 

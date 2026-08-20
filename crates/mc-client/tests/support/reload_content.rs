@@ -4,17 +4,18 @@
 //!
 //! # Every number here is derived from a declared list, never written down
 //!
-//! The shipped root declares four blocks and each declares `texture` equal to
-//! `name`, so its four texture keys are its four block names — listed in
-//! [`SHIPPED_KEYS`] rather than read back from a registry, for the reason
-//! [`crate::reload`] lists the block names: a fixture that discovered them would
-//! go on passing over a root that had stopped declaring one.
+//! The shipped root declares four blocks and **eight** texture keys, because the
+//! grass block states a key per facing — so a root's keys are no longer its block
+//! names. They are listed in [`crate::reload::SHIPPED_TEXTURE_KEYS`] rather than
+//! read back from a registry, for the reason that module lists the block names: a
+//! fixture that discovered them would go on passing over a root that had stopped
+//! declaring one.
 //!
 //! The layer a fresh assignment gives each of them is that key's position in the
 //! sorted list, and the layer a *new* key takes is the list's length. Neither is
-//! spelled as a digit anywhere below: `4` and `5` do not appear in this module,
-//! and a reader who wants to know why `base:amber` takes layer four is meant to
-//! find [`THE_NEXT_UNUSED_LAYER`] rather than a literal.
+//! spelled as a digit anywhere below: no layer index appears as a literal in this
+//! module, and a reader who wants to know which layer `base:amber` takes is meant
+//! to find [`THE_NEXT_UNUSED_LAYER`] rather than a number.
 //!
 //! # No absolute serial is stated, and that is deliberate
 //!
@@ -43,10 +44,10 @@
 //! appending that many keys through `LayerAssignment::appending` — the only door
 //! into the type — rather than by constructing one. Reaching the same state
 //! organically would take two hundred and fifty reloads. The synthetic keys are
-//! namespaced so that every one of them sorts *after* all four shipped keys,
-//! which is what keeps the shipped four on the layers a launch would have given
-//! them and keeps every expectation below derived rather than read out of the
-//! value under test.
+//! namespaced so that every one of them sorts *after* every shipped key, which is
+//! what keeps the shipped keys on the layers a launch would have given them and
+//! keeps every expectation below derived rather than read out of the value under
+//! test.
 //!
 //! # Why this is reached by `#[path]` and not declared inside `support`
 //!
@@ -70,15 +71,16 @@ use mc_sim::content::LoadedContent;
 use mc_sim::reload::ReloadRefusal;
 use mc_sim::simulation::{Accepted, PublishedContent};
 
-use crate::reload::{DIRT, GRASS, STONE, WATER};
+use crate::reload::SHIPPED_TEXTURE_KEYS;
 use crate::support::content::{ContentRoot, HUD_DIRECTORY, shipped_copy};
 
-/// The four texture keys the shipped root declares, in ascending order — which
-/// is the order a fresh assignment hands layers out in.
+/// The texture keys the shipped root declares, in ascending order — which is the
+/// order a fresh assignment hands layers out in.
 ///
-/// Listed rather than read, and asserted ascending by [`fresh_layers`] so that a
-/// later edit reordering it cannot silently move every expectation below.
-pub const SHIPPED_KEYS: [&str; 4] = [DIRT, GRASS, STONE, WATER];
+/// Stated once in [`crate::reload`] and re-exported here, and asserted ascending
+/// by [`fresh_layers`] so that a later edit reordering it cannot silently move
+/// every expectation below.
+pub const SHIPPED_KEYS: [&str; 8] = SHIPPED_TEXTURE_KEYS;
 
 /// The layer a key introduced over the shipped four takes, which is also how many
 /// layers a launch over the shipped root spends.
@@ -236,7 +238,7 @@ pub fn fresh_layers() -> Result<BTreeMap<String, u16>, Box<dyn Error>> {
         .all(|pair| matches!(pair, [before, after] if before < after));
     if !ascending {
         return Err(format!(
-            "the four shipped texture keys have to be listed in ascending order, because every \
+            "the shipped texture keys have to be listed in ascending order, because every \
              expectation in this module is a key's position in that list, and they are listed \
              {SHIPPED_KEYS:?}"
         )
@@ -261,7 +263,7 @@ pub fn layers_beside(extra: &[(&str, u16)]) -> Result<BTreeMap<String, u16>, Box
     for (key, layer) in extra {
         if layers.insert((*key).to_owned(), *layer).is_some() {
             return Err(format!(
-                "`{key}` is one of the four keys a launch already assigns, so stating it again \
+                "`{key}` is one of the keys a launch already assigns, so stating it again \
                  here would build an expectation that cannot say whether the launch's four were \
                  left where they were"
             )
@@ -271,25 +273,33 @@ pub fn layers_beside(extra: &[(&str, u16)]) -> Result<BTreeMap<String, u16>, Box
     Ok(layers)
 }
 
-/// The layers a launch hands out with the key at `retired` taken out and nothing
-/// renumbered.
+/// The layers a launch hands out with every key of `retired` taken out and
+/// nothing renumbered.
 ///
 /// That is the whole of what "appended, never renumbered" means, stated as an
-/// expectation: the fresh map, one entry lighter, every other key on the layer it
-/// held.
+/// expectation: the fresh map, those entries lighter, every other key on the
+/// layer it held.
+///
+/// **A slice rather than one key, and the reason is the grass block.** One
+/// declaration now states six facing keys, so an author who stops declaring it
+/// retires five of them at once — `base:dirt` stays, because the dirt block
+/// declares it too. A helper that could only take one key away at a time could
+/// not state what removing a declaration does.
 ///
 /// # Errors
 ///
 /// Returns an error unless [`SHIPPED_KEYS`] is ascending, or if the launch never
-/// assigned `retired`.
-pub fn layers_without(retired: &str) -> Result<BTreeMap<String, u16>, Box<dyn Error>> {
+/// assigned one of `retired`.
+pub fn layers_without(retired: &[&str]) -> Result<BTreeMap<String, u16>, Box<dyn Error>> {
     let mut layers = fresh_layers()?;
-    if layers.remove(retired).is_none() {
-        return Err(format!(
-            "`{retired}` is not one of the four keys a launch assigns, so taking it out of the \
-             expectation would leave the expectation the launch's own"
-        )
-        .into());
+    for key in retired {
+        if layers.remove(*key).is_none() {
+            return Err(format!(
+                "`{key}` is not one of the keys a launch assigns, so taking it out of the \
+                 expectation would leave the expectation the launch's own"
+            )
+            .into());
+        }
     }
     Ok(layers)
 }

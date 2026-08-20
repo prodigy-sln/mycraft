@@ -151,26 +151,31 @@ fn a_run_that_places_the_new_block(context: &CaptureContext) -> Result<Drawn, Bo
     let blocks = floor_of(&at_launch, STONE)?;
     let (mut client, reports) = a_client_on(&root, STONE)?;
     let mut meshed = World::new(blocks, at_launch)?.mesh()?;
-    let before_layers = reload_remesh::layers_serving(&client)?;
-    let before_scene = Arc::new(scene_of(&meshed, &before_layers)?);
+    let before_resolution = reload_remesh::resolution_serving(&client)?;
+    let before_scene = Arc::new(scene_of(&meshed, &before_resolution)?);
 
     let declared = declaring_after_launch(&root, AMBER_FILE, &amber())?;
     reports.changed(&[declared])?;
-    let layers = layers_handed_over(until_taken_up(&mut client))?;
+    let resolution = layers_handed_over(until_taken_up(&mut client))?;
     let built = placing_over_the_near_cell(&mut client);
     let work = client.take_remesh_work().ok_or(NOTHING_WAS_LEFT_TO_MESH)?;
     splice(&mut meshed, remesh(&work)?)?;
-    let after_scene = Arc::new(scene_of(&meshed, layers.stated())?);
+    let after_scene = Arc::new(scene_of(&meshed, resolution.stated())?);
 
     Ok(Drawn {
         built,
         before: drawn(
             context,
-            &before_layers,
+            before_resolution.layers(),
             &before_scene,
             "reload-before-amber",
         )?,
-        after: drawn(context, layers.stated(), &after_scene, "reload-after-amber")?,
+        after: drawn(
+            context,
+            resolution.stated().layers(),
+            &after_scene,
+            "reload-after-amber",
+        )?,
     })
 }
 
@@ -189,6 +194,7 @@ fn drawn(
         context.device(),
         context.queue(),
         &TerrainPassConfig::offscreen(),
+        &frames::no_supplied_texels(),
     )?;
     renderer.upload_textures(context.queue(), layers)?;
     renderer.upload_scene(context.queue(), scene)?;

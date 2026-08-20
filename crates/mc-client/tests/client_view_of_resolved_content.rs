@@ -38,7 +38,7 @@ mod staged_layers;
 use std::error::Error;
 
 use mc_client::content::ContentView;
-use mc_core::content::{ResolvedBlock, ResolvedContent};
+use mc_core::content::{FaceTextures, ResolvedBlock, ResolvedContent};
 use mc_core::id::{BlockName, TextureKey};
 
 use staged_layers::assigned;
@@ -100,7 +100,7 @@ fn written_down() -> Result<ResolvedContent, Box<dyn Error>> {
     for (name, texture, is_solid, layer) in STATED {
         blocks.push(ResolvedBlock {
             name: BlockName::parse(name)?,
-            texture: TextureKey::parse(texture)?,
+            textures: FaceTextures::uniform(TextureKey::parse(texture)?),
             is_solid,
         });
         assignment.push((texture, layer));
@@ -118,7 +118,9 @@ fn reported_by(view: &ContentView) -> Result<Vec<Reported>, Box<dyn Error>> {
     let mut reported = Vec::new();
     for (name, texture, _, _) in STATED {
         reported.push((
-            view.layers().layer_of(&TextureKey::parse(texture)?),
+            view.resolution()
+                .layers()
+                .layer_of(&TextureKey::parse(texture)?),
             view.is_solid(&BlockName::parse(name)?),
         ));
     }

@@ -80,24 +80,14 @@ not by the type system.
 0.33.3 and does not compile under `-D warnings`. Documents naming that pair are stale, not wrong
 about the intent.)
 
-## Known gap — texture resolution does not consult the registry
+## Texture resolution reads the declaration, at both sites
 
-`build_section_geometry` matches a quad's `BlockName` against a `TextureKey` **by identical
-spelling**. The registry is the real authority for which texture a block draws, and the builder's
-signature passes no registry, so the match is a coincidence that holds only because every
-`content/base/blocks/*` happens to declare `texture` equal to `name`.
+`build_section_geometry` and `hud::held::held_swatch` both take a `TextureResolution` and answer
+block + facing → key → layer out of the block's own declaration. **Neither parses a block's name**,
+and the two were closed together on purpose: one fixed and one left would show a block drawing
+correctly in the world while its indicator drew nothing, which reads as a HUD bug.
 
-**There are two such sites, not one.** `hud::held::held_swatch` (`src/hud/held.rs`) resolves the
-held-block indicator by parsing the block's own name as a texture key, on exactly the same
-coincidence. Whoever closes this gap must find both — one fixed and one left would show a block
-drawing correctly in the world while its indicator draws nothing, which reads as a HUD bug.
-
-Deferred deliberately for MVP 1, on two grounds: the spec contemplates the failure (FR-1.1-S5), and
-the failure mode is `UnresolvedTexture` naming the block — loud, never a wrong picture. Nothing
-silently renders the wrong thing.
-
-**MVP 2 must close it, and will hit it immediately.** A mod that draws two blocks with one texture,
-or names a texture differently from its block, is valid content this cannot express — and invariant
-1 says a missing hook is fixed in the API, never special-cased. The fix routes resolution through
-the registry and changes a binding signature, which is why it was not taken mid-implementation with
-five phases already broken down against it.
+**Do not stamp a resolved key or layer into a `Quad`.** The retained mesh is re-packed on every
+batch and never re-resolved, so a key fixed at mesh time goes stale on exactly the path built not to
+re-mesh. `docs/technical/rendering.md` §"A face draws what its block declared, and a `Quad` carries
+no key" holds the reasoning.

@@ -1,0 +1,18 @@
+# One solid voxel: the smallest model that is a cube of its own scale, which is
+# what a face set requires.
+
+schema = 1
+name   = "fixture:block"
+scale  = 1
+size   = [1, 1, 1]
+origin = [0, 0, 0]
+slice  = "y"
+
+[palette]
+"p" = "fixture:plain"
+
+[[layers]]
+y = 0
+grid = """
+p
+"""

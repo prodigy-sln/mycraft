@@ -17,6 +17,7 @@ use std::error::Error;
 use common::{TestResult, content_root};
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_world::content::LuauFileDefinitionSource;
 use tempfile::TempDir;
@@ -64,7 +65,7 @@ fn registered(registry: &BlockRegistry, names: &[&str]) -> Result<Vec<String>, B
         let definition = registry.resolve(&BlockName::parse(text)?)?;
         held.push(format!(
             "{text}: textured {}, solid {}, replaceable {}, breakable {}, breaks into {:?}",
-            definition.texture.as_str(),
+            textured(&definition.textures),
             definition.is_solid,
             definition.replaceable,
             definition.breakable,
@@ -96,7 +97,7 @@ fn hand_written_source() -> Result<InMemoryDefinitionSource, Box<dyn Error>> {
 fn hand_written_air() -> Result<BlockDefinition, Box<dyn Error>> {
     Ok(BlockDefinition {
         name: BlockName::parse("base:air")?,
-        texture: TextureKey::parse("base:air")?,
+        textures: FaceTextures::uniform(TextureKey::parse("base:air")?),
         is_solid: false,
         replaceable: true,
         breakable: true,
@@ -109,7 +110,7 @@ fn hand_written_air() -> Result<BlockDefinition, Box<dyn Error>> {
 fn hand_written_stone() -> Result<BlockDefinition, Box<dyn Error>> {
     Ok(BlockDefinition {
         name: BlockName::parse("base:stone")?,
-        texture: TextureKey::parse("base:stone")?,
+        textures: FaceTextures::uniform(TextureKey::parse("base:stone")?),
         is_solid: true,
         replaceable: false,
         breakable: true,
@@ -123,7 +124,7 @@ fn hand_written_stone() -> Result<BlockDefinition, Box<dyn Error>> {
 fn hand_written_grass() -> Result<BlockDefinition, Box<dyn Error>> {
     Ok(BlockDefinition {
         name: BlockName::parse("base:grass")?,
-        texture: TextureKey::parse("base:grass_top")?,
+        textures: FaceTextures::uniform(TextureKey::parse("base:grass_top")?),
         is_solid: true,
         replaceable: false,
         breakable: false,
@@ -157,4 +158,21 @@ fn definitions_held_in_memory_register_exactly_as_the_same_definitions_in_files_
          declaration is silent"
     );
     Ok(())
+}
+
+/// Every key a block's six facings draw from, joined — one key where all six
+/// agree, and a list where they do not.
+///
+/// **Total over the six rather than a reading of one of them.** Every fixture in
+/// this file states its texture as a single string, so the answer is one key; a
+/// resolver that lost five facings, or that answered one facing's key for all six
+/// while the declaration said otherwise, changes this string rather than hiding
+/// behind whichever facing happened to be read.
+fn textured(textures: &FaceTextures) -> String {
+    textures
+        .keys()
+        .iter()
+        .map(TextureKey::as_str)
+        .collect::<Vec<_>>()
+        .join(", ")
 }

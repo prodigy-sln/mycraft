@@ -51,3 +51,13 @@ perf.data*
 
 # A clean quit writes the world here. A runtime artifact, never source.
 saves/
+
+# The built texture set. Derived from `content/base/textures.toml` by
+# `voxforge build`, and never committed — the directory rather than the images,
+# so a stray file in it is ignored too. The manifest one level up is source.
+/content/base/textures/
+
+# Python bytecode. The measurement scripts beside `content/base/models/` are
+# committed and meant to be run, so every contributor who runs one gets this
+# directory; ignoring it keeps it out of an accidental sweep.
+__pycache__/

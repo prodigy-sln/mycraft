@@ -37,7 +37,8 @@ use std::sync::Arc;
 
 use glam::Vec3;
 use mc_core::block::BlockDefinition;
-use mc_core::id::BlockName;
+use mc_core::content::FaceTextures;
+use mc_core::id::{BlockName, TextureKey};
 use mc_sim::player::PlayerState;
 use mc_sim::simulation::{Simulation, seat};
 use mc_sim::world::World;
@@ -136,7 +137,7 @@ fn declared(simulation: &Simulation, block: &str) -> Option<Declared> {
     let definition: &BlockDefinition = simulation.world().registry().resolve(&name).ok()?;
     Some((
         definition.name.as_str().to_owned(),
-        definition.texture.as_str().to_owned(),
+        textured(&definition.textures),
         definition.is_solid,
         definition.replaceable,
         definition.breakable,
@@ -145,4 +146,21 @@ fn declared(simulation: &Simulation, block: &str) -> Option<Declared> {
             .as_ref()
             .map(|residue| residue.as_str().to_owned()),
     ))
+}
+
+/// Every key a block's six facings draw from, joined — one key where all six
+/// agree, and a list where they do not.
+///
+/// **Total over the six rather than a reading of one of them.** Every fixture in
+/// this file states its texture as a single string, so the answer is one key; a
+/// resolver that lost five facings, or that answered one facing's key for all six
+/// while the declaration said otherwise, changes this string rather than hiding
+/// behind whichever facing happened to be read.
+fn textured(textures: &FaceTextures) -> String {
+    textures
+        .keys()
+        .iter()
+        .map(TextureKey::as_str)
+        .collect::<Vec<_>>()
+        .join(", ")
 }

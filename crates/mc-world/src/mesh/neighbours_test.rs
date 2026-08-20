@@ -23,6 +23,7 @@ use std::error::Error;
 
 use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 
 use super::Neighbours;
@@ -73,7 +74,7 @@ fn registry_of_the_six() -> Result<BlockRegistry, Box<dyn Error>> {
         // solidity.
         declared.push(Ok(BlockDefinition {
             name: BlockName::parse(name)?,
-            texture: TextureKey::parse(name)?,
+            textures: FaceTextures::uniform(TextureKey::parse(name)?),
             is_solid: true,
             replaceable: false,
             breakable: true,

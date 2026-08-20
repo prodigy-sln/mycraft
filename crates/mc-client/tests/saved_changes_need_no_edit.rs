@@ -60,7 +60,7 @@ use mc_client::startup::{PreparationError, scene_of};
 use mc_core::block::{BlockId, BlockRegistry};
 use mc_core::id::BlockName;
 use mc_render::geometry::scene::SceneGeometry;
-use mc_render::texture::TextureLayers;
+use mc_render::texture::TextureResolution;
 use mc_sim::action::{ActionIntent, EditReport, TickIntent};
 use mc_sim::player::{BlockPos, MovementIntent};
 use mc_sim::replay::{SectionQuads, remesh, splice};
@@ -264,7 +264,7 @@ fn a_solid_block(registry: &BlockRegistry) -> Result<BlockName, Box<dyn Error>> 
 struct Handed {
     simulation: Simulation,
     meshed: Vec<SectionQuads>,
-    layers: TextureLayers,
+    resolution: TextureResolution,
     scene: SceneGeometry,
 }
 
@@ -276,7 +276,7 @@ impl Handed {
         Self {
             simulation: prepared.simulation,
             meshed: prepared.meshed,
-            layers: prepared.layers,
+            resolution: prepared.resolution,
             scene: prepared.scene,
         }
     }
@@ -311,7 +311,7 @@ impl Handed {
         if let Some(work) = self.simulation.take_remesh_work() {
             splice(&mut self.meshed, remesh(&work)?)?;
         }
-        self.scene = scene_of(&self.meshed, &self.layers)?;
+        self.scene = scene_of(&self.meshed, &self.resolution)?;
         Ok(())
     }
 }

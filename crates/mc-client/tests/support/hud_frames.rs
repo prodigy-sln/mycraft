@@ -29,7 +29,8 @@ use mc_render::gpu::{FrameRenderer, FrameSnapshot, RecordTarget};
 use mc_render::hud::{HudFrame, held_swatch};
 use mc_render::pass::TerrainPassConfig;
 use mc_render::snapshot::{ScenePhase, TerrainSnapshot};
-use mc_render::texture::TextureLayers;
+use mc_render::texture::TextureResolution;
+use mc_render::texture::supplied::SuppliedTexels;
 use mc_sim::action::default_held_block;
 use mc_sim::replay::ReplayWorld;
 use mc_testkit::frame::gpu::{
@@ -132,7 +133,7 @@ pub fn hud_holding_default_block(
 ) -> Result<HudFrame, Box<dyn Error>> {
     let held = default_block_held(content)?;
     Ok(HudFrame {
-        held: held_swatch(Some(&held), &content.layers).texture(),
+        held: held_swatch(Some(&held), &content.resolution).texture(),
         ..hud_of(root)?
     })
 }
@@ -184,8 +185,9 @@ pub fn prepared_renderer(
         context.device(),
         context.queue(),
         &TerrainPassConfig::offscreen(),
+        &super::frames::terrain_textures(prepared),
     )?;
-    renderer.upload_textures(context.queue(), &prepared.layers)?;
+    renderer.upload_textures(context.queue(), &prepared.resolution)?;
     renderer.upload_scene(context.queue(), &prepared.scene)?;
     Ok(renderer)
 }
@@ -220,9 +222,16 @@ pub struct HudCapture<'a> {
 /// second world, and the frame would be of the first.
 #[derive(Debug)]
 pub struct PreparedContent {
-    pub layers: TextureLayers,
+    pub resolution: TextureResolution,
     pub registry: Arc<BlockRegistry>,
     pub world: ReplayWorld,
+    /// The texels the built set offered this preparation.
+    ///
+    /// Carried for the same reason the resolution is: what a swatch is judged
+    /// against has to be what the array texture was filled from, and a key the
+    /// set covers is filled from an image while a key it does not is filled from
+    /// the generator. A second reading of the set would be a second answer.
+    pub texels: SuppliedTexels,
 }
 
 impl<'a> HudCapture<'a> {
@@ -233,14 +242,35 @@ impl<'a> HudCapture<'a> {
     ///
     /// Returns the preparation, pipeline, upload or spawn failure.
     pub fn ready(context: &'a CaptureContext, tick: u32) -> Result<Self, Box<dyn Error>> {
-        let prepared = super::prepare_scene()?;
+        Self::over(context, tick, &super::content_root()?)
+    }
+
+    /// That same capture, prepared from the content root at `root`.
+    ///
+    /// **The root is a parameter because which block a client holds is decided by
+    /// one**, and that is now a thing a fixture has to be able to choose. A client
+    /// holds the first solid block in registration order, and what the indicator
+    /// then draws is that block's own art — so a scenario whose subject is the
+    /// *indicator* rather than the block has to be able to move the choice off a
+    /// block whose colours appear behind it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the preparation, pipeline, upload or spawn failure.
+    pub fn over(
+        context: &'a CaptureContext,
+        tick: u32,
+        root: &Path,
+    ) -> Result<Self, Box<dyn Error>> {
+        let prepared = super::prepare_scene_at(root)?;
         let renderer = prepared_renderer(context, &prepared)?;
         let camera = super::frames::replay_camera(tick, &prepared.world, &prepared.registry)?;
         let PreparedScene {
             scene,
-            layers,
+            resolution,
             world,
             registry,
+            texels,
             ..
         } = prepared;
         let scene = Arc::new(scene);
@@ -249,9 +279,10 @@ impl<'a> HudCapture<'a> {
             renderer,
             snapshot: super::frames::snapshot(tick, camera, &scene),
             content: PreparedContent {
-                layers,
+                resolution,
                 registry,
                 world,
+                texels,
             },
         })
     }
@@ -345,6 +376,7 @@ impl<'a> UnpreparedCapture<'a> {
                 context.device(),
                 context.queue(),
                 &TerrainPassConfig::offscreen(),
+                &super::frames::no_supplied_texels(),
             )?,
             snapshot: TerrainSnapshot {
                 tick: 0,

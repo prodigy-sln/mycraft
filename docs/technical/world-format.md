@@ -542,9 +542,9 @@ time:
   differently than the save recorded. Loadable, but only with the caller's
   explicit acceptance — the data is fine, and whether it *should* be
   loaded is a judgement about the world it belongs to.
-- **Unchanged, or changed only in declared *appearance*** (its texture) —
-  loads without asking. A texture edit cannot damage a world: the blocks
-  are the same blocks and only look different.
+- **Unchanged, or changed only in declared *appearance*** (the keys its six
+  faces draw from) — loads without asking. A texture edit cannot damage a
+  world: the blocks are the same blocks and only look different.
 
 Behaviour and appearance are hashed **separately**, into two independent
 64-bit values, and that split is deliberate rather than an optimisation: a
@@ -552,6 +552,90 @@ single hash covering both would make a retextured mod indistinguishable
 from a rebalanced one, and the only safe response to that ambiguity would
 be to prompt on every texture edit — training a player to click through a
 prompt without reading it, which destroys the one thing the prompt is for.
+
+### What each of the two hashes folds, and how its revision moves
+
+Each hash is FNV-1a-64 over the block's declaration in the save's own
+canonical encoding, which is what gives every variable-length field its
+own length prefix — so `("ab", "c")` and `("a", "bc")` cannot fold to the
+same value. Each list is written out by hand rather than derived from
+`BlockDefinition`: a derive would bind every save in existence to a struct
+that changes for reasons having nothing to do with storage.
+
+| List | Fields, in order | Revision |
+|---|---|---|
+| Behaviour | revision byte, `name`, `is_solid`, `replaceable`, `breakable`, `breaks_into` | 1 |
+| Appearance | revision byte, `name`, then the six declared keys in `up`, `down`, `north`, `south`, `east`, `west` order | 2 |
+
+The **origin is in neither list**, and it is the field that would have
+broken everything: it is a label derived from the path a definition was
+read out of, so folding it would make a save written from a repository at
+one checkout refuse to load from another, for a reason with nothing to do
+with content and with a refusal a player could not tell apart from
+corruption. The name is in **both**, so a block's two hashes cannot be
+swapped for each other and one block's appearance cannot collide with
+another's behaviour.
+
+**The revision byte is per field list and never one number shared between
+them, and the cost of unifying them has been measured rather than
+argued.** The two lists grow for unrelated reasons, so a shared byte
+bumped because the appearance list gained a field moves every block's
+*behaviour* hash in every save in existence. Run against the committed
+pre-spec save at the moment the appearance list grew to six keys, the two
+arrangements answer:
+
+```
+changed:    [base:dirt, base:grass, base:stone, base:water]   // one shared byte
+retextured: [base:dirt, base:grass, base:stone, base:water]   // a byte per list
+```
+
+Those are not two shades of the same answer. Read the three-outcome
+decision above: a non-empty `changed` **refuses the load** under
+`Acceptance::OnlyUnchangedBlocks`, and `retextured` is never a refusal at
+all. So one shared constant means **every save written before this spec
+is refused at load**, and the player is told the blocks they built with
+behave differently — when nothing behaves differently, and all that
+happened is that they were retextured. The measurement was 5 of 1 224
+tests red, and the fifth is the behaviour-half guard reporting exactly the
+defect it was written for.
+
+**This paragraph exists because the next reader is right by every rule
+they can see.** Two constants where there was one is duplication, two
+numbers doing one job, and unifying them is the obvious tidy-up — obvious,
+one line, and it turns a silent retexture into a refused world. So there
+are two constants, only one of them has ever moved, and the reason is
+written here rather than left to be rediscovered.
+
+**The appearance list is at revision 2 because an appearance became six
+keys instead of one.** The consequence is player-visible and intended:
+every save written before that revision reports **every block it holds as
+retextured** on its next load. That is correct rather than a migration
+defect — every block's appearance really did change — and a retexture is
+in the arm that loads without asking anybody anything, so nothing about
+opening an older world changed. A future change to what a block looks like
+moves this byte again and no other; a future change to what a block *is*
+moves the other one.
+
+A save written before a revision is never compared field-by-field against
+one written after it. Two values folded over different field lists agree
+or disagree for reasons nothing in the save records, so the honest answer
+is that the whole list moved, which is what the revision byte says.
+
+**If you move a revision, know which tests can see it: only the ones that
+state the byte sequence.** This was measured rather than assumed. Leaving
+the appearance byte at 1 while the list grew to six keys reddens exactly
+the two guards that build the expected bytes by hand — `format_test.rs`'s
+appearance half and `tests/save_per_face_appearance.rs`'s stated-bytes
+guard — and **nothing else in the workspace**. In particular the guard
+over the committed pre-spec save stays green, because six keys under
+revision 1 still fold differently from one key under revision 1, so an
+older save still reports its blocks retextured either way.
+
+The consequence for whoever changes one of these: **a green suite is not
+evidence that the byte is right.** Every other witness compares one fold
+to another, and a comparison between two folds cannot see a leading byte
+that moved in both. Change the constant and the stating tests are the
+whole of what reports it.
 
 **The asymmetry behind refusing rather than substituting a placeholder for
 a missing block is about which failure is recoverable.** A refused load

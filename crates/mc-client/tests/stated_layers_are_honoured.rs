@@ -18,16 +18,17 @@
 //! [`build_section_geometry`] — the same function the client's own `scene_of`
 //! calls — and reads the layer back out of the corners it produced.
 //!
-//! # These fixtures declare `texture` equal to `name`, against the convention
+//! # Two of these read the resolution, and they used to read its absence
 //!
-//! Everywhere else in this feature a block's texture key is deliberately not its
-//! own name. Here it must be, and that is a constraint on the fixture rather
-//! than a fact about the requirement: an entry of the assignment is selected by
-//! the block's **name** today, so a fixture whose blocks named a different
-//! texture would be refused for that reason instead — red for the wrong reason,
-//! reading as a defect in the assignment when it is not one. The one reading
-//! below whose subject *is* that substitution states the two differently, on
-//! purpose.
+//! A block's texture key is no longer its own name. The two readings at the end
+//! of this file were written when it was — they pinned the substitution as a
+//! *failure*, so that closing it would turn them red and the red would be the
+//! announcement. It has been closed, and they are inverted here rather than
+//! deleted: what they reach is the property through
+//! [`ContentView`], the client's own construction of a resolution out of resolved
+//! content, which is the shipped route and is not the route either of the
+//! mapped readings for this takes. The two blocks in them are named for one
+//! mineral and declare another, exactly as before.
 
 #[path = "support/staged_layers.rs"]
 mod staged_layers;
@@ -35,11 +36,11 @@ mod staged_layers;
 use std::error::Error;
 
 use mc_client::content::ContentView;
-use mc_core::content::{ResolvedBlock, ResolvedContent};
+use mc_core::content::{FaceTextures, ResolvedBlock, ResolvedContent};
 use mc_core::id::{BlockName, TextureKey};
 use mc_render::geometry::{GeometryError, SectionGeometry, SectionOrigin, build_section_geometry};
-use mc_render::hud::{HeldSwatch, held_swatch};
-use mc_render::texture::TextureLayers;
+use mc_render::hud::{HeldSwatch, INDICATOR_FACE, held_swatch};
+use mc_render::texture::TextureResolution;
 use mc_world::mesh::{Facing, PlaneExtent, PlanePos, Quad};
 
 use staged_layers::assigned;
@@ -110,7 +111,7 @@ fn corners_are_packed_with_the_layer_the_assignment_names_and_not_with_a_sorted_
     let content = stating(&DISAGREEING, &DISAGREEING)?;
     let view = ContentView::of(&content);
 
-    let packed = packing(&blocks_of(&DISAGREEING), view.layers())?;
+    let packed = packing(&blocks_of(&DISAGREEING), view.resolution())?;
 
     assert_eq!(
         (packed, DISAGREEING.map(|(_, layer)| layer).to_vec()),
@@ -131,8 +132,8 @@ fn a_block_the_assignment_names_no_layer_for_is_refused_by_name_rather_than_pack
     let content = stating(&DISAGREEING, &NAMING_TWO_OF_THREE)?;
     let view = ContentView::of(&content);
 
-    let unassigned = packing(&[UNASSIGNED_BLOCK.to_owned()], view.layers())?;
-    let assigned = packing(&[NAMING_TWO_OF_THREE[0].0.to_owned()], view.layers())?;
+    let unassigned = packing(&[UNASSIGNED_BLOCK.to_owned()], view.resolution())?;
+    let assigned = packing(&[NAMING_TWO_OF_THREE[0].0.to_owned()], view.resolution())?;
 
     assert_eq!(
         (unassigned, assigned),
@@ -150,56 +151,57 @@ fn a_block_the_assignment_names_no_layer_for_is_refused_by_name_rather_than_pack
 }
 
 #[test]
-fn a_block_whose_declared_texture_is_not_its_own_name_is_refused_at_packing_time_naming_the_block()
--> TestResult {
+fn a_block_whose_declared_texture_is_not_its_own_name_packs_from_the_key_it_declared() -> TestResult
+{
     let view = ContentView::of(&substituting()?);
 
-    let packed = packing(&[SUBSTITUTED_BLOCK.to_owned()], view.layers())?;
+    let packed = packing(&[SUBSTITUTED_BLOCK.to_owned()], view.resolution())?;
 
     assert_eq!(
         packed,
-        Packed::RefusedNaming(SUBSTITUTED_BLOCK.to_owned()),
-        "the assignment names a layer for the key this block declares, and the packer still \
-         selects an entry by parsing the block's own *name* as a texture key. The two agree only \
-         because every shipped block declares them identically. This pins that substitution as a \
-         reading rather than as a comment in two CLAUDE.md files: a declaration whose `texture` \
-         differs from its `name` loads and then does not draw"
+        Packed::Corners(corners_for(&SUBSTITUTED_ASSIGNMENT[..1])),
+        "the assignment names a layer for the key this block declares, and that is the layer its \
+         corners carry. Reached through the client's own view of resolved content rather than \
+         through a resolution a fixture assembled, because that construction is where a lookup \
+         keyed on a block's name would survive: every other reading hands the packer a resolution \
+         somebody wrote out by hand"
     );
     Ok(())
 }
 
-/// The second site of the same substitution, which no existing note records.
+/// The second site of the same lookup, reached the same way.
 ///
-/// The geometry builder is not the only consumer resolving a block by parsing
-/// its name as a texture key: the held-block indicator does it too. A spec
-/// closing the gap that found one site and left the other would show a block
-/// drawing correctly in the world while its indicator drew nothing, which reads
-/// as a HUD bug. One reading through the indicator is what stops that.
+/// The geometry builder is not the only consumer that has to resolve a block to
+/// a key: the held-block indicator does too, and closing one site while leaving
+/// the other would show a block drawing correctly in the world with a blank
+/// indicator beside it — which reads as a HUD fault and sends whoever chases it
+/// to the wrong module. One reading through the indicator, over the same view,
+/// is what holds the two together.
 #[test]
-fn the_held_block_indicator_resolves_by_the_blocks_name_too_and_shows_nothing_for_such_a_block()
--> TestResult {
+fn the_held_block_indicator_shows_the_layer_of_the_key_the_block_declared() -> TestResult {
     let view = ContentView::of(&substituting()?);
     let substituted = BlockName::parse(SUBSTITUTED_BLOCK)?;
     let plainly_keyed = BlockName::parse(PLAINLY_KEYED_BLOCK)?;
 
     assert_eq!(
         (
-            held_swatch(Some(&substituted), view.layers()),
-            held_swatch(Some(&plainly_keyed), view.layers())
+            held_swatch(Some(&substituted), view.resolution()),
+            held_swatch(Some(&plainly_keyed), view.resolution())
         ),
         (
-            HeldSwatch::Unresolved {
-                block: substituted.clone(),
-                key: Some(TextureKey::parse(SUBSTITUTED_BLOCK)?),
+            HeldSwatch::Shows {
+                key: TextureKey::parse(ITS_DECLARED_KEY)?,
+                face: INDICATOR_FACE,
             },
             HeldSwatch::Shows {
                 key: TextureKey::parse(PLAINLY_KEYED_BLOCK)?,
+                face: INDICATOR_FACE,
             }
         ),
-        "the indicator parses the held block's own name as a texture key, so a block declaring a \
-         different one draws no swatch even though the assignment names a layer for the key it \
-         declared. The block beside it, whose key is its name, still shows — without that half \
-         an indicator that resolved nothing at all would read the same"
+        "the indicator draws the key the held block declares, whether or not that key is the \
+         block's own name. The block beside it, whose key *is* its name, still shows — without \
+         that half a lookup that answered with the declared key for everything and the name for \
+         nothing would read the same as one that had stopped resolving at all"
     );
     Ok(())
 }
@@ -218,7 +220,7 @@ fn stating(
     for (name, _) in blocks {
         stated.push(ResolvedBlock {
             name: BlockName::parse(name)?,
-            texture: TextureKey::parse(name)?,
+            textures: FaceTextures::uniform(TextureKey::parse(name)?),
             is_solid: true,
         });
     }
@@ -236,12 +238,12 @@ fn substituting() -> Result<ResolvedContent, Box<dyn Error>> {
         vec![
             ResolvedBlock {
                 name: BlockName::parse(SUBSTITUTED_BLOCK)?,
-                texture: TextureKey::parse(ITS_DECLARED_KEY)?,
+                textures: FaceTextures::uniform(TextureKey::parse(ITS_DECLARED_KEY)?),
                 is_solid: true,
             },
             ResolvedBlock {
                 name: BlockName::parse(PLAINLY_KEYED_BLOCK)?,
-                texture: TextureKey::parse(PLAINLY_KEYED_BLOCK)?,
+                textures: FaceTextures::uniform(TextureKey::parse(PLAINLY_KEYED_BLOCK)?),
                 is_solid: true,
             },
         ],
@@ -271,7 +273,7 @@ fn corners_for(table: &[(&str, u16)]) -> Vec<u16> {
 /// # Errors
 ///
 /// Returns an error if a fixture id is not a block name.
-fn packing(blocks: &[String], layers: &TextureLayers) -> Result<Packed, Box<dyn Error>> {
+fn packing(blocks: &[String], resolution: &TextureResolution) -> Result<Packed, Box<dyn Error>> {
     let mut quads = Vec::new();
     for (plane, block) in blocks.iter().enumerate() {
         quads.push(Quad {
@@ -288,9 +290,9 @@ fn packing(blocks: &[String], layers: &TextureLayers) -> Result<Packed, Box<dyn 
             block: BlockName::parse(block)?,
         });
     }
-    match build_section_geometry(&quads, SectionOrigin::new(SECTION), layers) {
+    match build_section_geometry(&quads, SectionOrigin::new(SECTION), resolution) {
         Ok(geometry) => Ok(Packed::Corners(corner_layers(&geometry))),
-        Err(GeometryError::UnresolvedTexture { block }) => {
+        Err(GeometryError::UnresolvedTexture { block, .. }) => {
             Ok(Packed::RefusedNaming(block.as_str().to_owned()))
         }
         Err(other) => Ok(Packed::RefusedOtherwise(other.to_string())),

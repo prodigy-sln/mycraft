@@ -15,15 +15,17 @@
 //! be exactly the vacuous green this spec exists to remove.
 
 use std::error::Error;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use mc_core::block::BlockRegistry;
 use mc_render::camera::{CameraView, camera_view};
 use mc_render::geometry::scene::SceneGeometry;
-use mc_render::gpu::{RecordTarget, TerrainRenderer};
+use mc_render::gpu::{RecordTarget, TerrainRenderer, TerrainTextures};
 use mc_render::pass::TerrainPassConfig;
 use mc_render::snapshot::{ScenePhase, TerrainSnapshot};
 use mc_render::surface::SurfaceSize;
+use mc_render::texture::sampler::TERRAIN_SAMPLER;
+use mc_render::texture::supplied::SuppliedTexels;
 use mc_sim::camera::CameraPose;
 use mc_sim::replay::{ReplayWorld, TickIndex, scripted_intent, simulation_for};
 use mc_testkit::frame::gpu::{
@@ -78,11 +80,44 @@ pub fn prepared_renderer(
         context.device(),
         context.queue(),
         &TerrainPassConfig::offscreen(),
+        &terrain_textures(prepared),
     )?;
-    renderer.upload_textures(context.queue(), &prepared.layers)?;
+    renderer.upload_textures(context.queue(), prepared.resolution.layers())?;
     renderer.upload_scene(context.queue(), &prepared.scene)?;
     Ok(renderer)
 }
+
+/// What the composition root hands a renderer: the terrain sampler it asks for,
+/// and the texels the built set offered for this preparation.
+///
+/// **Borrowed from the `PreparedScene` rather than assembled here.** What fills
+/// the array texture has to be what the launch read; a fixture supplying its own
+/// would be asserting about a set nobody built.
+pub fn terrain_textures(prepared: &PreparedScene) -> TerrainTextures<'_> {
+    TerrainTextures {
+        supplied: &prepared.texels,
+        sampler: TERRAIN_SAMPLER,
+    }
+}
+
+/// The same request with nothing supplied, for a renderer built before any
+/// content has been read.
+///
+/// **Not a shortcut, and it is what those fixtures are about.** A frame drawn
+/// while the world is still being prepared has no content root behind it yet, so
+/// there is no set to have offered anything and every layer is the generated
+/// texture — which is exactly the state the shipped client is in on its first
+/// frames.
+#[must_use]
+pub fn no_supplied_texels() -> TerrainTextures<'static> {
+    TerrainTextures {
+        supplied: NO_TEXELS.get_or_init(SuppliedTexels::none),
+        sampler: TERRAIN_SAMPLER,
+    }
+}
+
+/// The empty supply the renderers above borrow from.
+static NO_TEXELS: OnceLock<SuppliedTexels> = OnceLock::new();
 
 /// A request named `name`, at the declared capture size.
 ///

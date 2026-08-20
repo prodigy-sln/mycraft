@@ -175,8 +175,9 @@ fn a_terrain_pass_that_cannot_be_recorded_names_the_stage_that_failed() -> TestR
         context.device(),
         context.queue(),
         &TerrainPassConfig::offscreen(),
+        &support::production_textures(),
     )?;
-    renderer.upload_textures(context.queue(), &fixture.layers)?;
+    renderer.upload_textures(context.queue(), fixture.resolution.layers())?;
 
     let failure = record_without_a_scene(&context, &mut renderer, &fixture)
         .err()
@@ -355,6 +356,7 @@ fn render_while_preparing(
         context.device(),
         context.queue(),
         &TerrainPassConfig::offscreen(),
+        &support::production_textures(),
     )?;
     let request = support::request(context, name, COUNTING_FRAME)?;
     let snapshot = snapshot_of_nothing();

@@ -136,7 +136,7 @@ pub fn published_content(registry: &BlockRegistry) -> Result<PublishedContent, B
         let declared = registry.definition(BlockId::from_raw(u32::try_from(position)?))?;
         blocks.push(ResolvedBlock {
             name: declared.name.clone(),
-            texture: declared.texture.clone(),
+            textures: declared.textures.clone(),
             is_solid: declared.is_solid,
         });
     }
