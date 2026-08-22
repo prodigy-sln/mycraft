@@ -508,3 +508,129 @@ Three `optional_boolean` calls inline give
 `cargo clippy --workspace --all-targets --all-features -- -D warnings`. Extracted
 as `defaulting_to_solidity`, which also names the one derived default the loader
 has. No `#[allow]`.
+
+### Phase 2 — T04, T06, T07, T08 done at `9a09a08` (code) and this commit (docs)
+
+**Two commits, not four, and the split is where the tree stays green.** T04
+landed alone at `99edf1b` (`354 run, 341 passed, 13 failed`, from `340/14` — only
+FR-2.7-S1 moved). T06 and T07 landed together at `9a09a08` because **neither is
+green alone**: the third clause needs the shared key table, and a boundary plane
+of booleans cannot answer FR-2.3-S3 at all, so every split has a red commit in it
+(`git-workflow.md` §2).
+
+**The phase's own evidence, which is the point of the phase.** The whole mesher
+was rebuilt and no shipped quad or pixel moved:
+
+```sh
+cargo nextest run --workspace --no-fail-fast
+# 1409 tests run: 1409 passed, 1 skipped        (1394 from phase 1, + 15 new)
+
+cargo nextest run -p mc-sim -p mc-client \
+  -E 'binary(scene_contract) + binary(replay_world) + binary(terrain_goldens) + binary(hud_goldens)' \
+  --no-fail-fast
+# 16 tests run: 16 passed, 0 skipped
+```
+
+Named rather than inferred from a total, because a count cannot tell a test that
+passed from one that never ran: `the_meshed_quad_count_matches_the_committed_scene_contract_snapshot`,
+`no_quad_of_the_meshed_replay_names_the_block_that_fills_its_sea`,
+`every_declared_capture_matches_the_golden_committed_for_it` and
+`the_declared_hud_capture_matches_the_golden_committed_for_it` all PASS.
+`SCENE_QUAD_COUNT` stays 2759 and the four `r1` directories are untouched.
+
+**Mutation, Phase 2 (M5) — it bit, and it measured more than it was for.** Third
+clause dropped from `visible_face`.
+
+```sh
+cargo nextest run -p mc-world --no-fail-fast     # 354 run, 351 passed, 3 failed
+cargo nextest run --workspace --no-fail-fast     # 1409 run, 1406 passed, 3 failed, 1 skipped
+```
+
+FR-2.3-S1, S2 and S3 alone, workspace-wide. FR-2.3-S4 stayed green — two
+*different* drawn non-occluding blocks, so the clause was never what culled them,
+which is the control working rather than a gap.
+
+**Running it workspace-wide was worth more than the "nothing else" half it was
+for.** `scene_contract`, `replay_world` and all four goldens stayed green under a
+mesher with the engine rule deleted. That is a direct measurement of the
+reduction argument this whole phase rests on — the third clause never fires on
+shipped content, because every shipped block still has `drawn == occludes ==
+solid` and `occludes(beyond)` culls first. The argument was derived by reading
+the predicate in `/sdd-tasks`; it is now observed.
+
+**Mutation, Phase 2 (M6) — the test author's, and it bit.** `resolve_surroundings`
+reordered so `boundary_planes` runs before `section_keys`.
+
+```sh
+cargo nextest run --workspace --no-fail-fast     # 1409 run, 1408 passed, 1 failed, 1 skipped
+```
+
+`a_section_and_a_neighbour_both_holding_something_unresolvable_refuse_by_the_sections_own`
+**alone**, and for the right reason:
+
+```
+Error: "expected a refusal naming a block and its voxel, got
+  UnresolvedNeighbourBlock { name: BlockName(NamespacedId("example:orphan_next_door")),
+  facing: NegZ, position: LocalPos { x: 2, y: 6, z: 15 } }"
+```
+
+It named the neighbour's block at linear 3938 where the test demands the
+section's own at linear 4073 — so the failure also rules out the second wrong
+order the fixture was built against, a resolver reporting whichever came first in
+linear order. All six pre-existing refusal scenarios printed **PASS** by name
+under it.
+
+Both mutations reverted by re-editing the line, never `git checkout`, with
+`git diff --exit-code` returning 0 between them and after. The window was
+announced to the test author before it opened and closed explicitly, since a red
+from a mutation and a red from a defect are indistinguishable from outside.
+
+**T07's checklist item 1 was based on a false premise, and this is the
+correction.** The task says the existing `UnresolvedBlock` /
+`UnresolvedNeighbourBlock` scenarios are *"the cheapest instrument that can see"*
+a shared table resolved in the wrong order. **None of the six can see it.** Read
+all six: three use `Neighbours::none()`, and the other three
+(`a_block_a_neighbour_holds_against_the_shared_face_…`,
+`…away_from_the_shared_face_…`, `a_refused_mesh_leaves_the_section_and_every_neighbour_it_was_given_untouched`)
+build the meshed section from resolvable content and put the orphan only in a
+neighbour. Not one holds an unresolvable block on both sides. The precedence was
+a decision stated in `sweep.rs`'s own doc comment — *"The scenarios leave that
+open"* — and asserted nowhere. The test author added the test; M6 is what turned
+it from an untested guard into evidence. T07's intent stands; its premise does
+not.
+
+**`architecture.md`'s byte-identity claim was false and is corrected in place.**
+Open Question 2 justified keying the section first with *"every key the meshed
+section's voxels hold is byte-identical to today"*. Seeding `Contents::Empty` at
+key 0 shifts every key by one for a section holding no empty voxel and grows
+`distinct_blocks()` by one, so that sentence contradicts the seeding two bullets
+below it. **The decision is unchanged; the justification is replaced with the
+measured one** — key values are unobservable, verified by
+`grep -rn "distinct_blocks" --include=*.rs crates/` (definition plus two
+`CorruptMeshIndex` lengths nothing asserts) and
+`grep -rn "\bKey\b" --include=*.rs crates/ | grep -v "/src/"` (nothing at all).
+Corrected in the document rather than only in `docs/`, because a binding document
+carrying a false justification is worse than one carrying none: the next reader
+inherits the reasoning, not the decision.
+
+**Deferred observations — not this phase's work, recorded so a later one is
+scoped knowing them.**
+
+- **`crates/mc-world/tests/mesh_common/mod.rs` is at 490 non-blank lines against
+  the gate's 600**, up from 326. **Phase 4 needs a `targetable` answer in that
+  same module and will open with 110 lines of headroom, not 274.** Not split
+  here: splitting a shared helper module with no reader for the split is the
+  speculative move this spec has twice declined.
+- Production headroom after the rebuild, for whoever touches these next:
+  `mesh/resolve.rs` 421/500, `mesh/sweep.rs` 341/500, `section/mod.rs` 455/500.
+  `resolve.rs` grew by 104 non-blank lines and is the one to watch.
+- **Seven files decide drawnness by asking a section whether a cell is solid,
+  and this phase moved none of them.** `crates/mc-world/tests/mesh_fixtures.rs`,
+  `mesh_fixture_scale.rs`, `benches/meshing.rs` and `benches/support/oracle.rs`
+  mean drawnness and are candidates; `tests/block_semantics.rs` and
+  `tests/empty_cell_solidity.rs` mean solidity and stay.
+  `crates/mc-sim/tests/support/oracle.rs:199,211` is **Phase 3's T10**, which
+  names it. Leaving the four alone is behaviour-neutral while every fixture in
+  them has `drawn == solid`, and M5 above measured that they stay green either
+  way — but they are the sites at which an oracle could silently re-agree with
+  its subject once a fixture in them diverges.

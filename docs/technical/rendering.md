@@ -29,7 +29,7 @@ pub fn mesh_section(
 ```
 
 A `Quad` is a `facing`, a `plane` (the coordinate, along the facing's axis, of
-the **solid voxel that emitted the face** — never of the face itself, so
+the **drawn voxel that emitted the face** — never of the face itself, so
 every plane stays inside `0..16` and matches `world-format.md`'s
 exclusive-bound convention), an origin `PlanePos` and an extent
 `PlaneExtent` (both components ≥ 1), and a `block: BlockName`. A
@@ -57,10 +57,11 @@ secondary are the plane's two remaining axes taken in x < y < z order.
 Identical section contents produce a byte-identical quad sequence regardless
 of write history, palette order, palette length, index width, compaction
 state, reference counts, or the order blocks were registered in. This holds
-because solidity and block identity are resolved into **contents-ordered**
-keys before the sweep ever runs: one pass over the section's own voxels in
-their linear (x-fastest) order builds one entry per *distinct block the
-section actually holds*, in first-encounter order. Nothing registry-local or
+because block identity and what each block declares are resolved into
+**contents-ordered** keys before the sweep ever runs: one pass over the
+section's own voxels in their linear (x-fastest) order builds one entry per
+*distinct block the section actually holds*, in first-encounter order, and
+the six shared faces are then keyed into the same table. Nothing registry-local or
 history-dependent survives into that pass's output, so nothing
 registry-local or history-dependent can reach the emitted quads either.
 
@@ -73,8 +74,8 @@ warranted structurally rather than by convention.
 ### An empty cell is answered before the registry
 
 A cell holds a block or nothing (`technical/world-format.md`), and a
-palette entry holding nothing resolves to **non-solid without the registry
-being consulted at all**. That is one arm in one place, and it covers both
+palette entry holding nothing resolves to **neither drawn nor occluding,
+without the registry being consulted at all**. That is one arm in one place, and it covers both
 the meshed section and every supplied neighbour — which is what keeps "an
 empty cell shows no face" a single rule rather than two that could drift
 apart at a chunk boundary, where the difference would show as a seam only
@@ -85,8 +86,9 @@ Two consequences worth stating, because both are load-bearing:
 - **A section holding nothing anywhere meshes into a mesh carrying no
   quads, even against a registry holding no block at all.** Emptiness is
   not an unresolved block, so it earns no `UnresolvedBlock` refusal.
-- **Nothing about the sweep changes.** Emptiness reaches it as a non-solid
-  cell, and a non-solid cell already emitted no face. `visible_face`, the
+- **Nothing about the sweep changes.** Emptiness reaches it as a cell that
+  is not drawn and does not occlude, and an undrawn cell already emitted no
+  face. `visible_face`, the
   merge predicate, the loop nesting and the emission order are untouched by
   it — which is the reason retiring the base game's former empty block
   moved no pixel of any committed golden frame.
@@ -114,7 +116,7 @@ separately.
 
 Absence is **per neighbour**, never all-or-nothing: each of the six slots is
 independently `Some` or `None`. An absent neighbour is decided as if the
-adjacent voxel were non-solid — deliberately, because treating an unloaded
+adjacent voxel held nothing — deliberately, because treating an unloaded
 neighbour as solid would hide the streaming edge behind a silently missing
 face, and a visible wall at the world edge is correctable in a way a silently
 missing surface at every chunk boundary is not.
@@ -124,6 +126,83 @@ facing-plane voxels reference** — narrower than the rule for the meshed
 section itself, which resolves every palette entry any of its 4096 voxels
 reference. A block a neighbour holds away from the shared face is never read
 and can never fail the mesh.
+
+### Which faces exist: three questions, and one of them is an engine rule
+
+A face is emitted at a cell only when all three of these answer yes. The first
+two are read off the declarations either side of the face; the third is derived
+by the engine and stated in `visible_face` and nowhere else.
+
+```
+drawn(self) && !occludes(beyond) && key(self) != key(beyond)
+```
+
+1. **Is this block drawn?** `BlockDefinition::drawn` — the only question asked
+   of the cell showing the face. A block declared solid and undrawn is an
+   invisible barrier: it reaches the sweep and emits nothing.
+2. **Does whatever is beyond it fail to occlude?** `BlockDefinition::occludes`
+   of the neighbouring cell. Separate from the first because a block may be seen
+   without hiding what is behind it, which is the whole of what makes water look
+   like water — and a block may hide what is behind it without being seen or
+   being solid.
+3. **Is whatever is beyond it a different block?** **A block never draws a face
+   against its own kind.** Without this a body of water is a stack of visible
+   sheets, one interior face per cell; with it, a sea shows only its surface and
+   its edges.
+
+None of the three is derived from `is_solid`, which now means collision and
+nothing else. They coincide across the four blocks the base game ships, and
+deriving any of them from another would put that accident in the engine where
+content could not override it.
+
+**The third is a rule, not a declaration — and PRO-952 is its named breaker.**
+It is evaluated over **key identity**: keys are handed out per distinct
+*contents* over a table deduplicated by name, so `key(self) != key(beyond)`
+compares identity and reads neither a block name nor a runtime id. `visible_face`'s
+standing property — that no name and no runtime id is looked at anywhere in the
+file, which is what makes a mod's block behave exactly as the base game's — is
+therefore preserved by the comparison rather than weakened by it.
+
+What that costs a mod author, stated because it is not currently askable: **two
+adjacent cells holding the same non-occluding block show no seam between them,
+and there is no field that turns the rule off.** The value that would do it is
+`merges_with_self = false`, whose one identified use is drawing the interior
+faces of a translucent volume — per-pane glass — and translucency is PRO-952.
+The day that spec lands, this rule has to become a declaration; until then the
+engine's answer is the only answer.
+
+#### The boundary plane carries a key, not a flag
+
+`Boundaries` is `[[Key; 256]; 6]` — one key per cell of each of the six faces a
+section shares with its neighbours, over **the same key table as the section
+being meshed**, resolved second. A plane of booleans has no room for the third
+question, and the boundary is exactly where it has to be asked: a body of water
+spans sections, so a mesher that could only answer it inside a section shows a
+sheet at every chunk edge.
+
+Four properties a future change must not break, recorded here rather than
+reconstructed later from the code:
+
+1. **The meshed section is keyed before its boundaries.** This is what makes
+   `UnresolvedBlock` outrank `UnresolvedNeighbourBlock` when a section and a
+   neighbour both hold something unresolvable, and what keeps a refusal naming
+   the lowest voxel of the meshed section's *own* linear order rather than the
+   lowest of the two sections' union.
+2. **Key 0 is `Contents::Empty`**, seeded before any voxel is read. An
+   unsupplied neighbour's plane is therefore all zeros, which is "nothing
+   beyond" — it occludes nothing and is not the same kind as anything. Absence
+   stays a value the sweep reads rather than a branch it tests for.
+3. **Keys never reach the output.** They order nothing a caller sees. Their
+   numeric values are deliberately unobservable, and the seeding in (2) shifts
+   every key by one relative to a table that did not seed — which is harmless
+   only for as long as this stays true.
+4. **Only the 256 voxels of each shared face are ever read.** A block a
+   neighbour holds away from that face still never reaches the registry and
+   still cannot refuse a mesh it could not have appeared in.
+
+`Key` is `u16`. Its ceiling is the 4096 voxels of the meshed section plus the
+256 of each of six shared faces — 4096 + 6 × 256 = **5632** distinct blocks,
+*derived* from those shapes rather than measured, and far inside the type.
 
 ### The merge predicate, as built
 

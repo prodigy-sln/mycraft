@@ -207,14 +207,33 @@ Three ways to widen it were considered:
 | A bool plane **plus** a key plane | 1 536 + 3 072 = **4 608 bytes** | Works, but keeps two lookup paths and needs a second `occludes` answer for a neighbour block the meshed section does not hold. |
 | **One key plane over a table shared with the meshed section** | **3 072 bytes** | Chosen. Fewer bytes than today's bool plane plus identity, one lookup path, and it reuses the dedup-by-name machinery that already exists. |
 
-**Chosen mechanism.** `resolve_section` and `resolve_boundaries` share one
-`Resolver`, in that order — the order `mesh_section` already calls them in
+**Chosen mechanism.** `resolve_section` and `resolve_boundaries` share one key
+table, in that order — the order `mesh_section` already calls them in
 (`sweep.rs:75-76`). The meshed section's 4 096 voxels are keyed first, so
-**every key the meshed section's voxels hold is byte-identical to today**, and
 `MeshError::UnresolvedBlock` still outranks `UnresolvedNeighbourBlock` and
 still names the lowest voxel in linear order. The six shared faces are then
 keyed into the same table, appending any block the section did not itself hold.
 `Boundaries` becomes `[[Key; plane::CELLS]; BOUNDARIES]`. Then:
+
+> **Correction, made during Phase 2 implementation.** This paragraph originally
+> justified the ordering with *"every key the meshed section's voxels hold is
+> byte-identical to today"*. **That is false**, and it contradicts the seeding
+> two bullets below: keying `Contents::Empty` at key 0 before any voxel is read
+> shifts every key by one for a section holding no empty voxel, and grows
+> `distinct_blocks()` by one. **The decision is unchanged and the seeding is
+> safe — but for the measured reason, not that one: key values are
+> unobservable.** Assumption 3 below is what carries it, and it was verified
+> rather than assumed —
+> `grep -rn "distinct_blocks" --include=*.rs crates/` finds the definition at
+> `resolve.rs` and two uses in `sweep.rs`, both only as the `length` field of a
+> `CorruptMeshIndex` that nothing asserts, and
+> `grep -rn "Key" --include=*.rs crates/ | grep -v "/src/"` finds nothing
+> at all. The ordering earns its keep on refusal precedence alone, which
+> `a_section_and_a_neighbour_both_holding_something_unresolvable_refuse_by_the_sections_own`
+> now asserts and a hand mutation of the order was observed to redden.
+> **A future change that made a key value observable would turn this surplus
+> claim into a real constraint**, which is why property (3) in
+> `docs/technical/rendering.md` records it.
 
 - `occludes(beyond)` — a table lookup on the boundary cell's key.
 - "the same kind" — `key_of_self == key_beyond`, one `u16` compare, and it
