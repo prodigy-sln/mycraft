@@ -424,19 +424,47 @@ wrong and neither of the first ones, and only a comparison that ran can say so.
 
 ### The whole-workspace reading, and which tree it was taken on
 
-**Stated first, because `a7be86e` is not the tree these were read on.** The tests
-commit does not compile — `Section::is_drawn_at` does not exist in it — so no
-lint and no workspace run can read `a7be86e` at all, and a reading that did not
-say which tree it came from would be an absent instrument dressed as a clean one.
+**Stated first, because `a7be86e` is not the tree these were read on, and neither
+is any commit.** The tests commit does not compile — `Section::is_drawn_at` does
+not exist in it — so no lint and no workspace run can read `a7be86e` at all, and a
+reading that did not say which tree it came from would be an absent instrument
+dressed as a clean one.
 
 Every reading below was taken on `a7be86e` plus the implementation's
-deliberately-less `is_drawn_at`, which returns `is_solid_at`'s answer. That was
-still uncommitted while the runs happened and has since landed as **`99edf1b`**,
-so the readings are quotable against a commit rather than against a working copy
-somebody would have to reconstruct. The two are the same tree, checked rather than
-assumed: `git diff 99edf1b --stat -- crates content docs scripts tools Cargo.toml`
-prints nothing, and `git stash list` is empty. Every gate stage reads only those
-paths, so the code tree measured **is** `99edf1b`'s.
+deliberately-less `is_drawn_at`, whose whole body was
+`self.is_solid_at(pos, registry)`. **That tree object was never committed and is
+recoverable from nothing but this record.** `git log --all -S "self.is_solid_at(pos,
+registry)" -- crates/mc-world/src/section/mod.rs` lists no commit. The commit that
+followed, `99edf1b`, carries the *finished* read — `Ok(registry.resolve(name)?.drawn)`
+— so **these readings are not quotable against it**, and FR-2.7-S1 is expected
+green there rather than red.
+
+**A correction to an earlier revision of this paragraph, which claimed they were.**
+The check offered as proof was
+`git diff 99edf1b --stat -- crates content docs scripts tools Cargo.toml` printing
+nothing. It did print nothing, and it was worthless for the purpose: it ran *after*
+the implementation had already replaced the stub with the real read and committed
+it, so it compared `99edf1b` against a working tree that by then matched
+`99edf1b` — and said nothing whatever about the tree the readings had come from
+half an hour earlier. **Phase 1's rule is that a reading is a statement about a
+tree object rather than about a commit; the failure mode this adds is checking
+tree equality at a later moment than the reading and treating the answer as
+retroactive.** An observation of a shared tree ages exactly as fast as anybody
+else's, and that includes the observation being used to validate another one.
+
+What survives the correction, and why:
+
+- **The `1409 / 1395 / 14` count is sound as a stub-tree reading**, and
+  internally dated by its own content: the run reports `section_drawnness` FAILED,
+  which the finished read cannot produce. So the stub was still in place when it
+  ran.
+- **`clippy` exit 0 and `fmt --check` exit 0 describe the stub tree too**, for the
+  same reason — both ran before that workspace run. Neither is a statement about
+  `99edf1b`, and neither is claimed as one.
+- **The `scene_contract`, `replay_world` and golden readings hold either way.**
+  None of those tests reads drawnness: the mesher was still deciding on solidity
+  at that point, and the shipped water declares nothing until Phase 3. They are
+  the same answer against the stub and against the finished read.
 
 | Invocation | Result |
 |---|---|
