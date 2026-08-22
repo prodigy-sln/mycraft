@@ -364,7 +364,17 @@ screened figure sitting in a task list is the thing somebody tunes to.
 [Deferred observations and follow-ups discovered during implementation go below.
 Never delete task text; append status markers only.]
 
-### Phase 1 — closed. T01, T02, T03 done at `45a945c`; gate green.
+### Phase 1 — T01, T02, T03 done at `45a945c`
+
+**The gate result is not in this line yet.** An earlier revision of this heading
+said "gate green" while `scripts/sdd-gate.ps1` was still inside its
+`tests + coverage` stage — a status claim standing in for an observation, written
+into the durable record. What was actually observed at the time it was written:
+`cargo nextest run -p mc-world -p mc-core` at 388 passed / 0 failed,
+`cargo clippy --workspace --all-targets --all-features -- -D warnings` at exit 0,
+and the gate's earlier stages (sast, secrets, art) reporting ok. The gate's own
+verdict, its test count and its coverage figure are appended below when the run
+exits — not before.
 
 **Mutation, Phase 1 — it bit.** `optional_boolean`'s `absent` made a literal
 `false` inside `defaulting_to_solidity`. `cargo nextest run -p mc-world -p mc-core
@@ -401,12 +411,16 @@ the closing fence. `spec.md:426`, `spec.md:552`, `architecture.md:355`,
 **Where a `drawn` quotation may sit on the blocks page is tighter than recorded.**
 The last `texture`-blaming quotation on the page is **not** in the texture-table
 section — it is in the bounds section (`texture` holds 257 characters), now at
-`docs/modding/blocks-items.md:502`, which sits *below* "Reading a refusal". A
+`docs/modding/blocks-items.md:496`, which sits *below* "Reading a refusal". A
 `drawn` quotation anywhere above it returns
 `OutOfFieldOrder { field: "texture", after: "drawn" }` from
 `the_modding_guide_states_every_per_facing_refusal_in_the_recognised_field_order`.
 The `drawn = 1` quotation therefore lives in a new section placed after the
-bounds. `slid` and `drawnn` are unranked — neither is a recognised field — so
+bounds, at `:528`. Both numbers are from the committed tree, checked with
+`grep -n`: an earlier revision of this note said `:502`, which was measured while
+the `drawn` quotation was still in "Reading a refusal" and six lines above the
+bounds section had not yet been removed. A line number in a note is read as
+verified, so it is worth saying which tree it came from. `slid` and `drawnn` are unranked — neither is a recognised field — so
 they order nothing.
 
 **Three statements on `docs/modding/blocks-items.md` fall in later phases, and no
