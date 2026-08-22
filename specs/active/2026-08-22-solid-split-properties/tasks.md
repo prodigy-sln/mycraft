@@ -154,6 +154,7 @@ can be written. That widening is the test author's, in all three copies.
 - [ ] **T05** The three-way fixture, where `drawn`, `solid` and `occludes` are three different answers and no two can be each other — `crates/mc-world/tests/`, `crates/mc-world/tests/mesh_common/mod.rs:190`
       Scenarios: FR-2.4-S1, FR-2.4-S2, FR-2.4-S3
       **Written first, and green here is what makes green in T06 and T07 mean anything.** `architecture.md` §Drivers: `drawn` defaulting to `is_solid` makes all 34 existing solidity fixtures pass by construction and no count can see it. Split into three scenarios rather than one so a failure says which third failed.
+      **Conductor amendment: measure this population here, and do not carry a figure into it.** Shared test helpers exposing a solidity boolean in a *signature* were counted at **21** before Phase 1 and at **24** on `c14de5e` — Phase 1's own 21-site adaptation grew the population it was measured against, which is exactly why neither number may be trusted forward. `requirements.md` says "four" and lists five; an earlier brief said six. Run it: `grep -rn "fn registry_declaring\|solid: bool\|is_solid: bool\|&\[(&str, bool)\]" --include=*.rs crates/ | grep -v "/src/"`. Phase 1 left every one of them alone, and that was correct rather than cautious — Phase 1 can state no fixture where the three properties diverge from solidity **and observe anything**. This task is the first place the count bites, so run the command against the tree you are holding.
 
 - [ ] **T06** The per-face predicate becomes `drawn(self) && !occludes(beyond) && key(self) != key(beyond)` for a neighbour inside the section: `Resolved.blocks` carries `(Contents, drawn, occludes)` instead of `(Contents, bool)`, and `Resolver::solidity_at` is deleted in favour of keeping the key `key_for` already computes and today throws away — `crates/mc-world/src/mesh/resolve.rs:64` (`Resolved::is_solid`), `:253` (`solidity_at`), `crates/mc-world/src/mesh/sweep.rs:266` (`visible_face`), `:317` (`solidity`)
       Scenarios: FR-2.1-S1, FR-2.1-S2, FR-2.2-S1, FR-2.2-S2, FR-2.3-S1, FR-2.3-S2, FR-2.3-S4
@@ -235,6 +236,7 @@ FR-7.1-S1 before T12 has measured something other than what the scenario says.**
       Scenarios: —
       Depends on: T13
       `rendering.md` records the re-shoot, why the revision moved and that the declared spawn moved with it. On the player page, the first of the three sentences this spec falsifies — verified verbatim: *"**Water** is declared by the world's content and draws nothing: no face of it is ever emitted, so it has no picture on screen even though it holds a place in the texture set like every other block."* — is replaced by what a player now sees and how to get to it.
+      **Conductor amendment: this task also owns `docs/modding/blocks-items.md`, which no later task names.** Phase 1 added a paragraph beginning *"No base block states `drawn`, `occludes` or `targetable`"* (`:675` on `c14de5e`), plus a base-game table stating the same. Both become false the moment `water.luau` declares them, and the paragraph must be **deleted, not edited** — it has no true successor. An editing instruction here invites somebody to soften a sentence that has simply stopped being true.
 
 ---
 
@@ -279,6 +281,7 @@ load and never re-written; a view built once satisfies all of FR-3.1.
       Scenarios: —
       Depends on: T15, T16
       Verified: `architecture.md:829-841` states *"One shipped variant is unreachable, and the shipped content is why"* and hands the debt over in those words — *"whoever makes that split owes the scenario that cannot be written now"*. It becomes reachable here. The player sentence, verified verbatim: *"The crosshair only ever targets *solid* blocks, and water is not one, so a swing at a cell of water goes straight through it and breaks whatever solid block is behind."*
+      **Conductor amendment: `docs/modding/blocks-items.md` is a fifth site and no task named it.** Two statements there fall due here — *"Only a *solid* block can be aimed at — the ray a break travels stops at the first solid cell"*, and the sentence that it *"will start mattering the day a non-solid block can be targeted"*. Both were true when Phase 1 read them and both become false in this phase; they wrap across lines, so grep a fragment rather than the whole sentence (`:683` and `:686` on `c14de5e`).
 
 ---
 
@@ -330,6 +333,7 @@ would stay green against an implementation that folded no new field at all.
       Scenarios: —
       Depends on: T19, T20
       `world-format.md` carries both fold revisions and their numbers. The third falsified player sentence, verified verbatim: *"water is the one shipped block whose recorded behaviour moved, which is why a world saved before this build reports it by name on the terminal"* — after the bump all four shipped blocks report as changed, and the page says so.
+      **Conductor amendment: `docs/modding/blocks-items.md` is a third site and no task named it.** On `c14de5e` it is `:689`, and line numbers on this page drift as earlier phases edit it, so match the words rather than the number: *"`breakable` is one of the **five** fields a save folds into a block's recorded behaviour, alongside `name`, `solid`, `replaceable` and `breaks_into`"* — six once `targetable` joins the behaviour fold.
 
 ---
 
