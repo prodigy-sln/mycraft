@@ -61,12 +61,13 @@ use support::{TestResult, content};
 /// in all three: a save is read on its own terms.
 const ACCEPTING: Acceptance = Acceptance::OnlyUnchangedBlocks;
 
-/// Exactly what a player has to type to load a save whose blocks have changed.
+/// Exactly what a player types to have a save whose blocks have changed refused
+/// rather than loaded, and so the argument a refusal caused by it has to name.
 ///
 /// Spelled out rather than read from the client for the reason the acceptance
 /// suite gives at its own copy: a test reading the client's own constant would
 /// agree with a message quoting a spelling nothing accepts.
-const LOAD_CHANGED_BLOCKS: &str = "--load-changed-blocks";
+const REFUSE_CHANGED_BLOCKS: &str = "--refuse-changed-blocks";
 
 /// What the level that knows where a save is says about one it could not read,
 /// with the reason no longer written into it.
@@ -136,7 +137,7 @@ fn a_save_that_cannot_be_read_is_named_once_and_its_reason_given_once() -> TestR
         (
             occurrences_of(&said, &named),
             occurrences_of(&said, &reason),
-            occurrences_of(&said, LOAD_CHANGED_BLOCKS),
+            occurrences_of(&said, REFUSE_CHANGED_BLOCKS),
             said.as_str(),
         ),
         (1, 1, 0, whole.as_str()),
@@ -164,7 +165,7 @@ fn a_world_that_could_not_be_generated_names_the_missing_block_once() -> TestRes
     assert_eq!(
         (
             occurrences_of(&said, missing.as_str()),
-            occurrences_of(&said, LOAD_CHANGED_BLOCKS),
+            occurrences_of(&said, REFUSE_CHANGED_BLOCKS),
             said.as_str(),
         ),
         (1, 0, whole.as_str()),
@@ -192,8 +193,8 @@ fn a_save_refused_only_for_redeclared_blocks_offers_the_way_out_once_after_it() 
 
     assert_eq!(
         (
-            occurrences_of(&said, LOAD_CHANGED_BLOCKS),
-            follows(&said, LOAD_CHANGED_BLOCKS, &reason),
+            occurrences_of(&said, REFUSE_CHANGED_BLOCKS),
+            follows(&said, REFUSE_CHANGED_BLOCKS, &reason),
             said.as_str(),
         ),
         (1, true, whole.as_str()),

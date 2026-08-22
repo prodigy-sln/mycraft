@@ -150,11 +150,17 @@ pub fn simulation_at_launch(save: &Path, launching: Launching) -> Result<Seated,
         accepting,
     } = launching;
     match load_world(save, &registry, accepting) {
-        Ok(loaded) => Ok(seat(
-            resuming(&loaded.player),
-            World::new(loaded.world, registry)?,
-            content,
-        )),
+        // The changed list is attached rather than passed into `seat`: seating a
+        // player is asked the same question by every door, and a save is
+        // something only this arm has read.
+        Ok(loaded) => Ok(Seated {
+            changed: loaded.changed,
+            ..seat(
+                resuming(&loaded.player),
+                World::new(loaded.world, registry)?,
+                content,
+            )
+        }),
         Err(LoadError::Missing { .. }) => {
             let generated = ReplayWorld::generate(seed, &registry)?;
             Ok(simulation_for(&generated, registry, content)?)

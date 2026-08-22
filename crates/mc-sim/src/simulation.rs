@@ -124,6 +124,15 @@ pub struct Seated {
     pub simulation: Simulation,
     /// What entry did about a player whose box covered a solid cell.
     pub clearing: Clearing,
+    /// The blocks the save this simulation was loaded from records differently
+    /// from what the content now declares them to be, ascending.
+    ///
+    /// **Not something seating decides**, which is why [`seat`] leaves it empty
+    /// and the launch that read a save fills it in: it is a statement about a
+    /// file, and it travels here because this is the rail that already reaches
+    /// the one place that prints for a person. Empty for a generated world and
+    /// for a save that still agrees with the content.
+    pub changed: Vec<BlockName>,
 }
 
 /// Seats the player at `spawn` in `world` serving `content`, moving them clear
@@ -150,6 +159,9 @@ pub fn seat(mut spawn: PlayerState, world: World, content: PublishedContent) -> 
     Seated {
         simulation: Simulation::new(spawn, world, content),
         clearing,
+        // Seating a player says nothing about a save, and this door is crossed by
+        // launches that read none. Whoever loaded one puts what it reported here.
+        changed: Vec::new(),
     }
 }
 

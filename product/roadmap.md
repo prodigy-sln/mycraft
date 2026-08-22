@@ -124,6 +124,7 @@ it before a run starts.
 | P0 | Solid, drawn, occludes and targetable split, plus swimmable and density — *you can see water and swim in it* | PRO-904 | Todo — immediately after PRO-947 |
 | P0 | Where generated art comes from at build time — *a decision and an ADR amendment, not a spec* | PRO-930 | **Done** — ADR-026 |
 | P0 | The grass block looks like a grass block: per-face keys, baked art, real pixels from disk — *the world stops being teal* | PRO-947, PRO-902 | **Done** |
+| P0 | A save whose blocks changed behaviour loads and reports instead of being refused — *your world opens after a content update* | PRO-956 | **Done** |
 | P0 | The placeholder palette guarantees separation for blocks shipping no art | PRO-869 | Todo — unblocked |
 | P0 | Components attach behaviour; grass spreads onto dirt — *the model proven, not just moved* | PRO-919 | Todo |
 | P0 | Break a block and hold it — *pick up what you took, place it again* | PRO-929 | Todo |

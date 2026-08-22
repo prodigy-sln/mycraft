@@ -249,8 +249,8 @@ fn an_unchanged_declaration_records_the_appearance_the_stated_byte_sequence_fold
         "what a save records as a block's appearance is the format's stated field list folded \
          with FNV-1a-64, and this is that same fold arrived at without calling it. The standard \
          library's hasher is unspecified and moves with the toolchain, so a save written with it \
-         would report every block as changed after an unrelated compiler upgrade — a prompt a \
-         player cannot act on and learns to click through"
+         would report every block as changed after an unrelated compiler upgrade — a report a \
+         player cannot act on and learns to ignore"
     );
     Ok(())
 }

@@ -91,8 +91,13 @@ const BOX_HEIGHT: f32 = 1.8;
 
 /// The client's own argv, as a shell hands it over — the program's name first,
 /// which is what the parse has to step past.
-pub const NO_ACCEPTANCE: [&str; 1] = ["mycraft"];
-pub const ACCEPTANCE_GIVEN: [&str; 2] = ["mycraft", "--load-changed-blocks"];
+///
+/// **One spelling and no second one.** A launch over a save whose blocks have
+/// changed needs no argument now: loading is what a client does when it is told
+/// nothing, so the fixtures here differ in the save they read and never in what
+/// was typed. The argument that asks for the strict answer has no business in an
+/// entry-clearing fixture, because a refused launch seats nobody.
+pub const NO_ARGUMENT: [&str; 1] = ["mycraft"];
 
 /// A save written to disk, and everything needed to read it back.
 #[derive(Debug)]

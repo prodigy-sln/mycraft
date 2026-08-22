@@ -44,10 +44,20 @@
 //! scenario and is caught by `both_refusals_name_the_reach…`, which asks with a
 //! reach of 3.
 
+use std::error::Error;
+
 use glam::Vec3;
+use mc_core::id::BlockName;
 use mc_sim::world::Clearing;
 
-use super::{entering, reloading};
+use super::{changed_blocks, entering, reloading};
+
+/// What the readings that parse a block name propagate with `?`.
+///
+/// The clearing readings above take no name and stay infallible; a name that is
+/// not a namespaced id is a broken fixture rather than a claim about the
+/// composer, so it is reported as an error and never asserted about.
+type TestResult = Result<(), Box<dyn Error>>;
 
 #[test]
 fn a_player_moved_at_entry_is_told_they_would_have_entered_inside_solid_blocks_and_where_they_were_put()
@@ -204,4 +214,50 @@ fn no_clearing_verdict_is_told_in_the_same_words_at_entry_and_at_reload() {
          arrived; the verdict named above is the one whose two moments have collapsed into one \
          sentence"
     );
+}
+
+/// Three names, which no fixture in this suite's launches produces.
+///
+/// The saves those launches read hold one changed block or two, so the join is
+/// only ever exercised at a single separator. Three is where a fold that dropped
+/// the last name, emitted a trailing separator, or reversed the order stops being
+/// invisible — and none of those is reachable with two.
+#[test]
+fn every_changed_block_is_named_in_the_order_it_was_given_separated_once_each() -> TestResult {
+    let said = changed_blocks(&[
+        BlockName::parse("mod:copper")?,
+        BlockName::parse("mod:iron")?,
+        BlockName::parse("mod:tin")?,
+    ]);
+
+    assert_eq!(
+        said.as_deref(),
+        Some(
+            "mycraft: `mod:copper`, `mod:iron`, `mod:tin` no longer behave as they did when this \
+             world was saved, and it was loaded anyway"
+        ),
+        "a player whose mods have changed acts on this line by reading it, so it names every block \
+         and never the first few. The refusal it replaces printed both of its lists whole, and a \
+         line that reported less than the refusal did would be a step backwards"
+    );
+    Ok(())
+}
+
+/// The singular, which is the common case and the one a plural sentence is wrong
+/// about.
+#[test]
+fn one_changed_block_is_told_in_the_singular() -> TestResult {
+    let said = changed_blocks(&[BlockName::parse("mod:copper")?]);
+
+    assert_eq!(
+        said.as_deref(),
+        Some(
+            "mycraft: `mod:copper` no longer behaves as it did when this world was saved, and it \
+             was loaded anyway"
+        ),
+        "one block is what a player usually has, and `blocks no longer behave` is wrong about \
+         their world. A single sentence that read correctly for the plural is the shape this \
+         catches"
+    );
+    Ok(())
 }

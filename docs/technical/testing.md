@@ -2399,16 +2399,58 @@ because the missing-content-root refusal is decided before any device is opened,
 so no GPU and no display server are involved, and it is located through
 `CARGO_BIN_EXE_mc-client` rather than by a harness guessing a path.
 
-**What the three still do not cover.** The way-out sentence that tells a player
-to pass `--load-changed-blocks` reaches them through exactly one production
-line, and that line runs inside a redraw needing a device and a window.
-Replacing its argument with an empty string leaves the entire suite green. The
+**What the three did not cover, and what closed it.** The way-out sentence that
+tells a player to drop `--refuse-changed-blocks` reaches them through exactly one
+production line — `App::redraw`, inside a frame, needing a device and a window.
+Replacing its argument with an empty string once left the entire suite green. The
 other construction site cannot emit the sentence at all — every failure reaching
 it carries an empty way out — so mutating *that* one is a semantically identical
 program, and its green result would look like evidence while being none. It was
-deliberately not run. The supply is held by the guidance parameter being
-non-optional and by the constructor door making a third site impossible, not by
-a test.
+deliberately not run.
+
+**That line is now covered, by paying the device cost rather than by arguing it
+away.** `the_shipped_binary_told_to_refuse_a_changed_save_leaves_it_shut_and_says_why`
+runs the built binary over a changed save with the argument passed, and compares
+its whole error stream against a refusal rendered through the shipped reporting
+with `way_out()` appended the way the frame path appends it. The child reaches a
+window, refuses, and ends by itself. A machine with no device answers a **failing**
+verdict naming that rather than skipping — an absent instrument and a clean one
+must not look alike.
+
+**Both sides of that mechanism are now measured, and the figures are the argument
+for the shape.** Deleting the `say_changed_blocks` call left **1 384 of 1 385
+green**; making `main` ignore its own `argv` left **1 385 of 1 386 green**. In each
+case the one test that reddened was the subprocess reading. Every other reading of
+either sentence reaches the library directly, which is agreement between two copies
+of one decision — the binary can stop consulting the parse, or stop saying the
+line, and no library-level test in the workspace can tell.
+
+**The two readings differ in what they cost, and the reason is where each sentence
+is said.** The notice is said above any device, so a bounded read of the stream
+catches it with no GPU; the way-out sentence is said inside a frame, so its reading
+needs one. Putting the notice below the uploads for symmetry with the clearing
+notice would move it into the same cost class and buy nothing.
+
+**Both readings are bounded rather than waited out, and that was measured too.**
+`Command::output()` on the refusing reading wedged for **606 seconds** under the
+`argv` mutation, because a binary that ignores the argument loads the world and its
+window never closes. A wedged run reports nothing about which mechanism broke and
+gets blamed on the machine; the bounded version answers in about a second and names
+the defect.
+
+**Two readings spawn the real client and one of them opens a window, so the suite now
+has a visible side effect.** The refusing reading has to reach a window before it can
+say anything about the save, as above. The notice reading is killed the moment the
+line arrives — but on a machine whose GPU and window initialise faster than the
+child's content load, the window gets there first, so an ordinary `cargo nextest run`
+may flash a window and confine the cursor for a moment. **No environment variable
+suppresses it**: `gpu_startup::open` passes `wgpu::Backends::PRIMARY` as a `const` in
+its `InstanceDescriptor`, so `WGPU_BACKEND` is never consulted and there is no way to
+steer the child onto a headless backend from outside. Two alternatives were weighed
+and both refused — a source scan, which is the instrument a subprocess exists to beat
+(the section above says why), and a stop-after-preparing flag on the shipped binary,
+which buys a quiet test run by adding player-facing surface for a test's benefit. The
+flash is recorded rather than fixed, so nobody meeting it reads it as a fault.
 
 ### A documentation guard needs its subject to be an artefact, not a convention
 

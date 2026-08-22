@@ -5,11 +5,11 @@
 -- from standing on it, and `replaceable = true` lets a placement build straight
 -- through it rather than requiring it to be broken first.
 --
--- `breakable` and `breaks_into` are left unstated, so water keeps the documented
--- defaults: breakable, leaving the cell empty.
+-- `breaks_into` is left unstated, so water keeps the documented default
 return {
 	name = "base:water",
 	texture = "base:water",
 	solid = false,
+	breakable = false,
 	replaceable = true,
 }

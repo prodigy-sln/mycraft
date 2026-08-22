@@ -328,10 +328,24 @@ Three things follow for you as an author:
   always start, read the line, quit, and change the declaration back.
 
 A save whose blocks *behave* differently than they did when it was written is a
-separate question, and it is answered before this one: the launch refuses until you
-pass `--load-changed-blocks` (`docs/user/gameplay.md`). Making water solid is exactly
-such a change, so the offline half of the loop is two decisions rather than one — first
-whether to load the world at all, then where the player who loaded it can stand.
+separate question, answered before this one and answered the same way: the world is
+loaded, and the blocks that moved are named on the error stream.
+
+```
+mycraft: `base:water` no longer behaves as it did when this world was saved, and it was loaded anyway
+```
+
+Every changed block, ascending, on one line, and nothing at all when nothing
+changed. Making water solid is exactly such a change, so the offline half of the
+loop prints two lines rather than one — first which blocks the save disagrees with
+you about, then where the player who loaded it can stand.
+
+**A launch is refused for it only if you ask.** `--refuse-changed-blocks` leaves
+such a world shut and names the blocks, which is what somebody restoring a backup
+they are unsure of wants: opening a changed save and quitting normally rewrites its
+recorded hashes against the content you are running, and the next launch has nothing
+left to notice. For the write-edit-relaunch loop this page is about, leave it off —
+`docs/user/gameplay.md` has the player-facing half.
 
 ## The HUD reloads too
 
@@ -495,26 +509,38 @@ there. Now, with nothing running, edit `content/base/blocks/water.luau` and chan
 `solid = false` to `solid = true`. Then, from the checkout root:
 
 ```
-cargo run -p mc-client -- --load-changed-blocks
+cargo run -p mc-client
 ```
 
-The flag is needed because water now *behaves* differently than it did when you saved,
-and a launch refuses over that until you say to load the world anyway. That is the
-first decision. The second is the one this section is about, and the terminal answers
-it before the window has anything in it:
+Nothing on the command line, and you are let in. **Two lines come back**, in this
+order. The first is the save disagreeing with your declaration:
+
+```
+mycraft: `base:water` no longer behaves as it did when this world was saved, and it was loaded anyway
+```
+
+The second is the one this section is about, and it is answered before the window has
+anything in it:
 
 ```
 mycraft: you would have entered the world inside solid blocks, so you were moved to (12.5, 10, 12.5)
 ```
 
+**Worth running once with `--refuse-changed-blocks` as well**, to see the other
+answer. That launch is refused rather than let in: it names `saves/world.mcw`, then
+the blocks the registry cannot answer for — no missing ones, `base:water` changed —
+and it ends by telling you to drop the argument to load the world anyway. Nothing is
+written and nothing is lost; the world is simply left shut.
+
 The three numbers are wherever your own player was put — near where you quit, at the
 centre of a cell, on that cell's floor. You are standing on the world and you can walk,
 and you were told why you are not where you left off.
 
-To undo it: quit, set `solid = false` again, and launch with `--load-changed-blocks`
-once more — the save now records water as solid, so the flag is asked for in the other
-direction too. Nothing is printed this time, because a player whose box covers no solid
-cell is not moved and is told nothing.
+To undo it: quit, set `solid = false` again, and launch. The save now records water
+as solid, so the first line comes back — the disagreement runs in this direction too,
+and a declaration you have just put back is still a declaration the save does not
+recognise. The clearing line is *not* printed this time, because a player whose box
+covers no solid cell is not moved and is told nothing about it.
 
 **Worth doing once for the contrast.** Step 5 and step 6 are the same one-word edit to
 the same file. The only difference is whether the game was running when you made it,

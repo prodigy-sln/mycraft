@@ -45,6 +45,13 @@ pub struct Hit {
 /// `direction` need not be a unit vector; it is normalised here, which is what
 /// makes `reach` mean blocks rather than multiples of whatever was passed. A
 /// direction of no length points nowhere and meets nothing.
+///
+/// **`is_solid` is the whole of what stops the walk, and that decides more than
+/// aiming.** A block content declares non-solid is a block no action can ever be
+/// aimed at, so every rule read off the targeted cell — breakability first among
+/// them — is inert for it. Widening what may be targeted therefore reaches
+/// `Refusal::Indestructible`, whose own documentation records the scenario that
+/// becomes writable the day it happens.
 #[must_use]
 pub fn targeted(origin: Vec3, direction: Vec3, reach: f32, world: &dyn Solidity) -> Option<Hit> {
     let ray = direction.normalize_or_zero();

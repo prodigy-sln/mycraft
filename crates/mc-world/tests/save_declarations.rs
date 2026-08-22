@@ -11,8 +11,8 @@
 //! whose solidity, replaceability, breakability or drop changed is not.
 //! Recording one value for both would make a retextured mod indistinguishable
 //! from a rebalanced one, and the only safe answer to that ambiguity is to
-//! prompt on every texture edit — which teaches a player to accept without
-//! reading, and a prompt nobody reads destroys the only thing the recorded
+//! report on every texture edit — which teaches a player that a report means
+//! nothing, and a report nobody reads destroys the only thing the recorded
 //! declaration is for. The retexture test below is what makes the split
 //! observable; nothing else asserts it is real.
 //!
@@ -207,8 +207,8 @@ fn changing_only_a_block_texture_moves_its_recorded_appearance_and_leaves_its_be
         "the two registries differ in one block's texture and in nothing else, so the recorded \
          appearance has to move and the recorded behaviour has to stand still. This is the only \
          assertion that makes the split real: with one value for both, a retexture and a \
-         rebalance are the same event, every texture edit prompts, and a player learns to accept \
-         without reading"
+         rebalance are the same event, every texture edit is reported, and a player learns that \
+         a report means nothing"
     );
     Ok(())
 }
@@ -229,7 +229,7 @@ fn a_solid_breakable_block_that_breaks_into_nothing_records_the_version_1_behavi
          from the documented encoding rather than read off a run — a number copied out of the \
          first green run records whatever the writer did that day and pins nothing. Recording \
          one value today and another tomorrow makes every save in existence report its blocks as \
-         changed, which is the prompt this whole mechanism exists to raise only when something \
+         changed, which is the report this whole mechanism exists to make only when something \
          really did change"
     );
     Ok(())

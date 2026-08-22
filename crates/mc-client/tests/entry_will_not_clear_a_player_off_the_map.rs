@@ -44,7 +44,7 @@ use mc_world::section::Contents;
 use mc_world::world::{VoxelWorld, WorldPos};
 
 use entry::{
-    A_SEARCH_OF, ACROSS, ASave, FEET_ROW, NO_ACCEPTANCE, at, filling, floor_of, ground_registry,
+    A_SEARCH_OF, ACROSS, ASave, FEET_ROW, NO_ARGUMENT, at, filling, floor_of, ground_registry,
     inside_a_world, recorded_at, require, resumed, the_cube_around, without, written,
 };
 use persistence::{GROUND, TestResult, refusal, stood_at};
@@ -79,7 +79,7 @@ fn a_resumed_player_whose_only_clear_position_lies_partly_outside_the_world_star
 -> TestResult {
     let save = a_wedge_at_the_edge(&[])?;
 
-    let launched = resumed(&save, &NO_ACCEPTANCE)?;
+    let launched = resumed(&save, &NO_ARGUMENT)?;
 
     assert_eq!(
         stood_at(&launched),
@@ -106,7 +106,7 @@ fn a_resumed_player_whose_only_clear_position_lies_partly_outside_the_world_star
 fn a_resumed_player_near_the_worlds_edge_is_moved_inward_rather_than_over_it() -> TestResult {
     let save = a_wedge_at_the_edge(&THE_WAY_OUT_CELLS)?;
 
-    let launched = resumed(&save, &NO_ACCEPTANCE)?;
+    let launched = resumed(&save, &NO_ARGUMENT)?;
 
     assert_eq!(
         stood_at(&launched),

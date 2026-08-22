@@ -188,10 +188,16 @@ draws is its own property. Attempting the methods first means encoding the
 conflation into the method set and unpicking it later.
 
 **Adding `render` to `DeclaredAppearance` makes every existing save report a
-changed appearance.** That is the designed behaviour of the fingerprint, and
-the prompt it produces is the one the format's doc comment argues for. Worth
-knowing before it looks like a bug, and worth landing in the same increment as
-any other appearance-field change rather than in two consecutive ones.
+changed appearance.** That is the designed behaviour of the fingerprint, and it
+costs a player nothing: a changed *appearance* is neither reported nor refused,
+which is exactly the separation the two revision bytes exist for. Worth knowing
+before it looks like a bug, and worth landing in the same increment as any other
+appearance-field change rather than in two consecutive ones.
+
+**What it must not do is move the behaviour byte.** `render` describes how a
+block draws, so it belongs on the appearance list; putting it on the behaviour
+one would tell every player in existence that every block they built with
+behaves differently, on the strength of a rendering field.
 
 ## 5. Open questions for the spec
 

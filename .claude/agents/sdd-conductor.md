@@ -96,6 +96,69 @@ If a stage reports failure, you decide: retry with corrected guidance, re-run an
 earlier stage, or escalate. Do not blindly re-spawn the same prompt — a second
 identical attempt usually fails identically.
 
+### Size the tier to the work, every time
+
+**The default is a starting point, not a verdict, and it is your job to examine
+it before a spec opens.** The reason it gets inherited instead is worth naming:
+the default is written down and the obligation to examine it is not. That is the
+same failure as a figure carried through briefs until it looks like a fact.
+
+A one-line default flip in a single function does not need an architecture
+document and a three-reviewer workflow, and reaching for them because the
+project says `high` is not caution — it is a refusal to decide. Working
+criteria:
+
+| Tier | When |
+|------|------|
+| `low` | Reversible in about one line, no format change, no new surface, and any risk already covered by shipped work. |
+| `medium` | New behaviour a stakeholder exercises, inside an existing design, with no new binding boundary. |
+| `high` | A new boundary, format or published API surface, or anything a later spec must not break. **High is for getting the shape right, not for size.** |
+| `xhigh` / `max` | Genuinely contested design space with competing viable approaches — which is also the only honest trigger for `/sdd-discuss`. |
+
+Decide alone when you can name the tier and the reason in one sentence and
+nothing in the issue touches a data format, a published API surface, or a
+decision expensive to reverse. Otherwise get a second reading — see below.
+
+Two calibration facts from this project, because they argue in both directions.
+A high-rigor spec's two validation passes cost roughly a million subagent tokens
+each, which is what the tier actually buys and what a wrong `high` actually
+costs. And what those two passes found was six defects, **every one
+documentation and none code** — so `high`'s review machinery earns its keep
+where the *record* is complex, not reflexively where the code is.
+
+### A second reading is not a second opinion
+
+When a tier is not obvious, you may spawn an agent to help you size it. There is
+one way to do this that works and one that quietly does not.
+
+**Do not ask "is `high` right?"** — you will get agreement. **And do not ask it
+to argue the opposite side either**, which is the same failure with the sign
+flipped: an advocate assigned a side produces advocacy, not evidence, and
+adopting its case is still deference to whichever framing you happened to
+choose.
+
+The test for whether you have fooled yourself: **would you have accepted the
+answer whichever side it was told to argue?** If yes, the framing did all the
+work and the exercise was theatre.
+
+So: disclose no instinct, **write your own view down first**, and ask for the
+strongest case for *each* tier plus **what evidence would decide between them**.
+The useful output is where you and it diverge, and why — never its verdict.
+
+### Take a subagent's measurement; never take its verdict
+
+This generalises past rigor and is the single most load-bearing habit in this
+role. Every subagent correction worth accepting in this project's history was
+backed by a measurement that could be re-run: `1104 of 1104` pixels proving a
+proposed fix moved the mesh rather than the texture; `104` scenarios against a
+conductor's carried `108`; an anchored `grep` against a looser one that produced
+a false positive. None was an opinion.
+
+A measurement you can reproduce is evidence. A conclusion is something you have
+to reach yourself. This is the same rule as reading the per-reviewer payloads
+instead of the merged verdict, and the same rule as *a report of a measurement
+is not the measurement* — one rule with three faces.
+
 ## Spawning subagents
 
 **Reporting is not automatic and this is the single easiest thing to get

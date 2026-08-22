@@ -109,6 +109,23 @@ pub enum Refusal {
     /// Only a placement can meet this: a break needs no entry face.
     NoFace,
     /// Content declares this block cannot be broken.
+    ///
+    /// **Unreachable for a block content declares non-solid, and the shipped
+    /// content has one.** [`targeted`] returns a hit only where `is_solid`
+    /// answers true, so the walk steps through a non-solid cell and `broken` is
+    /// never called on it. `base:water` declares
+    /// `solid = false` and `breakable = false`, and a swing at a water cell
+    /// empties whatever solid block stands behind it — measured in
+    /// `crates/mc-sim/tests/shipped_water_is_not_broken_and_is_built_through.rs`,
+    /// which reddens the day that stops being true.
+    ///
+    /// **Splitting `solid` into drawn, occludes and targetable makes this live.**
+    /// The moment a non-solid block can be targeted, `broken` is called on one for
+    /// the first time and `breakable = false` acquires a player-visible
+    /// consequence it does not have today. Whoever makes that split owes the
+    /// scenario that cannot be written now: a break swung at water is refused and
+    /// leaves the water in the cell. It is recorded here rather than in a spec
+    /// folder because this is where somebody changing targetability reads.
     Indestructible,
     /// The cell the placement would land in holds a block content does not
     /// declare replaceable.

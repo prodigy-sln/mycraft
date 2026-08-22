@@ -33,17 +33,26 @@ use thiserror::Error;
 use crate::content::ContentView;
 use crate::textures::{TextureSetError, built_set, refusal_for};
 
-/// What a player types to load a save whose blocks are no longer what they were.
+/// What a player types to have a save whose blocks are no longer what they were
+/// refused instead of loaded.
 ///
 /// **One spelling, named once**, because the parse that accepts it and the
 /// refusal that tells a player about it have to agree: a message quoting a flag
 /// nothing accepts is worse than no message at all, since it reads as a way out
 /// and is not one.
-const LOAD_CHANGED_BLOCKS: &str = "--load-changed-blocks";
+///
+/// **The strictness is the argument and the loading is the default**, which is
+/// the reverse of what this flag's predecessor asked for. The reason is not
+/// symmetry: a save is rewritten against the current declarations on quit, so
+/// opening a changed save and playing on replaces its recorded hashes and the
+/// mismatch is gone from the file for good. The report is a one-shot. Somebody
+/// restoring a backup they are unsure about wants the world left shut, because
+/// opening it is what destroys the evidence.
+const REFUSE_CHANGED_BLOCKS: &str = "--refuse-changed-blocks";
 
 /// What a contributor runs to produce the texture set a launch reads.
 ///
-/// **One spelling, named once**, for the reason `LOAD_CHANGED_BLOCKS` carries:
+/// **One spelling, named once**, for the reason `REFUSE_CHANGED_BLOCKS` carries:
 /// a message quoting a command nothing accepts reads as a way out and is not
 /// one. `README.md` and `docs/modding/voxel-models.md` quote this same string,
 /// and `pub` is what lets a test compare the four rather than compare the
@@ -102,10 +111,10 @@ pub struct PreparedScene {
 /// Why a preparation — of the generated scene here, or of a launch in
 /// [`crate::launch`] — could not be completed.
 ///
-/// **One enum for both paths**, because `--load-changed-blocks` is spelled in one
-/// constant here: the parse that accepts the flag and the refusal that advertises
-/// it must not be able to disagree, and the refusal is interpolated inside this
-/// type's own `Display`.
+/// **One enum for both paths**, because `--refuse-changed-blocks` is spelled in
+/// one constant here: the parse that accepts the flag and the refusal that
+/// advertises it must not be able to disagree, and the refusal is interpolated
+/// inside this type's own `Display`.
 ///
 /// Every one of these fails the run rather than degrading it: a world that could
 /// not be meshed has no picture to show, and a window drawing the clear colour
@@ -160,6 +169,12 @@ pub enum PreparationError {
     /// failure and every failure under it, so a message appending advice to its
     /// own source strands that advice at the top of the report — before the
     /// refusal it answers — and has the source read out twice besides.
+    ///
+    /// **The way out is now to stop passing something rather than to start.** A
+    /// load refused for changed blocks alone can only have been refused because
+    /// `--refuse-changed-blocks` was on the command line, since nothing else
+    /// produces that decision — so the sentence names the argument as the thing
+    /// to drop.
     ///
     /// Transparent, because this level knows nothing the launch does not. The
     /// text a player reads is unchanged to the byte on the one path that offers
@@ -235,13 +250,13 @@ impl PreparationError {
     ///
     /// **A way out is not a link in the causal chain**, which is why it is asked
     /// for separately rather than carried in a message. A cause says what
-    /// happened; `--load-changed-blocks` says what to do about it, so it belongs
-    /// after the whole chain rather than at the top of it, where a message
-    /// wrapping its own source would strand it before the refusal it answers.
+    /// happened; dropping `--refuse-changed-blocks` says what to do about it, so
+    /// it belongs after the whole chain rather than at the top of it, where a
+    /// message wrapping its own source would strand it before the refusal it
+    /// answers.
     ///
-    /// The sentence itself is unchanged and still spelled in exactly one place,
-    /// so the parse that accepts the flag and the refusal that advertises it
-    /// cannot disagree.
+    /// The argument is still spelled in exactly one place, so the parse that
+    /// recognises it and the refusal that names it cannot disagree.
     #[must_use]
     pub fn way_out(&self) -> String {
         match self {
@@ -284,44 +299,50 @@ impl From<ContentError> for PreparationError {
 
 /// What the player said about loading a save whose blocks have changed.
 ///
-/// One flag, parsed by hand, with **no default in the domain value**: absent
-/// means the save is refused if anything about its blocks has changed, and a
-/// player who wants it loaded anyway says so per run. An environment variable
-/// would persist invisibly across launches, which is the "defaulting to yes"
-/// this decision exists to rule out.
+/// One flag, parsed by hand. **Absent means the world opens** and the blocks
+/// that changed are named on the error stream; the flag is how a player asks for
+/// the launch to be refused instead. An environment variable would persist
+/// invisibly across launches, which is why the strictness is asked for per run
+/// rather than configured.
 #[must_use]
 pub fn acceptance_from(args: impl Iterator<Item = String>) -> Acceptance {
     // The first argument is the program's own name, which is not something the
     // player typed and is not an answer to anything.
-    if args.skip(1).any(|argument| argument == LOAD_CHANGED_BLOCKS) {
-        Acceptance::ChangedBlocksToo
-    } else {
+    if args
+        .skip(1)
+        .any(|argument| argument == REFUSE_CHANGED_BLOCKS)
+    {
         Acceptance::OnlyUnchangedBlocks
+    } else {
+        Acceptance::ChangedBlocksToo
     }
 }
 
 /// What to tell a player about `failure` beyond what it already says — the way
 /// out where there is one, and nothing where there is not.
 ///
-/// A save whose blocks have only been *redeclared* is loadable data, and whether
-/// it should be loaded is the player's judgement to make; every other refusal is
-/// about a world that cannot be built at all, and no flag changes that.
+/// A save whose blocks have only been *redeclared* is loadable data and is loaded
+/// by default, so a launch refused for them is a launch the player asked to have
+/// refused. Every other refusal is about a world that cannot be built at all, and
+/// no argument changes that.
 fn way_out_of(failure: &LaunchError) -> String {
     if refused_only_for_changed_blocks(failure) {
         format!(
-            ". Those blocks are no longer what they were when this world was saved; pass \
-             `{LOAD_CHANGED_BLOCKS}` to load it anyway"
+            ". Those blocks are no longer what they were when this world was saved; drop \
+             `{REFUSE_CHANGED_BLOCKS}` to load it anyway"
         )
     } else {
         String::new()
     }
 }
 
-/// Whether the player saying yes is all that stands between `failure` and a
-/// world.
+/// Whether the player's own request for strictness is all that stands between
+/// `failure` and a world.
 ///
-/// A missing name is deliberately not one of these: acceptance never covers it,
-/// so a save refused for both would be refused again by the same list.
+/// A missing name is deliberately not one of these: no acceptance covers it, so a
+/// save refused for both would be refused again with the argument dropped — and
+/// telling somebody to drop it would send them round the same refusal a second
+/// time.
 fn refused_only_for_changed_blocks(failure: &LaunchError) -> bool {
     let LaunchError::Load { source, .. } = failure else {
         return false;

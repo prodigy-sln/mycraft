@@ -63,7 +63,7 @@ use mc_world::section::Contents;
 use mc_world::world::{VoxelWorld, WorldPos};
 
 use entry::{
-    A_SEARCH_OF, ASave, FEET_ROW, NO_ACCEPTANCE, at, cells_a_box_covers, eye_over, filling,
+    A_SEARCH_OF, ASave, FEET_ROW, NO_ARGUMENT, at, cells_a_box_covers, eye_over, filling,
     first_snapshot, floor_of, ground_registry, inside_a_world, recorded_at, require, resumed,
     the_cube_around, without, written,
 };
@@ -124,7 +124,7 @@ fn a_resumed_player_inside_a_solid_cell_starts_centred_on_the_clear_cell_one_ste
 -> TestResult {
     let save = a_trap_with_one_way_out(recorded_at(TRAPPED_FEET, 0.0, 0.0))?;
 
-    let launched = resumed(&save, &NO_ACCEPTANCE)?;
+    let launched = resumed(&save, &NO_ARGUMENT)?;
 
     assert_eq!(
         stood_at(&launched),
@@ -147,7 +147,7 @@ fn a_resumed_player_whose_box_abuts_a_solid_cell_without_overlapping_it_starts_e
 -> TestResult {
     let save = a_solid_cell_the_player_only_touches()?;
 
-    let launched = resumed(&save, &NO_ACCEPTANCE)?;
+    let launched = resumed(&save, &NO_ARGUMENT)?;
 
     assert_eq!(
         stood_at(&launched),
@@ -171,7 +171,7 @@ fn a_player_moved_at_entry_still_faces_the_yaw_and_pitch_the_save_recorded() -> 
     );
     let save = a_trap_with_one_way_out(looking)?;
 
-    let launched = resumed(&save, &NO_ACCEPTANCE)?;
+    let launched = resumed(&save, &NO_ARGUMENT)?;
 
     assert_eq!(
         (
@@ -200,7 +200,7 @@ fn a_resumed_player_with_nothing_clear_within_eight_blocks_starts_where_the_save
 -> TestResult {
     let save = a_wedge_with_no_way_out()?;
 
-    let launched = resumed(&save, &NO_ACCEPTANCE)?;
+    let launched = resumed(&save, &NO_ARGUMENT)?;
 
     assert_eq!(
         stood_at(&launched),
@@ -220,7 +220,7 @@ fn the_first_snapshot_a_simulation_publishes_reports_the_position_entry_moved_th
 -> TestResult {
     let save = a_trap_with_one_way_out(recorded_at(TRAPPED_FEET, 0.0, 0.0))?;
 
-    let launched = resumed(&save, &NO_ACCEPTANCE)?;
+    let launched = resumed(&save, &NO_ARGUMENT)?;
 
     assert_eq!(
         first_snapshot(&launched),

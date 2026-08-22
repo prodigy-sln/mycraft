@@ -61,13 +61,29 @@ const AXIS_MASK: u32 = SECTION_SIZE - 1;
 /// size is the power of two it was derived from.
 const _: () = assert!(1 << AXIS_SHIFT == SECTION_SIZE);
 
-/// What a save holds: the world it stored, and where it left the player.
+/// What a save holds: the world it stored, where it left the player, and which
+/// of its blocks the registry no longer declares the same way.
+///
+/// **The third field is what a load carries out rather than swallows.** The
+/// verdict was computed here and dropped, so the one thing a player can act on —
+/// which blocks their world disagrees with the content about — existed for the
+/// length of one statement. It travels because a verdict computed and dropped
+/// satisfies nothing, which is the same reason `Clearing` travels out of
+/// `mc-sim`.
+///
+/// It carries the **changed** list alone and not the whole verdict. A missing
+/// name is not reported here because it is never loaded at all: this value only
+/// exists where the load succeeded. A retextured name is not reported because a
+/// line after every art edit is noise the one that matters would hide in.
 ///
 /// `PartialEq` without `Eq`, which is what a stored coordinate allows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoadedWorld {
     pub world: VoxelWorld,
     pub player: SavedPlayer,
+    /// The names this save records whose declared behaviour has since changed,
+    /// ascending. Empty where every block is still what it was.
+    pub changed: Vec<BlockName>,
 }
 
 /// What a stored section is being read into: the names the save's table carries,
@@ -116,13 +132,17 @@ impl At {
 }
 
 /// The world and the player the save at `path` holds, resolved against
-/// `registry`.
+/// `registry`, together with the blocks it records differently from what
+/// `registry` declares now.
 ///
-/// `accepting` is the player's decision about blocks whose declarations have
-/// changed since the save was written, and it has no default: a save whose
-/// blocks have changed is loadable, and whether it *should* be loaded is a
-/// judgement about their world rather than one this function is in a position
-/// to make. It never covers a name the registry does not hold at all.
+/// `accepting` is the caller's decision about blocks whose declarations have
+/// changed since the save was written. **The default is to load**: a save whose
+/// blocks have changed is loadable data, and refusing it turns a content update
+/// into a world nobody can open — so the changed names are reported and the
+/// world is handed back. [`Acceptance::OnlyUnchangedBlocks`] asks for the
+/// stricter answer, which exists because opening such a save and playing on
+/// rewrites its hashes and destroys the evidence that anything moved. Neither
+/// answer covers a name the registry does not hold at all.
 ///
 /// # Errors
 ///
@@ -142,7 +162,8 @@ pub fn load_world(
     // optimisation: the complete list of what is missing or changed is what a
     // player acts on, and a file with a second problem behind it must not get to
     // report that one instead.
-    if let Some(refusal) = resolve(&required, registry).refusal(accepting) {
+    let verdict = resolve(&required, registry);
+    if let Some(refusal) = verdict.refusal(accepting) {
         return Err(refusal);
     }
     let record = decoded_world(&mut counted, path)?;
@@ -155,7 +176,15 @@ pub fn load_world(
         },
         path,
     )?;
-    Ok(LoadedWorld { world, player })
+    Ok(LoadedWorld {
+        world,
+        player,
+        // The verdict's own list, already ascending because `resolve` sorts what
+        // it reports. Not recomputed and not re-sorted: a second answer to the
+        // question the refusal above was asked is a second place for the two to
+        // disagree about the same save.
+        changed: verdict.changed,
+    })
 }
 
 /// The world `reader` is positioned at.

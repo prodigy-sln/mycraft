@@ -257,7 +257,7 @@ The field is `missing` and not `source`. `thiserror` reads any field named
 method `as_dyn_error` exists for reference `&PathBuf`, but its trait bounds were
 not satisfied*. The `Display` text is unaffected.
 
-`BUILD_THE_TEXTURE_SET` is a `pub const` beside `LOAD_CHANGED_BLOCKS` in
+`BUILD_THE_TEXTURE_SET` is a `pub const` beside `REFUSE_CHANGED_BLOCKS` in
 `startup.rs`, spelled once, for the reason that constant carries: a message
 quoting a command nothing accepts reads as a way out and is not one. It is `pub`
 so that the four places which must agree — the constant, `README.md`,
@@ -827,6 +827,19 @@ Two refusal variants were designed and then struck before shipping. `OutOfReach`
 non-solid block still cannot delete stone, so the extra check bought no additional safety while
 costing `base:water` its own placeability.
 
+**One shipped variant is unreachable, and the shipped content is why.** `Indestructible` is decided
+against the *targeted* block, and `targeted` returns a hit only where `is_solid` answers true — so a
+break swung at a cell of `base:water`, the one base block declaring both `solid = false` and
+`breakable = false`, walks through it and empties the solid block standing behind. The declaration
+says what water is; it refuses nothing, and no request the shipped content can produce reaches this
+variant at all. A reader of the table above would otherwise conclude that water is protected from
+breaking — it is not broken because it cannot be aimed at, which is a different fact with a different
+future. `crates/mc-sim/tests/shipped_water_is_not_broken_and_is_built_through.rs` asserts the break's
+real answer and reddens the day that changes, and the variant's own doc comment carries the handover:
+splitting `solid` into drawn, occludes and targetable makes the refusal live, and whoever makes that
+split owes the scenario that cannot be written now — a break swung at water refused, with the water
+left in the cell.
+
 **Three arms and never two, wherever both wrappers survive.** `broken`, `placed` and `overwritable`
 each read the world through `Option<Contents<&BlockName>>`, and each writes `None`,
 `Some(Contents::Empty)` and `Some(Contents::Holds(..))` as separate arms — a `let
@@ -959,7 +972,13 @@ and the packed vertices, by `crates/mc-client/tests/launch_and_capture_agree.rs`
 where the save lives (relative to the working directory, mirroring `CONTENT_ROOT`'s own convention,
 and deliberately not checked for existence — a missing save is the no-save case, not a failure);
 `startup::acceptance_from(args)` parses the one command-line flag MVP 1's human channel needs
-(`--load-changed-blocks`, `docs/user/gameplay.md`) and does nothing else. `Session::save` is a
+(`--refuse-changed-blocks`, `docs/user/gameplay.md`) and does nothing else. **The argument asks for
+the stricter answer and its absence is the accepting one**, which is the reverse of the flag it
+replaced: a save whose blocks merely behave differently is loadable data, and refusing it turned a
+content update into a world nobody could open. Which blocks moved is *said* by
+`notice::say_changed_blocks`, called from `launch::played_and_reported` — so `acceptance_from` still
+does nothing but parse, and the sentence lives beside the other notices rather than inside the
+parse. `Session::save` is a
 three-line forward to `mc_sim::persistence::save`. The one piece of client-side logic that is more
 than wiring is `ending_after_saving`, in `session.rs` and not in `mc-sim` because it returns
 `mc_render::window::Ending` and `mc-sim` may not name `mc-render` — it decides that only a run that
@@ -1028,16 +1047,23 @@ when a third caller appears** — MVP 3's join is the candidate.
 
 ### The search runs at every entry, and the alternative was refused on coupling
 
-Entry does not ask whether the save reported changed blocks. `RegistryVerdict`
-(`crates/mc-world/src/persistence/table.rs`) is computed and dropped inside `load_world`, and
-`LoadedWorld` carries only `{ world, player }`. Gating on it would mean widening `mc-world`'s
-persistence return so that `mc-sim` could ask persistence whether to ask the physics a question —
-persistence coupled to physics for a saving of almost nothing, since `cleared` opens with an
-`overlaps_solid` early return and a clear player therefore costs only the cells their own box
-covers (two, where the box lies inside one cell column). The 2 601-candidate ring is walked only by
-a player who is genuinely trapped. `changed` is also not the only way to be trapped: a hand-written
-save, or a launch made without `--load-changed-blocks` over a save whose blocks all still match,
-reaches the same state.
+Entry does not ask whether the save reported changed blocks. Gating on it would mean letting
+`mc-sim` ask persistence whether to ask the physics a question — persistence coupled to physics for
+a saving of almost nothing, since `cleared` opens with an `overlaps_solid` early return and a clear
+player therefore costs only the cells their own box covers (two, where the box lies inside one cell
+column). The 2 601-candidate ring is walked only by a player who is genuinely trapped. `changed` is
+also not the only way to be trapped: a hand-written save, or a launch over a save whose blocks all
+still match, reaches the same state.
+
+**The coupling refusal stands; the premise it rested on does not.** `LoadedWorld` no longer carries
+only `{ world, player }` — it carries `changed` as well, the ascending list of names whose declared
+behaviour moved, so the verdict `load_world` computes is reported instead of dropped. That widening
+adds no physics dependency: a list of names travelling out to be printed is not persistence asking
+about solidity, which is the thing the decision above refused. **What is forbidden is unchanged and
+is what `crates/mc-client/tests/entry_clears_whatever_the_load_reported.rs` reads for**: nothing may
+branch the clearing search on that list. `seat` asks the physics its question unconditionally, and
+the cheap implementation is now *spellable* where it previously was not — which is why that file
+matters more than it did, not less.
 
 ### Where the verdict is parked, and why once-ness is structural
 
@@ -2022,11 +2048,13 @@ transparent. What a player reads is unchanged to the byte on those paths: the
 that gains a layer, like a generated world reaching a malformed id, gains it
 because that layer was being dropped before.
 
-**A way out is not a cause.** `--load-changed-blocks` says what to do rather
-than what happened, so `PreparationError::way_out()` supplies it separately and
-`Ending::failed` appends it *after* the whole chain. Wrapping it around the
-front, which is what a `Display` suffix does, strands the advice ahead of the
-refusal it answers.
+**A way out is not a cause.** Dropping `--refuse-changed-blocks` says what to
+do rather than what happened, so `PreparationError::way_out()` supplies it
+separately and `Ending::failed` appends it *after* the whole chain. Wrapping it
+around the front, which is what a `Display` suffix does, strands the advice ahead
+of the refusal it answers. The advice now names an argument to **stop** passing:
+a load refused for changed blocks alone can only have been refused because that
+argument was on the command line, since nothing else produces the decision.
 
 **What the guards forbid, and what they do not.** A source scan over
 `crates/mc-client/src` reports any production file naming `Ending::Failed`,

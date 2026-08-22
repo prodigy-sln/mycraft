@@ -29,17 +29,21 @@ use super::format::{NameEntry, SaveNameId, TableRecord, appearance_of, behaviour
 use super::read::reader::{RequiredBlock, SaveRequirements};
 use crate::section::{Contents, SectionData};
 
-/// Whether the caller has decided to load a save whose blocks have changed since
-/// it was written.
+/// Whether the caller has asked for a save whose blocks have changed since it was
+/// written to be refused rather than loaded.
 ///
 /// **Not a `bool` and with no `Default`**, and that is the whole of it: a caller
-/// cannot pass `true` by accident, cannot get "yes" by forgetting the argument,
-/// and cannot express the decision without having read what it is about.
+/// cannot pass `true` by accident, cannot get either answer by forgetting the
+/// argument, and cannot express the decision without having read what it is
+/// about. What the *client* does when its player types nothing is the client's
+/// policy and is stated there; nothing here has an opinion about it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Acceptance {
-    /// Refuse a save whose blocks' declared behaviour has changed.
+    /// Refuse a save whose blocks' declared behaviour has changed. Asked for
+    /// explicitly, because opening such a save and playing on rewrites its
+    /// recorded hashes and there is then nothing left to notice.
     OnlyUnchangedBlocks,
-    /// Load it anyway. The player said so.
+    /// Load it and report which blocks moved.
     ChangedBlocksToo,
 }
 
@@ -59,21 +63,33 @@ pub struct RegistryVerdict {
     /// *should* be is a judgement about their world.
     pub changed: Vec<BlockName>,
     /// Names the registry holds whose declared appearance alone has changed.
-    /// Loadable without asking, and reported so that a caller can say so.
+    ///
+    /// **Nothing reports these, and the promise that something would is
+    /// withdrawn.** This field said it was "reported so that a caller can say
+    /// so"; no caller ever did, and none should — a line after every art edit is
+    /// noise the line about a rebalance would hide in, which is the same
+    /// reasoning that keeps a retexture out of the refusal.
+    ///
+    /// What it is for is being the third arm of a **total** classification. Every
+    /// name a save carries lands on exactly one of `missing`, `changed` and this,
+    /// which is what lets a test compare a whole verdict instead of asserting an
+    /// absence. Drop it and a block whose appearance alone moved would fall into
+    /// no list at all, so [`resolve`] could no longer be graded as a whole. It is
+    /// load-bearing for the evidence rather than for a report.
     pub retextured: Vec<BlockName>,
 }
 
 impl RegistryVerdict {
     /// Nothing, or the refusal a load carrying this verdict has to answer with.
     ///
-    /// **Acceptance never covers a missing name**, and that asymmetry is the
-    /// whole of this function. A missing block means nothing can go in the cell,
-    /// which is not a judgement a player is in a position to make; a changed
-    /// block means the data is loadable and whether it *should* be is a judgement
-    /// about their own world.
+    /// **No acceptance covers a missing name**, and that asymmetry is the whole of
+    /// this function. A missing block means nothing can go in the cell, so there
+    /// is no answer a caller could give that would make the save loadable; a
+    /// changed block means the data is loadable, and it is loaded unless the
+    /// caller asked otherwise.
     ///
     /// The refusal carries **both** lists whichever one caused it, so that a
-    /// player who has already accepted the changed blocks and is refused anyway
+    /// caller who is refused while asking for nothing stricter than the default
     /// can see it was the missing half that turned them away. It is produced only
     /// when at least one of the two is non-empty.
     #[must_use]
@@ -91,8 +107,8 @@ impl RegistryVerdict {
     /// decision.
     ///
     /// A retextured block is never a refusal: the blocks are the same blocks and
-    /// only look different, and prompting on every texture edit is what teaches a
-    /// player to accept without reading.
+    /// only look different, and stopping a player over every texture edit teaches
+    /// them that being stopped means nothing.
     fn refuses(&self, accepting: Acceptance) -> bool {
         !self.missing.is_empty()
             || (accepting == Acceptance::OnlyUnchangedBlocks && !self.changed.is_empty())

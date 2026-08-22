@@ -125,6 +125,8 @@ mod built_set_refusals;
 mod entry;
 #[path = "support/input/mod.rs"]
 mod input;
+#[path = "support/launch_notices.rs"]
+mod launch_notices;
 #[path = "support/per_facing_refusals.rs"]
 mod per_facing_refusals;
 #[path = "support/persistence.rs"]

@@ -539,19 +539,29 @@ time:
   judgement a caller is in a position to override.
 - **Changed** — the registry holds the name, but its declared *behaviour*
   (solidity, replaceability, breakability, what it breaks into) hashes
-  differently than the save recorded. Loadable, but only with the caller's
-  explicit acceptance — the data is fine, and whether it *should* be
-  loaded is a judgement about the world it belongs to.
+  differently than the save recorded. **Loaded, and reported.** The names
+  travel out of `load_world` on `LoadedWorld.changed` and the client says
+  them on the error stream; `Acceptance::OnlyUnchangedBlocks` asks for the
+  refusal instead, and a caller has to ask for it explicitly.
 - **Unchanged, or changed only in declared *appearance*** (the keys its six
-  faces draw from) — loads without asking. A texture edit cannot damage a
-  world: the blocks are the same blocks and only look different.
+  faces draw from) — loads with nothing said about it. A texture edit
+  cannot damage a world: the blocks are the same blocks and only look
+  different.
+
+**Only the first of the three is unconditional, and that asymmetry is the
+whole of the decision.** A missing name means nothing can go in the cell,
+so there is no answer a caller could give that would make the save
+loadable. A changed name means the data is loadable, and refusing it turned
+a content update into a world nobody could open — while the live reload of
+the very same edit accepted it and moved the player where that was
+genuinely dangerous. The two answers were inverted relative to risk.
 
 Behaviour and appearance are hashed **separately**, into two independent
 64-bit values, and that split is deliberate rather than an optimisation: a
 single hash covering both would make a retextured mod indistinguishable
 from a rebalanced one, and the only safe response to that ambiguity would
-be to prompt on every texture edit — training a player to click through a
-prompt without reading it, which destroys the one thing the prompt is for.
+be to report every texture edit — teaching a player that a report means
+nothing, which destroys the one thing the report is for.
 
 ### What each of the two hashes folds, and how its revision moves
 
@@ -590,14 +600,23 @@ retextured: [base:dirt, base:grass, base:stone, base:water]   // a byte per list
 ```
 
 Those are not two shades of the same answer. Read the three-outcome
-decision above: a non-empty `changed` **refuses the load** under
-`Acceptance::OnlyUnchangedBlocks`, and `retextured` is never a refusal at
-all. So one shared constant means **every save written before this spec
-is refused at load**, and the player is told the blocks they built with
-behave differently — when nothing behaves differently, and all that
-happened is that they were retextured. The measurement was 5 of 1 224
+decision above: a non-empty `changed` is **named on the player's terminal**,
+and refuses the load outright under `Acceptance::OnlyUnchangedBlocks`, while
+`retextured` is neither reported nor refused. So one shared constant means
+**every save written before this spec tells its player that every block they
+built with behaves differently** — when nothing behaves differently, and all
+that happened is that they were retextured. The measurement was 5 of 1 224
 tests red, and the fifth is the behaviour-half guard reporting exactly the
 defect it was written for.
+
+**The cost of a shared byte fell when the default flipped, and it did not
+fall to nothing.** Before, it refused every save in existence; now it
+mislabels every one of them on the way in. That is a smaller failure and it
+is a worse one to *find*, because a world that opens looks fine — which is
+why the guard is still a whole-verdict comparison against a committed save
+rather than a check that the load succeeded. Measured again on the tree
+that flipped the default: reporting a retextured block as changed reddens 7
+of 1 385, one of them the run of the shipped binary itself.
 
 **This paragraph exists because the next reader is right by every rule
 they can see.** Two constants where there was one is duplication, two
@@ -611,10 +630,15 @@ keys instead of one.** The consequence is player-visible and intended:
 every save written before that revision reports **every block it holds as
 retextured** on its next load. That is correct rather than a migration
 defect — every block's appearance really did change — and a retexture is
-in the arm that loads without asking anybody anything, so nothing about
-opening an older world changed. A future change to what a block looks like
-moves this byte again and no other; a future change to what a block *is*
-moves the other one.
+in the arm that is neither reported nor refused, so nothing about opening
+an older world changed. **The shipped content has since moved a behaviour
+hash as well**: `content/base/blocks/water.luau` declares
+`breakable = false`, so the committed pre-Luau save now reports `base:water`
+as changed and its other three blocks as retextured, which is the two-hash
+separation firing on a real content edit rather than on a fixture.
+
+A future change to what a block looks like moves this byte again and no
+other; a future change to what a block *is* moves the other one.
 
 A save written before a revision is never compared field-by-field against
 one written after it. Two values folded over different field lists agree
@@ -679,6 +703,24 @@ plain-file format described above is what makes the two coincide.
 ## Known limitations, as built
 
 These are current behaviour, not a roadmap.
+
+- **The changed-blocks report is a one-shot, and playing on destroys the
+  evidence.** A save is rewritten against the current declarations on quit:
+  `NameTable::record` writes `behaviour_of`/`appearance_of` from the registry
+  the process is running, not the values the file arrived with. So *load a
+  changed save → play → quit normally* replaces the recorded hashes, the
+  mismatch is gone from the file for good, and the next launch has nothing
+  left to notice. **This is the whole reason
+  `Acceptance::OnlyUnchangedBlocks` exists** and is not a flag nobody
+  passes: somebody restoring a backup they are unsure of wants the world
+  left shut, because opening it is what destroys the record of what it was.
+  Nothing warns about this at the moment the save is rewritten, and no
+  test asserts it — it is existing behaviour that this note records rather
+  than behaviour anything here created.
+
+  There is no per-load backup and no copy-on-open. A player who wants the
+  old record keeps their own copy of `saves/world.mcw`, which is what
+  `docs/user/gameplay.md` tells them.
 
 - **Importing a section that names an unregistered block is still an
   error** (`ImportError::UnknownBlock`), and there is still no

@@ -302,7 +302,7 @@ directory `CLAUDE.md`, a planning document and four cross-reference sentences. T
 surface had been documented correctly the whole time. Nobody asked *what did this
 change make untrue?*
 
-Two shapes are worth knowing because they are where the stale copies hide:
+Three shapes are worth knowing because they are where the stale copies hide:
 
 - **An ADR whose Consequences name another document as their record.** ADR-024 said
   the `texture` limitation "is stated in `modding/hot-reload.md` rather than papered
@@ -314,6 +314,19 @@ Two shapes are worth knowing because they are where the stale copies hide:
   digest of `hot-reload.md`, both restated the limitation in their own words. Neither
   contains the phrase the as-built pages use, and `INDEX.md`'s rows are long enough
   that a stale clause reads as prose rather than as a claim.
+- **A synonym for the limitation, on a page already corrected for this very class.**
+  SPEC-020 lifted the refusal of a save whose blocks *behave* differently, and found
+  the old behaviour recorded across fourteen files as a **prompt that has never
+  existed** — a refused launch naming a flag, described as the game asking. Five of
+  those lines were shipped `mc-world` doc comments *arguing from* the prompt. The worst
+  was player-facing and false about the shipped program, `docs/user/gameplay.md`'s "the
+  game asks before opening a save whose blocks behave differently", on a page corrected
+  for this same class two commits earlier. It survived that correction because the
+  correction grepped the limitation's own phrase and this line used a synonym for it.
+  **So the grep is over the limitation's vocabulary, not its wording** — every word the
+  old behaviour was ever described with, including the ones no as-built page uses, and
+  including the descriptions that were never accurate in the first place. A wrong
+  account of a limitation does not become findable by lifting the limitation.
 
 The general falsifiability form of this — that a green suite is no evidence about a
 document — is in `technical/testing.md`. This section is about the habit that catches

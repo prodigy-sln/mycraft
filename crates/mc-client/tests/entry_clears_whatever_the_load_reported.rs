@@ -5,17 +5,24 @@
 //!
 //! The cheap implementation asks persistence whether anything changed and only
 //! then asks the physics a question. It passes the offline-edit journey below and
-//! fails the one after it: that launch is made **without** `--load-changed-blocks`,
-//! against a save whose blocks all match the declarations it is read against, and
-//! whose recorded feet are inside a cell holding a solid block anyway. Nothing
-//! about that launch reports a change, and the player is still moved clear. **Do
-//! not let that fixture drift into one where a block changed** — it would then be
-//! a second copy of the journey above and the decision it grades would be graded
-//! by nothing.
+//! fails the one after it: that launch reads a save whose blocks all match the
+//! declarations it is read against, and whose recorded feet are inside a cell
+//! holding a solid block anyway. Nothing about that launch reports a change, and
+//! the player is still moved clear. **Do not let that fixture drift into one where
+//! a block changed** — it would then be a second copy of the journey above and the
+//! decision it grades would be graded by nothing.
 //!
-//! Widening `mc-world`'s persistence return so the launch seam could see the
-//! registry verdict is Out of Scope, so the cheapest green for that scenario is
-//! forbidden rather than merely unattractive.
+//! **The two journeys differ in the save and never in the command line**, and
+//! that is a tightening rather than a loss. They once differed in both, because
+//! the changed-save launch had to pass a flag to be allowed at all; loading is now
+//! what a client does when it is told nothing, so the only variable left is the
+//! one the file is about.
+//!
+//! `mc-world`'s persistence return does now carry which blocks changed — that is
+//! what the report on the error stream is composed from — so the cheap
+//! implementation is *spellable* here in a way it was not. Nothing may branch the
+//! clearing on it: `seat` asks the physics its question unconditionally, and this
+//! file is what says so.
 //!
 //! # The journey is the player's own, run rather than described
 //!
@@ -52,8 +59,8 @@ use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 
 use entry::{
-    A_SEARCH_OF, ACCEPTANCE_GIVEN, ASave, FEET_ROW, NO_ACCEPTANCE, at, cells_a_box_covers, filling,
-    floor_of, recorded_at, require, resumed, written,
+    A_SEARCH_OF, ASave, FEET_ROW, NO_ARGUMENT, at, cells_a_box_covers, filling, floor_of,
+    recorded_at, require, resumed, written,
 };
 use persistence::{
     EVERY_DECLARED_CELL, Launched, NOTHING, TestResult, against, held_at, refusal, stood_at,
@@ -87,7 +94,7 @@ const PUT_CLEAR_AT: Vec3 = Vec3::new(7.5, FEET_ROW as f32, 7.5);
 fn water_made_solid_while_the_game_was_off_does_not_resume_the_player_inside_it() -> TestResult {
     let save = a_save_of_a_player_standing_in_water()?;
 
-    let launched = resumed(&save, &ACCEPTANCE_GIVEN)?;
+    let launched = resumed(&save, &NO_ARGUMENT)?;
 
     assert_eq!(
         (stood_at(&launched), what_the_box_covers(&launched)),
@@ -110,7 +117,7 @@ fn a_launch_that_accepted_no_changed_blocks_still_moves_a_player_saved_inside_st
 {
     let save = a_save_of_a_player_standing_in_stone()?;
 
-    let launched = resumed(&save, &NO_ACCEPTANCE)?;
+    let launched = resumed(&save, &NO_ARGUMENT)?;
 
     assert_eq!(
         (stood_at(&launched), what_the_box_covers(&launched)),
@@ -135,7 +142,7 @@ fn a_player_moved_at_entry_starts_within_eight_blocks_of_the_save_in_a_world_sti
 -> TestResult {
     let save = a_save_of_a_player_standing_in_stone()?;
 
-    let launched = resumed(&save, &NO_ACCEPTANCE)?;
+    let launched = resumed(&save, &NO_ARGUMENT)?;
 
     assert_eq!(
         (

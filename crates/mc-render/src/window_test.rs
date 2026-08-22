@@ -196,7 +196,7 @@ const BELOW: &str = "the declaration was refused";
 /// A refusal a way out exists for, and the sentence that offers it.
 const REFUSED_SAVE: &str = "the save could not be read";
 const REDECLARED: &str = "`base:amber` is no longer declared as it was";
-const WAY_OUT: &str = ". Pass --load-changed-blocks to load it anyway";
+const WAY_OUT: &str = ". Drop --refuse-changed-blocks to load it anyway";
 
 #[test]
 fn a_failure_is_rendered_with_the_failure_beneath_it_after_a_separator() {

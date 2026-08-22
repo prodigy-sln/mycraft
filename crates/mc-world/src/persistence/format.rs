@@ -221,8 +221,8 @@ pub(crate) enum PaletteEntry {
 ///
 /// Compared once per distinct name against a *specific* other version of the
 /// same block, which is what makes 64 non-cryptographic bits enough: an
-/// accidental collision would be one changed block loading without a prompt,
-/// not a corrupted world. These detect change and not tampering — a local save
+/// accidental collision would be one changed block loading unremarked on, not a
+/// corrupted world. These detect change and not tampering — a local save
 /// can be edited directly, so a player forging their own record has easier ways
 /// to change their world.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -311,8 +311,8 @@ struct DeclaredBehaviour<'a> {
 /// texture changed is the same block to stand on, and a block whose solidity or
 /// drop changed is not. One value for both would make a retextured mod
 /// indistinguishable from a rebalanced one, and the only safe answer to that
-/// ambiguity is to prompt on every texture edit — which teaches a player to
-/// accept without reading.
+/// ambiguity is to report every texture edit — which buries the one report that
+/// was worth reading.
 ///
 /// The name is in both lists, so that the two hashes of one block cannot be
 /// swapped for each other and a block's appearance cannot collide with some
@@ -353,8 +353,10 @@ pub(crate) fn behaviour_of(definition: &BlockDefinition) -> DefinitionHash {
 /// **Every save written before this revision reports every block as retextured
 /// on its next load, and that is correct rather than a migration defect**: every
 /// block's appearance really did change, from one key to six. A retexture is
-/// loadable without asking anybody anything, which is exactly why the two lists
-/// carry separate revision bytes.
+/// loaded with nothing said about it, which is exactly why the two lists carry
+/// separate revision bytes — a byte shared between them would have turned an
+/// added texture key into a claim that every block in existence behaves
+/// differently.
 pub(crate) fn appearance_of(definition: &BlockDefinition) -> DefinitionHash {
     folded(&DeclaredAppearance {
         input_version: APPEARANCE_REVISION,

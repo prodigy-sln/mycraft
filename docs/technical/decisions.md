@@ -1578,3 +1578,107 @@ model it is a view of, under all eight dihedral transforms.
 - **Treating `build/validate.rs` as the guard and adding a fourth copy to it.** More agreement
   between copies, no more evidence about the values. The scenarios above are what the tables are
   answerable to.
+
+---
+
+## ADR-029 — A save whose blocks changed behaviour is loaded and reported; only a missing block refuses
+
+**Status**: Accepted · **Date**: 2026-08-22 · **Narrows ADR-025 in part** ·
+**Implemented 2026-08-22 by SPEC-020**
+
+**Context.** Two paths answer the same content edit and they answered it in opposite
+directions. Loading a save whose blocks' declared *behaviour* had changed was
+**refused** until the player passed `--load-changed-blocks`; the live reload of that
+very same edit **accepted** it and, where it was genuinely dangerous, moved the
+player rather than refusing (ADR-025's siblings, and the entry-clearing search). The
+refusal protected nothing: the world was already written, the data was loadable, and
+what the player got for a content update was a game that would not start. The reload
+path, which acts on a world somebody is standing in *right now*, is the one that
+accepts.
+
+Two further facts decided the shape rather than the direction. First, the refusal
+already named every changed block, so the information a player acts on existed and
+was being spent on turning them away. Second — and this is the one that is easy to
+miss — **a save is rewritten against the current declarations on quit.**
+`NameTable::record` writes `behaviour_of`/`appearance_of` from the registry the
+process is running, so *load a changed save → play → quit* replaces the recorded
+hashes and the mismatch is gone from the file for good. Whatever this path does, it
+gets one chance to do it.
+
+**Decision.**
+
+1. **Loading is the default.** A save whose blocks changed only in declared behaviour
+   is loaded, cell for cell, with the player where it recorded them.
+2. **The changed blocks are named on the error stream**: one line, every one of them,
+   ascending, complete, never truncated, and nothing at all when nothing changed. Not
+   a prompt — there is no prompt anywhere in this system and there never was.
+3. **Behaviour only.** A block whose declared *appearance* alone moved is not
+   reported. The reasoning that keeps a retexture out of the refusal transfers
+   unchanged to a line.
+4. **`--refuse-changed-blocks` keeps the strict answer**, per run, and the refusal it
+   causes names it as the thing to drop.
+5. **A missing block still refuses unconditionally**, whatever the argument. Nothing
+   can go in the cell, so there is no answer a caller could give that would make the
+   save loadable.
+6. **The line is said where the load completes, above any device.** `LoadedWorld`
+   carries the changed names out, they ride `Seated` beside the clearing verdict, and
+   `launch::played_and_reported` says them before a window or a GPU exists.
+
+**Why this does not contradict ADR-025.** That record refuses a *reload candidate*
+that stops declaring a block the world holds, and rejects "warning and accepting" on
+the grounds that a warning nobody reads is an acceptance. Both still hold, because
+both are about a **missing** name — point 5 here, unchanged, on the load path. The
+distinction ADR-025 did not have to draw is the one this record turns on: a missing
+name admits no answer, a changed one does. Where the two paths do meet, they now
+agree — a reload refuses a missing block, a load refuses a missing block, and neither
+refuses a block that is merely no longer what it was.
+
+**Consequences.**
+
+- **The report is a one-shot and playing on destroys the evidence** — see
+  `world-format.md` §"Known limitations, as built". That is what earns
+  `--refuse-changed-blocks` its keep: somebody restoring a backup they are unsure of
+  wants the world left shut, because opening it is what erases the record of what it
+  was. No backup, copy-on-open, or warning at the moment of rewriting is added here.
+- **Point 6 is a verifiability decision, not a tidy-up.** `notice::say_entering` sits
+  below the frame path's uploads because "you were moved" needs a world to have been
+  moved in. "These blocks changed" is already true when `load_world` returns, so it is
+  said above the device — which is the only reason a run of the *built binary* can
+  read it off the real stream. Measured: deleting that call leaves 1 384 of 1 385
+  tests green, and the one that reddens is the subprocess. Moving the line down for
+  symmetry with its sibling would take the only instrument that can see it away.
+- **`LoadedWorld` is wider than `architecture.md` said it was.** Widening it to let
+  persistence be *asked about physics* was refused and stays refused; carrying a list
+  of names out to be printed adds no such dependency. Nothing may branch the
+  entry-clearing search on that list, and
+  `crates/mc-client/tests/entry_clears_whatever_the_load_reported.rs` is what reads
+  for it — the cheap implementation is now spellable where it previously was not.
+- **A player can be moved by the entry search on a load they were never asked
+  about.** That is the pre-existing behaviour this leans on rather than a new
+  exposure: `seat` clears unconditionally, on every entry, with no branch on what the
+  load reported.
+
+**Rejected.**
+
+- **Keeping the refusal and improving its wording.** The refusal was not unclear; it
+  was the wrong answer. No wording makes "your world will not open because a mod you
+  installed changed a number" into something a player can act on beyond uninstalling
+  the mod.
+- **A prompt.** There is no dialog, HUD or stdin channel in this build, so the only
+  prompt available is a terminal question at startup — and a question asked on every
+  content update is one people learn to answer without reading, which is the same
+  objection that keeps retextures out of the report.
+- **Reporting retextured blocks too.** A line after every art edit is the noise the
+  line that matters would hide in. `RegistryVerdict.retextured` exists to make the
+  classification *total* so a test can compare a whole verdict, and its doc comment's
+  claim that "a caller can say so" is withdrawn rather than kept: no caller ever did.
+- **Bounding the list at the first few names.** `LoadError::Unresolvable`'s own
+  `Display` prints both lists whole, so a bounded line would report *less* than the
+  refusal it replaces.
+- **One shared revision byte over both hash lists**, which keeps coming up as an
+  obvious tidy-up. Under the old default it refused every save in existence; under
+  this one it mislabels every one of them on the way in — a smaller failure and a
+  harder one to notice, because a world that opens looks fine.
+- **Strict argument parsing.** An unrecognised argument stays ignored, which is also
+  why the retired `--load-changed-blocks` needs no handling: it stops matching, and
+  the load it used to ask for is now what happens anyway.

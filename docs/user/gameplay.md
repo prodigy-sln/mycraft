@@ -61,6 +61,15 @@ distance and it stays still as you move instead of crawling and sparkling.
 ever emitted, so it has no picture on screen even though it holds a place in the
 texture set like every other block.
 
+The content now declares water **unbreakable**, and that changes nothing you can
+do — it was never something you could aim at. The crosshair only ever targets
+*solid* blocks, and water is not one, so a swing at a cell of water goes straight
+through it and breaks whatever solid block is behind. What the declaration does
+change is your save: water is the one shipped block whose recorded behaviour
+moved, which is why a world saved before this build reports it by name on the
+terminal (see below). You can still build straight into water — a placement
+replaces it rather than needing it broken first.
+
 **A block whose art nobody has drawn still works.** If you install a mod that
 declares a block and ships no picture for it, that block draws a generated
 stand-in — a two-colour pattern derived from the texture's name, deterministic
@@ -75,26 +84,50 @@ draws six of them where it drew one. A save records what each block looked like
 when it was written, so a world saved before this build **does** come back with
 every block reported as retextured.
 
-**Nothing stops you and nothing asks you.** The world opens as normal: your
-terrain, your edits and where you were standing all come back exactly as you left
-them, and what changed is what they are painted with. That is deliberate. The
-game asks before opening a save whose blocks *behave* differently — a mod
-rebalanced under you is a judgement about your world that only you can make —
-and it does not ask when they merely look different, because prompting on every
-texture edit is what teaches people to click through prompts without reading.
+**Nothing stops you and nothing is said about it.** The world opens as normal:
+your terrain, your edits and where you were standing all come back exactly as you
+left them, and what changed is what they are painted with. That is deliberate, and
+it is different from the case below. A block that merely looks different gets no
+line on the terminal at all, because a message after every texture edit is what
+teaches people that a message means nothing.
 
-`--load-changed-blocks` is the flag for the first case and it has nothing to do
-with this one:
+There is no way to decline the new art, and no mechanism keeps a save on the old
+pictures: what a block looks like comes from the content the game is running, not
+from the save.
+
+## A save whose blocks *behave* differently also opens, and the terminal says which
+
+A mod can change what a block *is* rather than what it looks like — whether it is
+solid, whether it can be broken, what it drops. Your world opens anyway, and the
+game names the blocks it found:
 
 ```
-cargo run -p mc-client -- --load-changed-blocks
+mycraft: `base:water` no longer behaves as it did when this world was saved, and it was loaded anyway
 ```
 
-You would need it if a mod changed what a block *is* — whether it is solid,
-whether it can be broken, what it drops. You do not need it to open a world whose
-grass now has grass on it. There is no flag to decline the new art, and no
-mechanism keeps a save on the old pictures: what a block looks like comes from
-the content the game is running, not from the save.
+One line, every block that moved, in alphabetical order, on the error stream. It
+is a notice and not a refusal — the world opens. Nothing is asked of you and there
+is no prompt of any kind: read the line, and if a mod changed something you did
+not want changed, put it back and relaunch.
+
+**If you would rather not be let in, say so:**
+
+```
+cargo run -p mc-client -- --refuse-changed-blocks
+```
+
+With that on the command line a world whose blocks behave differently is left
+shut, and the game names them so you know which mod to look at. This is worth
+knowing about for one specific reason: **playing on destroys the evidence.** Your
+save records what each block was when you last quit, so opening a changed world
+and quitting normally rewrites those records against the mod you are running now.
+The next launch has nothing left to notice. If you have just restored a backup and
+are not sure what content it belongs to, `--refuse-changed-blocks` is how you look
+without touching anything.
+
+A block the running content does not declare *at all* is different again, and no
+argument changes it: there is nothing to put in those cells, so the launch is
+refused either way and the missing blocks are named.
 
 ## Controls
 
@@ -184,21 +217,25 @@ keep a copy of a world before playing on, copy that file yourself.
 
 **If the save can't be read, the game refuses to start rather than quietly generating a new world in
 its place.** The refusal names the file and the reason. If the save was written under a mod set that
-has since changed, the refusal names every affected block and treats two cases differently: a block
-that's missing outright — a mod that defined it is gone — can't be resolved at all, and the game
-always refuses to start over it. A block the game still recognises by name but that behaves
-differently than it did when you saved (solidity, breakability, what it drops) is a call you get to
-make: pass `--load-changed-blocks` on the command line to load the world anyway, changed blocks and
-all, or leave it off and the game keeps refusing until you either restore the mod or decide to pass
-the flag. A block that only *looks* different — a retextured mod, with nothing about how it behaves
-changed — never triggers this at all; that world loads normally, without asking.
+has since changed, what happens next depends on *what* changed, and the three cases are treated
+differently:
+
+- **A block that's missing outright** — a mod that defined it is gone — can't be resolved at all:
+  there is nothing to put in those cells. The game always refuses to start over it, whatever you put
+  on the command line, and names every missing block.
+- **A block that behaves differently** than it did when you saved (solidity, breakability, what it
+  drops) does not stop you. The world opens and the terminal names the blocks that moved, one line,
+  all of them. Pass `--refuse-changed-blocks` if you would rather be turned away — see "A save whose
+  blocks *behave* differently also opens" above for when that is worth doing.
+- **A block that only *looks* different** — a retextured mod, with nothing about how it behaves
+  changed — is not reported at all. That world loads with nothing said about it.
 
 **A world you saved before this build records every one of its blocks as having been
 retextured**, and that is expected rather than a sign anything is wrong: the game
 changed how it records what a block looks like, so the old record and the new one
 are not comparable and the honest answer is that they all look different. Looking
-different is the case that never asks you anything, so such a world opens exactly
-as it did before, with no prompt and no flag — and nothing on screen is different
+different is the case nothing is said about, so such a world opens exactly as it
+did before, with no line on the terminal — and nothing on screen is different
 either. What blocks actually look like has not changed yet.
 
 A save that loads can still put you somewhere that stopped being standable while the
@@ -231,8 +268,8 @@ that used to end in a single line saying the content could not be read, the game
 now prints the file it was reading, the thing declared in it, and the part it
 could not accept — so a file you or a mod author edited can be found and fixed
 without hunting through all of them. The same holds for a saved world it cannot
-load: it says which save, and why, once rather than twice, and where passing
-`--load-changed-blocks` would let you in anyway it says so at the end, after the
+load: it says which save, and why, once rather than twice, and where dropping
+`--refuse-changed-blocks` would let you in anyway it says so at the end, after the
 reason. Look on the terminal you started the game from; the text begins
 `mycraft: `.
 

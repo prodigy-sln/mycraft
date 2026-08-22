@@ -200,6 +200,38 @@ pub fn simulation_to_play(
     Ok((simulation_at_launch(save, launching)?, holding))
 }
 
+/// The simulation a launch plays, with what the save it read disagreed with the
+/// content about already said out loud.
+///
+/// **Said here, where the load has completed and no device has been opened.** It
+/// is a statement about a file rather than about a world the player has been put
+/// into, so it does not wait for a picture the way the clearing notice does —
+/// `notice::say_entering` sits below the frame path's uploads because "you were
+/// moved" needs a world to have been moved in, and "these blocks changed" is
+/// already true the moment the save has been read.
+///
+/// That is not tidiness: it is what puts the only scenario able to see a client
+/// which composes the line and never prints it — a run of the shipped binary — in
+/// reach of a suite with no display server. Moving this below the uploads for
+/// symmetry with its sibling would take that scenario out of reach again.
+///
+/// **A function of its own rather than four statements inside the sequence
+/// above**, because deciding which world a launch plays and telling the player
+/// what reading its save found are one step from the caller's side and the
+/// sequence has no business being able to do the first without the second.
+///
+/// # Errors
+///
+/// Returns whatever [`simulation_to_play`] refuses.
+fn played_and_reported(
+    save: &Path,
+    launching: Launching,
+) -> Result<(Seated, BlockName), PreparationError> {
+    let (seated, holding) = simulation_to_play(save, launching)?;
+    crate::notice::say_changed_blocks(&seated.changed);
+    Ok((seated, holding))
+}
+
 /// Starts preparing a launch on a worker, and hands back the handle to collect it
 /// through.
 ///
@@ -276,7 +308,7 @@ pub fn prepare_launch(
     let content = PublishedContent::first(resolved, hud);
     let hud = Arc::clone(&content.hud);
 
-    let (seated, holding) = simulation_to_play(
+    let (seated, holding) = played_and_reported(
         save,
         Launching {
             seed: mc_sim::REPLAY_SEED,

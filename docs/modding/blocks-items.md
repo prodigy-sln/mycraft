@@ -547,14 +547,37 @@ and that this is fine: a residue is resolved when a break happens.
 | `dirt.luau` | `base:dirt` | `base:dirt` | `true` | *(absent)* | *(absent)* | *(absent)* |
 | `grass.luau` | `base:grass` | *(a table of six)* | `true` | *(absent)* | *(absent)* | *(absent)* |
 | `stone.luau` | `base:stone` | `base:stone` | `true` | *(absent)* | *(absent)* | *(absent)* |
-| `water.luau` | `base:water` | `base:water` | `false` | `true` | *(absent)* | *(absent)* |
+| `water.luau` | `base:water` | `base:water` | `false` | `true` | `false` | *(absent)* |
 
 They are read in that order, which is why `base:dirt` — the first solid block —
 is what a new player holds.
 
 `base:water` is the only base block declaring `replaceable = true`, which is what
-makes water placeable at all. No base block declares itself unbreakable or names
-a residue: breaking any of the four leaves the cell empty.
+makes water placeable at all, and the only one declaring `breakable = false`. No
+base block names a residue: breaking dirt, grass or stone leaves the cell empty.
+
+**Water's `breakable = false` is worth reading as an example rather than as a
+rule, because it changes nothing a player can do.** Only a *solid* block can be
+aimed at — the ray a break travels stops at the first solid cell — so a swing at a
+cell of water passes through it and breaks whatever is behind. The declaration is
+there to say what water is rather than to stop anything, and it will start
+mattering the day a non-solid block can be targeted.
+
+What it *does* change is every save in existence, and that is the lesson for your
+own content: **`breakable` is one of the five fields a save folds into a block's
+recorded behaviour**, alongside `name`, `solid`, `replaceable` and `breaks_into`.
+Edit any of them and every existing world holding that block will name it on the
+terminal at its next launch:
+
+```
+mycraft: `base:water` no longer behaves as it did when this world was saved, and it was loaded anyway
+```
+
+That is a notice and not a refusal — the world opens — and it is a one-shot: the
+next clean quit rewrites the save against your new declaration and there is nothing
+left to notice. Editing `texture` instead moves the *appearance* fold, which is
+never reported. See `docs/technical/world-format.md` for the two folds and
+`docs/modding/hot-reload.md` for the offline edit-and-relaunch loop.
 
 `base:grass` is the only one stating a table, and it is the block the table form
 exists for: six facings and six keys, five of them its own and one shared with

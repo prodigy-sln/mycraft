@@ -134,9 +134,9 @@ fn a_save_whose_block_was_only_retextured_produces_its_world_without_asking() ->
         "a retextured block is the same block to stand on, and no decision was given here — the \
          load is the strictest one a caller can ask for and it still produces the world. This is \
          why the save records appearance and behaviour separately: one value for both would make \
-         this file indistinguishable from a rebalanced one, and prompting on every texture edit is \
-         what teaches a player to accept without reading, which destroys the only thing the \
-         prompt is for"
+         this file indistinguishable from a rebalanced one, and reporting every texture edit is \
+         what teaches a player that a report means nothing, which destroys the only thing the \
+         report is for"
     );
     Ok(())
 }

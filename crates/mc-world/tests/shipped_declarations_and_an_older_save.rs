@@ -25,17 +25,23 @@
 //! A block's recorded appearance folds **every key it declares**, one per facing,
 //! under a revision byte of its own. Every save written before that — this fixture
 //! included — recorded an appearance over one key under the previous revision, so
-//! every block in it is reported **retextured**. That is correct rather than a
-//! migration defect: every block's appearance really did change, and a retexture
-//! is loadable without asking anybody anything.
+//! every block in it looks different now. That is correct rather than a migration
+//! defect, and a retexture is loaded without a word said about it.
 //!
-//! **What must not have moved is the other half.** A block's behaviour is folded
-//! over its own field list under its own revision, this feature adds nothing to
-//! it, and a save reporting its blocks as *changed* would stop a player at a
-//! prompt about a rebalance that never happened. The revision byte is therefore
-//! per field list and not one number shared between the two: bumping a shared one
-//! would move every behaviour fold in existence as a side effect of adding a
-//! texture key. The second reading below is what says it did not.
+//! **What must not have moved is the other half, and one block's half really
+//! did.** A block's behaviour is folded over its own field list under its own
+//! revision. `content/base/blocks/water.luau` declares `breakable = false`, which
+//! is one of the five fields that fold goes over, so water — and water alone — is
+//! reported as behaving differently. That is the two-hash separation firing on a
+//! real content edit rather than on a fixture, and it is the whole reason the
+//! expectations below name four blocks in two lists rather than four in one.
+//!
+//! The revision byte is per field list and not one number shared between the two:
+//! bumping a shared one would move every behaviour fold in existence as a side
+//! effect of adding a texture key, and the split below is what says it did not.
+//! **A shared byte reports all four blocks as changed and none as retextured**,
+//! which is a different answer from every expectation here rather than a nearly
+//! equal one.
 //!
 //! # An empty verdict is what the wrong answer looks like too
 //!
@@ -57,7 +63,7 @@ use common::TestResult;
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 use mc_world::content::LuauFileDefinitionSource;
-use mc_world::persistence::{Acceptance, RegistryVerdict, requirements, resolve};
+use mc_world::persistence::{Acceptance, LoadError, RegistryVerdict, requirements, resolve};
 use tempfile::TempDir;
 
 /// The save the swap is judged against, written before it.
@@ -72,6 +78,14 @@ const NEEDED_BY_THE_OLDER_SAVE: [&str; 4] = ["base:dirt", "base:grass", "base:st
 const WITHDRAWN: &str = "water";
 const WITHDRAWN_BLOCK: &str = "base:water";
 
+/// The one shipped block whose declared *behaviour* moved after this save was
+/// written: `content/base/blocks/water.luau` states `breakable = false`, and
+/// `breakable` is one of the five fields a behaviour fold goes over.
+const BEHAVES_DIFFERENTLY: &str = "base:water";
+
+/// The three whose *appearance* alone moved, ascending.
+const LOOK_DIFFERENT: [&str; 3] = ["base:dirt", "base:grass", "base:stone"];
+
 /// What the shipped content declares its blocks in, and what it declares its HUD
 /// in.
 ///
@@ -83,7 +97,7 @@ const BLOCK_EXTENSION: &str = "luau";
 const HUD_EXTENSION: &str = "toml";
 
 #[test]
-fn a_save_written_before_appearances_folded_facing_keys_reports_its_blocks_as_retextured()
+fn the_shipped_content_reports_water_as_behaving_differently_and_the_other_three_as_retextured()
 -> TestResult {
     let needed = requirements(&older_save()?)?;
 
@@ -93,34 +107,52 @@ fn a_save_written_before_appearances_folded_facing_keys_reports_its_blocks_as_re
         verdict,
         RegistryVerdict {
             missing: Vec::new(),
-            changed: Vec::new(),
-            retextured: every_block_the_older_save_holds()?,
+            changed: vec![BlockName::parse(BEHAVES_DIFFERENTLY)?],
+            retextured: named(&LOOK_DIFFERENT)?,
         },
-        "an appearance recorded before it folded a key per facing was folded over different \
-         fields under a different revision, so the two are not comparable and the honest answer \
-         is that every block looks different. Comparing them anyway would be worse than either \
-         answer: two values folded over different field lists agree or disagree for reasons \
-         nothing in the save records"
+        "this is the one fixed oracle over whole resolved definitions, and what it says is that \
+         the two halves of a block's record moved independently. `{BEHAVES_DIFFERENTLY}` states \
+         `breakable = false`, which is a behaviour field, so it lands in `changed`; the other \
+         three declare the same behaviour they always did and differ only in folding a key per \
+         facing, so they land in `retextured`. A revision byte shared between the two field \
+         lists puts all four in `changed` and leaves `retextured` empty, and a field mapped to \
+         the wrong list swaps a name between them — neither of which is a near miss of this \
+         expectation"
     );
     Ok(())
 }
 
+/// Both arms of the acceptance decision over the same save, in one reading.
+///
+/// **The argument is not simply flipped from what this test used to pass**, and
+/// that matters. Under the accepting default `refusal` answers `None` for *any*
+/// changed list at all, so a reading that asserted only that arm would pass
+/// however badly the behaviour fold broke — a shared revision byte, every block
+/// reported changed, still `None`. The strict arm is what carries the evidence:
+/// it names the changed blocks, so it disagrees with a shared byte by three names.
 #[test]
-fn a_save_written_before_this_format_is_still_loaded_without_the_player_being_asked() -> TestResult
-{
+fn the_same_save_loads_by_default_and_is_refused_naming_water_alone_when_strictness_is_asked_for()
+-> TestResult {
     let needed = requirements(&older_save()?)?;
 
     let verdict = resolve(&needed, &shipped_registry()?);
 
     assert_eq!(
-        verdict.refusal(Acceptance::OnlyUnchangedBlocks),
-        None,
-        "every hash this save stores other than a block's appearance is unchanged, and a player \
-         opening their world is not stopped. The way that breaks is one number: a revision byte \
-         shared between the appearance field list and the behaviour one moves both when only the \
-         first gained a field, and every save in existence then reports every block as behaving \
-         differently — a prompt about a rebalance that never happened, on a world nothing is \
-         wrong with"
+        (
+            verdict.refusal(Acceptance::ChangedBlocksToo),
+            verdict.refusal(Acceptance::OnlyUnchangedBlocks)
+        ),
+        (
+            None,
+            Some(LoadError::Unresolvable {
+                missing: Vec::new(),
+                changed: vec![BlockName::parse(BEHAVES_DIFFERENTLY)?],
+            })
+        ),
+        "a player who has updated their content opens their world: the default answer over a save \
+         whose blocks merely behave differently is no refusal at all. Somebody who asked for the \
+         strict answer is turned away and told which block it was — one name and not four, which \
+         is the reading a revision byte shared between the two field lists cannot satisfy"
     );
     Ok(())
 }
@@ -131,8 +163,17 @@ fn a_save_written_before_this_format_is_still_loaded_without_the_player_being_as
 ///
 /// Returns an error if one of the four is not a namespaced id.
 fn every_block_the_older_save_holds() -> Result<Vec<BlockName>, Box<dyn Error>> {
-    NEEDED_BY_THE_OLDER_SAVE
-        .into_iter()
+    named(&NEEDED_BY_THE_OLDER_SAVE)
+}
+
+/// `texts` as block names, in the order given.
+///
+/// # Errors
+///
+/// Returns an error if one of them is not a namespaced id.
+fn named(texts: &[&str]) -> Result<Vec<BlockName>, Box<dyn Error>> {
+    texts
+        .iter()
         .map(|name| Ok(BlockName::parse(name)?))
         .collect()
 }
