@@ -253,17 +253,50 @@ smaller of the two, and both are inline arrays rather than allocations.
 Meshing runs on 16 `rayon` workers (`crates/mc-render/CLAUDE.md`), so the live
 figure is 16 × 3 072 = 48 KiB against 16 × 1 536 = 24 KiB today.
 
-**Cost in work: none added, and one lookup removed.** Measured by reading
+**Cost in work, as designed.** Measured by reading
 `Resolver::solidity_at` (`resolve.rs:~318`): it already calls `key_for`, which
 already performs the dedup and returns exactly the key this design wants, and
 then **throws the key away to return a bool**. Sharing the table consumes a
-value that is already computed. Per face the sweep gains one `u16` comparison
-and loses nothing. Neither the vertex format, the section table, nor the number
-of draw calls is touched, so `mc-render/CLAUDE.md`'s one-indirect-draw rule and
-the `< 200 µs` per-section budget are unaffected by the widening — what does
-move is the quad count, because water now emits faces, and that is the change
-the spec is for. `crates/mc-world/benches/meshing.rs` is the instrument if a
-number is wanted; nothing here predicts a regression that needs one.
+value that is already computed. Neither the vertex format, the section table,
+nor the number of draw calls is touched, so `mc-render/CLAUDE.md`'s
+one-indirect-draw rule is unaffected by the widening — what does move is the
+quad count, because water now emits faces, and that is the change the spec is
+for.
+
+> **Correction, measured during Phase 2 implementation.** This paragraph
+> originally claimed *"none added, and one lookup removed … per face the sweep
+> gains one `u16` comparison and loses nothing"*, and that the `< 200 µs`
+> per-section budget was unaffected. **The reasoning was sound and the quantity
+> is false.** `crates/mc-world/benches/meshing.rs` — named above as the
+> instrument if a number were wanted — was run, and a number was wanted:
+>
+> | fixture | before (`83b0baf`) | after (`281ff43`) | Δ |
+> |---|---|---|---|
+> | terrain | 139.4 µs | 160.2 µs | **+20.8 µs (+14.9 %)** |
+> | solid | 164.5 µs | 183.9 µs | **+19.4 µs (+11.8 %)** |
+> | checkerboard | 405.9 µs | 434.6 µs | +28.7 µs (+7.1 %) |
+>
+> Criterion point estimates, three rounds **interleaved** between two worktrees
+> on one machine to cancel drift. `terrain` therefore spends roughly 21 µs of
+> the 55 µs of margin it held under the declared 200 µs budget. **The budget is
+> not breached and the decision is unchanged** — what is corrected is the
+> claim that the change was free.
+>
+> **The mechanism was looked for and not found.** What it is *not*: the third
+> clause, measured directly at **−0.5 to +4.5 µs across the three fixtures**,
+> which straddles zero; and anything proportional to quad count, since
+> `checkerboard` carries roughly eight times `terrain`'s quads and shows the
+> same *absolute* delta. Plane initialisation and the extra struct moves were
+> excluded by arithmetic rather than by experiment: 1 536 extra bytes of memset
+> plus a few 8–11 KiB moves is ≈ 2 µs against a measured ≈ 20 µs.
+>
+> **The bench cannot narrow it further, and that is a property of the bench.**
+> `visible_face` runs exactly 6 × 16 × 256 = 24 576 times per section for
+> *every* fixture — a constant of section geometry, not of content — so a fixed
+> per-section cost and a per-face-decision cost predict identical absolute
+> deltas. ≈20 µs / 24 576 ≈ 0.8 ns, two or three cycles, is as consistent with
+> the measurement as a fixed slab is. Distinguishing them needs an instrument
+> that varies the call count, which no fixture here does.
 
 **What a future change must not break.** Recorded so it is not reconstructed:
 (1) the meshed section is keyed **before** its boundaries, or refusal

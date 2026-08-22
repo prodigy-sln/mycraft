@@ -648,3 +648,95 @@ scoped knowing them.**
   predicate, and never by calling `is_drawn_at` because it is convenient. Until
   such a fixture exists the oracle needs no change, and it would fail *loudly*
   rather than silently if one appeared, which is the safe failure direction.
+
+### Phase 2 — the mesher got slower, and the phase-end gate failed for an unrelated reason
+
+Two findings, established after the phase's scenarios were all green. They point
+opposite ways and neither is the other.
+
+#### 1. A measured regression, against a binding claim that said there would be none
+
+`architecture.md` Open Question 2 said *"none added, and one lookup removed …
+per face the sweep gains one `u16` comparison and loses nothing"*, and named
+`crates/mc-world/benches/meshing.rs` as the instrument *"if a number is wanted"*.
+A number was wanted. Criterion point estimates, µs, **interleaved** three rounds
+between two worktrees on one machine so drift cancels:
+
+| fixture | `83b0baf` (before T06+T07) | `281ff43` (after) | Δ |
+|---|---|---|---|
+| terrain | 139.4 | 160.2 | **+20.8 (+14.9 %)** |
+| solid | 164.5 | 183.9 | **+19.4 (+11.8 %)** |
+| checkerboard | 405.9 | 434.6 | +28.7 (+7.1 %) |
+
+`83b0baf` is the commit immediately before the rebuild and already carries the
+tests and `is_drawn_at`, so **the only difference measured is T06 + T07**.
+`terrain` spends ~21 µs of the 55 µs of margin it held under the declared 200 µs
+per-section budget. **The budget is not breached.**
+
+**Mechanism: looked for, not found.** Excluded, with numbers:
+
+- **Not the third clause.** A third variant with `beyond == key` removed,
+  measured in the same interleaved rounds: **−0.5 to +4.5 µs**, straddling zero.
+- **Not proportional to quad count.** `checkerboard` carries roughly eight times
+  `terrain`'s quads and shows the same *absolute* delta.
+- **Not plane initialisation or the extra struct moves, by arithmetic** — 1 536
+  extra bytes of memset plus a few 8–11 KiB moves is ≈ 2 µs against ≈ 20 µs
+  measured. Excluded by magnitude rather than by experiment.
+
+**Why the bench cannot narrow it, which is a fact about the bench.**
+`visible_face` runs exactly 6 × 16 × 256 = **24 576 times per section for every
+fixture** — a constant of section geometry, not of content. So a fixed
+per-section cost and a per-face-decision cost predict *identical* absolute
+deltas, and ≈20 µs / 24 576 ≈ 0.8 ns (two or three cycles) fits as well as a
+fixed slab does. Separating them needs an instrument that varies the call count,
+and no fixture here does.
+
+> **Phase 3: re-baseline before adding water, on the tree the phase opens on.**
+> This matters more than the numbers above. Water adds quads to the shipped
+> scene, so water's cost and the rebuild's cost land in the same measurement —
+> and without a baseline taken first they are inseparable, permanently.
+
+#### 2. The bench prints a budget verdict from a single mean — do not quote it
+
+`meshing.rs` prints `terrain: meshed in Xµs on average, over/inside its 200µs
+budget` and exits non-zero on a breach. **That line is one 500-iteration mean and
+it is not a measurement.** Three consecutive runs of the *same* tree gave
+
+```
+235.053 µs   ·   184.339 µs   ·   144.864 µs
+```
+
+— a 1.6× spread, and the first of them printed **"over its 200 µs budget"**. The
+budget was never breached. Criterion's estimate, which the same program prints
+and its own note tells the reader to ignore, was stable across those runs.
+**Read criterion's interval; treat the verdict line as a smoke alarm, never as a
+number.** Reporting that first line and stopping would have sent somebody
+chasing a breach that does not exist — and would have missed the real regression
+underneath it, which is smaller than the noise in that line.
+
+#### 3. The phase-end gate failed on a load-sensitive test, and the arithmetic is what makes that a conclusion
+
+`mc-client::reload_remesh_blocks_no_tick::the_ticks_a_whole_world_re_mesh_runs_over_are_the_ticks_a_run_with_no_reload_advances`
+failed with `StillMeshing` where it expects `Scene { sections: 256 }` — the
+worker had not finished the whole-world re-mesh within the collect's patience.
+That patience is a wall clock:
+`crates/mc-client/tests/support/reload_remesh.rs:111`,
+`A_COLLECT_MAY_NOT_OUTLAST = Duration::from_secs(15)`, polled every 1 ms.
+
+**It is not finding 1.** 256 sections × 159 µs = **41 ms against a 15 s
+patience — 365× headroom**, and an order of magnitude for `llvm-cov`
+instrumentation still leaves 0.4 s. A 12–15 % regression cannot turn 41 ms into
+more than 15 s.
+
+What it is: `nextest --workspace` under coverage saturates every core, and this
+test needs one worker thread to mesh 256 sections while dozens of instrumented
+binaries compete. The **previous** gate — tree `b6a13f66`, carrying the
+identical mesher — ran all 1409 and passed this test; the two trees differ by a
+doc comment and a `## Notes` entry.
+
+The run also reported `318/1409 tests run` — **with a slash**, so fail-fast
+cancelled it and 1 091 tests never started. That reading says nothing about them.
+
+**The test's budget was not touched.** It belongs to a shipped spec and encodes a
+real product property; loosening a threshold to reach green is the defect this
+project names explicitly.
