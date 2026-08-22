@@ -123,17 +123,28 @@ same defect as a threshold quietly lowered."* The pair is **derived, never
 tuned to green**, and the derivation is what makes it a fixture rather than a
 magic number.
 
-#### The scenario-wording question this leaves to the caller
+#### The scenario-wording question this left to the caller — **answered**
 
-FR-7.1-S1 reads *"WHEN the shipped client runs the declared capture ticks THE
-SYSTEM SHALL show water in the captured frame at every sample pixel where the
-judge predicts water, and at no fewer than one."* "the captured frame" is
-singular, so the strict reading is **per declared terrain capture tick** —
-all three. The 4 715 surviving poses say that reading is satisfiable, and the
-design targets it. The loose reading (at least one water sample somewhere in
-the capture set) is weaker and I do not recommend it: a frame that predicts no
-water witnesses nothing. **Flagged rather than silently chosen** — see
-Questions for the caller.
+This document quoted FR-7.1-S1 as *"…show water in the captured frame at every
+sample pixel where the judge predicts water, and at no fewer than one"* and asked
+whether "the captured frame", singular, binds per declared terrain capture tick or
+across the capture set. The strict reading — **per tick, all three** — was
+recommended here on the grounds that a frame predicting no water witnesses
+nothing, and the 4 715 surviving poses say it is satisfiable.
+
+**The question is closed and the spec closed it, not this document.**
+`spec.md:248` now reads *"…show water in **each** captured frame at every sample
+pixel where the judge predicts water, and at no fewer than one sample pixel in
+**every one of those frames**"* — the strict per-tick reading, stated twice and
+unambiguously. The wording this document quoted is no longer the wording in
+`spec.md`, and the recommendation and the requirement now agree. **The design
+targets per tick; nothing here is left open.**
+
+Recorded rather than deleted, so a reader meeting the singular phrasing in an
+older copy can see what settled it. The consequence for the implementation is in
+`tasks.md` T12, whose fallback ladder walks the declared capture *ticks* before
+any second scene precisely because moving which frames are captured leaves this
+reading strict.
 
 ### Open Question 2 — self-merging is an engine rule, and the boundary plane carries a key
 
@@ -733,7 +744,7 @@ Existing code touched, what connects, and what must not break.
 | `mc-world/src/persistence/format.rs:275-365` | both folds, both bytes | hand-written, never derived; the origin stays excluded; field order is the record |
 | `mc-sim/src/world/mod.rs:249, 274` | a second bitset written at both existing sites and nowhere else | "the one place either view is written" becomes "any view", and stays true — this is what FR-3.2 rests on |
 | `mc-sim/src/replay/solid.rs:94, 146, 202` | second `Bitset`; `LastResolved` caches a pair; `Targetable` impl; renamed `ResolvedVoxels` | totality outside the extent; the two-arms-for-two-facts rule for empty vs outside |
-| `mc-sim/src/world/action/trace.rs:56` | `targeted` takes `&dyn Targetable` | `Solidity` keeps its meaning at all five `collide.rs` sites |
+| `mc-sim/src/world/action/trace.rs:56` | `targeted` takes `&dyn Targetable` | `Solidity` keeps its meaning at every site that reads it, and `trace.rs:56` is the only one that moves. Re-measured for the task list: `&dyn Solidity` appears at `player/collide.rs:101,125,222,250,259` (the five this row named), **`player/physics.rs:74`**, and **`world/clearing.rs:68,98,114`** — the nine that mean collision, matching the count Decision 4 already argued from. The three sites outside `collide.rs` were missing from this row and are as binding as the five |
 | `mc-sim/src/world/action/mod.rs:348` | unchanged; reads `solid` | FR-4.1-S2 — a registry of only non-solid blocks offers no held block even where some are drawn |
 | `mc-sim/src/world/reload.rs:87` | `(drawn, occludes, textures)` | `targetable` is **absent** from the key (FR-7.2-S3) |
 | `mc-sim/src/replay/spawn.rs:37, 49` | derived coast column and yaw | the fall still happens; the derivation is recorded, not tuned |
@@ -846,16 +857,22 @@ What could go wrong, what to verify early, and where the blast radius is.
 
 ---
 
-## Questions for the caller
+## Questions for the caller — **both answered; kept with their answers**
 
-Neither blocks the design; both change a scenario's wording rather than a
-decision.
+Neither blocked the design; both changed a scenario's wording rather than a
+decision, and both are now settled in `spec.md`. Kept visible rather than deleted
+so a reader meeting either question can see what closed it.
 
 1. **Does FR-7.1-S1 bind per declared terrain capture tick, or across the
-   capture set?** The wording ("the captured frame", singular) reads per tick,
-   the measurements say per tick is satisfiable, and the design targets it. If
-   the loose reading was intended, say so and the spawn derivation relaxes.
+   capture set?** → **Per tick, all three.** Asked here because the wording this
+   document quoted said "the captured frame", singular. `spec.md:248` now says
+   *"in **each** captured frame … and at no fewer than one sample pixel in
+   **every one of those frames**"*, which is the strict reading stated twice.
+   Recommendation and requirement agree; the spawn derivation does **not** relax.
+   See the answered subsection under Open Question 1.
 2. **`spec.md`'s Open Questions and the brief both say the camera remedy "moves
-   the scene contract a second time".** It does not — `scene_contract` reads no
-   camera. Recorded here as a correction; the sentence in `spec.md` wants
-   editing so a later stage does not re-derive the wrong cost.
+   the scene contract a second time".** → **Corrected in `spec.md`.** It does not
+   — `scene_contract` (`crates/mc-sim/src/replay/contract.rs:44`) takes
+   `&[SectionQuads]` and reads no camera. `spec.md` Open Question 1 now carries
+   the correction in its own words (*"The two remedies do not both move the scene
+   contract"*), so no later stage re-derives the wrong cost.
