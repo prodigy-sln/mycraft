@@ -245,7 +245,7 @@ wrong reason, and applied consistently that argues against 78 just as much.
 The two capabilities Key Principle 7 requires, asserted rather than claimed.
 
 - **FR-7.1**: The shipped game draws its sea.
-  - FR-7.1-S1: WHEN the shipped client runs the declared capture ticks THE SYSTEM SHALL show water in the captured frame at every sample pixel where the judge predicts water, and at no fewer than one
+  - FR-7.1-S1: WHEN the shipped client runs the declared capture ticks THE SYSTEM SHALL show water in each captured frame at every sample pixel where the judge predicts water, and at no fewer than one sample pixel in every one of those frames
 
 - **FR-7.2**: A reload that changes what is drawn re-meshes the world, and one
   that changes only how a block behaves does not. **This is the wiring, not the
@@ -514,9 +514,14 @@ PRO-957 re-shoots no goldens and lands on the behaviour revision this spec bumps
 - **Every drawn block is opaque.** The judge's first-drawn-voxel march depends on
   it, and PRO-952 is the named breaker.
 - **The player's camera sees water in at least one declared sample pixel.**
-  Assumed by FR-6.2-S1 and FR-7.1-S1, and **not yet measured** — the sea is 131
-  of 4 096 columns, one or two blocks deep, against a 32 × 18 grid. See Open
-  Questions.
+  Assumed by FR-6.2-S1 and FR-7.1-S1. **Measured, and false against the fixture as
+  it stood** — 0 water pixels at all three ticks, and 0 unoccluded lines of sight
+  to the sea at every one of the 120 ticks. It becomes true only because the
+  declared spawn moves; see Open Questions 1. **So this is an assumption the
+  implementation has to establish rather than inherit**: until the new spawn pair
+  is derived from the real simulation, both scenarios are unsatisfiable, and a
+  phase that reports them green without a moved spawn has measured something other
+  than what they say.
 
 ## Definition of Done — documentation
 
@@ -571,21 +576,50 @@ a reviewer does not have to rediscover it, and so that a later stage does not
 
 ## Open Questions
 
-Must be empty before implementation starts. Both are for `/sdd-architect`.
+**Both are now answered, with measurements, in `architecture.md`.** They are kept
+here with their answers rather than deleted, so a reader meeting the question can
+see what settled it.
 
-1. **Does any declared sample pixel see water?** If not, FR-6.2-S1 and FR-7.1-S1
-   are unsatisfiable without changing the fixture, and the remedies — raising
-   `SEA_LEVEL`, or moving the camera path — each move the scene contract a second
-   time inside one spec. This is the **first thing `/sdd-architect` measures**,
-   before anything is designed against it.
+1. **Does any declared sample pixel see water?** **No — measured, and it is not an
+   aiming problem.** Water's surface is a strip at `x ∈ [60,63]`, `z ∈ [0,34]`;
+   the declared spawn is (32,32) facing 225°, deliberately away from it so the
+   landmark pillar lands in the first frame. Across all three capture ticks the
+   grid sees 0 water pixels, unoccluded line of sight to any of the 131 surface
+   voxels is 0 at **every one of the 120 ticks**, and a 72-yaw sweep at the spawn
+   column finds water at no yaw at all. The eye travels ~3 blocks over the script
+   while the sea is 28–31 blocks away behind rising terrain, so no added tick,
+   pitch or yaw reaches it.
+
+   **One claim this question originally made is false, and the distinction decides
+   the remedy.** The two remedies do *not* both move the scene contract.
+   `scene_contract` takes `&[SectionQuads]` and reads no camera, so
+   `SCENE_QUAD_COUNT`, `total_face_area` and `area_by_block` are properties of the
+   world's mesh alone. **Moving the camera moves the goldens, which move once in
+   this spec regardless. Moving the world moves the scene contract.** Raising
+   `SEA_LEVEL` is therefore rejected — measured, the first level putting water at
+   the spawn's feet is 38, which submerges 1 535 columns, 37% of the world.
+
+   The answer is to **move the declared spawn**, which is two declarations in one
+   file: 4 715 (column, yaw) pairs hold water through the script's +30° turn, and
+   616 of those hold water, sky, grass and the landmark pillar in one frame, so
+   the property the yaw exists for is preserved rather than sacrificed. **This is
+   a product change made for a test's benefit and is recorded as one** — a human
+   player can already walk to the sea today; it is only the automated capture that
+   cannot see it. Accepted by the project owner on 2026-08-22.
 2. **Is "no face between two cells of the same drawn non-occluding block" a
    declared field or an engine rule, and what does the boundary plane carry?**
-   FR-2.3 states the behaviour and leaves the mechanism open. A declared
-   `merges_with_self` honours invariant 1 and costs a field with no identified use
-   for its `false` value; an engine identity rule costs a derivation content
-   cannot override. Fold membership is **appearance** either way. Either answer
-   has to widen `Boundaries`, which today carries `[[bool; 256]; 6]` and no block
-   identity — see Other decisions.
+   **An engine rule, evaluated over key identity; the plane carries a `Key` per
+   cell.** The rule names no block and no id, and a `Key` comparison compares
+   identity under a table deduplicated by name, so `visible_face`'s claim that no
+   name and no runtime id is read survives verbatim. `merges_with_self = false`
+   has exactly one identified use — interior faces of a translucent volume — and
+   that belongs to PRO-952, which bumps the appearance byte for `render` anyway,
+   so deferring the field costs no extra bump. **Consequence: this spec's
+   `APPEARANCE_REVISION` bump covers `drawn` and `occludes` only, and the
+   ruling-table row for self-merging is vacated rather than contradicted.** The
+   argument against is recorded at the rule's own site: an engine rule is a
+   derivation content cannot override, and PRO-952 is named there as the change
+   that must turn it back into a field.
 
 ## Clarifications
 
