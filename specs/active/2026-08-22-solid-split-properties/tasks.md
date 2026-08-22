@@ -382,6 +382,49 @@ skipped** in 117.6 s, and **coverage 93.63%**. The gpu-free stage separately ran
 69 passed / 1 skipped and 106 passed / 0 skipped. Measured on the tree at
 `d40ad42`, working tree clean.
 
+**Gated a second time, on the tree actually being closed.** The first reading was
+taken at `d40ad42`; two spec-folder commits followed (`67fe007` recording that
+reading, and the test author's `53f076f` re-running M1–M3 with `--no-fail-fast`).
+A gate reading is a statement about a **tree object**, not about a commit, and the
+objects differ — `git rev-parse d40ad42^{tree} 53f076f^{tree}` gives
+`315e073f79d04ba436ff1c261781df54f802e212` and
+`5181de87dfdc18daf142c3244f8d8116536035a7` — so the first reading does not
+transfer, whatever changed. **The rule, worth applying mechanically rather than
+re-deriving: if the tree object moved, re-gate; if it did not, do not.** No
+argument about *which* files changed can make a reading transfer; it can only
+predict what the re-run will say.
+
+Re-run on `53f076f`: `scripts/sdd-gate.ps1` exited **0**, every stage ok,
+**1394 run, 1394 passed, 1 skipped** in 119.1 s, **lines 93.63%, regions 92.1%,
+10744 lines tracked**. Log written to a *second* file so the `d40ad42` evidence
+was not overwritten — two trees need two logs.
+
+**Why recording this does not demand a third run.** Committing these words moves
+the tree object again, which is a real regress rather than a technicality. What
+bounds it is that the gate's inputs are unchanged, measured rather than argued:
+
+```sh
+git diff --stat d40ad42..53f076f -- crates docs tools content scripts Cargo.toml
+# prints nothing — byte-identical
+```
+
+Every stage reads only those paths; the size stage is narrowest and explicit
+about it (`$SizeRoots = @('crates', 'tools')` with `-Filter '*.rs'`), and no stage
+in the script names `specs` at all (`grep -n "specs" scripts/sdd-gate.ps1` prints
+nothing). The two runs above are the corroboration: two different tree objects,
+differing only in spec-folder markdown, produced identical figures down to
+`93.63%`. So a spec-folder commit cannot move a gate reading — which is a claim
+about this gate script, and stops being true the day a stage learns to read
+`specs/`.
+
+**One thing the size stage is worth knowing for, beyond this phase.** It fails
+when a declared root measures **zero** files, because a total is vacuous at the
+granularity that matters: `crates/` contributes ~400 files, so a mistyped `tools`
+root contributes nothing, the total barely moves, and the stage would otherwise
+pass while a whole tree went unmeasured. That is a positive control living inside
+a gate stage, and the reason to check *what* a stage measures rather than that it
+printed `ok`.
+
 **Mutation, Phase 1 — it bit.** `optional_boolean`'s `absent` made a literal
 `false` inside `defaulting_to_solidity`. `cargo nextest run -p mc-world -p mc-core
 --no-fail-fast`: **388 run, 387 passed, 1 failed** — exactly
