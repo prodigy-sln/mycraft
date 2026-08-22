@@ -31,8 +31,8 @@ use super::plane::{CELLS as PLANE_CELLS, cell_of, position_in_plane};
 use super::resolve::{self, Boundaries, Key, Resolved};
 use super::{Facing, MeshError, Neighbours, PlaneExtent, PlanePos, Quad, SectionMesh};
 
-/// Everything a face is decided against: what the section itself holds, and how
-/// solid whatever lies beyond each of its six boundaries is where the two meet.
+/// Everything a face is decided against: what the section itself holds, and
+/// which block lies beyond each of its six boundaries where the two meet.
 struct Surroundings {
     resolved: Resolved,
     boundaries: Boundaries,
@@ -40,10 +40,12 @@ struct Surroundings {
 
 /// The faces `section` shows, merged into rectangles and ordered.
 ///
-/// Whether a face exists is decided by the solidity `registry` registered for
-/// the block holding the voxel, and by that alone — no block name and no runtime
-/// id is looked at, so a block a mod ships is treated exactly as one the base
-/// game ships is.
+/// Whether a face exists is decided by what `registry` registered the blocks
+/// either side of it as declaring — drawn, and occluding — and by whether those
+/// two blocks are the same one. By that alone: no block name and no runtime id
+/// is looked at, so a block a mod ships is treated exactly as one the base game
+/// ships is. See [`visible_face`] for the three questions and for why a key
+/// comparison reads no name.
 ///
 /// Meshing reads and never writes: every parameter is a shared reference and the
 /// mesh handed back is owned, so calling `compact()` on the input to simplify
@@ -52,7 +54,7 @@ struct Surroundings {
 ///
 /// A face on a boundary is decided against the voxel facing it in the neighbour
 /// beyond, voxel by voxel. A neighbour that was not supplied is decided as
-/// though the voxel beyond were non-solid, so the edge of loaded content shows a
+/// though the voxel beyond held nothing, so the edge of loaded content shows a
 /// face rather than being sealed shut against a chunk that has not arrived — and
 /// that is decided one neighbour at a time, never all at once.
 ///
@@ -68,12 +70,11 @@ pub fn mesh_section(
     neighbours: &Neighbours<'_>,
     registry: &BlockRegistry,
 ) -> Result<SectionMesh, MeshError> {
-    // The meshed section resolves before any neighbour, so that when both hold
-    // something unresolvable it is the section's own refusal a caller is given.
-    // The scenarios leave that open; it is fixed here so the answer does not
-    // depend on which of them happened to be looked at first.
-    let resolved = resolve::resolve_section(section, registry)?;
-    let boundaries = resolve::resolve_boundaries(neighbours, registry)?;
+    // The section and its boundaries key into one table, and the section keys
+    // first — which is what makes its own refusal outrank a neighbour's when
+    // both hold something unresolvable, and what makes a key comparison mean
+    // "the same block" across a boundary.
+    let (resolved, boundaries) = resolve::resolve_surroundings(section, neighbours, registry)?;
     let surroundings = Surroundings {
         resolved,
         boundaries,
@@ -259,10 +260,32 @@ impl<'a> Plane<'a> {
 
 /// The block whose face is visible at one cell of one plane, if any is.
 ///
-/// A face is there when the voxel is solid and the voxel one step off this
-/// facing is not. Solidity comes from the registered definition alone: no block
-/// name and no runtime id is looked at anywhere in this file, which is what
-/// makes a block a mod ships behave exactly as one the base game ships does.
+/// Three questions, and a face is there only when all three answer yes:
+///
+/// 1. **Is this block drawn?** What a face is made of, and the only question
+///    about the cell showing it. A block that stops a player and shows nothing
+///    reaches here and emits nothing.
+/// 2. **Does whatever is beyond it fail to occlude?** What a face is hidden by.
+///    Separate from the first because a block may be seen without hiding what is
+///    behind it, which is the whole of what makes water look like water.
+/// 3. **Is whatever is beyond it a different block?** The engine rule that a
+///    block never draws a face against its own kind — without it a body of water
+///    is a stack of visible sheets, one per cell.
+///
+/// **The third is a rule the engine derives and not something content states.**
+/// It names no block and it is stated here and nowhere else. `merges_with_self`
+/// would be the field that let content override it, and **PRO-952 is its named
+/// breaker**: the day a translucent block wants the interior faces of its own
+/// volume drawn, this rule has to become a declaration. Until then two adjacent
+/// cells of one non-occluding block show no seam and a mod author cannot ask for
+/// one.
+///
+/// All three answers come from the registered definition alone, reached through
+/// a key. **No block name and no runtime id is looked at anywhere in this file**,
+/// which is what makes a block a mod ships behave exactly as one the base game
+/// ships does — and a key comparison does not weaken that: keys are handed out
+/// per distinct *contents* over a table deduplicated by name, so comparing two
+/// of them compares identity and reads neither name.
 fn visible_face(
     surroundings: &Surroundings,
     facing: Facing,
@@ -272,33 +295,37 @@ fn visible_face(
     let resolved = &surroundings.resolved;
     let voxel = facing.voxel_at(plane, position_in_plane(cell));
     let key = key_at(resolved, voxel)?;
-    if !solidity(resolved, key)? || solid_beyond(surroundings, facing, voxel, cell)? {
+    if !drawn(resolved, key)? {
+        return Ok(None);
+    }
+    let beyond = key_beyond(surroundings, facing, voxel, cell)?;
+    if occludes(resolved, beyond)? || beyond == key {
         return Ok(None);
     }
     Ok(Some(key))
 }
 
-/// Whether the voxel one step off `facing` of `voxel` is solid.
+/// Which block the voxel one step off `facing` of `voxel` holds.
 ///
 /// A step that leaves the section is answered by the boundary plane resolved for
 /// that facing, at the cell the face itself sits in — the two agree about where
 /// they are in the plane they share, so no coordinate is converted here and
 /// nothing has to know a second time which end of a neighbour is read. An absent
-/// neighbour resolved to a plane holding nothing solid, so absence needs no
-/// branch of its own.
-fn solid_beyond(
+/// neighbour resolved to a plane holding the key of nothing, which hides nothing
+/// and is the same kind as nothing, so absence needs no branch of its own.
+fn key_beyond(
     surroundings: &Surroundings,
     facing: Facing,
     voxel: LocalPos,
     cell: usize,
-) -> Result<bool, MeshError> {
+) -> Result<Key, MeshError> {
     match facing.adjacent(voxel) {
         Adjacent::Inside(beside) => {
             let resolved = &surroundings.resolved;
-            solidity(resolved, key_at(resolved, beside)?)
+            key_at(resolved, beside)
         }
         Adjacent::Across(_) => present(
-            surroundings.boundaries.is_solid(facing, cell),
+            surroundings.boundaries.key_at(facing, cell),
             cell,
             PLANE_CELLS,
         ),
@@ -311,10 +338,19 @@ fn key_at(resolved: &Resolved, voxel: LocalPos) -> Result<Key, MeshError> {
     present(resolved.key_at(index), index, VOXELS_PER_SECTION)
 }
 
-/// Whether the block `key` names was registered solid.
-fn solidity(resolved: &Resolved, key: Key) -> Result<bool, MeshError> {
+/// Whether the block `key` names was registered drawn.
+fn drawn(resolved: &Resolved, key: Key) -> Result<bool, MeshError> {
     present(
-        resolved.is_solid(key),
+        resolved.is_drawn(key),
+        key as usize,
+        resolved.distinct_blocks(),
+    )
+}
+
+/// Whether the block `key` names was registered as hiding what is behind it.
+fn occludes(resolved: &Resolved, key: Key) -> Result<bool, MeshError> {
+    present(
+        resolved.occludes(key),
         key as usize,
         resolved.distinct_blocks(),
     )
