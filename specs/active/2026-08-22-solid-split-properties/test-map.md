@@ -357,23 +357,120 @@ run — there is no `N/M` form here to check for.
 **All thirteen are assertion failures** — not fixture-guard refusals and not
 compile errors — so every one of them ran its comparison and printed both sides.
 
-One test reached its RED the wrong way first, and the fix generalises.
-`a_voxel_declared_drawn_and_not_solid_shows_all_six_of_its_sides` initially read
-`faces(some_quads(&mesh)?)`, and `some_quads` refuses an empty mesh — so against
-a tree where the drawn block emits nothing, the guard fired and the assertion
-never ran: `Error: "this section holds solid voxels with nothing solid beside
-them…"`. **That guard buys nothing where the expected list is a non-empty
-literal**, because an empty actual already fails against a six-element expected;
-all it can do there is turn an assertion failure into an error showing neither
-side. It is kept where a comparison genuinely could be vacuous and dropped where
-it could not.
+### An empty-mesh guard ahead of a non-empty expectation is a loud instrument reporting the wrong thing
 
-**FR-2.7-S1's RED is outstanding.** Per the ruling its RED must be an assertion
-failure rather than the compile error the missing method currently gives, so it
-is measured once `is_drawn_at` lands returning `is_solid_at`'s answer. Against
-that stub the fixture's four answers read `(true, true, false, false)` where the
-test demands `(true, false, false, true)` — the default-equals-`solid` trap
-itself, failing on the value.
+One test reached its RED the wrong way first, and it is the
+absent-instrument-versus-clean-instrument family with the sign flipped: not a
+silence that reads as a pass, but a **failure that reads as the wrong failure**.
+
+`a_voxel_declared_drawn_and_not_solid_shows_all_six_of_its_sides` initially read
+`faces(some_quads(&mesh)?)`. `some_quads` refuses a mesh holding no quads, so
+against a tree where the drawn block emits nothing the guard fired first and the
+comparison never ran at all:
+
+```
+Error: "this section holds solid voxels with nothing solid beside them, so its
+mesh must hold quads; every assertion that reads them is vacuous on an empty mesh"
+```
+
+That is red, and it is red for the right *reason*, and it still cost the one thing
+the RED is displayed for: neither side of the comparison was printed, so nothing
+confirmed the six expected faces were the six the scenario wants.
+
+**The rule.** The guard can only help where an empty actual would *satisfy* the
+comparison. Where the expectation is a non-empty literal it cannot: an empty
+actual already fails against six expected elements, so the guard's only effect is
+to replace an assertion failure that shows both sides with an error that shows
+neither.
+
+**Where it was dropped:** all four uses in
+`crates/mc-world/tests/mesh_declared_drawnness.rs`, every one of which compares
+against a non-empty literal list. The other three files of this phase never used
+it — `mesh_same_kind.rs` and `mesh_declared_occlusion.rs` compare complete
+enumerated lists, and FR-2.4-S3's pair has a non-empty half.
+
+**Where it is load-bearing, and why** — the pre-existing sites, read rather than
+assumed, and left exactly as they are:
+
+| Site | Why an empty mesh would satisfy the comparison |
+|---|---|
+| `mesh_determinism.rs:166`, `:190`, `:214` | each compares one mesh against **another mesh**; two empty meshes are equal |
+| `mesh_errors.rs:266` | same shape — the mesh against all blocks versus the mesh against fewer |
+| `mesh_fixture_scale.rs:176` | `quads.len() * 2 <= visible`; no quads at all is comfortably under any ceiling |
+
+**A deferred observation rather than a change** (`tasks.md` §Notes, scope guard):
+the five remaining sites — `mesh_neighbours.rs:169`, `:229`, `:249`, `:274`,
+`:298` — all compare against non-empty literals, so the guard is redundant there
+in exactly the way it was redundant in mine. It is harmless until one of those
+tests goes red on an empty mesh, at which point it hides both sides of the
+comparison the way it hid mine. Not this phase's scenarios and not touched.
+
+### FR-2.7-S1's RED, measured against the stub
+
+`cargo test -p mc-world --test section_drawnness` → `running 1 test` →
+`0 passed; 1 failed`, an assertion failure and not the compile error the missing
+method gave before:
+
+```
+  left: (true, true, false, false)
+ right: (true, false, false, true)
+```
+
+The left side is the default-equals-`solid` trap itself, failing on the value.
+Predicted in this file before the stub existed and measured to the digit
+afterwards, which is the point of the ruling that this RED not be a compile
+error: a section answering drawnness from solidity gets both cells' second answer
+wrong and neither of the first ones, and only a comparison that ran can say so.
+
+### The whole-workspace reading, and which tree it was taken on
+
+**Stated first, because `a7be86e` is not the tree these were read on.** The tests
+commit does not compile — `Section::is_drawn_at` does not exist in it — so no
+lint and no workspace run can read `a7be86e` at all, and a reading that did not
+say which tree it came from would be an absent instrument dressed as a clean one.
+
+Every reading below was taken on `a7be86e` plus the implementation's
+deliberately-less `is_drawn_at`, which returns `is_solid_at`'s answer. That was
+still uncommitted while the runs happened and has since landed as **`99edf1b`**,
+so the readings are quotable against a commit rather than against a working copy
+somebody would have to reconstruct. The two are the same tree, checked rather than
+assumed: `git diff 99edf1b --stat -- crates content docs scripts tools Cargo.toml`
+prints nothing, and `git stash list` is empty. Every gate stage reads only those
+paths, so the code tree measured **is** `99edf1b`'s.
+
+| Invocation | Result |
+|---|---|
+| `cargo nextest run --workspace --no-fail-fast` | `1409 tests run: 1395 passed, 14 failed, 1 skipped` |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | **exit 0**, no diagnostics |
+| `cargo fmt --all -- --check` | **exit 0** |
+
+`1409 tests run` carries **no slash**, so nothing was cancelled and the half of
+the claim that says *nothing else moved* is an observation rather than a statement
+about tests that never started.
+
+**The count is derived rather than snapshotted.** Phase 1 closed at 1394 run /
+1394 passed / 1 skipped. This phase adds fifteen tests — the fourteen scenarios
+plus the one additional-coverage test — so 1394 + 15 = **1409**, and 1394 + 1
+(the additional-coverage test, green from the start) = **1395 passed**, leaving
+exactly the fourteen scenario tests red. Every arm of that arithmetic is fixed
+before the run, so a wrong number in any of them is visible rather than absorbed.
+
+**The three things this phase must not move, checked individually and green,
+untouched:**
+
+| Invocation | Result |
+|---|---|
+| `cargo nextest run -p mc-sim -E 'binary(scene_contract) + binary(replay_world)' --no-fail-fast` | `13 tests run: 13 passed` |
+| `cargo nextest run -p mc-client -E 'binary(terrain_goldens) + binary(hud_goldens)' --no-fail-fast` | `3 tests run: 3 passed` |
+
+Among them `the_meshed_quad_count_matches_the_committed_scene_contract_snapshot`
+(the committed `SCENE_QUAD_COUNT`),
+`no_quad_of_the_meshed_replay_names_the_block_that_fills_its_sea`, and
+`every_declared_capture_matches_the_golden_committed_for_it` over the four
+committed `…-r1` directories. `git status --short` names none of those files, so
+they are green on their committed numbers with nothing about them edited — which
+is this phase's own evidence that the widening is behaviour-preserving, and it is
+worth more than any assertion a test author could add.
 
 ### The widening: by addition, so that none of the 26 call sites moved
 
