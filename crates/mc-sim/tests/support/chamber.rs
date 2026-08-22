@@ -329,6 +329,9 @@ fn declaring(
             replaceable: block.replaceable,
             breakable: block.breakable,
             breaks_into: block.breaks_into.map(BlockName::parse).transpose()?,
+            drawn: block.is_solid,
+            occludes: block.is_solid,
+            targetable: block.is_solid,
             origin: origin.clone(),
         }));
     }

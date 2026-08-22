@@ -79,6 +79,9 @@ fn registry_of_the_six() -> Result<BlockRegistry, Box<dyn Error>> {
             replaceable: false,
             breakable: true,
             breaks_into: None,
+            drawn: true,
+            occludes: true,
+            targetable: true,
             origin: DefinitionOrigin::new(GUARD_ORIGIN),
         }));
     }

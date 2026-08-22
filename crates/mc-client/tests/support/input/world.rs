@@ -175,6 +175,9 @@ fn declared_registry() -> Result<BlockRegistry, Box<dyn Error>> {
                 // a residue named here would be a claim this file cannot check.
                 breakable: true,
                 breaks_into: None,
+                drawn: is_solid,
+                occludes: is_solid,
+                targetable: is_solid,
                 origin: origin.clone(),
             })
         })

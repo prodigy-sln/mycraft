@@ -468,6 +468,9 @@ fn registry() -> Result<BlockRegistry, Box<dyn Error>> {
             replaceable: false,
             breakable: true,
             breaks_into: None,
+            drawn: false,
+            occludes: false,
+            targetable: false,
             origin: origin.clone(),
         }),
         Ok(BlockDefinition {
@@ -477,6 +480,9 @@ fn registry() -> Result<BlockRegistry, Box<dyn Error>> {
             replaceable: false,
             breakable: true,
             breaks_into: None,
+            drawn: true,
+            occludes: true,
+            targetable: true,
             origin: origin.clone(),
         }),
     ];

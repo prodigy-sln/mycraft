@@ -130,6 +130,9 @@ pub fn declared(name: &str, is_solid: bool) -> Result<BlockDefinition, Box<dyn E
         replaceable: !is_solid,
         breakable: true,
         breaks_into: None,
+        drawn: is_solid,
+        occludes: is_solid,
+        targetable: is_solid,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
     })
 }

@@ -5,12 +5,15 @@
 //!
 //! `replacable` is a word a mod author types once. Under the format this loader
 //! replaces, an unrecognised key was refused by name; a loader that reads the
-//! six keys it knows and never asks what else is there cannot tell a typo from
-//! an absence, so the block registers, the field the author wrote does nothing,
-//! and nothing anywhere says why. That is what these tests are about, and it is
-//! why the refusal owes the author **the fields it does recognise** as well as
-//! the one it does not — a name is only a typo once you can see what it was
-//! nearly.
+//! keys it knows and never asks what else is there cannot tell a typo from an
+//! absence, so the block registers, the field the author wrote does nothing, and
+//! nothing anywhere says why. That is what these tests are about, and it is why
+//! the refusal owes the author **the fields it does recognise** as well as the
+//! one it does not — a name is only a typo once you can see what it was nearly.
+//!
+//! The list grows, and every field added to it makes that sentence carry more:
+//! `drawnn` beside `drawn` is only obviously a typo to somebody who can see
+//! `drawn`.
 //!
 //! # The order that list comes out in is a contract, not a detail
 //!
@@ -53,22 +56,42 @@ use luau_common::{
 };
 use tempfile::TempDir;
 
-/// Every field name a declaration is allowed to state.
+/// Every field name a declaration is allowed to state, in the order a refusal
+/// quotes them back.
 ///
 /// Written out here rather than read from the loader: an expectation derived
 /// from the value under test agrees with whatever that value becomes.
-const RECOGNISED_FIELDS: [&str; 6] = [
+///
+/// **The order is asserted, and the list is compared whole.** A mirror is only
+/// load-bearing while something reddens when it drifts, and the earlier reading
+/// here could not see drift in the direction that matters: it filtered *these*
+/// names by whether the refusal mentions them, so a refusal quoting a tenth field
+/// satisfied it exactly as a correct one did. [`fields_the_refusal_quotes`] reads
+/// the list out of the refusal instead, which makes a missing name, an extra name
+/// and a reordering three different failures.
+const RECOGNISED_FIELDS: [&str; 9] = [
     "name",
     "texture",
     "solid",
     "replaceable",
     "breakable",
     "breaks_into",
+    "drawn",
+    "occludes",
+    "targetable",
 ];
 
 /// A field name nobody recognises, and the shape of the mistake that produces
 /// one: a letter short of `solid`.
 const A_MISSPELLING_OF_SOLID: &str = "slid";
+
+/// A third, a letter *past* `drawn` — the newest field on the list and therefore
+/// the one whose absence from a stale mirror shows up last.
+const A_MISSPELLING_OF_DRAWN: &str = "drawnn";
+
+/// The words a refusal introduces the recognised list with, and where
+/// [`fields_the_refusal_quotes`] starts reading.
+const THE_LIST_IS_INTRODUCED_BY: &str = "a declaration may state ";
 
 /// A second one, a letter short of `replaceable`, so that a refusal has two
 /// names to put in an order.
@@ -160,10 +183,55 @@ fn recognised_fields_named(cause: &str) -> Vec<&'static str> {
 }
 
 /// Every recognised field name, in that same fixed order.
-fn all_six_recognised() -> Vec<&'static str> {
+fn all_of_them_recognised() -> Vec<&'static str> {
     let mut every = RECOGNISED_FIELDS.to_vec();
     every.sort_unstable();
     every
+}
+
+/// Every field name `cause` quotes back as one a declaration may state, in the
+/// order it quotes them.
+///
+/// Read out of the refusal rather than filtered against [`RECOGNISED_FIELDS`],
+/// which is the difference between a mirror that is enforced and one that merely
+/// exists. A filter answers "which of my names does the cause mention", so it is
+/// blind to a name the cause quotes and this file does not know about — the exact
+/// state a mirror left behind by a field addition is in. Reading the list makes
+/// the comparison total.
+///
+/// Empty where the refusal introduces no list at all, which is honest: a refusal
+/// about something else quotes nothing, and inventing an answer for it would let
+/// the wrong refusal satisfy the assertion.
+fn fields_the_refusal_quotes(cause: &str) -> Vec<String> {
+    let Some(at) = cause.rfind(THE_LIST_IS_INTRODUCED_BY) else {
+        return Vec::new();
+    };
+    cause[at + THE_LIST_IS_INTRODUCED_BY.len()..]
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// [`RECOGNISED_FIELDS`] as the comparison below reads them.
+fn every_field_a_declaration_may_state() -> Vec<String> {
+    RECOGNISED_FIELDS
+        .iter()
+        .map(|field| (*field).to_owned())
+        .collect()
+}
+
+/// What a refusal about an unrecognised field quoted back, whole.
+///
+/// The blamed field and the quoted list travel together for the reason
+/// [`Unrecognised`] holds both: a refusal that named the offender and quoted the
+/// wrong list is the failure a mod author cannot recover from, and a refusal that
+/// quoted the right list against the wrong offender sends them to the wrong line.
+#[derive(Debug, PartialEq, Eq)]
+struct Quoted {
+    blamed: Blamed,
+    fields_quoted_in_order: Vec<String>,
 }
 
 /// What repeated reads of one content root said about the fields it does not
@@ -210,7 +278,7 @@ fn a_field_the_loader_does_not_recognise_is_refused_beside_the_ones_it_does() ->
         },
         Unrecognised {
             blamed: Blamed::Declaration(blaming(AMBER, A_MISSPELLING_OF_SOLID)),
-            recognised_fields_named: all_six_recognised(),
+            recognised_fields_named: all_of_them_recognised(),
         },
         "a key the loader has no meaning for is a mistake, and refusing it is the only thing \
          that tells a mod author `slid` was never going to do anything. Ignoring it registers a \
@@ -222,7 +290,7 @@ fn a_field_the_loader_does_not_recognise_is_refused_beside_the_ones_it_does() ->
 }
 
 #[test]
-fn a_declaration_stating_all_six_recognised_fields_and_nothing_else_registers() -> TestResult {
+fn a_declaration_stating_every_recognised_field_and_nothing_else_registers() -> TestResult {
     let directory = TempDir::new()?;
     let root = root_declaring(
         &directory,
@@ -230,6 +298,9 @@ fn a_declaration_stating_all_six_recognised_fields_and_nothing_else_registers() 
             raw_field("replaceable", "false"),
             raw_field("breakable", "true"),
             text_field("breaks_into", ASH),
+            raw_field("drawn", "true"),
+            raw_field("occludes", "true"),
+            raw_field("targetable", "true"),
         ]),
     )?;
 
@@ -241,8 +312,42 @@ fn a_declaration_stating_all_six_recognised_fields_and_nothing_else_registers() 
         "the control on the refusal next door, and the only thing standing between an \
          unrecognised-field check and a check that refuses everything. Every field here is one \
          the loader is documented to accept, so a declaration using the whole contract must \
-         load — a check that over-fires takes the six-field declaration down with the \
-         misspelled one and this is what says so"
+         load — a check that over-fires takes the whole-contract declaration down with the \
+         misspelled one and this is what says so. It states **all** of them rather than the \
+         six it used to, which is what makes it move when the contract grows: a control \
+         exercising a subset of the contract stops being a control over the part it left out"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_field_one_letter_past_a_real_one_is_refused_quoting_every_field_in_declaration_order()
+-> TestResult {
+    let directory = TempDir::new()?;
+    let root = root_declaring(
+        &directory,
+        &the_required_three_and(&[raw_field(A_MISSPELLING_OF_DRAWN, "true")]),
+    )?;
+
+    let (blamed, cause) = judged(&root, AMBER_FILE);
+
+    assert_eq!(
+        Quoted {
+            blamed,
+            fields_quoted_in_order: fields_the_refusal_quotes(&cause),
+        },
+        Quoted {
+            blamed: Blamed::Declaration(blaming(AMBER, A_MISSPELLING_OF_DRAWN)),
+            fields_quoted_in_order: every_field_a_declaration_may_state(),
+        },
+        "the list a refusal quotes back is the only place a mod author can read what a \
+         declaration may say, and its order is a contract rather than a detail: the modding \
+         page quotes this refusal and a guard compares the quotation against a real run line \
+         for line, so a list the loader assembles in any order that can vary makes that guard \
+         intermittently red and the page unwritable. The whole list is compared rather than \
+         checked name by name, so a name the loader quotes and nothing here knows about is a \
+         failure — which is what the mirror above is for, and the direction that had nothing \
+         watching it"
     );
     Ok(())
 }

@@ -178,6 +178,9 @@ pub fn registry_from(
             replaceable: false,
             breakable: true,
             breaks_into: None,
+            drawn: is_solid,
+            occludes: is_solid,
+            targetable: is_solid,
             origin: DefinitionOrigin::new(origin),
         }));
     }

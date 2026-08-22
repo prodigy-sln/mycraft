@@ -102,6 +102,9 @@ fn hand_written_air() -> Result<BlockDefinition, Box<dyn Error>> {
         replaceable: true,
         breakable: true,
         breaks_into: None,
+        drawn: false,
+        occludes: false,
+        targetable: false,
         origin: DefinitionOrigin::new("hand-written air"),
     })
 }
@@ -115,6 +118,9 @@ fn hand_written_stone() -> Result<BlockDefinition, Box<dyn Error>> {
         replaceable: false,
         breakable: true,
         breaks_into: Some(BlockName::parse("base:air")?),
+        drawn: true,
+        occludes: true,
+        targetable: true,
         origin: DefinitionOrigin::new("hand-written stone"),
     })
 }
@@ -129,6 +135,9 @@ fn hand_written_grass() -> Result<BlockDefinition, Box<dyn Error>> {
         replaceable: false,
         breakable: false,
         breaks_into: None,
+        drawn: true,
+        occludes: true,
+        targetable: true,
         origin: DefinitionOrigin::new("hand-written grass"),
     })
 }

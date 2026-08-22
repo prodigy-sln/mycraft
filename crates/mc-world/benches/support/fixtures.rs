@@ -225,6 +225,9 @@ fn definition(name: &str, is_solid: bool) -> Result<BlockDefinition, NamespacedI
         replaceable: false,
         breakable: true,
         breaks_into: None,
+        drawn: is_solid,
+        occludes: is_solid,
+        targetable: is_solid,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
     })
 }

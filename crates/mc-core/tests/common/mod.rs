@@ -45,6 +45,9 @@ pub fn definition(
         replaceable: false,
         breakable: true,
         breaks_into: None,
+        drawn: true,
+        occludes: true,
+        targetable: true,
         origin: DefinitionOrigin::new(origin),
     })
 }

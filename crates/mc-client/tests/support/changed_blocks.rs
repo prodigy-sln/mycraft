@@ -210,6 +210,9 @@ pub fn block(
         replaceable: !is_solid,
         breakable,
         breaks_into: None,
+        drawn: is_solid,
+        occludes: is_solid,
+        targetable: is_solid,
         origin: DefinitionOrigin::new("the changed-blocks fixture"),
     })
 }

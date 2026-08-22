@@ -17,6 +17,13 @@
 //! changes the verdict to [`Verdict::NoQuotedRefusalWasFound`] rather than passing
 //! silently on an empty set.
 //!
+//! The recogniser itself, the field order the guide introduces a declaration's
+//! fields in, and the readings over both now live in `support/quoted_refusals.rs`,
+//! because a second binary holds a page against a run in the opposite direction —
+//! `documented_property_refusals.rs`, which asks whether a refusal is quoted at
+//! all rather than whether a quotation is real. Two copies of one recogniser is
+//! the failure these guards exist to prevent, one level up.
+//!
 //! # An enumerated verdict, not an absence
 //!
 //! A scan that read no page, whose walk broke, or whose recogniser stopped matching
@@ -133,6 +140,8 @@ mod per_facing_refusals;
 mod persistence;
 #[path = "support/printed_refusals.rs"]
 mod printed_refusals;
+#[path = "support/quoted_refusals.rs"]
+mod quoted_refusals;
 #[path = "support/reload.rs"]
 mod reload;
 #[path = "support/reload_content.rs"]
@@ -149,21 +158,12 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use printed_refusals::{UNRECOGNISED_FIELD, normalised, printed_refusals};
+use printed_refusals::{UNRECOGNISED_FIELD, printed_refusals};
+use quoted_refusals::{BLOCKS_PAGE, REFUSAL_PREFIX, pages, quoted_refusals_in, ranked_field};
 use support::TestResult;
-
-/// The first thing the reporting writes, and therefore the whole of the
-/// recogniser: a quoted refusal is a fenced block whose first line begins here.
-const REFUSAL_PREFIX: &str = "mycraft: ";
-
-/// How a fenced block opens and closes.
-const FENCE: &str = "```";
 
 /// The extension a page is written with.
 const PAGE_EXTENSION: &str = "md";
-
-/// The directory of pages a mod author reads, below the repository root.
-const PAGES: [&str; 2] = ["docs", "modding"];
 
 /// The same typo, one letter further from anything the loader knows — what a page
 /// left quoting a field name that has moved on would carry.
@@ -291,28 +291,8 @@ fn pages_quoting_the_printed_refusals_verbatim_agree_and_their_other_blocks_are_
     Ok(())
 }
 
-/// The page a mod author writes a block declaration against, below [`PAGES`].
-const BLOCKS_PAGE: &str = "blocks-items.md";
-
 /// The page a mod author reads about the built texture set on, below [`PAGES`].
 const MODELS_PAGE: &str = "voxel-models.md";
-
-/// The six fields a declaration may state, in the order the guide introduces
-/// them.
-///
-/// Written out here rather than read from the loader, which is the point: an
-/// expectation derived from the value under test agrees with whatever that value
-/// becomes. `documented_refusals` is the one guard where the page and the program
-/// are compared against each other rather than each against a third copy, and this
-/// list is the page's own order.
-const FIELDS_IN_THE_ORDER_THE_GUIDE_STATES: [&str; 6] = [
-    "name",
-    "texture",
-    "solid",
-    "replaceable",
-    "breakable",
-    "breaks_into",
-];
 
 /// What a page says about a set of refusals the client raises.
 ///
@@ -412,9 +392,11 @@ fn listing_of(page: &Path, raised: &[String]) -> Result<GuideListing, Box<dyn Er
 
 /// Whether the fields the page's quotations name run in the guide's own order.
 ///
-/// A quotation whose field is not one of the six is passed over rather than
-/// ranked: `slid` is the misspelling one of them is *about*, and giving it a
-/// position would rank a word the guide never introduces.
+/// A quotation whose field is not one the guide introduces is passed over rather
+/// than ranked: `slid` is the misspelling one of them is *about*, and giving it a
+/// position would rank a word the guide never introduces. That is also why the
+/// order this ranks against needs a witness of its own — `support/quoted_refusals.rs`
+/// records what a list left short of a field the loader gained silently costs.
 fn fields_in_order(quoted: &[String]) -> GuideListing {
     let mut furthest: Option<(usize, String)> = None;
     for refusal in quoted {
@@ -434,16 +416,6 @@ fn fields_in_order(quoted: &[String]) -> GuideListing {
     GuideListing::EveryRefusalIsQuotedInFieldOrder
 }
 
-/// Where in the guide's own order the field `refusal` blames sits, and what it is
-/// called.
-fn ranked_field(refusal: &str) -> Option<(usize, String)> {
-    FIELDS_IN_THE_ORDER_THE_GUIDE_STATES
-        .into_iter()
-        .enumerate()
-        .find(|(_, field)| refusal.contains(&format!("field `{field}`")))
-        .map(|(at, field)| (at, field.to_owned()))
-}
-
 /// The first of the printed refusals — the one about a block declaration.
 ///
 /// # Errors
@@ -455,17 +427,6 @@ fn the_block_refusal(printed: &[String]) -> Result<String, Box<dyn Error>> {
         .first()
         .cloned()
         .ok_or_else(|| "the client wrote no refusal for a block declaration to drift from".into())
-}
-
-/// Where the pages a mod author reads live.
-///
-/// # Errors
-///
-/// Returns an error if the repository root cannot be located above this crate.
-fn pages() -> Result<PathBuf, Box<dyn Error>> {
-    Ok(PAGES
-        .iter()
-        .fold(support::repository_root()?, |below, part| below.join(part)))
 }
 
 /// What the pages under `directory` quote, judged against what the client writes.
@@ -550,36 +511,6 @@ fn collect_pages(directory: &Path, found: &mut Vec<PathBuf>) -> Result<(), Box<d
         }
     }
     Ok(())
-}
-
-/// The refusals one page quotes: the fenced blocks whose first line begins with the
-/// prefix the reporting writes, in the order they appear.
-///
-/// A block's info string is not read — `text`, `console` or nothing at all are the
-/// same block — because the recogniser is derived from what the program writes and
-/// an info string is something an author chooses.
-fn quoted_refusals_in(page: &str) -> Vec<String> {
-    let mut quoted = Vec::new();
-    let mut lines = page.lines();
-    while let Some(line) = lines.next() {
-        if !is_fence(line) {
-            continue;
-        }
-        let block = lines
-            .by_ref()
-            .take_while(|line| !is_fence(line))
-            .collect::<Vec<_>>()
-            .join("\n");
-        if block.starts_with(REFUSAL_PREFIX) {
-            quoted.push(normalised(&block));
-        }
-    }
-    quoted
-}
-
-/// Whether a line opens or closes a fenced block.
-fn is_fence(line: &str) -> bool {
-    line.trim_start().starts_with(FENCE)
 }
 
 /// A page quoting the printed refusal with one field renamed, written under

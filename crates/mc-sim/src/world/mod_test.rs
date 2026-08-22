@@ -139,6 +139,9 @@ fn declaring(names: &[&str]) -> Result<BlockRegistry, Box<dyn Error>> {
             replaceable: false,
             breakable: true,
             breaks_into: None,
+            drawn: true,
+            occludes: true,
+            targetable: true,
             origin: origin.clone(),
         }));
     }

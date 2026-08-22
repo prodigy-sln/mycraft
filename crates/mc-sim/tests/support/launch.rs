@@ -87,6 +87,9 @@ pub fn registry_with_the_marker() -> Result<BlockRegistry, Box<dyn Error>> {
             replaceable: false,
             breakable: true,
             breaks_into: None,
+            drawn: true,
+            occludes: true,
+            targetable: true,
             origin,
         })],
     ))?;

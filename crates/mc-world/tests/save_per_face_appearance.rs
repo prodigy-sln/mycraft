@@ -135,6 +135,9 @@ fn registry_texturing(keys: [&str; 6]) -> Result<BlockRegistry, Box<dyn Error>> 
         replaceable: false,
         breakable: true,
         breaks_into: None,
+        drawn: true,
+        occludes: true,
+        targetable: true,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
     })];
     let mut registry = BlockRegistry::new();

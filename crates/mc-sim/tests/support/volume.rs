@@ -125,6 +125,9 @@ pub fn registry_declaring(blocks: &[(&str, bool)]) -> Result<BlockRegistry, Box<
             replaceable: false,
             breakable: true,
             breaks_into: None,
+            drawn: is_solid,
+            occludes: is_solid,
+            targetable: is_solid,
             origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
         }));
     }
