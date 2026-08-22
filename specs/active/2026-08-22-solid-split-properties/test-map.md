@@ -568,22 +568,71 @@ rather than 274.
   from the start, because the order is already right — which is why the mutation
   below is owed rather than optional.
 
-### Mutations owed on the GREEN tree, and who owes them
+### Mutations run, and what each proved
 
-Both are the implementation's to run, inside an announced window, reverted by
-re-editing the line and confirmed with `git diff --exit-code`.
+Both were the implementation's, run on the GREEN tree at `9a09a08` inside an
+announced window, applied by hand and reverted by **re-editing the line** — never
+`git checkout` — with `git diff --exit-code` clean between them and after.
 
-- **The phase's own** (`tasks.md` §Notes): drop the third clause from the
-  predicate. FR-2.3-S1, S2 and S3 must redden and nothing else should. Derived
-  rather than asserted: the clause can only fire where `drawn(self)` holds and
-  `occludes(beyond)` does not, and on every shipped block those two are solidity —
-  so two cells that reached it would both be solid and the second clause would
-  already have culled. FR-2.3-S4 holds two *different* blocks, so the clause is
-  true there and dropping it changes nothing. If anything outside those three
-  reddens, that is information about these tests and belongs here either way.
-- **The one the additional-coverage test needs.** It is green from the start, so
-  something has to show it can go red: swap the two calls at `sweep.rs:75-76` so
-  the boundaries resolve first. That test alone must redden, reporting
-  `UnresolvedNeighbourBlock` where it demands `UnresolvedBlock`, and the six
-  pre-existing refusal scenarios must all stay green — they are blind to the
-  order, which is the whole reason this one was written.
+**Both outcomes were predicted in writing before either was run**, and both
+matched exactly, including which test would stay green and why. Prediction first
+then measurement is worth more than either alone: an expectation written after the
+fact cannot be wrong, and a mutation table assembled that way records only that
+somebody was unsurprised.
+
+| Mutation | Invocation | Result |
+|---|---|---|
+| **M5** — the third clause dropped from `visible_face`: `occludes(beyond) \|\| beyond == key` cut back to `occludes(beyond)` | `cargo nextest run -p mc-world --no-fail-fast` → `354 tests run: 351 passed, 3 failed` · `cargo nextest run --workspace --no-fail-fast` → `1409 tests run: 1406 passed, 3 failed, 1 skipped` | Exactly FR-2.3-S1, S2 and S3, workspace-wide and nothing else. **FR-2.3-S4 stayed green**, which is the control doing its job: its two cells hold two *different* drawn non-occluding blocks, so the third clause was never what culled them. |
+| **M6** — the resolution order swapped, boundaries keyed before the meshed section | `cargo nextest run --workspace --no-fail-fast` → `1409 tests run: 1408 passed, 1 failed, 1 skipped` · `cargo nextest run -p mc-world -E 'binary(mesh_errors)' --no-fail-fast` → `7 tests run: 6 passed, 1 failed` | `a_section_and_a_neighbour_both_holding_something_unresolvable_refuse_by_the_sections_own` **alone**, workspace-wide, and for the right reason (below). All six pre-existing refusal scenarios printed **PASS** by name. |
+
+Both counts carry **no slash**, so the half of each claim that says *nothing else
+moved* is an observation rather than a statement about tests that never started.
+
+**M6's failure text rules out both wrong orders at once**, which is what the
+fixture was built for:
+
+```
+Error: "expected a refusal naming a block and its voxel, got
+  UnresolvedNeighbourBlock { name: BlockName(NamespacedId("example:orphan_next_door")),
+  facing: NegZ, position: LocalPos { x: 2, y: 6, z: 15 } }"
+```
+
+It named the neighbour's block at (2, 6, 15) — linear 3 938 — where the test
+demands the section's own at (9, 14, 15) — linear 4 073. So the same failure
+falsifies *resolve the boundaries first* and *resolve both and report the lower
+linear index*, because both name that identical wrong block. And the six
+pre-existing scenarios passing under it is the measured form of the claim that
+made this test necessary: `tasks.md` T07 called them "the cheapest instrument that
+can see" a wrong order, and they saw nothing. **The guard is no longer untested.**
+
+### M5 run workspace-wide turned a derivation into an observation
+
+The reason for the wider selection was the ordinary "nothing else moved" check,
+and it bought something better. `scene_contract`, `replay_world` and all four
+committed `…-r1` goldens **stayed green under a mesher with the engine rule
+deleted**.
+
+That is the reduction argument the entire phase rests on — *while the shipped
+water still declares nothing, every shipped block has `drawn == occludes ==
+solid`, so the third clause only ever fires where `!occludes(beyond)` already
+held, and two such cells cannot be the same block* — and until this run it had
+only ever been **derived, by reading the predicate**. It is now measured: the
+clause genuinely never fires on shipped content, because `occludes(beyond)` culls
+first every time.
+
+Worth keeping in view for Phase 3, which is where that stops being true: the
+moment `content/base/blocks/water.luau` states `drawn = true`, the shipped sea
+becomes exactly the case where the first two clauses hold and the third decides —
+so this measurement is also the last point at which deleting the rule costs
+nothing. If a later phase repeats M5 and the goldens move, that is the rule
+starting to matter rather than a regression.
+
+### Verified green independently
+
+`cargo nextest run -p mc-world -E 'binary(mesh_declared_drawnness) +
+binary(mesh_declared_occlusion) + binary(mesh_same_kind) + binary(section_drawnness)
++ binary(mesh_errors)' --no-fail-fast` → **`21 tests run: 21 passed, 0 skipped`**,
+each named in the output: the fourteen scenario tests, the additional-coverage
+test, and the six pre-existing refusal scenarios it sits beside. Run by the test
+author on the shut tree rather than taken from the implementation's report, since
+the tests are the test author's to declare green.
