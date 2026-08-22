@@ -40,12 +40,21 @@ struct Surroundings {
 
 /// The faces `section` shows, merged into rectangles and ordered.
 ///
-/// Whether a face exists is decided by what `registry` registered the blocks
-/// either side of it as declaring — drawn, and occluding — and by whether those
-/// two blocks are the same one. By that alone: no block name and no runtime id
-/// is looked at, so a block a mod ships is treated exactly as one the base game
-/// ships is. See [`visible_face`] for the three questions and for why a key
-/// comparison reads no name.
+/// A face exists at a cell when three things hold, and by these alone:
+///
+/// 1. the block the cell holds was registered `drawn`;
+/// 2. the block beyond that face was **not** registered `occludes`;
+/// 3. the two are not the same block.
+///
+/// The first two are what each block declares; the third is an engine rule — a
+/// block never draws a face against its own kind, which is what stops a body of
+/// one non-occluding block being a stack of visible sheets. None of the three is
+/// derived from solidity, which means collision and nothing else.
+///
+/// **No block name and no runtime id is looked at anywhere in this module**, so
+/// a block a mod ships is treated exactly as one the base game ships is. The
+/// third rule does not weaken that: it compares identity, under a table
+/// deduplicated by name, and reads neither.
 ///
 /// Meshing reads and never writes: every parameter is a shared reference and the
 /// mesh handed back is owned, so calling `compact()` on the input to simplify

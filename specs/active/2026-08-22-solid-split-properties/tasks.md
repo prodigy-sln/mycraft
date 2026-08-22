@@ -625,12 +625,26 @@ scoped knowing them.**
   `mesh/resolve.rs` 421/500, `mesh/sweep.rs` 341/500, `section/mod.rs` 455/500.
   `resolve.rs` grew by 104 non-blank lines and is the one to watch.
 - **Seven files decide drawnness by asking a section whether a cell is solid,
-  and this phase moved none of them.** `crates/mc-world/tests/mesh_fixtures.rs`,
-  `mesh_fixture_scale.rs`, `benches/meshing.rs` and `benches/support/oracle.rs`
-  mean drawnness and are candidates; `tests/block_semantics.rs` and
-  `tests/empty_cell_solidity.rs` mean solidity and stay.
-  `crates/mc-sim/tests/support/oracle.rs:199,211` is **Phase 3's T10**, which
-  names it. Leaving the four alone is behaviour-neutral while every fixture in
-  them has `drawn == solid`, and M5 above measured that they stay green either
-  way — but they are the sites at which an oracle could silently re-agree with
-  its subject once a fixture in them diverges.
+  this phase moved none of them, and that is correct rather than deferred
+  work.** Of the seven, `tests/block_semantics.rs` and
+  `tests/empty_cell_solidity.rs` are genuinely about solidity and stay;
+  `tests/mesh_fixtures.rs:37` counts solidity deliberately and says so in its own
+  doc comment; `crates/mc-sim/tests/support/oracle.rs:199,211` is **Phase 3's
+  T10**, which names it.
+
+  **The one that matters is `crates/mc-world/benches/support/oracle.rs:175,208,210`**
+  — the independent visible-face oracle behind `mesh_fixture_scale.rs` and
+  `mesh_properties.rs`' proptest. **Do not "fix" it by pointing it at
+  `is_drawn_at`.** That would look like tidying and would destroy the property
+  the whole comparison exists for: *an oracle that decides visibility by calling
+  the same question the mesher calls is not an oracle, it is a second copy of the
+  subject.* As it stands the oracle is both independent **and** correct, because
+  every fixture in those two binaries has `drawn == solid` — and M5 above
+  measured them green under a mesher with the engine rule deleted.
+
+  **The rule for whoever comes next:** if a future phase adds a fixture to those
+  binaries where drawnness and solidity diverge, the oracle must be given
+  drawnness derived **on its own terms** — never by calling the mesher's
+  predicate, and never by calling `is_drawn_at` because it is convenient. Until
+  such a fixture exists the oracle needs no change, and it would fail *loudly*
+  rather than silently if one appeared, which is the safe failure direction.
