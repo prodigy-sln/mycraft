@@ -20,8 +20,19 @@ Seven scenarios: FR-1.1-S1..S4, FR-1.2-S1, FR-1.2-S2, FR-8.1-S1.
 ### FR-1.2-S2 is closed by a test that already existed, and here is the measurement
 
 FR-1.2-S2 asks that the engine produce, for the unrecognised-field refusal,
-exactly the message the modding guide prints. `docs/modding/blocks-items.md:396`
-**already quotes that refusal**, and
+exactly the message the modding guide prints. **Three pages already quoted that
+refusal, not one** — `grep -rn "a declaration may state" docs/` finds it on
+`docs/modding/blocks-items.md`, `docs/modding/hot-reload.md:378` and
+`docs/modding/README.md:183`, and the guard below sweeps every page under
+`docs/modding/` rather than a named one. All three carried **byte-identical**
+six-name quotations, and the guard's failing output shows the quotation and the
+produced text **but not the page it came from** — so updating one page leaves the
+guard red on a quotation that looks like the one just fixed, with nothing hinting
+that two more exist. That is the hour it costs, and it is a fact about the
+instrument rather than about this spec. The guard's own direction is what saves
+it in the end: it will not go green until the last of the three is corrected.
+
+With that said, `docs/modding/blocks-items.md:396` quotes it and
 `every_refusal_the_modding_pages_quote_is_a_refusal_the_client_prints` compares
 every fenced quotation under `docs/modding/` against a real run, line for line,
 in the quoted → produced direction. Measured rather than argued: with the loader
@@ -73,11 +84,54 @@ these is a scenario's own test.
   name the mirror does not know) because `named_in_order` filters the needles —
   which is exactly the hole FR-1.2-S1's test was written to close.
 
+## Where a new refusal may be quoted on the blocks page, corrected
+
+FR-8.1-S1's test says only *that* the two refusals are quoted. **Where they sit
+is constrained by a different guard**, and this is a correction to advice the test
+author gave that turned out to be wrong.
+
+`the_modding_guide_states_every_per_facing_refusal_in_the_recognised_field_order`
+ranks every quotation on the page by the field it blames and demands the guide's
+own order. The advice given was that the region around "Reading a refusal" was
+safe for the `drawn` quotation, on the grounds that the `texture`-blaming
+quotations are all in the texture-table section above it. **That was derived from
+one section rather than from the page**, and `ranked_field` matches
+``field `texture` `` anywhere. The implementation measured the consequence:
+`OutOfFieldOrder { field: "texture", after: "drawn" }`.
+
+The real constraint, measured on the current tree: the last ranked `texture`
+quotation is the declared-value bound refusal at
+`docs/modding/blocks-items.md:496` (`` `texture` holds 257 characters ``), which
+sits **below** "Reading a refusal", and the `drawn = 1` quotation now sits at
+`:528` beneath it. Page order therefore ranks 1, 1, 1, 1, 1, 6. The `slid` and
+`drawnn` quotations rank nowhere, because neither is a recognised field, so
+`ranked_field` returns `None` for both — which is why they may sit beside each
+other above all of it.
+
+**The general rule, so the next field does not repeat this:** grep the whole page
+for ``field `<name>` `` across every recognised field before choosing where a new
+quotation goes. A section's boundaries are not the ranking's boundaries.
+
 ## Two skeletons, because no single one reddens all four FR-1.1 scenarios
 
 Measured, not argued (`standards/global/testing.md` §2, "One skeleton is often
 not enough"). Command:
-`cargo nextest run -p mc-world -E 'binary(luau_declaration_properties)'`.
+`cargo nextest run -p mc-world -E 'binary(luau_declaration_properties) + binary(luau_declaration_keys)'`
+— run without `--no-fail-fast`, and safe for a different reason than the
+mutations below: both summaries came back `10 tests run` with no slash against a
+selection of exactly ten, so nothing was cancelled unobserved. The `mc-client`
+half of the same skeletons is the same shape — `3 run, 1 passed, 2 failed` and
+`9 run, 7 passed, 2 failed`, both no-slash against selections of exactly that
+size.
+
+**The one run that had to have the flag, and did.** Whether the 21-site
+adaptation broke anything is a claim about the *whole* workspace, and a
+fail-fast run answers it for however many tests happened to start:
+`cargo nextest run --workspace --no-fail-fast` over a tree with a correct loader
+and a not-yet-updated page gave `1394 run, 1392 passed, 2 failed, 1 skipped`,
+the two failures being the documentation guards and nothing else. The same
+selection *without* the flag had reported `85/1394` — evidence about 85 tests,
+in a line that reads like a verdict on 1 394.
 
 | Skeleton | FR-1.1-S1 | FR-1.1-S2 | FR-1.1-S3 | FR-1.1-S4 |
 |---|---|---|---|---|
@@ -95,16 +149,67 @@ fixture ("this scenario needs the content root … to refuse the run, and it
 prepared a scene instead") rather than on an assertion. Six `mc-client` tests go
 red that way. The read and the list growth land together.
 
+## How to tell a cancelled run from a complete one, before any count below
+
+`nextest` cancels the rest of a run on the first failure unless
+`--no-fail-fast` is given, and it renders that as **`N/M tests run` — with a
+slash**. A complete run has no slash: `388 run`. Measured on three runs in this
+phase (`186/388`, `85/1394`, and the no-slash summaries below), not read out of
+documentation.
+
+**This matters most for the half of a mutation that says something stayed
+green.** "One test red" survives a cancelled run; **"nothing else moved" does
+not** — it is a statement about tests that may never have started, and it reads
+identically either way. `assert!(nothing_else_failed)` from a cancelled run is
+the absence-assertion defect one level up, in the report rather than in the
+suite. Every count in this file therefore records its invocation, including the
+ones that were safe for a different reason.
+
 ## Mutations run, and what each proved
 
-Each was applied by hand, observed, and reverted by hand; the tree was confirmed
-clean against `HEAD` afterwards.
+Each was applied by hand, observed, and reverted **by re-editing the line** —
+never `git checkout` — with `git diff --exit-code` clean afterwards. M1–M3 were
+first run without `--no-fail-fast` and **re-run with it** before this table was
+written; the re-run agreed with the original in every arm, and the numbers below
+are the re-run's. M3 mutates the loader, so it was run with the implementation
+author's explicit consent inside an announced window.
 
-| Mutation | Result |
-|---|---|
-| **M1** — `RECOGNISED_FIELDS` in `luau_declaration_keys.rs` left at six, loader at nine | Exactly one test red: `a_field_one_letter_past_a_real_one_is_refused_quoting_every_field_in_declaration_order`. `a_field_the_loader_does_not_recognise_is_refused_beside_the_ones_it_does` stayed **green** — the measured proof that the filtered reading is blind in this direction. |
-| **M2** — `FIELDS_IN_THE_ORDER_THE_GUIDE_STATES` left at six, loader at nine | `the_guide_introduces_the_declaration_fields_in_the_order_a_refusal_quotes_them` red; `the_modding_guide_states_every_per_facing_refusal_in_the_recognised_field_order` stayed **green** — the same blindness, one mirror over. |
-| **M3** — the loader's nine reordered (`occludes` before `drawn`), page untouched | `a_field_one_letter_past_a_real_one_…` red, reporting both orders. Nothing else in `luau_declaration_keys` moved, and the reddening does not route through the modding page. |
+| Mutation | Invocation | Result |
+|---|---|---|
+| **M1** — `RECOGNISED_FIELDS` in `luau_declaration_keys.rs` cut to six, loader at nine | `cargo nextest run -p mc-world -E 'binary(luau_declaration_keys)' --no-fail-fast` → `6 run, 5 passed, 1 failed` | One test red: `a_field_one_letter_past_a_real_one_is_refused_quoting_every_field_in_declaration_order`. `a_field_the_loader_does_not_recognise_is_refused_beside_the_ones_it_does` printed an explicit **PASS** — the measured proof that the filtered reading is blind in this direction. |
+| **M2** — `FIELDS_IN_THE_ORDER_THE_GUIDE_STATES` cut to six, loader at nine | `cargo nextest run -p mc-client -E 'binary(documented_property_refusals) + binary(documented_refusals)' --no-fail-fast` → `9 run, 8 passed, 1 failed` | One test red: `the_guide_introduces_the_declaration_fields_in_the_order_a_refusal_quotes_them`. `the_modding_guide_states_every_per_facing_refusal_in_the_recognised_field_order` **PASS** — the same blindness, one mirror over. Both remaining page guards also **PASS**, so the mirror is the only thing this mutation reaches. |
+| **M3** — the loader's nine reordered (`OCCLUDES_FIELD` before `DRAWN_FIELD`) | `cargo nextest run -p mc-world --no-fail-fast` → `339 run, 338 passed, 1 failed` | `a_field_one_letter_past_a_real_one_…` alone, reporting both orders. **One test in 339 sees a reordered field list**, and the package it ran in opens nothing under `docs/`. |
+| **M4** — `optional_boolean`'s `absent` made a literal `false` for all three fields (the implementation's own mutation, on the GREEN tree) | `cargo nextest run -p mc-world -p mc-core --no-fail-fast` → `388 run, 387 passed, 1 failed` | `a_solid_block_that_states_nothing_more_is_drawn_occludes_and_can_be_aimed_at` alone. **The first run of this was `186/388` under fail-fast** — a line that reads like a complete result and is evidence about 186 tests. |
+
+**M4's three green arms are recorded because they are the measurement, not a
+null result** (`testing.md` §2 asks for the outcome either way):
+
+- **FR-1.1-S2 green** — a `false` default is what that fixture expects anyway.
+  This is the vacuity the two-skeleton table above predicts, now measured against
+  the real implementation rather than against a skeleton built to make the point.
+- **FR-1.1-S3 green** — `drawn` is *stated* in its fixture, and `occludes` and
+  `targetable` default to `false` either way. So S3 reddens against a wrong
+  **value** but not against a wrong **default source**. That is a real limit of
+  the fixture and it is why S1 exists.
+- **FR-1.1-S4 green** — a wrong-kind refusal is raised before any default is
+  reached.
+
+### Why M3 is scoped to a package rather than mutating the page
+
+The question it answers is: *the loader's nine in the wrong order, with the page
+agreeing, so page-versus-run stays green.* **That stipulation is unobservable on
+either tree this phase had.** Before the documentation task the page was stale,
+so the page guard was already red for an unrelated reason — `testing.md` §2's
+"red for a known reason hides red for an unknown one", and the reason the
+original M3 could not have observed the stipulation at all. After it, the page
+quotes the correct nine, so reordering the loader makes the page *disagree* and
+reddens that guard for a second reason.
+
+Scoping to `-p mc-world`, where **no test opens anything under `docs/`**, answers
+it better than a page mutation would: with the page wholly out of scope, one test
+in 339 still reddens on the reorder alone. "Does not route through the page" is
+therefore a **structural** property of `luau_declaration_keys.rs` rather than an
+experiment that came out the right way, and it is recorded as one.
 
 ## Which tree the lint measured, stated because the two are not the same tree
 
