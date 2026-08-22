@@ -106,6 +106,32 @@ clean against `HEAD` afterwards.
 | **M2** — `FIELDS_IN_THE_ORDER_THE_GUIDE_STATES` left at six, loader at nine | `the_guide_introduces_the_declaration_fields_in_the_order_a_refusal_quotes_them` red; `the_modding_guide_states_every_per_facing_refusal_in_the_recognised_field_order` stayed **green** — the same blindness, one mirror over. |
 | **M3** — the loader's nine reordered (`occludes` before `drawn`), page untouched | `a_field_one_letter_past_a_real_one_…` red, reporting both orders. Nothing else in `luau_declaration_keys` moved, and the reddening does not route through the modding page. |
 
+## Which tree the lint measured, stated because the two are not the same tree
+
+`cargo clippy --workspace --all-targets --all-features -- -D warnings` came back
+**clean, exit 0** — but it measured the *mutated* tree, the one carrying the three
+fields on `BlockDefinition` and reads for them in the loader. **That is not the
+tree this commit contains.** The committed tree does not compile at all until T01
+and T02 land, so no lint can be run against it, and a clippy line that did not
+say which tree it read would be an absent instrument dressed as a clean one
+(`standards/global/testing.md` §2).
+
+What the distinction buys, concretely: the run **did** cover all 21 adaptation
+sites, both mirrors and all three new test files, because those compile under the
+mutation — so anything the lint could say about the test-side work has been said.
+The two diagnostics it raised were:
+
+- `error: this function has too many lines (35/30)` at
+  `crates/mc-world/src/content/luau_declaration/mod.rs:149` — **the
+  implementation's**, reported rather than fixed, since adding three
+  `optional_boolean` reads to `check` is what trips it. It needs splitting, not an
+  `#[allow]`.
+- `error: all variants have the same postfix: Quoted` in
+  `crates/mc-client/tests/documented_property_refusals.rs` — **mine**, fixed
+  before the commit by renaming the verdict arms.
+
+`cargo fmt --all -- --check` was clean against the same tree.
+
 ## The adaptation, and the rule it followed
 
 `BlockDefinition` gains three fields and has no constructor, so every struct
