@@ -1,6 +1,6 @@
 ---
 id: SPEC-021
-title: One bit answers four questions — solid, drawn, occludes and targetable split, plus swimmable and density
+title: One bit answers four questions — solid, drawn, occludes and targetable split
 status: active
 rigor: high
 rigor-reason: >
@@ -24,31 +24,31 @@ is this drawn, does it stop me, can I aim at it, is it sensible to hold — so
 water, the one shipped block that declares itself non-solid, is **completely
 invisible**: `visible_face` (`crates/mc-world/src/mesh/sweep.rs:275`) emits no
 face at all unless the voxel is solid. Split the bit into separately declared
-properties and add the two a liquid needs, so that a block states what it *is*
-rather than having three further facts derived from one, and a player can see
-water and swim in it.
+properties, so that a block states what it *is* rather than having three further
+facts derived from one, and a player can see water.
 
 ## Stakeholder capability delivered
 
 Named, per Key Principle 7:
 
-- **Player** — the sea is visible and swimmable. You can walk to the coast, see
-  the water surface, wade in, and swim up out of it. Today the sea is a hole in
-  the world that you walk through and cannot see.
+- **Player** — the sea is visible. You can walk to the coast and see the water
+  surface; today the sea is a hole in the world that you walk through and cannot
+  see. You can aim at water, and a swing at it is refused rather than breaking
+  the block behind it.
 - **Mod author** — you can declare a block that is visible without being solid,
-  solid without being visible, aimable without being solid, or swimmable with a
-  declared density, and each of those is a field you write in a `*.luau` file
-  with a refusal that names it when you get it wrong.
+  solid without being visible, or aimable without being solid, and each of those
+  is a field you write in a `*.luau` file with a refusal that names it when you
+  get it wrong.
 
 ## User Stories
 
-- As a **player**, I want to see and swim in the sea, so that water is part of
-  the world rather than an invisible hole in it.
+- As a **player**, I want to see the sea, so that water is part of the world
+  rather than an invisible hole in it.
+- As a **player**, I want a swing aimed at water to leave the water and the block
+  behind it alone, so that what the content says about water is what happens.
 - As a **mod author**, I want to declare separately whether my block is drawn,
-  occludes, collides, can be aimed at and can be swum in, so that a decorative
-  block is not forced to be an obstacle and an invisible barrier is expressible.
-- As a **mod author**, I want a numeric field's refusal to name the field, the
-  bound and what I wrote, so that a mistyped density is one edit to fix.
+  occludes, collides and can be aimed at, so that a decorative block is not
+  forced to be an obstacle and an invisible barrier is expressible.
 - As a **player**, I want a world I saved before this change to open and tell me
   which blocks now behave differently, so that a content update does not cost me
   my world.
@@ -59,7 +59,7 @@ Scenario rules: `standards/global/scenario-guidelines.md`. Each scenario gets at
 least one test, mapped in this folder's `test-map.md` — that mapping is a floor,
 not a ceiling.
 
-**Scenario count: 78.** The one command that measures it, so that no later stage
+**Scenario count: 54.** The one command that measures it, so that no later stage
 counts differently — the anchor is what keeps prose references to a scenario out
 of the total:
 
@@ -67,56 +67,40 @@ of the total:
 grep -cE "^  - FR-[0-9]+\.[0-9]+-S[0-9]+: " spec.md
 ```
 
-Per group: FR-1 17, FR-2 18, FR-3 9, FR-4 11, FR-5 3, FR-6 8, FR-7 5, FR-8 6,
-FR-9 1. `grep -oE "^  - FR-[0-9]+\.[0-9]+-S[0-9]+" spec.md | sort | uniq -d`
-must print nothing.
+Per group: FR-1 8, FR-2 18, FR-3 9, FR-4 3, FR-5 6, FR-6 5, FR-7 4, FR-8 1.
+`grep -oE "^  - FR-[0-9]+\.[0-9]+-S[0-9]+" spec.md | sort | uniq -d` must print
+nothing.
 
-**This is a large scenario set and the size is a stated risk, not an oversight.**
-`product/roadmap.md:186-193` records that the 82-scenario terrain-render spec
-found eighteen instances of something passing for the wrong reason, and that "a
-spec is exactly where that failure hides, because nobody holds the whole of it at
-once". 78 sits next to that number. A recommendation to split this spec in two is
-recorded under Open Questions; until that is answered, the whole of PRO-904 is
-specified here.
+**This spec was cut from 78 scenarios to 54 on 2026-08-22, and the 24 that left
+went to PRO-957 rather than being dropped.** See Out of Scope. The reason for the
+cut is `product/roadmap.md:186-193`: it refused to fold PRO-904 into PRO-947
+because an 82-scenario spec hid eighteen instances of something passing for the
+wrong reason, and applied consistently that argues against 78 just as much.
 
-### FR-1 — A block declares five new properties
+### FR-1 — A block declares three new properties
 
-- **FR-1.1**: A declaration may state `drawn`, `occludes`, `targetable` and
-  `swimmable` as booleans. Each is optional and each defaults to the value the
-  declaration states for `solid`, so no existing declaration becomes invalid.
-  `solid` remains required and now means collision and nothing else.
-  - FR-1.1-S1: WHEN a declaration states `solid = true` and none of the four new booleans THE SYSTEM SHALL read `drawn`, `occludes`, `targetable` and `swimmable` as true
-  - FR-1.1-S2: WHEN a declaration states `solid = false` and none of the four new booleans THE SYSTEM SHALL read `drawn`, `occludes`, `targetable` and `swimmable` as false
-  - FR-1.1-S3: WHEN a declaration states `solid = false` and `drawn = true` THE SYSTEM SHALL read `drawn` as true and `occludes`, `targetable` and `swimmable` as false
+- **FR-1.1**: A declaration may state `drawn`, `occludes` and `targetable` as
+  booleans. Each is optional and each defaults to the value the declaration states
+  for `solid`, so no existing declaration becomes invalid. `solid` remains
+  required and now means collision and nothing else.
+  - FR-1.1-S1: WHEN a declaration states `solid = true` and none of the three new booleans THE SYSTEM SHALL read `drawn`, `occludes` and `targetable` as true
+  - FR-1.1-S2: WHEN a declaration states `solid = false` and none of the three new booleans THE SYSTEM SHALL read `drawn`, `occludes` and `targetable` as false
+  - FR-1.1-S3: WHEN a declaration states `solid = false` and `drawn = true` THE SYSTEM SHALL read `drawn` as true and `occludes` and `targetable` as false
   - FR-1.1-S4: IF a declaration states `drawn = 1` THEN THE SYSTEM SHALL refuse the content naming the file, the block, the field `drawn`, and that it must be `true or false` but is `a number`
 
-- **FR-1.2**: A declaration may state `density` as a number in kilograms per
-  cubic metre. It is optional, absent means `0.0`, and a declared value must be
-  finite and between `0.0` and `100000.0` inclusive. Both Luau's whole-number and
-  fractional forms are accepted.
-  - FR-1.2-S1: WHEN a declaration states `density = 1000.0` THE SYSTEM SHALL read the density as `1000.0`
-  - FR-1.2-S2: WHEN a declaration states `density = 1` THE SYSTEM SHALL read the density as `1.0`
-  - FR-1.2-S3: WHEN a declaration states no `density` THE SYSTEM SHALL read the density as `0.0`
-  - FR-1.2-S4: WHEN a declaration states `density = 0.0` THE SYSTEM SHALL accept it
-  - FR-1.2-S5: WHEN a declaration states `density = 100000.0` THE SYSTEM SHALL accept it
-  - FR-1.2-S6: IF a declaration states `density = -0.1` THEN THE SYSTEM SHALL refuse the content naming the field `density`, the bound `0.0` to `100000.0`, and the value written
-  - FR-1.2-S7: IF a declaration states `density = 100000.1` THEN THE SYSTEM SHALL refuse the content naming the field `density`, the bound `0.0` to `100000.0`, and the value written
-  - FR-1.2-S8: IF a declaration states `density = 0/0` THEN THE SYSTEM SHALL refuse the content naming the field `density` and that it must be a finite number
-  - FR-1.2-S9: IF a declaration states `density = "heavy"` THEN THE SYSTEM SHALL refuse the content naming the field `density` and that it must be a number but is `a string`
-
-- **FR-1.3**: The set of fields a declaration may state is quoted back verbatim
+- **FR-1.2**: The set of fields a declaration may state is quoted back verbatim
   when an unrecognised one is written, and the modding guide prints the same
   refusal the engine produces.
-  - FR-1.3-S1: IF a declaration states a field named `drawnn` THEN THE SYSTEM SHALL refuse it and quote exactly the eleven recognised field names, in declaration order — `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `density`
-  - FR-1.3-S2: THE SYSTEM SHALL produce, for that refusal, exactly the message the modding guide prints for it
+  - FR-1.2-S1: IF a declaration states a field named `drawnn` THEN THE SYSTEM SHALL refuse it and quote exactly the nine recognised field names, in declaration order — `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`
+  - FR-1.2-S2: THE SYSTEM SHALL produce, for that refusal, exactly the message the modding guide prints for it
 
-- **FR-1.4**: The shipped content declares water's new properties, and declares
+- **FR-1.3**: The shipped content declares water's new properties, and declares
   nothing new for the other three blocks. **Without this, every scenario in FR-2
-  through FR-5 can be satisfied by synthetic fixtures while the shipped game is
+  through FR-4 can be satisfied by synthetic fixtures while the shipped game is
   unchanged** — the shipped declaration is the only thing that makes the player
   capability real.
-  - FR-1.4-S1: WHEN the shipped content root is read THE SYSTEM SHALL read `base:water` as not solid, drawn, non-occluding, targetable, swimmable, unbreakable, replaceable, and of density `1000.0`
-  - FR-1.4-S2: WHEN the shipped content root is read THE SYSTEM SHALL read `base:dirt`, `base:grass` and `base:stone` as solid, drawn, occluding, targetable, not swimmable, and of density `0.0`
+  - FR-1.3-S1: WHEN the shipped content root is read THE SYSTEM SHALL read `base:water` as not solid, drawn, non-occluding, targetable, unbreakable and replaceable
+  - FR-1.3-S2: WHEN the shipped content root is read THE SYSTEM SHALL read `base:dirt`, `base:grass` and `base:stone` as solid, drawn, occluding and targetable
 
 ### FR-2 — What is drawn is declared, not derived from collision
 
@@ -206,114 +190,78 @@ specified here.
   `replaceable` is a separate declaration and is unchanged.
   - FR-3.5-S1: WHEN a placement is aimed at a cell holding `base:water` THE SYSTEM SHALL replace the water with the block being placed
 
-### FR-4 — What stops a player, and what a player swims through
+### FR-4 — Which block a new player holds
 
-- **FR-4.1**: Collision reads `solid` and nothing else.
-  - FR-4.1-S1: WHEN a player walks into a cell holding a block declaring `solid = true, drawn = false` THE SYSTEM SHALL stop them at its boundary
-  - FR-4.1-S2: IF a player walks into a cell holding a block declaring `solid = false, drawn = true` THEN THE SYSTEM SHALL let them pass through it
-
-- **FR-4.2**: A player whose body overlaps a cell holding a `swimmable` block can
-  move upward through it from rest, without standing on anything.
-  - FR-4.2-S1: WHILE a player's body overlaps a cell holding a block declaring `swimmable = true, solid = false` THE SYSTEM SHALL raise the player when they request upward movement, with no solid cell under their feet
-  - FR-4.2-S2: IF a player's body overlaps only cells holding blocks declaring `swimmable = false` THEN THE SYSTEM SHALL not raise them when they request upward movement with no solid cell under their feet
-  - FR-4.2-S3: WHEN a block declaring `swimmable = true, solid = false` is placed around a player at rest in previously empty cells THE SYSTEM SHALL raise them on their next upward request
-
-- **FR-4.3**: `density` is the number a swimmable block's resistance is computed
-  from, and it comes from the declaration rather than from the engine.
-  - FR-4.3-S1: WHEN a player falls through a cell holding a swimmable block declaring `density = 1000.0` THE SYSTEM SHALL leave them with a lower downward speed after one tick than the same fall through one declaring `density = 0.0`
-  - FR-4.3-S2: WHEN two swimmable blocks declare different densities THE SYSTEM SHALL produce a different fall speed through each, so no single engine-side constant can satisfy both
-  - FR-4.3-S3: IF a player falls through a cell holding a swimmable block declaring `density = 100000.0` THEN THE SYSTEM SHALL leave their vertical speed at exactly zero after one tick, never upward
-
-- **FR-4.4**: A pairing a player cannot exercise is accepted rather than refused.
-  Refusing it would put a game rule in the engine that content could not
-  override.
-  - FR-4.4-S1: WHEN a block declares `density = 1000.0` and `swimmable = false` THE SYSTEM SHALL accept the declaration and leave a player's fall through that cell unchanged
-  - FR-4.4-S2: WHEN a block declares `swimmable = true` and `solid = true` THE SYSTEM SHALL accept the declaration and stop a player at its boundary
-
-- **FR-4.5**: A reload that changes only what is drawn does not move anybody. The
-  reload's clearing search exists to move a player the *new solidity* left inside
-  a block, and `drawn` is not solidity.
-  - FR-4.5-S1: WHEN a reload changes nothing but one block's `drawn` and a player's body overlaps a cell holding it THE SYSTEM SHALL leave the player exactly where they are and move nobody
-
-### FR-5 — Which block a new player holds
-
-- **FR-5.1**: The block a player finds in hand is the first *colliding* block in
+- **FR-4.1**: The block a player finds in hand is the first *colliding* block in
   registration order. The fourth consumer of the old bit is answered explicitly
   rather than left to fall out of the split: a held block is one you place to
   build with, and building means an obstacle.
-  - FR-5.1-S1: WHEN the shipped content is registered THE SYSTEM SHALL put `base:dirt` in a new player's hand, unchanged by this split
-  - FR-5.1-S2: IF a registry holds only blocks declaring `solid = false` THEN THE SYSTEM SHALL offer no held block at all, even where some of them are drawn
-  - FR-5.1-S3: WHEN a reload publishes a registry whose first colliding block in registration order is `base:stone` THE SYSTEM SHALL report `base:stone` as the block the player holds
+  - FR-4.1-S1: WHEN the shipped content is registered THE SYSTEM SHALL put `base:dirt` in a new player's hand, unchanged by this split
+  - FR-4.1-S2: IF a registry holds only blocks declaring `solid = false` THEN THE SYSTEM SHALL offer no held block at all, even where some of them are drawn
+  - FR-4.1-S3: WHEN a reload publishes a registry whose first colliding block in registration order is `base:stone` THE SYSTEM SHALL report `base:stone` as the block the player holds
 
-### FR-6 — A save records the split without confusing a retexture for a rebalance
+### FR-5 — A save records the split without confusing a retexture for a rebalance
 
-- **FR-6.1**: `targetable`, `swimmable` and `density` are recorded as declared
-  **behaviour**; `drawn` and `occludes` are recorded as declared **appearance**.
-  The two lists keep separate revision bytes so that making water visible cannot
-  claim every block in a save behaves differently.
-  - FR-6.1-S1: WHEN two content roots differ in nothing but one block's `targetable` THE SYSTEM SHALL record different declared behaviour for that block and identical declared appearance
-  - FR-6.1-S2: WHEN two content roots differ in nothing but one block's `swimmable` THE SYSTEM SHALL record different declared behaviour for that block and identical declared appearance
-  - FR-6.1-S3: WHEN two content roots differ in nothing but one block's `density` THE SYSTEM SHALL record different declared behaviour for that block and identical declared appearance
-  - FR-6.1-S4: WHEN two content roots differ in nothing but one block's `drawn` THE SYSTEM SHALL record identical declared behaviour for that block and different declared appearance
-  - FR-6.1-S5: THE SYSTEM SHALL state a behaviour fold whose leading byte is `2` and an appearance fold whose leading byte is `3`, each asserted as a byte sequence built by hand
+- **FR-5.1**: `targetable` is recorded as declared **behaviour**; `drawn` and
+  `occludes` are recorded as declared **appearance**. The two lists keep separate
+  revision bytes so that making water visible cannot claim every block in a save
+  behaves differently.
+  - FR-5.1-S1: WHEN two content roots differ in nothing but one block's `targetable` THE SYSTEM SHALL record different declared behaviour for that block and identical declared appearance
+  - FR-5.1-S2: WHEN two content roots differ in nothing but one block's `drawn` THE SYSTEM SHALL record identical declared behaviour for that block and different declared appearance
+  - FR-5.1-S3: THE SYSTEM SHALL state a behaviour fold whose leading byte is `2` and an appearance fold whose leading byte is `3`, each asserted as a byte sequence built by hand
 
-- **FR-6.2**: A world saved before this spec opens, and the verdict it is opened
+- **FR-5.2**: A world saved before this spec opens, and the verdict it is opened
   under is asserted whole rather than as an absence. **The committed fixture
   already reports `base:water` as behaviour-changed today**, so a scenario that
   asked only for "some block is named" would stay green against an implementation
   that folded no new field and never bumped the revision byte.
-  - FR-6.2-S1: WHEN the committed pre-spec save is loaded against the shipped content THE SYSTEM SHALL report a verdict whose changed list is exactly `base:dirt`, `base:grass`, `base:stone`, `base:water` in ascending order, whose missing list is empty and whose retextured list is empty, and SHALL open the world naming those blocks on the error stream in one line
-  - FR-6.2-S2: IF that load is asked to refuse changed blocks THEN THE SYSTEM SHALL refuse it, naming all four
+  - FR-5.2-S1: WHEN the committed pre-spec save is loaded against the shipped content THE SYSTEM SHALL report a verdict whose changed list is exactly `base:dirt`, `base:grass`, `base:stone`, `base:water` in ascending order, whose missing list is empty and whose retextured list is empty, and SHALL open the world naming those blocks on the error stream in one line
+  - FR-5.2-S2: IF that load is asked to refuse changed blocks THEN THE SYSTEM SHALL refuse it, naming all four
 
-- **FR-6.3**: An appearance change is classified as an appearance change and
+- **FR-5.3**: An appearance change is classified as an appearance change and
   reported to nobody. Asserted as a whole verdict, because "no changed block was
   named" is also what an `occludes` folded into *neither* list would produce.
-  - FR-6.3-S1: WHEN two content roots differ in nothing but one block's `occludes` THE SYSTEM SHALL report a verdict whose retextured list names exactly that block and whose changed and missing lists are empty
+  - FR-5.3-S1: WHEN two content roots differ in nothing but one block's `occludes` THE SYSTEM SHALL report a verdict whose retextured list names exactly that block and whose changed and missing lists are empty
 
-### FR-7 — The golden set and its judge move together
+### FR-6 — The golden set and its judge move together
 
-- **FR-7.1**: Drawing water changes what the mesher emits, so the scene revision
+- **FR-6.1**: Drawing water changes what the mesher emits, so the scene revision
   is bumped, the previous revision's goldens are deleted, and the committed set
   is exactly what the new revision declares. Measured, not inferred: the shipped
   replay world holds 178 water voxels in 131 of its 4 096 columns, and zero quads
   name water today.
-  - FR-7.1-S1: THE SYSTEM SHALL hold, under the committed golden root, exactly the capture directories the current scene revision declares and no directory of any other revision
-  - FR-7.1-S2: IF the scene revision names a capture for which no golden is committed THEN THE SYSTEM SHALL fail naming the missing path
+  - FR-6.1-S1: THE SYSTEM SHALL hold, under the committed golden root, exactly the capture directories the current scene revision declares and no directory of any other revision
+  - FR-6.1-S2: IF the scene revision names a capture for which no golden is committed THEN THE SYSTEM SHALL fail naming the missing path
 
-- **FR-7.2**: The ray-marched judge behind the golden set marches to the first
+- **FR-6.2**: The ray-marched judge behind the golden set marches to the first
   **drawn** voxel, its classification of every sample is enumerated rather than
   asserted as an absence, and its prediction of water is proven non-vacuous.
-  - FR-7.2-S1: WHEN the judge marches from the player's camera through the shipped replay THE SYSTEM SHALL classify every declared sample pixel as exactly one of sky, `base:grass`, `base:stone`, `base:dirt` or `base:water`, with at least one classified `base:water`
-  - FR-7.2-S2: WHEN the judge marches through a world holding a block declaring `drawn = false, solid = true` THE SYSTEM SHALL pass through that block rather than predicting it
-  - FR-7.2-S3: WHEN every sample the judge predicts as terrain is compared against the captured frame THE SYSTEM SHALL find each of them something other than sky
+  - FR-6.2-S1: WHEN the judge marches from the player's camera through the shipped replay THE SYSTEM SHALL classify every declared sample pixel as exactly one of sky, `base:grass`, `base:stone`, `base:dirt` or `base:water`, with at least one classified `base:water`
+  - FR-6.2-S2: WHEN the judge marches through a world holding a block declaring `drawn = false, solid = true` THE SYSTEM SHALL pass through that block rather than predicting it
+  - FR-6.2-S3: WHEN every sample the judge predicts as terrain is compared against the captured frame THE SYSTEM SHALL find each of them something other than sky
 
-### FR-8 — The player sees water and swims in it, and a mod author can turn it off
+### FR-7 — The player sees water, and a mod author can turn it off
 
 The two capabilities Key Principle 7 requires, asserted rather than claimed.
 
-- **FR-8.1**: The shipped game draws its sea.
-  - FR-8.1-S1: WHEN the shipped client runs the declared capture ticks THE SYSTEM SHALL show water in the captured frame at every sample pixel where the judge predicts water, and at no fewer than one
+- **FR-7.1**: The shipped game draws its sea.
+  - FR-7.1-S1: WHEN the shipped client runs the declared capture ticks THE SYSTEM SHALL show water in the captured frame at every sample pixel where the judge predicts water, and at no fewer than one
 
-- **FR-8.2**: The shipped game lets a player swim.
-  - FR-8.2-S1: WHEN a player standing in the shipped replay world's sea requests upward movement with no solid cell under their feet THE SYSTEM SHALL raise them to the water surface at `y = 34`
-
-- **FR-8.3**: A reload that changes what is drawn re-meshes the world, and one
+- **FR-7.2**: A reload that changes what is drawn re-meshes the world, and one
   that changes only how a block behaves does not. **This is the wiring, not the
   policy** (`standards/global/testing.md` §2): the geometry-change test today
   keys on `(is_solid, textures)` (`crates/mc-sim/src/world/reload.rs:87`), so a
   correct `drawn` field that this site never learns about would leave an edited
   block looking unchanged until relaunch, with every other scenario green.
-  - FR-8.3-S1: WHEN a reload candidate changes nothing but one block's `drawn` THE SYSTEM SHALL re-mesh the world so the change is visible without a relaunch
-  - FR-8.3-S2: WHEN a reload candidate changes nothing but one block's `occludes` THE SYSTEM SHALL re-mesh the world so the change is visible without a relaunch
-  - FR-8.3-S3: WHEN a reload candidate changes nothing but one block's `targetable` THE SYSTEM SHALL report an accepted reload whose published serial advances and whose rebuilt-section count is zero
-  - FR-8.3-S4: WHEN a reload candidate changes nothing but one block's `density` THE SYSTEM SHALL report an accepted reload whose published serial advances and whose rebuilt-section count is zero
+  - FR-7.2-S1: WHEN a reload candidate changes nothing but one block's `drawn` THE SYSTEM SHALL re-mesh the world so the change is visible without a relaunch
+  - FR-7.2-S2: WHEN a reload candidate changes nothing but one block's `occludes` THE SYSTEM SHALL re-mesh the world so the change is visible without a relaunch
+  - FR-7.2-S3: WHEN a reload candidate changes nothing but one block's `targetable` THE SYSTEM SHALL report an accepted reload whose published serial advances and whose rebuilt-section count is zero
 
-### FR-9 — The refusals a mod author meets are the ones the guide prints
+### FR-8 — The refusals a mod author meets are the ones the guide prints
 
-- **FR-9.1**: Every refusal this spec adds is quoted in the modding guide exactly
-  as the engine produces it. The guide holds three declaration refusals today and
-  gains six.
-  - FR-9.1-S1: THE SYSTEM SHALL produce, for each of the six refusals FR-1.1-S4, FR-1.2-S6, FR-1.2-S7, FR-1.2-S8, FR-1.2-S9 and FR-1.3-S1 name, exactly the message the modding guide prints for it
+- **FR-8.1**: Every refusal this spec adds is quoted in the modding guide exactly
+  as the engine produces it.
+  - FR-8.1-S1: THE SYSTEM SHALL produce, for each of the two refusals FR-1.1-S4 and FR-1.2-S1 name, exactly the message the modding guide prints for it
 
 ## Technical Considerations
 
@@ -336,26 +284,30 @@ new property:
 |----------|------|-----|
 | `drawn` | **appearance** | A block that stops being drawn is still the same block to stand on, to build through and to break. Nothing about mutating the world changes. |
 | `occludes` | **appearance** | Whether a face behind it is culled is what the world looks like and nothing else. |
-| self-merging | **appearance** | Same, if it becomes a declared field at all — see the open mechanism question below. |
+| self-merging | **appearance** | Same, if it becomes a declared field at all — see Open Question 2. |
 | `targetable` | **behaviour** | This is the property that makes `breakable = false` live (FR-3.4). A block that becomes aimable changes what a break and a placement *do* to a world — exactly what the behaviour list exists to report. |
-| `swimmable` | **behaviour** | It changes how a player moves through a cell. Physics. |
-| `density` | **behaviour** | Same. |
 | `solid` | **behaviour**, unchanged | Already there, and its meaning narrows to the one thing the list already recorded it for. |
+
+PRO-957's `swimmable` and `move_resistance` are **behaviour** on the same
+grounds — they change how a player moves through a cell — and that ruling is
+recorded here because it was made here, even though the fields are that spec's.
+It costs PRO-957 no second revision bump: the behaviour byte moves in this spec
+and PRO-957 lands on the same revision.
 
 Consequences, stated rather than discovered:
 
-- **`BEHAVIOUR_REVISION` moves to 2, and this is the first time it ever has.**
-  Every block of every existing save reports as changed. That is survivable
-  rather than fatal because PRO-956 shipped a fortnight ago: a save whose blocks
-  report changed loads and names them instead of refusing. It is nonetheless a
-  real cost, paid once, deliberately, and FR-6.2 asserts what a player sees for
-  it. Worth stating precisely, because the near-miss version of this sentence is
-  false: PRO-956's load path **has** already reported a real content edit —
-  `base:water`'s `breakable = false` moves its behaviour fold today, which is
-  what `crates/mc-world/tests/shipped_declarations_and_an_older_save.rs` and
+- **`BEHAVIOUR_REVISION` moves to 2.** Every block of every existing save reports
+  as changed. That is survivable rather than fatal because PRO-956 shipped a
+  fortnight ago: a save whose blocks report changed loads and names them instead
+  of refusing. It is nonetheless a real cost, paid once, deliberately, and FR-5.2
+  asserts what a player sees for it. Worth stating precisely, because the
+  near-miss version of this sentence is false: PRO-956's load path **has** already
+  reported a real content edit — `base:water`'s `breakable = false` moves its
+  behaviour fold today, which is what
+  `crates/mc-world/tests/shipped_declarations_and_an_older_save.rs` and
   `docs/user/gameplay.md:68` record. What has never moved is the revision *byte*,
   and that is the difference between one block being named and all four being
-  named. It is also exactly why FR-6.2 asserts the verdict **whole**: a scenario
+  named. It is also exactly why FR-5.2 asserts the verdict **whole**: a scenario
   asking only that some block is named would stay green against an
   implementation that folded no new field at all.
 - **`APPEARANCE_REVISION` moves to 3, and no player is told anything.** That is
@@ -375,7 +327,7 @@ Consequences, stated rather than discovered:
 - **Only a test stating the byte sequence can see a revision byte move.** The
   format module's own doc comment records this as measured: every other witness
   compares one fold to another and cannot see a leading byte that moved in both.
-  FR-6.1-S5 is that test, for both bytes.
+  FR-5.1-S3 is that test, for both bytes.
 
 #### 2. The render oracle's independence
 
@@ -411,12 +363,13 @@ The reasoning, because the ruling on its own is worth nothing here:
   that had quietly stopped reading the registry at all would still agree about
   water, and nothing would say so.
 - **So the split adds a positive control the module does not have today.**
-  FR-7.2-S1 asserts the judge predicts `base:water` for at least one sample, and
-  FR-7.2-S2 asserts it marches *through* a `drawn = false, solid = true` block —
-  which no judge reading `solid` can pass. Together they are the two directions
-  `testing.md` §2 asks for: the prediction is non-vacuous, and it is reached by
-  the new field rather than the old one. **The judge comes out of this spec with
-  more falsifiability than it went in with, not less.**
+  FR-6.2-S1 asserts the judge classifies every sample and predicts `base:water`
+  for at least one, and FR-6.2-S2 asserts it marches *through* a
+  `drawn = false, solid = true` block — which no judge reading `solid` can pass.
+  Together they are the two directions `testing.md` §2 asks for: the prediction is
+  non-vacuous, and it is reached by the new field rather than the old one. **The
+  judge comes out of this spec with more falsifiability than it went in with, not
+  less.**
 - **The named breaker, recorded now rather than reconstructed later.** A
   first-drawn-voxel march is right only while every drawn block is opaque. The
   day a translucent block exists — PRO-952 — the judge needs a second rule, and
@@ -435,26 +388,26 @@ The reasoning, because the ruling on its own is worth nothing here:
 - **`ResolvedBlock` gains nothing.** `crates/mc-core/src/content.rs`'s written
   argument is that it carries what a client *draws and predicts with* and
   excludes the rules by which a world is *mutated*. Applying that test would put
-  `drawn`, `occludes` and self-merging in and keep `targetable` out. But
-  measured: `ResolvedBlock::is_solid` reaches only
-  `crates/mc-client/src/content.rs:73`, which builds `ClientContent::solidity`,
-  and `ClientContent::is_solid` has **no production caller at all** — the mesher
-  reaches solidity through `BlockRegistry` (`mesh/resolve.rs:324`), not through
-  resolved content. Extending the struct now would add surface with no production
-  reader, which is the "policy is not wiring" trap in `testing.md` §2 and the
-  half-a-spec failure in Key Principle 7. So the struct is left alone and the
-  question is handed to PRO-944, which moves the composition root and is the
-  spec that gives the client a reason to hold any of this. **The absence is
-  stated here rather than left silent.**
-- **The four boolean defaults are knowingly the trap.** A `drawn` default equal
+  `drawn` and `occludes` in and keep `targetable` out. But measured:
+  `ResolvedBlock::is_solid` reaches only `crates/mc-client/src/content.rs:73`,
+  which builds `ClientContent::solidity`, and `ClientContent::is_solid` has **no
+  production caller at all** — the mesher reaches solidity through
+  `BlockRegistry` (`mesh/resolve.rs:324`), not through resolved content.
+  Extending the struct now would add surface with no production reader, which is
+  the "policy is not wiring" trap in `testing.md` §2 and the half-a-spec failure
+  in Key Principle 7. So the struct is left alone and the question is handed to
+  PRO-944, which moves the composition root and is the spec that gives the client
+  a reason to hold any of this. **The absence is stated here rather than left
+  silent.**
+- **The three boolean defaults are knowingly the trap.** A `drawn` default equal
   to `solid` makes all 34 existing solidity fixtures pass by construction, and no
   count can see it. The countermeasures are named rather than left to review:
   **FR-2.4** is the fixture where `drawn`, `solid` and `occludes` cannot be each
   other; **FR-2.3** states `solid` in every one of its scenarios, because leaving
   it unstated lets an implementation ignoring `occludes` satisfy one half or the
-  other; **FR-2.7** separates the two questions a section answers; **FR-7.2-S2**
-  applies the same discipline to the judge; and **FR-1.4** is what stops the
-  whole of FR-2 through FR-5 being satisfiable by synthetic fixtures while the
+  other; **FR-2.7** separates the two questions a section answers; **FR-6.2-S2**
+  applies the same discipline to the judge; and **FR-1.3** is what stops the
+  whole of FR-2 through FR-4 being satisfiable by synthetic fixtures while the
   shipped game is unchanged.
 - **A boundary plane carries one bool per cell and no block identity.**
   `Boundaries` is `[[bool; 256]; 6]` (`crates/mc-world/src/mesh/resolve.rs:93`),
@@ -470,34 +423,62 @@ The reasoning, because the ruling on its own is worth nothing here:
   (`crates/mc-world/src/content/luau_declaration/mod.rs:64`, order load-bearing),
   its hand-maintained mirror at
   `crates/mc-world/tests/luau_declaration_keys.rs:60`, and the refusal message
-  printed at `docs/modding/blocks-items.md:396`.
-- **The numeric reader is new machinery, at 100 % coverage.** No numeric field is
-  read anywhere in the declaration parser today; the only numeric mention is
-  `kind_of` rendering both variants as `"a number"` for refusal text. Luau
-  delivers `density = 1` as `ScriptValue::Integer(i64)` and `density = 1.0` as
-  `ScriptValue::Number(f64)`, so the reader accepts both arms. `density = 0/0`
-  and `density = 1/0` are expressible in a declaration, which is what makes the
-  finiteness check reachable rather than decorative.
-  `standards/global/testing.md` §4 puts validation rules at 100 % coverage.
+  printed at `docs/modding/blocks-items.md:396`. It becomes `[&str; 9]` here and
+  `[&str; 11]` in PRO-957.
 
 ## Existing Code to Leverage
 
 | What | Location | Reuse |
 |------|----------|-------|
-| Optional boolean field reader with a default | `crates/mc-world/src/content/luau_declaration/mod.rs:204` | the pattern the four new booleans follow |
-| Refusal construction naming field and expectation | `crates/mc-world/src/content/luau_declaration/mod.rs:272` `FieldFault::wrong_kind` | the density refusals extend it |
-| The recognised-field list and its refusal | same file, `:64` `RECOGNISED_FIELDS` | grows; order is load-bearing |
+| Optional boolean field reader with a default | `crates/mc-world/src/content/luau_declaration/mod.rs:204` | the pattern the three new booleans follow |
+| Refusal construction naming field and expectation | `crates/mc-world/src/content/luau_declaration/mod.rs:272` `FieldFault::wrong_kind` | FR-1.1-S4 |
+| The recognised-field list and its refusal | same file, `:64` `RECOGNISED_FIELDS` | grows to nine; order is load-bearing |
 | Behaviour / appearance folds and their revision bytes | `crates/mc-world/src/persistence/format.rs:275-365` | both lists gain fields; both bytes bump |
-| Changed-block load and report | shipped by SPEC-020 / PRO-956 | FR-6.2 exercises it for the first real bump |
+| Changed-block load and report | shipped by SPEC-020 / PRO-956 | FR-5.2 exercises it for the first revision bump |
+| Total three-list verdict | `crates/mc-world/src/persistence/table.rs:54` `RegistryVerdict` | FR-5.2 and FR-5.3 assert the whole verdict, never an absence |
 | Independent per-voxel walk of a meshed world | `crates/mc-sim/tests/support/oracle.rs`, `crates/mc-sim/tests/scene_contract.rs` | FR-2.6's oracle, extended to water |
-| Ray-marched frame judge | `crates/mc-client/tests/support/oracle.rs` | FR-7.2; marches on `drawn` |
-| The golden re-shoot procedure | `docs/technical/rendering.md`, "Re-shooting a golden set" | FR-7.1; the procedure has a known corrupting failure mode and is followed as written |
+| Ray-marched frame judge | `crates/mc-client/tests/support/oracle.rs` | FR-6.2; marches on `drawn` |
+| The golden re-shoot procedure | `docs/technical/rendering.md`, "Re-shooting a golden set" | FR-6.1; the procedure has a known corrupting failure mode and is followed as written |
 | The inherited fuse | `crates/mc-sim/tests/shipped_water_is_not_broken_and_is_built_through.rs:138` | goes red in this spec; FR-3.4 is what replaces it |
-| Reload geometry-change test | `crates/mc-sim/src/world/reload.rs:87` `drawn_of` | FR-8.2; must learn `drawn` and `occludes` |
+| Reload geometry-change test | `crates/mc-sim/src/world/reload.rs:87` `drawn_of` | FR-7.2; must learn `drawn` and `occludes` |
 
 ## Out of Scope
 
 Binding.
+
+### Moved to PRO-957, not dropped
+
+**The 24 scenarios below were specified, audited and then cut from this spec on
+2026-08-22 when it was split at 78.** They are named individually so that a
+reviewer meeting the gap can tell scope *moved* from scope *dropped* — the same
+distinction SPEC-019 recorded when it retired an FR rather than deleting it.
+
+- **`swimmable`, and everything that reads it.** A player raised through a
+  swimmable block from rest, a player *not* raised where nothing is swimmable, a
+  swimmable block placed around a player at rest, the `swimmable = true` plus
+  `solid = true` pairing accepted rather than refused, `swimmable`'s membership of
+  the behaviour fold, and a player swimming to the surface of the shipped sea at
+  `y = 34`. **Capability carried: a player can swim.**
+- **The block declaration's first numeric field.** Nine scenarios covering the
+  reader, both of Luau's numeric forms, the absent default, both accepted bounds,
+  and four refusals — negative, above bound, non-finite, and not a number. Plus
+  the field's membership of the behaviour fold, the reload that must not re-mesh
+  for it, and its presence in the shipped water declaration. **Capability
+  carried: a mod author can state a validated number in a declaration.**
+- **The field is `move_resistance`, not `density`.** This spec's draft called it
+  `density`, as an assumption flagged rather than buried. The project owner ruled
+  against the name: drag and density are independent properties and one number
+  cannot express both — honey and water have nearly the same density and very
+  different viscosity — and the name is what mod authors write, so it is the most
+  expensive part to change later. `density` stays reserved for mass-per-volume if
+  buoyancy is ever simulated, which would need the player to have one too.
+  Minetest's `move_resistance` is the prior art. Recorded here because the
+  reasoning was produced here, and because a reader of this spec's history will
+  otherwise meet `density` with no explanation.
+
+PRO-957 re-shoots no goldens and lands on the behaviour revision this spec bumps.
+
+### Never in PRO-904
 
 - **Transparency, draw order and sorting.** Water is drawn opaque. Alpha, a
   second pass and sorted transparency are PRO-952.
@@ -512,8 +493,6 @@ Binding.
 - **Renaming `solid` to `collides`.**
 - **A wire representation of any of these properties.** `mc-proto` and `mc-net`
   are empty skeletons; there is nothing to migrate.
-- **Breath, drowning, swim animation, or a swimming camera.** FR-4.2 is moving
-  upward through a swimmable block and nothing more.
 - **New blocks, or any content beyond editing the four shipped declarations.**
 - **Reclaiming the golden set's previous revision directories for history.** They
   are deleted, as the re-shoot procedure requires.
@@ -526,18 +505,16 @@ Binding.
 - **PRO-947 / SPEC-019 must be merged first.** It is. The golden set this spec
   re-shoots is the one PRO-947 minted, and re-shooting a set that was about to
   move anyway would have been the third repetition the roadmap ruled against.
+- **PRO-957 depends on this spec**, not the other way round: `swimmable` and
+  `move_resistance` join the behaviour fold this spec bumps, and a swimmable
+  block a player cannot see is not a capability anybody can exercise.
 
 ## Assumptions
 
-- **`density` means resistance to movement through a block's volume, in kg/m³.**
-  Neither PRO-904 nor `product/roadmap.md` states what it does; it arrives with
-  `swimmable` and the exit criterion is "swim in it". If it was meant as mass for
-  physics or as light attenuation, FR-4.3 and FR-4.4 are wrong and nothing else
-  in this spec is. **Raised with the requester; see Open Questions.**
 - **Every drawn block is opaque.** The judge's first-drawn-voxel march depends on
   it, and PRO-952 is the named breaker.
 - **The player's camera sees water in at least one declared sample pixel.**
-  Assumed by FR-7.2-S1 and FR-8.1-S1, and **not yet measured** — the sea is 131
+  Assumed by FR-6.2-S1 and FR-7.1-S1, and **not yet measured** — the sea is 131
   of 4 096 columns, one or two blocks deep, against a 32 × 18 grid. See Open
   Questions.
 
@@ -545,7 +522,7 @@ Binding.
 
 Key Principle 3, for all three audiences. Every item below is a **surface this
 spec implements**, so none of it is deferrable and none of it is "not applicable".
-FR-1.3-S2 and FR-9.1-S1 make the mod-author refusals mechanically checkable; the
+FR-1.2-S2 and FR-8.1-S1 make the mod-author refusals mechanically checkable; the
 rest is prose that no test can assert, which is exactly why it is enumerated here
 rather than left to a reviewer's memory.
 
@@ -561,14 +538,14 @@ rather than left to a reviewer's memory.
 
 Owed, per audience:
 
-- **Player** (`docs/user/gameplay.md`) — the sea is visible; you can wade and
-  swim up out of it; a swing at water is refused and the water stays; a save from
+- **Player** (`docs/user/gameplay.md`) — the sea is visible; a swing at water is
+  refused and the water stays, and the block behind it is untouched; a save from
   before this build names all four shipped blocks rather than one.
-- **Mod author** (`docs/modding/blocks-items.md`) — five new fields, each with its
-  type, its default, its bound, and the refusal it produces; the sentence "the
-  three optional fields are independent of one another" becomes eight; the field
-  table and the recognised-field refusal at `:396` are rewritten; and a worked
-  example that runs — a declaration that is drawn without being solid.
+- **Mod author** (`docs/modding/blocks-items.md`) — three new fields, each with
+  its type, its default and the refusal it produces; the sentence "the three
+  optional fields are independent of one another" becomes six; the field table and
+  the recognised-field refusal at `:396` are rewritten; and a worked example that
+  runs — a declaration that is drawn without being solid.
 - **Engine reader** — `docs/technical/architecture.md:830-841` states
   `Refusal::Indestructible` is unreachable and why; it becomes reachable, and the
   handover text there, in that variant's doc comment, in `targeted`'s, and in the
@@ -582,43 +559,26 @@ Owed, per audience:
 
 ## A note on scenario patterns
 
-Guideline 4 asks every requirement for an unwanted-behaviour scenario. Eleven of
+Guideline 4 asks every requirement for an unwanted-behaviour scenario. Several of
 these requirements are written entirely with `WHEN`, and in each the negative
 direction is carried by a *sibling* scenario rather than by an `IF` clause —
 FR-2.3-S4 is the case where faces **are** emitted, FR-2.4-S3 the case where one
-**is** culled, FR-4.4 the two pairings that are accepted rather than refused,
-FR-6.1-S4 the property that must **not** move the behaviour fold, FR-6.3 the
-change that must be reported to nobody, FR-8.3-S3 and S4 the reloads that must
-**not** re-mesh. The substance is present and the pattern is not; recorded here
-so a reviewer does not have to rediscover it, and so that a later stage does not
+**is** culled, FR-5.1-S2 the property that must **not** move the behaviour fold,
+FR-5.3 the change that must be reported to nobody, FR-7.2-S3 the reload that must
+**not** re-mesh. The substance is present and the pattern is not; recorded here so
+a reviewer does not have to rediscover it, and so that a later stage does not
 "fix" it by adding scenarios that re-prove a sibling through the same code path.
 
 ## Open Questions
 
-Must be empty before implementation starts. Question 1 is for the requester;
-2 and 3 are for `/sdd-architect`.
+Must be empty before implementation starts. Both are for `/sdd-architect`.
 
-1. **Should PRO-904 ship as one spec or two?** 78 scenarios is the honest size of
-   the issue as scoped, and it sits next to the 82-scenario spec
-   `product/roadmap.md:186-193` names as the one that hid eighteen wrong-reason
-   passes — the roadmap's own stated reason for **not** folding PRO-904 into
-   PRO-947. The natural seam is clean, and the two halves are counted rather
-   than estimated:
-
-   | Half | Scenarios | What it is |
-   |------|-----------|------------|
-   | *"you can see water"* | **54** | FR-1.1 (4), FR-1.3 (2), FR-1.4 (2), FR-2 (18), FR-3 (9), FR-5 (3), FR-6.1-S1/S4/S5 (3), FR-6.2 (2), FR-6.3 (1), FR-7 (5), FR-8.1 (1), FR-8.3-S1/S2/S3 (3), FR-9 (1). One golden re-shoot, one behaviour bump, no new machinery. |
-   | *"you can swim in it"* | **24** | FR-1.2 (9), FR-6.1-S2/S3 (2), FR-4 (11), FR-8.2 (1), FR-8.3-S4 (1). No re-shoot, and all of the genuinely new machinery: the first numeric validated-input path, and a physics change. |
-   Each half delivers a named player capability on its own, so Key Principle 7 is
-   satisfied either way. **Recommendation: split.** The re-shoot is paid once
-   regardless, so the usual argument for bundling does not apply here. Not acted
-   on unilaterally, because the roadmap and the issue both scope them together.
-2. **Does any declared sample pixel see water?** If not, FR-7.2-S1 and FR-8.1-S1
+1. **Does any declared sample pixel see water?** If not, FR-6.2-S1 and FR-7.1-S1
    are unsatisfiable without changing the fixture, and the remedies — raising
    `SEA_LEVEL`, or moving the camera path — each move the scene contract a second
    time inside one spec. This is the **first thing `/sdd-architect` measures**,
    before anything is designed against it.
-3. **Is "no face between two cells of the same drawn non-occluding block" a
+2. **Is "no face between two cells of the same drawn non-occluding block" a
    declared field or an engine rule, and what does the boundary plane carry?**
    FR-2.3 states the behaviour and leaves the mechanism open. A declared
    `merges_with_self` honours invariant 1 and costs a field with no identified use
@@ -642,3 +602,9 @@ Must be empty before implementation starts. Question 1 is for the requester;
 - Q: Is `is_solid` folded into a save's declared behaviour? → A: Yes,
   `format.rs:343`. The split moves the behaviour byte for every block of every
   existing save, once.
+- Q: One spec or two? → A: Two. Cut to 54 scenarios here; the 24 swim scenarios
+  went to PRO-957. The seam was counted before the recommendation was made, and
+  Key Principle 7 holds on both sides of it.
+- Q: What does `density` mean? → A: It does not exist. The project owner ruled
+  the field is `move_resistance`, named for the mechanic it drives, and it belongs
+  to PRO-957. See Out of Scope for the reasoning.

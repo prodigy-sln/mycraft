@@ -5,6 +5,13 @@ description corrected 2026-08-22. `product/roadmap.md:124` states the feature as
 *"Solid, drawn, occludes and targetable split, plus swimmable and density — you can
 see water and swim in it"*.
 
+**That roadmap row was split on 2026-08-22.** PRO-904 keeps the solid / drawn /
+occludes / targetable split and *"you can see water"*; `swimmable` and the numeric
+field became **PRO-957**, *"you can swim in it"*, and the numeric field is
+`move_resistance` rather than `density` (§3.3). Everything measured below still
+holds for both halves — it was measured against one tree — but §3.3 and §5 are
+the only places where the ownership changed.
+
 Everything below marked **measured** was produced by a command run on
 2026-08-22 against `main` at `57327a9` / branch
 `feature/PRO-904-solid-split-properties`. Everything marked **derived** is
@@ -69,10 +76,12 @@ The mesher makes the conflation explicit: `visible_face`
   returns exactly one match, inside `kind_of`, which maps both numeric variants
   to the refusal word `"a number"`. There is no `required_number` or
   `optional_number`.
-- **`density = 1` and `density = 1.0` arrive as different variants.**
+- **A whole-number and a fractional literal arrive as different variants.**
   `ScriptValue::Integer(i64)` and `ScriptValue::Number(f64)`
   (`crates/mc-script/src/value.rs:22,24`), translated at
-  `crates/mc-script/src/luau/translate.rs:75-76`.
+  `crates/mc-script/src/luau/translate.rs:75-76`. So `move_resistance = 1` and
+  `move_resistance = 1.0` reach the reader as different arms. Carried to PRO-957
+  with the numeric field; measured here.
 - **`ResolvedBlock::is_solid` is dead in production.** Measured:
   `grep -rn "is_solid" crates/*/src --include=*.rs | grep -v _test.rs` shows it
   read only by `crates/mc-client/src/content.rs:73`, which builds
@@ -152,28 +161,43 @@ scenario set rather than left to review: **FR-2.4** requires a fixture in which
 `drawn`, `solid` and `occludes` are three *different* answers, **FR-2.3-S4**
 requires a drawn non-occluding block whose neighbour is a *different* drawn
 non-occluding block, **FR-2.3** states `solid` explicitly in every one of its
-scenarios, **FR-2.7** separates the two questions a section answers, **FR-7.2-S2**
-applies the same discipline to the frame judge, and **FR-1.4** asserts the
-shipped declarations so that none of FR-2 through FR-5 can be satisfied by
+scenarios, **FR-2.7** separates the two questions a section answers, **FR-6.2-S2**
+applies the same discipline to the frame judge, and **FR-1.3** asserts the
+shipped declarations so that none of FR-2 through FR-4 can be satisfied by
 synthetic fixtures while the shipped game is unchanged.
 
-### 3.3 `density` is a non-negative bounded number in kilograms per cubic metre
+### 3.3 The numeric field left with PRO-957, and its name was wrong
 
-`0.0` to `100000.0` inclusive; water declares `1000.0`; absent means `0.0`. Read
-as "positive" in the non-negative sense so that `0.0` stays expressible — a
-swimmable block offering no resistance is a thing a mod may want to declare, and
-refusing `0.0` while accepting an absent field would make the two forms differ
-for no reason. Both `ScriptValue::Integer` and `ScriptValue::Number` are
-accepted; `density = 0/0` and `density = 1/0` are expressible in Luau and are
-refused, which is what makes the finiteness check non-vacuous.
+This document drafted `density` as a non-negative bounded number in kilograms per
+cubic metre, `0.0` to `100000.0` inclusive, absent meaning `0.0`, accepting both
+`ScriptValue::Integer` and `ScriptValue::Number` — and flagged its *meaning* as an
+assumption rather than settling it silently, because neither PRO-904 nor
+`product/roadmap.md` says what the number does.
+
+**The project owner ruled the field should not exist under that name.** It is
+`move_resistance`, one number named for the mechanic it drives, and it belongs to
+PRO-957. Drag and density are independent properties and one number cannot
+express both — honey and water have nearly the same density and very different
+viscosity, helium and air the reverse — and the name is what mod authors write,
+so it is the most expensive part to change later. Minecraft hardcodes drag per
+block and has no such field; Minetest, whose blocks are script-declared as ours
+are, ships `move_resistance` and generalises it past liquids to cobwebs.
+`density` stays reserved for mass-per-volume if buoyancy is ever simulated, which
+would need the player to have one too.
+
+The bound, the two-variant reader and the four refusals all carry over to
+PRO-957 unchanged; what changed is the name and the spec that owns it. Recorded
+here because the reasoning was produced here.
 
 ### 3.4 Fold membership, per property
 
 See `## The two architecture decisions` in `spec.md` §Technical Considerations.
-Summary: `targetable`, `swimmable` and `density` join the **behaviour** list and
-bump `BEHAVIOUR_REVISION` to 2; `drawn` and `occludes` (and self-merging, if it
+Summary: `targetable` joins the **behaviour** list and bumps
+`BEHAVIOUR_REVISION` to 2; `drawn` and `occludes` (and self-merging, if it
 becomes a declared field) join the **appearance** list and bump
-`APPEARANCE_REVISION` to 3.
+`APPEARANCE_REVISION` to 3. PRO-957's `swimmable` and `move_resistance` are
+behaviour on the same grounds and land on the revision this spec bumps, so they
+cost no second bump.
 
 ### 3.5 The render oracle stays independent, and gains a positive control
 
@@ -187,32 +211,32 @@ agreement "by construction rather than by luck".
 
 ## 4. Assumptions carried, each with what falsifies it
 
-- **Density is the swim parameter.** Neither the issue nor the roadmap states
-  what `density` *does*. It arrives in the same breath as `swimmable` and the
-  exit criterion is "swim in it", so it is specified here as the resistance a
-  block's volume offers to a player moving through it. If the intended meaning
-  was mass-for-physics or light attenuation, FR-4.3 and FR-4.4 are wrong and
-  nothing else in this spec is. **Raised with the requester rather than settled
-  silently.**
 - **Water is drawn opaque.** Transparency, sorting and the inset/wavy surface are
   PRO-952 and are out of scope. The oracle's first-drawn-voxel march is correct
   only while every drawn block is opaque; the day a translucent block exists,
   the oracle needs a second rule, and that is recorded as the named breaker.
 - **A break swung at water is refused, and the water stays.** That is the
-  scenario SPEC-020 could not write and this spec inherits (FR-3.3). It follows
+  scenario SPEC-020 could not write and this spec inherits (FR-3.4). It follows
   from `breakable = false` once water is targetable; it is asserted, not assumed.
+- **The player's camera sees water in at least one declared sample pixel.** Not
+  yet measured; the first thing `/sdd-architect` measures. 131 of 4 096 columns,
+  one or two blocks deep, against a 32 × 18 grid.
 
-## 5. Questions put to the requester
+The assumption this document opened with — that `density` means resistance to
+movement — was raised rather than buried, and was ruled on before it reached the
+declaration surface. See §3.3.
 
-0. **One spec or two?** The audited scenario set is 78, next to the 82 the
-   roadmap names as the spec that hid eighteen wrong-reason passes. The seam is
-   clean and counted: 54 scenarios for *"you can see water"*, 24 for *"you can
-   swim in it"*, each delivering a named player capability, and the golden
-   re-shoot is paid once either way. **Recommendation: split.** Not acted on
-   unilaterally, because the roadmap and the issue scope them together. See
-   `spec.md` Open Question 1.
-1. **What does `density` mean?** (default taken: resistance to movement, kg/m³ —
-   see §4.)
+## 5. Questions put to the requester — both answered 2026-08-22
+
+0. **One spec or two?** → **Two.** The audited set was 78, next to the 82 the
+   roadmap names as the spec that hid eighteen wrong-reason passes. The seam was
+   counted before the recommendation was made: 54 scenarios for *"you can see
+   water"*, 24 for *"you can swim in it"*, each delivering a named player
+   capability, and the golden re-shoot paid once either way. Approved; this spec
+   is the 54, and the 24 went to PRO-957. `spec.md` Out of Scope names them
+   individually so scope-moved is distinguishable from scope-dropped.
+1. **What does `density` mean?** → **It does not exist.** See §3.3: the field is
+   `move_resistance` and it belongs to PRO-957.
 2. **Is self-merging a declared field or an engine rule?** A drawn non-occluding
    block abutting itself must not draw an internal face, or a 47-column
    two-deep sea draws faces inside itself. That can be a declared
@@ -220,9 +244,11 @@ agreement "by construction rather than by luck".
    its own kind". No use for `merges_with_self = false` has been identified, and
    invariant 1 argues against engine-side derivation. Recommendation: specify the
    *behaviour* here and let `/sdd-architect` choose the mechanism. Fold
-   membership is **appearance** under either.
+   membership is **appearance** under either. **Either answer has to widen
+   `Boundaries`**, which carries `[[bool; 256]; 6]` and no block identity.
+   Remains open; it is `spec.md` Open Question 2.
 3. **Does the replay world hold enough water for a golden frame to see any?**
    131 of 4 096 columns, all one or two blocks deep, against a 32 × 18 sample
    grid. If no sample sees water, the golden set does not witness the spec's
    headline change and the world's sea level may need raising — which moves the
-   scene contract again. Named as the first thing `/sdd-architect` must measure.
+   scene contract again. Remains open; the first thing `/sdd-architect` measures.
