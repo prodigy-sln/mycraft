@@ -190,6 +190,38 @@ impl Section {
         }
     }
 
+    /// Whether the block held at `pos` is drawn, according to `registry`.
+    ///
+    /// A separate question from [`is_solid_at`](Self::is_solid_at) and never
+    /// derived from it: a block may be walked through and seen, or stood on and
+    /// invisible. The two answers being separately readable is what lets an
+    /// independent oracle disagree with the mesher — one deriving either from the
+    /// other would keep oracle and subject agreeing while both ignored what a
+    /// block declares.
+    ///
+    /// Nothing here compares a name or a runtime id, for the same reason
+    /// [`is_solid_at`](Self::is_solid_at) does not.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SectionError::OutOfBounds`] if `pos` is not a position in a
+    /// section, and [`SectionError::Registry`] if the block held there is not
+    /// registered in `registry`.
+    pub fn is_drawn_at(
+        &self,
+        pos: LocalPos,
+        registry: &BlockRegistry,
+    ) -> Result<bool, SectionError> {
+        match self.block_at(pos)? {
+            // The same short-circuit as solidity, and load-bearing for the same
+            // reason: nothing is not a block, so there is nothing to look up.
+            // Meshing depends on the two arms agreeing about emptiness, since a
+            // cell holding nothing shows no face and hides none either.
+            Contents::Empty => Ok(false),
+            Contents::Holds(name) => Ok(registry.resolve(name)?.drawn),
+        }
+    }
+
     /// Writes `block` at `pos`.
     ///
     /// # Errors
