@@ -275,3 +275,190 @@ shared by both binaries that hold a page against a run — which also removes th
 second copy of the recogniser that a new binary would otherwise have needed.
 `documented_refusals.rs` is now 536 non-blank lines and all six of its tests
 still pass unchanged.
+
+## Phase 2 — The mesher decides by what is declared drawn
+
+Fourteen scenarios: FR-2.1-S1, FR-2.1-S2, FR-2.2-S1..S4, FR-2.3-S1..S4,
+FR-2.4-S1..S3, FR-2.7-S1.
+
+**FR-2.7 and FR-2.4 were written first**, per `architecture.md` §Risks: they are
+the two that cannot pass vacuously, and green anywhere else in this phase means
+nothing until they are red for the right reason first.
+
+| Scenario | File | Test |
+|---|---|---|
+| FR-2.7-S1 | `crates/mc-world/tests/section_drawnness.rs` | `a_cell_holding_a_solid_undrawn_block_is_reported_solid_and_not_drawn` |
+| FR-2.4-S1 | `crates/mc-world/tests/mesh_declared_drawnness.rs` | `solid_undrawn_rock_shows_nothing_however_its_neighbours_are_declared` |
+| FR-2.4-S2 | `crates/mc-world/tests/mesh_declared_drawnness.rs` | `a_drawn_voxel_beside_solid_undrawn_rock_shows_every_side_facing_empty_space` |
+| FR-2.4-S3 | `crates/mc-world/tests/mesh_declared_drawnness.rs` | `removing_the_solid_undrawn_neighbour_is_what_makes_the_face_toward_it_appear` |
+| FR-2.1-S1 | `crates/mc-world/tests/mesh_declared_drawnness.rs` | `a_voxel_declared_drawn_and_not_solid_shows_all_six_of_its_sides` |
+| FR-2.1-S2 | `crates/mc-world/tests/mesh_declared_drawnness.rs` | `a_voxel_declared_solid_and_not_drawn_shows_none_of_its_sides` |
+| FR-2.2-S1 | `crates/mc-world/tests/mesh_declared_occlusion.rs` | `a_solid_neighbour_that_does_not_occlude_leaves_the_face_toward_it_showing` |
+| FR-2.2-S2 | `crates/mc-world/tests/mesh_declared_occlusion.rs` | `a_neighbour_that_occludes_without_being_solid_hides_the_face_toward_it` |
+| FR-2.2-S3 | `crates/mc-world/tests/mesh_declared_occlusion.rs` | `a_neighbouring_section_holding_a_non_occluding_block_leaves_the_shared_face_showing` |
+| FR-2.2-S4 | `crates/mc-world/tests/mesh_declared_occlusion.rs` | `a_boundary_with_no_neighbouring_section_supplied_shows_its_face` |
+| FR-2.3-S1 | `crates/mc-world/tests/mesh_same_kind.rs` | `two_cells_side_by_side_holding_one_drawn_block_show_no_face_between_them` |
+| FR-2.3-S2 | `crates/mc-world/tests/mesh_same_kind.rs` | `two_cells_stacked_holding_one_drawn_block_show_no_face_between_them` |
+| FR-2.3-S3 | `crates/mc-world/tests/mesh_same_kind.rs` | `two_cells_in_neighbouring_sections_holding_one_drawn_block_show_no_face_across_it` |
+| FR-2.3-S4 | `crates/mc-world/tests/mesh_same_kind.rs` | `two_cells_holding_two_different_drawn_blocks_each_show_their_face_between_them` |
+
+### One skeleton reddens all fourteen, and that is a property of the tests rather than luck
+
+`tasks.md`'s Phase 2 preamble and the test author's brief both expect **two**
+skeletons — an emit-nothing one for the scenarios asserting no face, an
+over-eager one for the scenarios asserting a face — on the reasoning
+`testing.md` §1 gives. **Neither was built, and the reason is worth recording
+because it is a correction rather than a shortcut.**
+
+Every fixture in this phase holds a block of *both* awkward kinds at once: one
+declared drawn and not solid, and one declared solid and not drawn. So the
+unmodified tree behaves as an emit-nothing implementation for the first kind and
+an over-eager one for the second **in the same run**, and one skeleton — `HEAD`
+at `ef455f8`, with `Section::is_drawn_at` the only thing missing — reddens all of
+them.
+
+What makes that sufficient rather than convenient is structural: **no test in
+this phase is a bare absence assertion.** Each scenario that asserts nothing is
+emitted is written either as a complete enumerated face list that also has to
+account for a drawn control voxel, or as a with-and-without pair:
+
+| Scenario asserting no face | The form that keeps it falsifiable |
+|---|---|
+| FR-2.1-S2 | complete list = the six sides of a *second*, drawn voxel in the same section |
+| FR-2.4-S1 | complete list = exactly one quad, from the one drawn voxel in 4 096 of undrawn rock |
+| FR-2.4-S3 | the pair `(with the neighbour, without it)` = `([], [one face])` |
+| FR-2.2-S2 | complete list = five sides present, the culled sixth absent from among them |
+| FR-2.3-S1, S2 | complete list = six quads whose extents also pin the merge axes |
+| FR-2.3-S3 | complete list = five quads, the sixth absent |
+
+An emit-nothing implementation fails every row of that table on the faces it
+owes. That is the second skeleton's job done in the shape of the assertion
+instead of in a second tree, which is where `testing.md` §2 would rather have
+it.
+
+### The failing output, with the invocation beside every count
+
+**Why `cargo test` per binary rather than `cargo nextest --no-fail-fast`.**
+`nextest` builds every test target in the package before it runs anything, and
+`section_drawnness.rs` does not compile until `Section::is_drawn_at` exists — so
+`cargo nextest run -p mc-world -E 'binary(mesh_declared_drawnness)'` dies at
+`error[E0599]: no method named is_drawn_at` and starts nothing at all. That is a
+measurement, not a preference. `cargo test --test <name>` builds one target, and
+runs and reports every test in it, so none of these counts can be a cancelled
+run — there is no `N/M` form here to check for.
+
+| Invocation | Result |
+|---|---|
+| `cargo test -p mc-world --test mesh_declared_drawnness` | `running 5 tests` → `0 passed; 5 failed` |
+| `cargo test -p mc-world --test mesh_declared_occlusion` | `running 4 tests` → `0 passed; 4 failed` |
+| `cargo test -p mc-world --test mesh_same_kind` | `running 4 tests` → `0 passed; 4 failed` |
+| each of the three, piped to `grep -c` for the assertion-failure line | `5`, `4`, `4` |
+
+**All thirteen are assertion failures** — not fixture-guard refusals and not
+compile errors — so every one of them ran its comparison and printed both sides.
+
+One test reached its RED the wrong way first, and the fix generalises.
+`a_voxel_declared_drawn_and_not_solid_shows_all_six_of_its_sides` initially read
+`faces(some_quads(&mesh)?)`, and `some_quads` refuses an empty mesh — so against
+a tree where the drawn block emits nothing, the guard fired and the assertion
+never ran: `Error: "this section holds solid voxels with nothing solid beside
+them…"`. **That guard buys nothing where the expected list is a non-empty
+literal**, because an empty actual already fails against a six-element expected;
+all it can do there is turn an assertion failure into an error showing neither
+side. It is kept where a comparison genuinely could be vacuous and dropped where
+it could not.
+
+**FR-2.7-S1's RED is outstanding.** Per the ruling its RED must be an assertion
+failure rather than the compile error the missing method currently gives, so it
+is measured once `is_drawn_at` lands returning `is_solid_at`'s answer. Against
+that stub the fixture's four answers read `(true, true, false, false)` where the
+test demands `(true, false, false, true)` — the default-equals-`solid` trap
+itself, failing on the value.
+
+### The widening: by addition, so that none of the 26 call sites moved
+
+`registry_declaring(blocks: &[(&str, bool)])` **keeps its signature** and now
+delegates. What was added to `crates/mc-world/tests/mesh_common/mod.rs`:
+
+- `Declaration { solid, drawn, occludes }` and `Declaration::like_solidity`,
+  which is what a fixture written before the three were separable means.
+- `registry_of_declarations(&[(&str, Declaration)])` — the one place a meshing
+  fixture's `BlockDefinition` is built, so the one-answer and three-answer routes
+  cannot drift.
+- `DRAWN_ONLY`, `SOLID_AND_OCCLUDING`, `SOLID_ONLY`, `OCCLUDING_ONLY` and the
+  five block names `HAZE`, `MURK`, `GHOST`, `MIST`, `SHROUD`. Named declarations
+  rather than struct literals at every call site: a scenario's wording is one hop
+  away, and in exchange FR-2.3-S3 gets a block that means the same thing in two
+  sections by construction rather than by two literals agreeing.
+- `every_side_of`, `every_side_of_but`, `named_faces`, `section_of_nothing_but`.
+
+`section_of_nothing_but` exists because **`section_holding` cannot express an
+empty cell** — it parses every palette entry as a name — and four scenarios say
+"empty space". Standing a block declared to show nothing in for genuine
+`Contents::Empty` would leave those scenarios satisfied by a mesher that never
+looked at emptiness at all, and it would not reach the key-0 seeding.
+
+**Measured, behaviour-preserving.** Eight test binaries link `mesh_common`:
+`cargo test -p mc-world --test meshing --test mesh_budget --test mesh_determinism
+--test mesh_errors --test mesh_fixture_scale --test mesh_merging --test
+mesh_neighbours --test mesh_properties` → `10, 7, 3, 7, 5, 5, 8, 3` = **48 tests,
+48 passed, 0 failed**, of which 47 are pre-existing and one is the new
+additional-coverage test below. Every one of the 26 `registry_declaring` call
+sites still means what it meant.
+
+**What was left alone, and why.** The conductor's brief said "in all three
+copies" and then corrected itself; this is what was actually done.
+
+- `crates/mc-world/tests/common/mod.rs` — **no Phase 2 reader.** FR-2.7's test
+  links `mesh_common` instead, because that is the only module in this crate that
+  can build a registry where solidity and drawnness disagree, and putting the
+  scenario there costs one file rather than a second `Declaration` duplicated
+  into a sibling module.
+- `crates/mc-sim/tests/support/volume.rs` — Phase 4, where `targeted` gives it a
+  reader. Widening it here would be the speculative move Phase 1 correctly
+  declined.
+- `registry_declaring_all` at `crates/mc-world/tests/save_resolution.rs:117` — no
+  Phase 2 reader either.
+
+**One thing for whoever widens it next.** `mesh_common/mod.rs` is now **490
+non-blank lines against the gate's 600**, up from 326. Phase 4 needs a
+`targetable` answer in the same module, and there are 110 lines of headroom
+rather than 274.
+
+### Additional coverage
+
+- `crates/mc-world/tests/mesh_errors.rs` ·
+  `a_section_and_a_neighbour_both_holding_something_unresolvable_refuse_by_the_sections_own`
+  — catches a shared key table resolved boundaries-first. `tasks.md` T07 calls
+  the existing `UnresolvedBlock` / `UnresolvedNeighbourBlock` scenarios "the
+  cheapest instrument that can see" a wrong resolution order. **They cannot see
+  it, and that was verified by reading all six**: three supply
+  `Neighbours::none()` and three give a wholly resolvable meshed section, so not
+  one of them holds an unresolvable block on *both* sides. `sweep.rs:71-74`
+  states the precedence as a deliberate decision and adds, in its own words, that
+  "the scenarios leave that open" — the code documents its own gap. This test
+  closes it, and its fixture excludes a second wrong order too: the section's own
+  orphan sits at linear index 4 073 and the neighbour's at 3 938, so a resolver
+  reporting whichever came first in linear order also names the wrong one. Green
+  from the start, because the order is already right — which is why the mutation
+  below is owed rather than optional.
+
+### Mutations owed on the GREEN tree, and who owes them
+
+Both are the implementation's to run, inside an announced window, reverted by
+re-editing the line and confirmed with `git diff --exit-code`.
+
+- **The phase's own** (`tasks.md` §Notes): drop the third clause from the
+  predicate. FR-2.3-S1, S2 and S3 must redden and nothing else should. Derived
+  rather than asserted: the clause can only fire where `drawn(self)` holds and
+  `occludes(beyond)` does not, and on every shipped block those two are solidity —
+  so two cells that reached it would both be solid and the second clause would
+  already have culled. FR-2.3-S4 holds two *different* blocks, so the clause is
+  true there and dropping it changes nothing. If anything outside those three
+  reddens, that is information about these tests and belongs here either way.
+- **The one the additional-coverage test needs.** It is green from the start, so
+  something has to show it can go red: swap the two calls at `sweep.rs:75-76` so
+  the boundaries resolve first. That test alone must redden, reporting
+  `UnresolvedNeighbourBlock` where it demands `UnresolvedBlock`, and the six
+  pre-existing refusal scenarios must all stay green — they are blind to the
+  order, which is the whole reason this one was written.

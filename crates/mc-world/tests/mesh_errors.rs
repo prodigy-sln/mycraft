@@ -75,6 +75,16 @@ const ON_THE_SHARED_FACE: LocalPos = at(2, 6, 15);
 /// further in, and read by nothing.
 const AWAY_FROM_THE_SHARED_FACE: LocalPos = at(2, 6, 14);
 
+/// Where the meshed section holds its own unresolvable block in the scenario
+/// where a neighbour holds one too.
+///
+/// Its linear index is **higher** than the one the neighbour's sits at —
+/// 9 + 14·16 + 15·256 = 4073 against 2 + 6·16 + 15·256 = 3938 — so a resolver
+/// that reported whichever of the two came first in linear order would report the
+/// neighbour's. Only resolving the meshed section before any neighbour names this
+/// one.
+const HIGHER_THAN_THE_NEIGHBOURS: LocalPos = at(9, 14, 15);
+
 /// Which of the six neighbours holds the block that refuses the mesh when all
 /// six are supplied, and where inside it.
 ///
@@ -325,6 +335,42 @@ fn a_block_a_neighbour_holds_away_from_the_shared_face_never_refuses_the_mesh() 
          unmeshable because of content in a chunk beside it that it never looks at. A mesher \
          resolving a neighbour's whole 4096 voxels refuses this, and the scenario above stops \
          it from simply never resolving a neighbour instead"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_section_and_a_neighbour_both_holding_something_unresolvable_refuse_by_the_sections_own()
+-> TestResult {
+    let complete = registry_declaring(&[(VOID, false), (ORPHAN, true), (ORPHAN_NEXT_DOOR, true)])?;
+    let missing_both = registry_declaring(&[(VOID, false)])?;
+    let section = section_holding(
+        &[VOID, ORPHAN],
+        |voxel| u16::from(voxel == HIGHER_THAN_THE_NEIGHBOURS),
+        &complete,
+    )?;
+    let neighbour = section_holding(
+        &[VOID, ORPHAN_NEXT_DOOR],
+        |voxel| u16::from(voxel == ON_THE_SHARED_FACE),
+        &complete,
+    )?;
+
+    let refused = unresolved_block(mesh_section(
+        &section,
+        &Neighbours::none().with(NEIGHBOUR_HOLDING_IT, &neighbour),
+        &missing_both,
+    ))?;
+
+    assert_eq!(
+        refused,
+        (ORPHAN.to_owned(), HIGHER_THAN_THE_NEIGHBOURS),
+        "both the section and the neighbour hold a block this registry cannot resolve, and only \
+         one refusal can be handed back. It is the section's own, because that is the content the \
+         caller asked about and the one it can do something about — a caller told to go and look \
+         in the chunk next door would find a second problem waiting behind the one it was not \
+         told about. Every other order gives a different answer here: resolving the boundaries \
+         first names the neighbour's block, and resolving both and reporting the lower linear \
+         index names it too, because this section's own sits higher than it"
     );
     Ok(())
 }
