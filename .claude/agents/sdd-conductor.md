@@ -201,13 +201,26 @@ For each stage:
 5. Require an **explicit end-of-turn signal**. Put this in every child prompt:
 
    > Every time you finish a turn and are handing control back to me, send a
-   > SendMessage — even when you have nothing to say. If there is nothing to
-   > report, send exactly `[DONE]` and nothing else. Never end a turn silently,
-   > including after you have answered a question of mine or applied a
-   > correction. Your silence is indistinguishable from your still working.
+   > SendMessage — never end a turn silently, including after you have answered
+   > a question of mine or applied a correction. Your silence is
+   > indistinguishable from your still working.
+   >
+   > **`[DONE]` means the task is finished and I need nothing further from you.
+   > Send it only when nothing of yours is still running and the tree holds none
+   > of your uncommitted work.** If a turn ends with work outstanding, send one
+   > line of prose instead — "still running, nothing to decide" is exactly
+   > right.
 
    Without this you cannot tell "finished" from "mid-edit", and the harness
    will not tell you either — see below.
+
+   **Keep those two sentences distinct, because an earlier version of this
+   prompt collapsed them** — it asked for `[DONE]` whenever there was "nothing
+   to report", and separately for `[DONE]` when the work was pushed. A child
+   duly sent `[DONE]` with its gate still running, seven files uncommitted and
+   the spec folder unmoved. It had followed the instruction; the instruction was
+   wrong. **An ambiguous `[DONE]` is worse than silence**, because silence gets
+   investigated and `[DONE]` is the one signal that releases the tree.
 6. **You** report to `main` via SendMessage when the MVP is done or you are
    blocked.
 
