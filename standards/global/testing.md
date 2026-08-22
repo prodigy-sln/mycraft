@@ -181,6 +181,32 @@ the next is in the diff you are looking at.
   positive control above: the hole that survives is *inside* the good
   verdict, where a scan that came to return an empty list unconditionally
   would answer "all treated" forever.
+- **A hand-maintained list compared by *filtering* cannot see an extra
+  member.** This is the same rule one step further in, and it is the shape
+  that rots quietly, because it compiles and it stays green. Two mirrors of
+  a nine-name field list were each held at six while the loader grew, and
+  neither reddened: one filtered its *needles* by presence in the observed
+  message, so six needles against a nine-name message found all six and
+  matched; the other looked each observed item up in the held list and
+  skipped what it could not rank, so the three new names were passed over
+  rather than reported. Both were measured — cut either mirror to six with
+  the loader at nine and exactly one test reddens, and it is not the mirror's
+  own. The repair is to read the list *out of* the observed output and
+  compare the whole thing in order, so a missing name, an extra name and a
+  reordering are three distinct failures.
+- **A count is only a count with `--no-fail-fast`.** A test runner that
+  stops at the first failure cancels the rest, and its summary still reads
+  like a complete result: `186/388 tests run: 185 passed, 1 failed` says
+  nothing whatever about the other 202. The tell for `cargo nextest` is the
+  slash — `N/M tests run` is a cancelled run, a bare `N tests run` is a
+  complete one. This bites hardest on **mutation checks**, whose load-bearing
+  half is usually the *green* one: "exactly one test reddened" and "nothing
+  else moved" are not observations if the rest never ran, and they look
+  identical to the real thing in a report. Record the invocation beside every
+  count, including the counts that were sound for some other reason —
+  provenance recorded unevenly reads as provenance absent. A per-test named
+  outcome is stronger than any count, because a cancelled test cannot be
+  named green.
 - **Red for a known reason hides red for an unknown one.** A test already
   failing on a stale count also swallowed a revision-substitution defect —
   the only test in 661 that could see it. This is the same family with the
