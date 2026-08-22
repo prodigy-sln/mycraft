@@ -60,9 +60,9 @@ see [script-limits.md](script-limits.md) for the budget and the memory cap, and
 declaration calls nothing the engine provides: it returns a table and that is
 all. There is no `mycraft.*` binding to use here.
 
-## The six fields
+## The nine fields
 
-Three are required and three are optional.
+Three are required and six are optional.
 
 | Field | Type | Required | Absent means | Bound |
 |---|---|---|---|---|
@@ -72,6 +72,15 @@ Three are required and three are optional.
 | `replaceable` | boolean | no | `false` | — |
 | `breakable` | boolean | no | `true` | — |
 | `breaks_into` | string, namespaced id | no | the cell is left empty | 256 characters |
+| `drawn` | boolean | no | **whatever you wrote for `solid`** | — |
+| `occludes` | boolean | no | **whatever you wrote for `solid`** | — |
+| `targetable` | boolean | no | **whatever you wrote for `solid`** | — |
+
+The last three are the only fields whose default is not a constant. Every other
+absence means the same thing in every declaration; these three mean whatever the
+*same* declaration said about `solid`. That is what lets a declaration written
+before they existed go on meaning exactly what it meant — one field used to
+answer all four questions at once.
 
 ```luau
 return {
@@ -82,6 +91,10 @@ return {
 	replaceable = false,           -- optional, absent means false
 	breakable = true,              -- optional, absent means true
 	breaks_into = "example:ash",   -- optional, absent means the cell empties
+
+	drawn = true,                  -- optional, absent means whatever `solid` says
+	occludes = true,               -- optional, absent means whatever `solid` says
+	targetable = true,             -- optional, absent means whatever `solid` says
 }
 ```
 
@@ -102,11 +115,25 @@ return {
 - **`breaks_into`** — the namespaced id of the block a break leaves behind.
   Absent means the cell is left **empty**, which is a different claim from the
   block being indestructible, which is why they are different fields.
+- **`drawn`** — is any face of this block emitted at all. Absent means whatever
+  you wrote for `solid`. This is the field that lets a block be seen without
+  stopping anybody, and the field that lets a block stop somebody without being
+  seen.
+- **`occludes`** — does this block hide the face of a neighbour that meets it.
+  Absent means whatever you wrote for `solid`. Separate from `drawn` because a
+  block may be seen *and* let you see what is behind it, which is the whole of
+  what makes water look like water.
+- **`targetable`** — can a swing find this block. Absent means whatever you wrote
+  for `solid`. Whether the block then yields to that swing is `breakable`; this
+  field decides only whether the swing arrives.
 
-**The three optional fields are independent of one another.** A block may declare
+**The six optional fields are independent of one another.** A block may declare
 `breakable = false` *and* a `breaks_into`; the residue is simply never reached,
 and it is still there the day you make the block breakable again by editing one
-line.
+line. The same holds across the three seeing fields: `drawn = true` on a
+non-solid block says it is visible and says **nothing** about whether it hides
+what is behind it or whether a swing can find it. Each of the three falls back to
+`solid` on its own, so stating one does not state the other two.
 
 **A residue is resolved when a break happens, not when the declaration is read.**
 `breaks_into = "example:ash"` registers whether or not anything declares
@@ -119,11 +146,20 @@ default. Falling back is the worst available outcome, because the block then
 behaves exactly as it would have if you had written nothing at all — so there is
 no symptom to notice and nothing to search for.
 
+`drawn = 1` is refused the same way, and it is the one worth knowing about,
+because a fall-back there would be invisible twice over. The default for `drawn`
+is whatever you wrote for `solid` — so on a solid block a silently ignored
+`drawn = 1` draws the block exactly as you intended, and you never learn the line
+did nothing. The next declaration you write it in says `solid = false`, and then
+your block is invisible for a reason nothing anywhere mentions. The refusal is
+quoted in full under "Reading a refusal", below.
+
 **A field the loader does not recognise is refused, not ignored.** A misspelled
-`replacable` is a word anybody types once, and a loader that read the six keys it
+`replacable` is a word anybody types once, and a loader that read the keys it
 knows and never asked what else was there could not tell a typo from an absence.
-The refusal names the field you wrote **and the six you may write**, because a
-name is only recognisable as a typo once you can see what it was nearly.
+The refusal names the field you wrote **and all nine you may write**, because a
+name is only recognisable as a typo once you can see what it was nearly —
+`drawnn` beside `drawn` explains itself where `drawnn` alone does not.
 
 ## The namespaced id rule
 
@@ -393,11 +429,22 @@ A `blocks/amber.luau` declaring `slid = true` where it meant `solid` is refused
 like this:
 
 ```
-mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`
 ```
 
 The parts read outermost first, separated by `: ` — the stage that failed, then
 the file, then the block, then the field, then the cause.
+
+The same refusal for a name one letter *past* a real field rather than one letter
+short — `drawnn` for `drawn`, which is the typo the newest field on the list
+invites:
+
+```
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `drawnn`: `drawnn` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`
+```
+
+A field that exists but holds the wrong kind of value is refused differently, and
+that refusal is quoted under "Being seen is not being solid", below.
 
 Three refusals whose shape is worth knowing before you meet them:
 
@@ -457,6 +504,69 @@ useful while you are getting a declaration right; the host keeps the earliest
 output up to its limit and then stops recording, and says how many lines it
 stopped keeping. It does not refuse your declaration for printing too much.
 
+## Being seen is not being solid
+
+`solid` answers one question — does this block stop a player who walks into it —
+and it used to answer three more by implication. Those three are now their own
+fields:
+
+| You want | Field |
+|---|---|
+| a block you can walk through but can see | `solid = false, drawn = true` |
+| a block you can see through to what is behind | `occludes = false` |
+| a block a swing passes straight through | `targetable = false` |
+
+Each defaults to whatever the same declaration says about `solid`, so writing
+none of them is writing what you always wrote. A block that is solid is drawn,
+hides what is behind it and can be aimed at; a block that is not is none of the
+three. **Stating one of them says nothing about the other two.**
+
+Wrong kinds are refused rather than defaulted, and this is the refusal you will
+meet if you reach for `1`:
+
+```
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `drawn`: `drawn` must be true or false, but is a number
+```
+
+Both halves are there on purpose: what the field accepts, and what it found.
+
+### A pane you can see but walk through
+
+A complete declaration, and the case the split exists for — visible, not solid,
+and not hiding what is behind it:
+
+```luau
+-- A pane of amber glass. You can see it, you can see through it, and you can
+-- walk straight into the cell it occupies.
+return {
+	name = "example:amber-pane",
+	texture = "example:amber-pane",
+	solid = false,
+	drawn = true,
+	occludes = false,
+	targetable = true,
+}
+```
+
+`solid = false` would once have made every one of the last three false with it,
+which is why a block like this could not be declared at all. Read the four lines
+as four separate answers: it does not stop you, it is drawn, it does not hide the
+block behind it, and a swing can still find it — that last one being what lets
+you break it, together with `breakable` defaulting to `true`.
+
+Drop `targetable = false` in instead and you have a pane that cannot be broken by
+aiming at it, whatever `breakable` says: `targetable` decides whether the swing
+arrives, `breakable` decides what happens when it does.
+
+**What consumes these three today.** The loader reads all three, refuses a bad
+one, and records what you declared — you can declare the pane above right now and
+it registers. What *acts* on them is arriving separately: until it does, the
+mesher still decides what to draw from `solid`, and a trace still decides what you
+are aiming at from `solid`. So the pane registers and reads back exactly as
+declared, and looks on screen like the non-solid block it is. That is stated here
+rather than left for you to discover, because a field that records correctly and
+changes nothing yet is worth knowing about before you build content on it.
+
 ## Replaceability is not derived from solidity
 
 **Placement reads `replaceable` and never consults `solid`.** Solidity is a
@@ -501,6 +611,12 @@ solid or not for exactly the same reason and by exactly the same mechanism.
 Declare a block named `example:air` as `solid = true` and cells holding it are
 reported solid. Declare one named `example:stone` as `solid = false` and cells
 holding it are reported non-solid.
+
+**`drawn`, `occludes` and `targetable` are declared on exactly the same terms.**
+Each is read from your declaration or defaulted from the `solid` in that same
+declaration, and from nothing else. No name is treated as implicitly invisible,
+implicitly transparent or implicitly unaimable-at — not `base:water`, and not
+whatever you call yours.
 
 ## A complete example
 
@@ -556,6 +672,12 @@ is what a new player holds.
 makes water placeable at all, and the only one declaring `breakable = false`. No
 base block names a residue: breaking dirt, grass or stone leaves the cell empty.
 
+**No base block states `drawn`, `occludes` or `targetable`**, which is why the
+table above has no column for them: all four read all three from their own
+`solid`, so dirt, grass and stone are drawn, occluding and targetable, and water
+is none of the three. The shipped sea is the obvious candidate for declaring
+them and does not yet.
+
 **Water's `breakable = false` is worth reading as an example rather than as a
 rule, because it changes nothing a player can do.** Only a *solid* block can be
 aimed at — the ray a break travels stops at the first solid cell — so a swing at a
@@ -591,7 +713,7 @@ called and a key is what it is drawn from.
 ## What is not here yet
 
 Per-cell state, callbacks and components. Worldgen in script. Reading a second
-content root. And `extends`, in every form — a declaration states its own six
+content root. And `extends`, in every form — a declaration states its own nine
 fields and inherits nothing.
 
 **Declarations now reload while the game is running.** Save a file in `blocks/` and

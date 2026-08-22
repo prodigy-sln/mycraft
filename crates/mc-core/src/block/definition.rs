@@ -42,10 +42,13 @@ pub struct BlockDefinition {
     pub textures: FaceTextures,
     /// Whether this block stops a player who walks into it.
     ///
-    /// A fact about physics and nothing else. Whether a *new* block may be built
-    /// over this one is [`replaceable`](Self::replaceable), which is a separate
-    /// declaration on purpose: the two coincide across the blocks the base game
-    /// happens to ship, and deriving either from the other would put that
+    /// Collision and nothing else. It says nothing about whether the block is
+    /// seen ([`drawn`](Self::drawn)), whether it hides what is behind it
+    /// ([`occludes`](Self::occludes)), whether a swing can find it
+    /// ([`targetable`](Self::targetable)), or whether a new block may be built
+    /// over it ([`replaceable`](Self::replaceable)). Each of those is a separate
+    /// declaration on purpose: they coincide across the blocks the base game
+    /// happens to ship, and deriving any of them from this one would put that
     /// accident in the engine where content could not override it.
     pub is_solid: bool,
     /// Whether a placement may overwrite this block.
@@ -72,6 +75,28 @@ pub struct BlockDefinition {
     /// residue that a later batch registers, so the name is resolved where a
     /// break reads it and not where it is declared.
     pub breaks_into: Option<BlockName>,
+    /// Whether any face of this block is emitted.
+    ///
+    /// Appearance and nothing else, read by the mesher. Absent in a declaration
+    /// means whatever that declaration says about [`is_solid`](Self::is_solid) —
+    /// which is what keeps every declaration written before this field existed
+    /// meaning what it meant, since one bit used to answer this question too.
+    pub drawn: bool,
+    /// Whether this block hides the face of a neighbour that would meet it.
+    ///
+    /// Separate from [`drawn`](Self::drawn) because a block may be seen without
+    /// hiding what is behind it, which is the whole of what makes water look like
+    /// water. Absent in a declaration means whatever that declaration says about
+    /// [`is_solid`](Self::is_solid).
+    pub occludes: bool,
+    /// Whether a swing can find this block.
+    ///
+    /// What the crosshair may settle on, read where a trace resolves what a
+    /// player is aiming at. Absent in a declaration means whatever that
+    /// declaration says about [`is_solid`](Self::is_solid). Whether the block
+    /// then yields to that swing is [`breakable`](Self::breakable): this field
+    /// decides only whether the swing arrives.
+    pub targetable: bool,
     pub origin: DefinitionOrigin,
 }
 
