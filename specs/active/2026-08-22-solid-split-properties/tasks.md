@@ -372,9 +372,15 @@ said "gate green" while `scripts/sdd-gate.ps1` was still inside its
 into the durable record. What was actually observed at the time it was written:
 `cargo nextest run -p mc-world -p mc-core` at 388 passed / 0 failed,
 `cargo clippy --workspace --all-targets --all-features -- -D warnings` at exit 0,
-and the gate's earlier stages (sast, secrets, art) reporting ok. The gate's own
-verdict, its test count and its coverage figure are appended below when the run
-exits — not before.
+and the gate's earlier stages (sast, secrets, art) reporting ok.
+
+**Gate: green.** `scripts/sdd-gate.ps1` exited **0**, log written outside the
+repo and redirected rather than piped. Every stage ok — format, lint + complexity
+(clippy, zero warnings), gpu-free, docs, size, deps, sast, secrets, both art
+stages. `tests + coverage (llvm-cov nextest)`: **1394 tests run, 1394 passed, 1
+skipped** in 117.6 s, and **coverage 93.63%**. The gpu-free stage separately ran
+69 passed / 1 skipped and 106 passed / 0 skipped. Measured on the tree at
+`d40ad42`, working tree clean.
 
 **Mutation, Phase 1 — it bit.** `optional_boolean`'s `absent` made a literal
 `false` inside `defaulting_to_solidity`. `cargo nextest run -p mc-world -p mc-core
