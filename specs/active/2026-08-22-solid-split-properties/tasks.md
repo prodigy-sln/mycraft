@@ -103,16 +103,16 @@ authors tests in that window runs
 `cargo clippy --workspace --all-targets --all-features -- -D warnings` directly**
 (`testing.md` §2: a green suite is no evidence about a lint).
 
-- [ ] **T01** `BlockDefinition` gains `drawn`, `occludes` and `targetable`, each read by the existing `optional_boolean` with `absent` = the declaration's own resolved `solid`; `is_solid`'s doc comment narrows to collision and nothing else — `crates/mc-core/src/block/definition.rs:50`, `crates/mc-world/src/content/luau_declaration/mod.rs:204` (`optional_boolean`), `:272` (`FieldFault::wrong_kind`)
+- [x] **T01** `BlockDefinition` gains `drawn`, `occludes` and `targetable`, each read by the existing `optional_boolean` with `absent` = the declaration's own resolved `solid`; `is_solid`'s doc comment narrows to collision and nothing else — `crates/mc-core/src/block/definition.rs:50`, `crates/mc-world/src/content/luau_declaration/mod.rs:204` (`optional_boolean`), `:272` (`FieldFault::wrong_kind`)
       Scenarios: FR-1.1-S1, FR-1.1-S2, FR-1.1-S3, FR-1.1-S4
       Each field gets a doc comment stating the one question it answers, in the shape the existing fields use. Invariant 1 is satisfied here and only here: every default in this change is a documented constant in the declaration loader, and no engine module derives a property from a name or an id.
 
-- [ ] **T02** `RECOGNISED_FIELDS` grows from `[&str; 6]` to `[&str; 9]` in the order FR-1.2-S1 quotes, and the three sites that carry the list move together — `crates/mc-world/src/content/luau_declaration/mod.rs:64` (verified `[&str; 6]`), its hand-maintained mirror at `crates/mc-world/tests/luau_declaration_keys.rs:60` (verified `[&str; 6]`), and the refusal message printed in `docs/modding/blocks-items.md` (verified: the fenced refusal block quoting the six names sits at `:397`, and `crates/mc-client/tests/documented_refusals.rs` compares a real run against it line for line)
+- [x] **T02** `RECOGNISED_FIELDS` grows from `[&str; 6]` to `[&str; 9]` in the order FR-1.2-S1 quotes, and the three sites that carry the list move together — `crates/mc-world/src/content/luau_declaration/mod.rs:64` (verified `[&str; 6]`), its hand-maintained mirror at `crates/mc-world/tests/luau_declaration_keys.rs:60` (verified `[&str; 6]`), and the refusal message printed in `docs/modding/blocks-items.md` (verified: the fenced refusal block quoting the six names sits at `:397`, and `crates/mc-client/tests/documented_refusals.rs` compares a real run against it line for line)
       Scenarios: FR-1.2-S1, FR-1.2-S2
       Depends on: T01
       Order is load-bearing — a refusal quotes the list back. `FIELD_NAMES_READ` is 64 and needs no change for nine fields (`architecture.md` Assumption 5).
 
-- [ ] **T03** Mod-author documentation: the three fields with type, default and the refusal each produces; the field table rewritten; the sentence "the three optional fields are independent of one another" becomes six; and a worked example that runs — a declaration that is drawn without being solid — `docs/modding/blocks-items.md`
+- [x] **T03** Mod-author documentation: the three fields with type, default and the refusal each produces; the field table rewritten; the sentence "the three optional fields are independent of one another" becomes six; and a worked example that runs — a declaration that is drawn without being solid — `docs/modding/blocks-items.md`
       Scenarios: FR-8.1-S1
       Depends on: T01, T02
       A reference listing names without a working example is not documentation (Key Principle 3). FR-1.2-S2 and FR-8.1-S1 are what make this page mechanically checkable; the rest of the page is prose no test asserts, which is why it is a task rather than a reviewer's memory.
@@ -363,3 +363,81 @@ screened figure sitting in a task list is the thing somebody tunes to.
 
 [Deferred observations and follow-ups discovered during implementation go below.
 Never delete task text; append status markers only.]
+
+### Phase 1 — closed. T01, T02, T03 done at `45a945c`; gate green.
+
+**Mutation, Phase 1 — it bit.** `optional_boolean`'s `absent` made a literal
+`false` inside `defaulting_to_solidity`. `cargo nextest run -p mc-world -p mc-core
+--no-fail-fast`: **388 run, 387 passed, 1 failed** — exactly
+`a_solid_block_that_states_nothing_more_is_drawn_occludes_and_can_be_aimed_at`
+(FR-1.1-S1), as the task predicted, and nothing else. Reverted by re-editing the
+line; `git diff --exit-code` returned 0. Note that a plain run without
+`--no-fail-fast` reports `186/388 tests run` and proves nothing about the other
+202 — the count is only a count with fail-fast disabled.
+
+**T02 has more sites than it names, measured.** The task names the loader, the
+mirror at `luau_declaration_keys.rs:60`, and one documented refusal. Actually
+five things moved:
+
+- `crates/mc-world/src/content/luau_declaration/mod.rs` — the constant.
+- `crates/mc-world/tests/luau_declaration_keys.rs` — the mirror (test author's).
+- `crates/mc-client/tests/support/quoted_refusals.rs` — a **second** test-side
+  mirror the task does not name, formerly
+  `documented_refusals.rs:308 FIELDS_IN_THE_ORDER_THE_GUIDE_STATES`. It was
+  silently blind: `ranked_field` returns `Option` and its caller skips what it
+  cannot rank, so a list left at six compiled and reddened nothing.
+- `docs/modding/blocks-items.md`, `docs/modding/hot-reload.md` and
+  `docs/modding/README.md` — **three** pages quoted the six-name refusal, not
+  one. `every_refusal_the_modding_pages_quote_is_a_refusal_the_client_prints`
+  sweeps every page under `docs/modding/`, and its failing output does not name
+  which page a stale quotation came from. Command:
+  `grep -rn "may state \`name\`" docs/`.
+
+**The line number in T02 is off by one.** `awk 'NR>=394 && NR<=398'` on the
+pre-change page: 395 is the opening fence, **396 is the refusal text**, 397 is
+the closing fence. `spec.md:426`, `spec.md:552`, `architecture.md:355`,
+`architecture.md:739` and `requirements.md:115` all say `:396` and are right.
+
+**Where a `drawn` quotation may sit on the blocks page is tighter than recorded.**
+The last `texture`-blaming quotation on the page is **not** in the texture-table
+section — it is in the bounds section (`texture` holds 257 characters), now at
+`docs/modding/blocks-items.md:502`, which sits *below* "Reading a refusal". A
+`drawn` quotation anywhere above it returns
+`OutOfFieldOrder { field: "texture", after: "drawn" }` from
+`the_modding_guide_states_every_per_facing_refusal_in_the_recognised_field_order`.
+The `drawn = 1` quotation therefore lives in a new section placed after the
+bounds. `slid` and `drawnn` are unranked — neither is a recognised field — so
+they order nothing.
+
+**Three statements on `docs/modding/blocks-items.md` fall in later phases, and no
+later task names this page.** Recorded here rather than fixed: each is true today
+and none of them is Phase 1's.
+
+- Phase 3 (FR-1.3): the base-game table and the paragraph beginning "**No base
+  block states `drawn`, `occludes` or `targetable`**" both go stale the moment
+  water declares them. T14 names `docs/technical/rendering.md` and
+  `docs/user/gameplay.md:60-62`.
+- Phase 4 (FR-3): "Only a *solid* block can be aimed at — the ray a break travels
+  stops at the first solid cell", and the sentence that it "will start mattering
+  the day a non-solid block can be targeted", both become false. T18 names four
+  sites plus `docs/user/gameplay.md:64-68`, none of them this page.
+- Phase 5 (FR-5.1): "`breakable` is one of the **five** fields a save folds into a
+  block's recorded behaviour, alongside `name`, `solid`, `replaceable` and
+  `breaks_into`" becomes six when `targetable` joins the behaviour fold. T22 names
+  `docs/technical/world-format.md` and `docs/user/gameplay.md:68-70`.
+
+**The three tasks landed as one commit, and no split of them is green.** T01's own
+RED needs T02's list growth, because `only_recognised_fields`
+(`luau_declaration/mod.rs:145`, doc comment at `:174-176`) runs ahead of every
+field read — so a fixture stating `drawn` is refused as unrecognised and never
+reaches `optional_boolean`. And the page quotations are what FR-1.2-S2 and
+FR-8.1-S1 assert, verbatim against a real run. Code-then-docs leaves
+`documented_refusals` red; docs-then-code leaves it red the other way. One commit
+was the only ordering with no red commit in it (`git-workflow.md` §2).
+
+**`check` broke the nesting/length lint and the extraction is load-bearing.**
+Three `optional_boolean` calls inline give
+`error: this function has too many lines (35/30)` under
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`. Extracted
+as `defaulting_to_solidity`, which also names the one derived default the loader
+has. No `#[allow]`.
