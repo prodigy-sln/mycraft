@@ -94,6 +94,41 @@ pub const STONE_THAT_IS_NOT_SOLID: &str = "return {\n\
      \tsolid = false,\n\
      }\n";
 
+/// What a candidate says about `base:dirt` and about `base:grass` when an author
+/// has taken their solidity away and changed nothing else.
+///
+/// **Restated rather than removed, and that is what makes a scenario over them
+/// worth anything.** A candidate that stopped declaring dirt and grass would
+/// leave stone the first block registered *as well as* the first solid one, so a
+/// rule reading plain registration order would answer stone too. Restating them
+/// keeps dirt first in registration order and makes stone first among the blocks
+/// that stop a player, and those are two different answers.
+pub const DIRT_THAT_IS_NOT_SOLID: &str = "return {\n\
+     \tname = \"base:dirt\",\n\
+     \ttexture = \"base:dirt\",\n\
+     \tsolid = false,\n\
+     }\n";
+
+pub const GRASS_THAT_IS_NOT_SOLID: &str = "return {\n\
+     \tname = \"base:grass\",\n\
+     \ttexture = \"base:grass\",\n\
+     \tsolid = false,\n\
+     }\n";
+
+/// What a candidate says about `base:stone` when an author has said no ray may
+/// stop at it and has left its solidity alone.
+///
+/// The one declaration in which what stops a player and what a swing can find
+/// disagree, and it is stated *against* the default: `targetable` absent means
+/// the block's own `solid`, so a reader that answered from the default rather
+/// than from the declaration answers `true` here.
+pub const STONE_THAT_MAY_NOT_BE_AIMED_AT: &str = "return {\n\
+     \tname = \"base:stone\",\n\
+     \ttexture = \"base:stone\",\n\
+     \tsolid = true,\n\
+     \ttargetable = false,\n\
+     }\n";
+
 /// A content root written into a temporary directory, removed when this is
 /// dropped.
 ///

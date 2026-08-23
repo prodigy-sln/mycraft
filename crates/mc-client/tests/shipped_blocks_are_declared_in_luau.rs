@@ -1,11 +1,18 @@
 //! What the base game ships, read through the door a player's launch goes
 //! through.
 //!
-//! The four blocks, their order, their solidity, the one that may be built
-//! through, and the one a client puts in a player's hand. None of that is new —
-//! it is what the game already did — so a test asserting only those facts would
-//! have been green before a line of this feature was written, and green
-//! afterwards, and would have said nothing about either.
+//! The four blocks, their order, what stops a player, what is drawn, what hides
+//! what is behind it, what a swing can find, what may be broken, the one that
+//! may be built through, and the one a client puts in a player's hand.
+//!
+//! **The six facts about a block are read as one line each, and the four lines
+//! are compared as one ordered list.** Six separate assertions cannot see a
+//! field that stopped being read at all, and a comparison that *filtered* the
+//! observed blocks by the ones it expected could not see a fifth block arrive —
+//! this project has twice shipped a hand-maintained list that stayed green while
+//! the thing it mirrored grew, both times because the comparison filtered. So a
+//! missing block, an extra block, a reordering and a changed field are four
+//! distinct failures here.
 //!
 //! **So every reading here also says which file declared the block**, and that
 //! is what makes these tests able to fail today. A definition carries the origin
@@ -35,33 +42,57 @@ use support::{TestResult, content, content_root};
 /// of `content/base/blocks/` would write it down.
 ///
 /// Written out rather than read off the shipped root, because a fixture derived
-/// from the thing under test agrees with it whatever it becomes. Only `water` is
-/// non-solid and only `water` may be built through, which is the whole of the
-/// difference between the four.
+/// from the thing under test agrees with it whatever it becomes.
+///
+/// **Water is the whole of the difference between the four, and it is no longer
+/// one difference but five.** It alone is soft, it alone may be built through,
+/// it alone cannot be broken, and it alone is drawn without hiding what stands
+/// behind it. The other three say nothing at all about being drawn, hiding or
+/// being aimed at, so each of those reads back as whatever that declaration says
+/// about `solid` — which for those three is `true` three times over. Writing the
+/// derived values out here rather than deriving them is the point: a reader that
+/// came to answer every one of the three from `solid` would agree with a table
+/// that derived them the same way, and disagree with this one over water.
 const SHIPPED: [Declared; 4] = [
     Declared {
         name: "base:dirt",
         file: "dirt.luau",
         solid: true,
         replaceable: false,
+        breakable: true,
+        drawn: true,
+        occludes: true,
+        targetable: true,
     },
     Declared {
         name: "base:grass",
         file: "grass.luau",
         solid: true,
         replaceable: false,
+        breakable: true,
+        drawn: true,
+        occludes: true,
+        targetable: true,
     },
     Declared {
         name: "base:stone",
         file: "stone.luau",
         solid: true,
         replaceable: false,
+        breakable: true,
+        drawn: true,
+        occludes: true,
+        targetable: true,
     },
     Declared {
         name: "base:water",
         file: "water.luau",
         solid: false,
         replaceable: true,
+        breakable: false,
+        drawn: true,
+        occludes: false,
+        targetable: true,
     },
 ];
 
@@ -74,13 +105,36 @@ const IN_HAND: Declared = SHIPPED[0];
 const THE_ONLY_NON_SOLID_ONE: &str = "water";
 
 /// One line of the expected reading: a block, the file that declared it, and
-/// the two facts about it that differ across the shipped four.
+/// the six facts a declaration states or leaves to its `solid`.
 #[derive(Debug, Clone, Copy)]
 struct Declared {
     name: &'static str,
     file: &'static str,
     solid: bool,
     replaceable: bool,
+    breakable: bool,
+    drawn: bool,
+    occludes: bool,
+    targetable: bool,
+}
+
+/// One line of a reading, owned, so that the expectation and the observation are
+/// the same shape and are compared field by field.
+///
+/// **A struct rather than a formatted line.** Both sides used to be rendered to
+/// one string, which compares the whole of a block's reading as this does but
+/// reports a disagreement as two sentences a reader has to diff by eye. Named
+/// fields put the changed one in the failure output.
+#[derive(Debug, PartialEq, Eq)]
+struct Reading {
+    name: String,
+    file: String,
+    solid: bool,
+    replaceable: bool,
+    breakable: bool,
+    drawn: bool,
+    occludes: bool,
+    targetable: bool,
 }
 
 /// What a launch came to, so that a launch which refused and a launch which
@@ -90,7 +144,9 @@ struct Declared {
 enum Launched {
     /// The blocks it registered, in registration order, each with the file that
     /// declared it.
-    Registered(Vec<String>),
+    Registered(Vec<Reading>),
+    /// A block it registered that could not be read back at all.
+    Unreadable(String),
     /// It held this block, declared by this file.
     Holding(String),
     /// It refused because nothing the content declares could be placed.
@@ -100,7 +156,7 @@ enum Launched {
 }
 
 #[test]
-fn the_shipped_content_declares_four_blocks_in_luau_with_water_alone_soft_and_replaceable()
+fn the_shipped_content_declares_four_blocks_with_water_alone_soft_unbreakable_and_seen_through()
 -> TestResult {
     let save = tempfile::tempdir()?;
 
@@ -109,10 +165,13 @@ fn the_shipped_content_declares_four_blocks_in_luau_with_water_alone_soft_and_re
     assert_eq!(
         launched,
         Launched::Registered(SHIPPED.iter().map(reading_of).collect()),
-        "these four blocks, in this order, with water alone soft and water alone replaceable, are \
-         the world the base game has always made — and the point of this feature is that they are \
-         now declared in the language a mod author writes. A reading that names the right blocks \
-         out of the wrong files is the swap not having happened"
+        "these four blocks, in this order, out of these four files, are the world the base game \
+         ships. Three of them state nothing about being drawn, hiding what is behind them or \
+         being aimed at, and so read back as the `solid` each of them states; water states all \
+         three and is the one block where they come apart — soft, unbreakable, drawn, and hiding \
+         nothing behind it. A reading that names the right blocks out of the wrong files is the \
+         declaration not having moved; a reading that answers water's three from its solidity is \
+         the split not having happened"
     );
     Ok(())
 }
@@ -160,7 +219,7 @@ fn a_content_root_declaring_nothing_solid_refuses_to_start_rather_than_opening_a
 fn launched_over(root: &Path, save: &Path) -> Result<Launched, Box<dyn Error>> {
     Ok(
         match prepare_launch(root, save, Acceptance::OnlyUnchangedBlocks) {
-            Ok(prepared) => Launched::Registered(registered_in(&prepared.registry)),
+            Ok(prepared) => registered_in(&prepared.registry),
             Err(refused) => refusal(&refused),
         },
     )
@@ -197,39 +256,48 @@ fn refusal(refused: &mc_client::startup::PreparationError) -> Launched {
 }
 
 /// Every block `registry` holds, in the order it registered them.
-fn registered_in(registry: &BlockRegistry) -> Vec<String> {
-    (0..registry.registered_count())
-        .map(|id| {
-            registry
-                .definition(BlockId::from_raw(id as u32))
-                .map_or_else(|failure| failure.to_string(), described)
-        })
-        .collect()
+///
+/// A block the registry will not read back stops the reading rather than
+/// becoming one more line of it: a definition that could not be fetched says
+/// nothing about what any declaration states, and rendering the failure as a
+/// line of the list would put it where a reader looks for a block.
+fn registered_in(registry: &BlockRegistry) -> Launched {
+    let mut readings = Vec::new();
+    for id in 0..registry.registered_count() {
+        match registry.definition(BlockId::from_raw(id as u32)) {
+            Ok(definition) => readings.push(described(definition)),
+            Err(failure) => return Launched::Unreadable(failure.to_string()),
+        }
+    }
+    Launched::Registered(readings)
 }
 
 /// One registered block, as this suite reads it.
-fn described(definition: &BlockDefinition) -> String {
-    reading(
-        definition.name.as_str(),
-        &declaring_file(&definition.origin),
-        definition.is_solid,
-        definition.replaceable,
-    )
+fn described(definition: &BlockDefinition) -> Reading {
+    Reading {
+        name: definition.name.as_str().to_owned(),
+        file: declaring_file(&definition.origin),
+        solid: definition.is_solid,
+        replaceable: definition.replaceable,
+        breakable: definition.breakable,
+        drawn: definition.drawn,
+        occludes: definition.occludes,
+        targetable: definition.targetable,
+    }
 }
 
 /// One expected block, written the same way.
-fn reading_of(declared: &Declared) -> String {
-    reading(
-        declared.name,
-        declared.file,
-        declared.solid,
-        declared.replaceable,
-    )
-}
-
-/// The one spelling both sides of the comparison are written in.
-fn reading(name: &str, file: &str, solid: bool, replaceable: bool) -> String {
-    format!("{name} declared by {file}, solid {solid}, replaceable {replaceable}")
+fn reading_of(declared: &Declared) -> Reading {
+    Reading {
+        name: declared.name.to_owned(),
+        file: declared.file.to_owned(),
+        solid: declared.solid,
+        replaceable: declared.replaceable,
+        breakable: declared.breakable,
+        drawn: declared.drawn,
+        occludes: declared.occludes,
+        targetable: declared.targetable,
+    }
 }
 
 /// The file an origin points at, by its name alone.

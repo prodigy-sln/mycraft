@@ -37,6 +37,8 @@
 //! while a deliberate palette edit flows through both sides at once — which is
 //! correct, because the image is rebuilt from those same files.
 
+#[path = "support/reload.rs"]
+mod reload;
 mod support;
 
 use std::error::Error;
@@ -46,6 +48,7 @@ use mc_core::id::{BlockName, TextureKey};
 use mc_render::texture::mip::levels_for;
 use mc_render::texture::placeholder::placeholder_texels;
 
+use reload::{Declaration, STONE_FILE, restating};
 use support::art::{declared_material_colors, drawn_colors};
 use support::swatch::require;
 use support::{PreparedScene, TestResult, built_sets, prepare_scene_at};
@@ -54,11 +57,6 @@ use support::{PreparedScene, TestResult, built_sets, prepare_scene_at};
 const STONE: &str = "base:stone";
 const GRASS_TOP: &str = "base:grass_top";
 const DIRT: &str = "base:dirt";
-const WATER: &str = "base:water";
-
-/// The block whose faces would draw water if any of them were emitted.
-const WATER_BLOCK: &str = "base:water";
-
 /// The materials `stone-block.mcvox` is made of.
 ///
 /// **Material names, not colours.** Which three materials a model's voxels are
@@ -180,11 +178,41 @@ fn two_covered_keys_are_each_filled_from_their_own_image() -> TestResult {
     Ok(())
 }
 
+/// A layer is allocated from what content **declares**, not from what the mesh
+/// turned out to hold.
+///
+/// # The witness is declared, because the shipped one stopped being one
+///
+/// Water used to carry this: it was in the world in quantity and no quad drew
+/// it, so a layer set built out of the meshed quads would have left it with
+/// none. **That rested on a coincidence — water happened to be unmeshed because
+/// it happened to be non-solid — and this spec deletes the coincidence.** With
+/// the sea drawn, a mesh-derived layer set would give water a layer too, and the
+/// reading could no longer tell the two mechanisms apart. Renumbering its
+/// expectation to the quads water now draws would have left a **green test that
+/// had stopped asking its question**, which is worse than a red one because it
+/// reads as evidence.
+///
+/// So the antecedent is declared outright instead, which makes this stronger
+/// than it was rather than merely repaired.
+///
+/// # Why stone
+///
+/// It is the most present block in the world. Its meshed face area is **13 315**,
+/// the largest of the four the replay places and well clear of grass at 6 900 or
+/// dirt at 783 — so a launch emitting even a handful of its faces misses by a
+/// wide margin rather than by one, and "no quad draws it" stays hard to satisfy
+/// by accident. A witness that is *absent* from the world would prove nothing
+/// about layer allocation at all.
 #[test]
 fn the_block_no_quad_draws_still_holds_a_layer_and_no_face_takes_its_key() -> TestResult {
-    let root = built_sets::a_root_with_a_built_set()?;
-    let water = TextureKey::parse(WATER)?;
-    let block = BlockName::parse(WATER_BLOCK)?;
+    let root = restating(
+        built_sets::a_root_with_a_built_set()?,
+        STONE_FILE,
+        &stone_that_is_an_invisible_obstacle(),
+    )?;
+    let stone = TextureKey::parse(STONE)?;
+    let block = BlockName::parse(STONE)?;
 
     let prepared = prepare_scene_at(root.path())?;
 
@@ -197,15 +225,15 @@ fn the_block_no_quad_draws_still_holds_a_layer_and_no_face_takes_its_key() -> Te
         .collect();
     assert_eq!(
         (
-            prepared.resolution.layers().layer_of(&water).is_some(),
+            prepared.resolution.layers().layer_of(&stone).is_some(),
             prepared.resolution.key_of(&block, Face::Up).cloned(),
             drawn.len(),
         ),
-        (true, Some(water), 0),
-        "water is declared and is not solid, so it spends a layer of the array texture and the \
+        (true, Some(stone), 0),
+        "a block declared `drawn = false` spends a layer of the array texture even though the \
          mesher emits no face that could sample it. Both halves are the claim: a layer set built \
          out of the meshed quads would leave it with none, and a mesher that emitted its faces \
-         would draw a block the content says is not there"
+         would draw a block the content says is not drawn"
     );
     Ok(())
 }
@@ -230,4 +258,14 @@ fn an_image_named_for_a_key_no_block_declares_leaves_the_launch_alone() -> TestR
          make every set stale the moment a declaration was deleted"
     );
     Ok(())
+}
+
+/// `base:stone`, restated as an obstacle nothing draws.
+///
+/// Both halves stated and neither alone: `solid = true` is what keeps the block
+/// in the world, and `drawn = false` is what takes it out of the picture. A
+/// declaration stating only the second would default its solidity from nothing
+/// and the world would have changed underneath the reading.
+fn stone_that_is_an_invisible_obstacle() -> Declaration {
+    Declaration::of(STONE).solid(true).drawn(false)
 }

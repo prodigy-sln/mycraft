@@ -19,19 +19,19 @@
 //! held by the compiler and by a reader, never by a test, and these guards hold
 //! the **value** instead.
 //!
-//! # Why both halves, and what happened to the appearance one
+//! # Why both halves, and what each of them has since been through
 //!
 //! A block records two hashes and the split is deliberate: what it is to stand
-//! on, and what it looks like. The phase that gave an appearance six texture
-//! keys instead of one has since landed, so the appearance half below states six
-//! keys under a revision of its own — **revised here by that phase's test author
-//! and by nobody else**, which is what the note this paragraph replaces asked
-//! for.
+//! on, and what it looks like. Both lists have now grown, one phase apart and for
+//! different reasons — the appearance half gained six texture keys where it had
+//! one, and then `drawn` and `occludes`; the behaviour half gained `targetable`.
+//! Each was **revised here by that phase's test author and by nobody else**.
 //!
-//! What was bought by writing both halves before the fold moved crates survives
-//! the revision, and it is the behaviour half: it is still the fold it was, over
-//! the fields it was, under revision 1, and it has been green across two changes
-//! it had every opportunity to move under.
+//! What was bought by writing both halves before the fold moved crates is spent:
+//! neither list is the list it was, so neither guard can any longer say a value
+//! did not move. What they say now is narrower and still worth having — that what
+//! a save records is what the *stated* field list folds to, arrived at without
+//! calling the fold.
 //!
 //! # The revision byte is per field list, and that is load-bearing
 //!
@@ -39,8 +39,10 @@
 //! existence the moment the appearance list gained a field — every save in the
 //! world reporting every block as behaving differently, over a texture key. So
 //! the two are stated separately here as they are stated separately in the
-//! format, and the behaviour constant staying at 1 while the appearance one is 2
-//! is the whole of what says the bump reached only the list that grew.
+//! format, and each guard asserts its own. Two constants that move independently
+//! are what says a bump reached only the list that grew; a guard over one fold
+//! cannot see the other fold's byte fail to move, which is why there are two of
+//! them and not one over both.
 //!
 //! # The oracle, and why the same arithmetic is written twice
 //!
@@ -55,12 +57,21 @@
 //! copies of the arithmetic is not duplication here, it is the instrument: the
 //! one under test cannot move without this one disagreeing.
 //!
-//! # What makes them non-vacuous, given neither could be red first
+//! # What makes them non-vacuous
 //!
-//! They are green from the moment they are written, so falsifiability has to
-//! come from mutation instead. Two of this phase's are the evidence, and both
-//! redden both guards: changing the offset basis by one, and returning the basis
-//! without folding at all. The outcomes are recorded in the phase's own record.
+//! A guard authored *after* the change it is about is green from the moment it is
+//! written, because it states the arithmetic that change already made, and its
+//! falsifiability then has to come from mutation. Two mutations are the standing
+//! evidence for that case and both redden both guards: changing the offset basis
+//! by one, and returning the basis without folding at all.
+//!
+//! **A guard authored before the change is the stronger case, and it is the one
+//! these two are in as they stand.** Each states a field list and a revision the
+//! fold does not produce yet, so each is red until the fold is made to agree —
+//! and a red run is evidence a mutation only stands in for. That is the reason
+//! they are written ahead of the implementation rather than beside it: a guard
+//! written afterwards agrees with whatever the change produced, which is exactly
+//! the claim this file exists to *not* make.
 //!
 //! # What they do not assert
 //!
@@ -105,12 +116,14 @@ const CRATE_DEPTH: usize = 2;
 /// revision bumped without the fields changing is a disagreement rather than a
 /// change both sides make together.
 ///
-/// **Two numbers and not one.** The appearance list gained five fields and says
-/// so in its own byte; the behaviour list gained nothing and its byte has not
-/// moved. A single shared constant would have moved both, and the behaviour half
-/// of this file is the instrument that would have reported it.
-const STATED_BEHAVIOUR_REVISION: u8 = 1;
-const STATED_APPEARANCE_REVISION: u8 = 2;
+/// **Two numbers and not one, and they stand apart.** The appearance list has
+/// grown twice — five texture keys, then `drawn` and `occludes` — against the
+/// behaviour list's once, for `targetable`, so the two bytes are two different
+/// numbers and a single shared constant could not state either. Each guard
+/// asserts its own, which is what lets one fold's byte fail to move while the
+/// other's does and be reported rather than absorbed.
+const STATED_BEHAVIOUR_REVISION: u8 = 2;
+const STATED_APPEARANCE_REVISION: u8 = 3;
 
 /// Where an FNV-1a 64 fold starts, and what it multiplies by.
 ///
@@ -231,9 +244,18 @@ fn stated_over(
 /// The bytes the format states a block's declared behaviour is.
 ///
 /// The field list written out in its declared order: the input version, the
-/// name, the three flags, then the residue as an optional name. The origin is
-/// deliberately not among them — it is derived from a file path, and folding it
-/// would make a save refuse to load from a second checkout.
+/// name, the three flags, the residue as an optional name, and last of all what a
+/// swing can find. The origin is deliberately not among them — it is derived from
+/// a file path, and folding it would make a save refuse to load from a second
+/// checkout.
+///
+/// **`targetable` is appended and never inserted**, because the canonical
+/// encoding writes a struct positionally: a field placed among the existing ones
+/// moves every byte after it, and every save in existence would then disagree for
+/// a reason nobody declared. It is on this list rather than the appearance one
+/// because it is what makes `breakable = false` change what a break *does* — a
+/// block that becomes aimable is a different block to swing at, which is the
+/// question this list answers.
 fn stated_behaviour_bytes(definition: &BlockDefinition) -> Vec<u8> {
     let mut stated = vec![STATED_BEHAVIOUR_REVISION];
     push_text(&mut stated, definition.name.as_str());
@@ -247,6 +269,7 @@ fn stated_behaviour_bytes(definition: &BlockDefinition) -> Vec<u8> {
             push_text(&mut stated, residue.as_str());
         }
     }
+    push_flag(&mut stated, definition.targetable);
     stated
 }
 
@@ -262,12 +285,32 @@ fn stated_behaviour_bytes(definition: &BlockDefinition) -> Vec<u8> {
 /// states one string, so all six of these keys are equal today — which is exactly
 /// why the *order* has a witness of its own, over six distinct keys, in
 /// `tests/save_per_face_appearance.rs`.
+///
+/// **`drawn` and `occludes` are appended after the keys, in that order**, for the
+/// positional reason the behaviour list records. They are on *this* list because a
+/// block that stopped being drawn, or stopped hiding what stands behind it, is
+/// still the same block to stand on, to build through and to break: putting
+/// either on the behaviour list would tell every player in existence that every
+/// block they built with behaves differently, over a rendering field.
+///
+/// **`base:water` is the only shipped block whose two flags disagree**, so it is
+/// the whole of what this guard can see about their order: a fold emitting
+/// `occludes` first still agrees with dirt, grass and stone and disagrees only
+/// over water.
+///
+/// That is a fact about what the base game currently declares rather than about
+/// the format, and it would go quiet without failing the day water declares the
+/// two alike or stops being shipped. The second witness is deliberately not a
+/// shipped block: `tests/save_per_face_appearance.rs` folds a fixture that is
+/// drawn and see-through, and nothing outside that file decides what it says.
 fn stated_appearance_bytes(definition: &BlockDefinition) -> Vec<u8> {
     let mut stated = vec![STATED_APPEARANCE_REVISION];
     push_text(&mut stated, definition.name.as_str());
     for face in Face::ALL {
         push_text(&mut stated, definition.textures.at(face).as_str());
     }
+    push_flag(&mut stated, definition.drawn);
+    push_flag(&mut stated, definition.occludes);
     stated
 }
 

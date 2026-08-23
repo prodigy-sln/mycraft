@@ -142,7 +142,10 @@ loads and does nothing.
 
 | Field | Visible after a reload? |
 |---|---|
-| `solid` | **yes** — the world is re-meshed and you can walk into, or through, what changed |
+| `drawn` | **yes** — the world is re-meshed and the block appears or disappears |
+| `occludes` | **yes** — the world is re-meshed and the faces behind it appear or vanish |
+| `solid` | **yes** in behaviour: you can walk into, or through, what changed. Whether it also *redraws* depends on the next paragraph |
+| `targetable` | **yes**, in behaviour: whether your swing finds it. Nothing is re-meshed for it |
 | adding a declaration | **yes** — a new solid block sorting first arrives in your hand |
 | removing a declaration | only if the world holds none of that block; otherwise the candidate is refused |
 | `texture`, as one string | **yes** — all six faces redraw from the new key |
@@ -151,6 +154,24 @@ loads and does nothing.
 | `replaceable` | **yes**, in behaviour: whether a placement builds straight through it |
 | `breakable` | **yes**, in behaviour: whether it can be broken at all |
 | `breaks_into` | **yes**, in behaviour: what the cell holds afterwards |
+
+**What decides a re-mesh is `drawn`, `occludes` and the six keys — and nothing
+else.** Editing `solid`, `targetable`, `replaceable`, `breakable` or `breaks_into`
+changes what the world *does* without changing what it looks like, so no section
+is built again.
+
+**Editing `solid` alone still redraws, and it is worth knowing why**, because the
+answer changes the moment you write one more line. `drawn` and `occludes` default
+to whatever the same declaration says about `solid` — so a declaration that never
+mentions them moves all three at once when you flip `solid`, and the world
+re-meshes. Write `drawn` and `occludes` out explicitly, and from then on editing
+`solid` moves only collision: your block goes on looking exactly as it did while
+you walk through where you used to stand. That is the split working, not a reload
+that missed something.
+
+**A reload that changes only `targetable` is accepted and re-meshes nothing.**
+Your swing starts or stops finding the block on the very next tick; the picture on
+screen never flickers, because nothing about it changed.
 
 ### Editing `texture` changes what you see
 
@@ -375,7 +396,7 @@ are the launch refusals** — same loader, same words — under the reload's own
 sentence. This one is `solid` typed as `slid`:
 
 ```
-mycraft: the content root could not be taken up: the content root could not be read: the content root's blocks could not be read: content/base/blocks/stone.luau, block `base:stone`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`
+mycraft: the content root could not be taken up: the content root could not be read: the content root's blocks could not be read: content/base/blocks/stone.luau, block `base:stone`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`
 ```
 
 The fields it lists are the whole set a declaration may state, which makes this the one

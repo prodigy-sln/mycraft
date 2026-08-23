@@ -149,6 +149,9 @@ pub struct Declaration {
     replaceable: Option<bool>,
     breakable: Option<bool>,
     breaks_into: Option<String>,
+    drawn: Option<bool>,
+    occludes: Option<bool>,
+    targetable: Option<bool>,
 }
 
 impl Declaration {
@@ -170,6 +173,9 @@ impl Declaration {
             replaceable: None,
             breakable: None,
             breaks_into: None,
+            drawn: None,
+            occludes: None,
+            targetable: None,
         }
     }
 
@@ -221,6 +227,28 @@ impl Declaration {
         self
     }
 
+    /// The same declaration, stating whether any face of the block is emitted.
+    #[must_use]
+    pub const fn drawn(mut self, drawn: bool) -> Self {
+        self.drawn = Some(drawn);
+        self
+    }
+
+    /// The same declaration, stating whether the block hides what stands behind
+    /// it.
+    #[must_use]
+    pub const fn occludes(mut self, occludes: bool) -> Self {
+        self.occludes = Some(occludes);
+        self
+    }
+
+    /// The same declaration, stating whether a swing can find the block.
+    #[must_use]
+    pub const fn targetable(mut self, targetable: bool) -> Self {
+        self.targetable = Some(targetable);
+        self
+    }
+
     /// The declaration as a Luau chunk returning a table.
     #[must_use]
     pub fn text(&self) -> String {
@@ -241,17 +269,41 @@ impl Declaration {
             )),
         }
         chunk.push_str(&format!("\tsolid = {},\n", self.solid));
-        if let Some(replaceable) = self.replaceable {
-            chunk.push_str(&format!("\treplaceable = {replaceable},\n"));
-        }
-        if let Some(breakable) = self.breakable {
-            chunk.push_str(&format!("\tbreakable = {breakable},\n"));
-        }
-        if let Some(residue) = &self.breaks_into {
-            chunk.push_str(&format!("\tbreaks_into = \"{residue}\",\n"));
-        }
+        chunk.push_str(&self.stated_fields());
         chunk.push_str("}\n");
         chunk
+    }
+
+    /// The lines for every optional field this declaration states, in the order
+    /// the loader recognises them.
+    ///
+    /// Its own function because the chunk outgrew `clippy.toml`'s thirty-line cap
+    /// when the three appearance fields arrived, and "what a declaration must
+    /// state" against "what it may state" is the seam that keeps each half about
+    /// one thing. **A field this declaration leaves unstated writes no line at
+    /// all**, which is what lets a fixture spell "says nothing about it" apart
+    /// from "says false".
+    fn stated_fields(&self) -> String {
+        let mut stated = String::new();
+        if let Some(replaceable) = self.replaceable {
+            stated.push_str(&format!("\treplaceable = {replaceable},\n"));
+        }
+        if let Some(breakable) = self.breakable {
+            stated.push_str(&format!("\tbreakable = {breakable},\n"));
+        }
+        if let Some(residue) = &self.breaks_into {
+            stated.push_str(&format!("\tbreaks_into = \"{residue}\",\n"));
+        }
+        if let Some(drawn) = self.drawn {
+            stated.push_str(&format!("\tdrawn = {drawn},\n"));
+        }
+        if let Some(occludes) = self.occludes {
+            stated.push_str(&format!("\toccludes = {occludes},\n"));
+        }
+        if let Some(targetable) = self.targetable {
+            stated.push_str(&format!("\ttargetable = {targetable},\n"));
+        }
+        stated
     }
 }
 

@@ -98,8 +98,57 @@ impl BlockVolume for NamedSlab {
     }
 }
 
+/// What a block declares about the four questions this suite's fixtures ask of
+/// one: whether it stops a player, whether it is drawn, whether it hides what is
+/// behind it, and whether a ray may stop at it.
+///
+/// **Four separate answers, because a fixture that cannot state them separately
+/// cannot fail a rule that reads all four off solidity.** Written as a struct
+/// rather than as four positional booleans, so a declaration reads the way its
+/// scenario is worded and getting two of them the wrong way round is a fixture
+/// that no longer compiles rather than one that still passes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Declaration {
+    pub solid: bool,
+    pub drawn: bool,
+    pub occludes: bool,
+    pub targetable: bool,
+}
+
+impl Declaration {
+    /// What every fixture written before the four were separable means: all four
+    /// answers are the block's solidity.
+    #[must_use]
+    pub const fn like_solidity(solid: bool) -> Self {
+        Self {
+            solid,
+            drawn: solid,
+            occludes: solid,
+            targetable: solid,
+        }
+    }
+}
+
+/// A block that is seen and may be aimed at, and that stops nobody and hides
+/// nothing — the shape the shipped water has, stated without borrowing its name.
+///
+/// It is the one declaration in which a rule reading *drawnness* or
+/// *targetability* where it meant *collision* gives a different answer from the
+/// rule as written, which is the whole of what a registry built out of it can
+/// prove.
+pub const DRAWN_AND_AIMED_AT_ONLY: Declaration = Declaration {
+    solid: false,
+    drawn: true,
+    occludes: false,
+    targetable: true,
+};
+
 /// A registry holding exactly `blocks`, each carrying the solidity declared
 /// beside it and textured by its own name.
+///
+/// Every one of the four questions a definition answers is answered by that
+/// solidity, which is what a fixture written before they were separable meant —
+/// see [`registry_of_declarations`] for the builder that can state them apart.
 ///
 /// Built through the in-memory definition source because a registry has no other
 /// door in — which is the same structural rule content goes through, so a
@@ -111,20 +160,43 @@ impl BlockVolume for NamedSlab {
 /// Returns an error if a name is not a namespaced id, or if the registry refuses
 /// the batch.
 pub fn registry_declaring(blocks: &[(&str, bool)]) -> Result<BlockRegistry, Box<dyn Error>> {
+    let declared: Vec<(&str, Declaration)> = blocks
+        .iter()
+        .map(|&(name, is_solid)| (name, Declaration::like_solidity(is_solid)))
+        .collect();
+    registry_of_declarations(&declared)
+}
+
+/// A registry holding exactly `blocks`, in the order given, each carrying the
+/// declaration beside it and textured by its own name.
+///
+/// The one place these fixtures' definitions are built, so that a fixture stating
+/// four answers and a fixture stating one reach the registry by the same route
+/// rather than by two that could drift.
+///
+/// # Errors
+///
+/// Returns an error if a name is not a namespaced id, or if the registry refuses
+/// the batch.
+pub fn registry_of_declarations(
+    blocks: &[(&str, Declaration)],
+) -> Result<BlockRegistry, Box<dyn Error>> {
     let mut declared = Vec::with_capacity(blocks.len());
-    for &(name, is_solid) in blocks {
-        // Solidity is the one property these declarations are about, and it is
-        // stated per block above. The scenarios this registry serves resolve
-        // solidity and never breakability, replaceability or a residue, so each
-        // of those is left at what a declaration saying nothing about it means;
-        // the fixtures that do break blocks declare their own registry.
+    for &(name, states) in blocks {
+        // The scenarios these registries serve resolve what a block is declared
+        // to be and never breakability, replaceability or a residue, so each of
+        // those is left at what a declaration saying nothing about it means; the
+        // fixtures that do break blocks declare their own registry.
         declared.push(Ok(BlockDefinition {
             name: BlockName::parse(name)?,
             textures: FaceTextures::uniform(TextureKey::parse(name)?),
-            is_solid,
+            is_solid: states.solid,
             replaceable: false,
             breakable: true,
             breaks_into: None,
+            drawn: states.drawn,
+            occludes: states.occludes,
+            targetable: states.targetable,
             origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
         }));
     }

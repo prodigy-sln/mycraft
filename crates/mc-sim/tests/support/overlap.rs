@@ -6,7 +6,7 @@
 //! registry about every name it finds. The two share no lookup chain, so an
 //! adapter that transposed an axis, saturated a coordinate or resolved a name
 //! wrongly cannot make both of them wrong in the same direction — which is
-//! exactly what would happen if this borrowed [`SolidVoxels`](mc_sim::replay::SolidVoxels).
+//! exactly what would happen if this borrowed [`ResolvedVoxels`](mc_sim::replay::ResolvedVoxels).
 //!
 //! The box is re-derived here too, from the specification's declared constants
 //! rather than from the physics' own: half a width of 0.3 on each horizontal

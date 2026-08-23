@@ -254,17 +254,36 @@ impl DefinitionHash {
 /// unrelated reasons, and a shared byte would move every block's *behaviour* hash
 /// in every save in existence the moment the appearance list gained a field.
 ///
-/// Measured when the appearance list grew to six keys: the committed pre-spec
-/// save reports all four of its blocks `changed` under a shared byte and
-/// `retextured` under this arrangement. Those are not two shades of one answer —
-/// a non-empty `changed` **refuses the load** under
+/// Measured when the appearance list grew to six keys, **and it is a reading of
+/// that tree rather than of this one**: the committed pre-spec save reported all
+/// four of its blocks `changed` under a shared byte and `retextured` under this
+/// arrangement. Those are not two shades of one answer — a non-empty `changed`
+/// **refuses the load** under
 /// [`Acceptance::OnlyUnchangedBlocks`](super::table::Acceptance), and
 /// `retextured` never refuses at all. Unifying these turns every world saved
 /// before a retexture into a refused one.
 ///
-/// The appearance list gained five keys and says so in its own byte; the
-/// behaviour list gained nothing and its byte has not moved since the format was
-/// written. `docs/technical/world-format.md` carries the numbers.
+/// **Do not re-read that measurement against today's answer and conclude the
+/// split bought nothing.** The behaviour byte has since moved on its own account,
+/// so that same save now reports all four `changed` under *either* arrangement —
+/// the two agree today because a behaviour field really was added, which is the
+/// one circumstance in which they are supposed to agree. What the split bought is
+/// that the appearance list's two growths cost no player anything, and no later
+/// reading can recover that from a tree where both bytes have moved.
+///
+/// Both lists have now grown, one phase apart and for unrelated reasons: the
+/// appearance list gained five keys and then `drawn` and `occludes`, and the
+/// behaviour list gained `targetable`. Each move is in that list's own byte and
+/// in no other, which is the arrangement working rather than an exception to it.
+/// `docs/technical/world-format.md` carries the numbers.
+///
+/// **The behaviour byte's move is the expensive one, and it was paid
+/// deliberately.** Every block of every save written before it reports as
+/// `changed` on its next load, so every player is told the blocks they built with
+/// behave differently. That is survivable only because such a save loads and
+/// names them rather than being refused, and it is exactly why `drawn` and
+/// `occludes` are on the *other* list: routing a rendering field through this
+/// byte would buy that cost again for a change no player can act on.
 ///
 /// **Only a test that states the byte sequence can see one of these move.**
 /// Measured: leaving the appearance byte at 1 while its list grew reddens the two
@@ -272,10 +291,10 @@ impl DefinitionHash {
 /// workspace. Every other witness compares one fold to another, and that cannot
 /// see a leading byte which moved in both — so a green suite is no evidence a
 /// revision is right.
-const BEHAVIOUR_REVISION: u8 = 1;
-const APPEARANCE_REVISION: u8 = 2;
+const BEHAVIOUR_REVISION: u8 = 2;
+const APPEARANCE_REVISION: u8 = 3;
 
-/// The declared behaviour of a block, as revision 1 of this list defines it.
+/// The declared behaviour of a block, as revision 2 of this list defines it.
 ///
 /// **Written out by hand rather than derived from [`BlockDefinition`], and that
 /// is the whole of it.** A derive over that type would bind every save to a
@@ -295,6 +314,17 @@ const APPEARANCE_REVISION: u8 = 2;
 /// Defaults are resolved before a definition exists, so what is folded is the
 /// resolved value and "declared versus defaulted" is not a distinction the type
 /// can make.
+///
+/// **A new field is appended and never inserted.** The canonical encoding writes
+/// a struct positionally, so a rename costs nothing and a field placed among the
+/// existing ones moves every byte after it — every save in existence would then
+/// disagree for a reason nobody declared, and the revision byte would be
+/// reporting a change larger than the one that was made.
+///
+/// `targetable` is here rather than on the appearance list because it decides
+/// what a swing *does* to a world: it is what makes `breakable = false`
+/// reachable at all, so a block that becomes aimable is a different block to
+/// stand in front of.
 #[derive(Serialize)]
 struct DeclaredBehaviour<'a> {
     input_version: u8,
@@ -303,6 +333,7 @@ struct DeclaredBehaviour<'a> {
     replaceable: bool,
     breakable: bool,
     breaks_into: Option<&'a str>,
+    targetable: bool,
 }
 
 /// The declared appearance of a block.
@@ -327,15 +358,31 @@ struct DeclaredBehaviour<'a> {
 /// A fixed-size array rather than six named fields: the canonical encoding
 /// writes a tuple as its elements and nothing else, so the two shapes fold
 /// identically, and this one cannot have a face left out of it.
+///
+/// **`drawn` and `occludes` are appended after the keys, in that order**, for
+/// the positional reason [`DeclaredBehaviour`] records. They are on this list
+/// because a block that stopped being drawn, or stopped hiding what stands
+/// behind it, is still the same block to stand on, to build through and to
+/// break: nothing about mutating the world changes, so nothing a player has to
+/// decide about changes either.
 #[derive(Serialize)]
 struct DeclaredAppearance<'a> {
     input_version: u8,
     name: &'a str,
     textures: [&'a str; 6],
+    drawn: bool,
+    occludes: bool,
 }
 
-/// What revision 1 of the behaviour list records as `definition`'s declared
+/// What revision 2 of the behaviour list records as `definition`'s declared
 /// behaviour.
+///
+/// **Every save written before this revision reports every block it holds as
+/// `changed` on its next load**, and that is the designed cost of adding
+/// `targetable` rather than a migration defect: what a swing can find is part of
+/// what a block is, and the two records are not comparable across the move. Such
+/// a save loads and names its blocks instead of being refused, which is the only
+/// reason the cost is payable at all.
 pub(crate) fn behaviour_of(definition: &BlockDefinition) -> DefinitionHash {
     folded(&DeclaredBehaviour {
         input_version: BEHAVIOUR_REVISION,
@@ -344,24 +391,27 @@ pub(crate) fn behaviour_of(definition: &BlockDefinition) -> DefinitionHash {
         replaceable: definition.replaceable,
         breakable: definition.breakable,
         breaks_into: definition.breaks_into.as_ref().map(BlockName::as_str),
+        targetable: definition.targetable,
     })
 }
 
-/// What revision 2 of the appearance list records as `definition`'s declared
+/// What revision 3 of the appearance list records as `definition`'s declared
 /// appearance.
 ///
 /// **Every save written before this revision reports every block as retextured
 /// on its next load, and that is correct rather than a migration defect**: every
-/// block's appearance really did change, from one key to six. A retexture is
-/// loaded with nothing said about it, which is exactly why the two lists carry
-/// separate revision bytes — a byte shared between them would have turned an
-/// added texture key into a claim that every block in existence behaves
-/// differently.
+/// block's appearance really did change. A retexture is loaded with nothing said
+/// about it, which is exactly why the two lists carry separate revision bytes —
+/// a byte shared between them would have turned an added texture key, or a
+/// drawnness nobody can act on, into a claim that every block in existence
+/// behaves differently.
 pub(crate) fn appearance_of(definition: &BlockDefinition) -> DefinitionHash {
     folded(&DeclaredAppearance {
         input_version: APPEARANCE_REVISION,
         name: definition.name.as_str(),
         textures: Face::ALL.map(|face| definition.textures.at(face).as_str()),
+        drawn: definition.drawn,
+        occludes: definition.occludes,
     })
 }
 

@@ -1,34 +1,42 @@
-//! The world a simulation owns: one type, two views of it, and one private
+//! The world a simulation owns: one type, three views of it, and one private
 //! write.
 //!
-//! A block store says what is where and a bitset says what stops the player, and
-//! the whole difficulty of an editable world is that those two can fall out of
-//! step. Deriving one from the other would remove the problem outright — and was
-//! rejected for a reason worth restating here, because the alternative looks
-//! strictly simpler: the replay's overlap oracle judges the physics by
-//! re-reading the world's blocks and asking the registry about every name it
-//! finds, and it is the only assertion in the simulation that covers a whole run
-//! rather than a declared fixture. A `Solidity` that read the store through the
-//! registry would be *that identical chain*, so the one unscoped invariant the
-//! simulation has would be judging itself and would go green forever.
+//! A block store says what is where, one bitset says what stops the player and a
+//! second says what a swing can find, and the whole difficulty of an editable
+//! world is that they can fall out of step. Deriving them from the store would
+//! remove the problem outright — and was rejected for a reason worth restating
+//! here, because the alternative looks strictly simpler: the replay's overlap
+//! oracle judges the physics by re-reading the world's blocks and asking the
+//! registry about every name it finds, and it is the only assertion in the
+//! simulation that covers a whole run rather than a declared fixture. A
+//! `Solidity` that read the store through the registry would be *that identical
+//! chain*, so the one unscoped invariant the simulation has would be judging
+//! itself and would go green forever.
 //!
-//! So the two views are kept, and kept in step **structurally rather than by a
-//! calling convention**. This type owns the store, the collision view and the
-//! registry both were resolved against; **nothing outside this module can write
-//! any of the three**, and the accessors that read them hand out shared borrows,
-//! which cannot.
+//! **The two resolved views are two bits and not one, because content declares
+//! them separately.** A block may stop a player without a swing being able to
+//! find it, and may be findable while stopping nobody — the shipped water is the
+//! second — so a single bit answering both would be a game rule the engine had
+//! written on content's behalf.
 //!
-//! **Two functions write any of the three, and each settles solidity before it
-//! writes either view.** `write` is one edit; `adopt` is the whole registry
+//! So the views are kept, and kept in step **structurally rather than by a
+//! calling convention**. This type owns the store, both resolved views and the
+//! registry all of them were resolved against; **nothing outside this module can
+//! write any of them**, and the accessors that read them hand out shared
+//! borrows, which cannot.
+//!
+//! **Two functions write any of them, and each settles both answers before it
+//! writes anything.** `write` is one edit; `adopt` is the whole registry
 //! replaced by content read while the game was running. The dirty set is not one
-//! of the three and never was, which is why the marking functions beside them —
+//! of the views and never was, which is why the marking functions beside them —
 //! including a `pub` one — take nothing away from this claim.
-//! This header used to claim exactly one, and hot reload falsified it. What has
-//! not changed is what the claim was ever about: neither writes one view without
-//! the other, and neither writes anything it has not already resolved. A caller
-//! that swapped the registry and left the bitset to a later refresh would reopen
-//! the disagreement, and the overlap oracle could not see it — that oracle
-//! re-reads the world through the registry and would be agreeing with itself.
+//! This header used to claim exactly one writer, and hot reload falsified it.
+//! What has not changed is what the claim was ever about: neither writes one
+//! view without the others, and neither writes anything it has not already
+//! resolved. A caller that swapped the registry and left a bitset to a later
+//! refresh would reopen the disagreement, and the overlap oracle could not see
+//! it — that oracle re-reads the world through the registry and would be
+//! agreeing with itself.
 //!
 //! **The visibility is load-bearing.** `write` and `adopt` carry no `pub` at
 //! all, so they are visible in this module and its descendants and nowhere else
@@ -51,8 +59,8 @@ use mc_world::column::{ChunkColumn, ColumnCoordinate};
 use mc_world::section::{Contents, Section};
 use mc_world::world::{Extent, VoxelWorld, WorldError, WorldPos};
 
-use crate::player::{BlockPos, Solidity};
-use crate::replay::SolidVoxels;
+use crate::player::{BlockPos, Solidity, Targetable};
+use crate::replay::ResolvedVoxels;
 use crate::replay::prepare::{PrepareError, SectionQuads, mesh_world};
 
 use remesh::with_its_neighbours;
@@ -76,10 +84,11 @@ pub struct SectionKey {
     pub index: usize,
 }
 
-/// The blocks a simulation owns, and what the player collides with.
+/// The blocks a simulation owns, what the player collides with, and what a swing
+/// can find.
 pub struct World {
     blocks: VoxelWorld,
-    solid: SolidVoxels,
+    resolved: ResolvedVoxels,
     registry: Arc<BlockRegistry>,
     /// Which sections have been written since the last drain.
     ///
@@ -90,18 +99,18 @@ pub struct World {
 }
 
 impl World {
-    /// The world `blocks` describes, with its solidity resolved through
-    /// `registry`.
+    /// The world `blocks` describes, with what each of its voxels stops resolved
+    /// through `registry`.
     ///
     /// # Errors
     ///
     /// Returns [`RegistryError::UnknownName`] if the blocks hold a name the
     /// registry does not know.
     pub fn new(blocks: VoxelWorld, registry: Arc<BlockRegistry>) -> Result<Self, RegistryError> {
-        let solid = SolidVoxels::resolve(&blocks, &registry)?;
+        let resolved = ResolvedVoxels::resolve(&blocks, &registry)?;
         Ok(Self {
             blocks,
-            solid,
+            resolved,
             registry,
             dirty: BTreeSet::new(),
         })
@@ -139,8 +148,8 @@ impl World {
     ///
     /// All of them, in a declared order: the reload that reads this refuses a
     /// content set for every block it stopped declaring rather than for
-    /// whichever was met first. [`SolidVoxels::resolve`] stops at the first and
-    /// is not the instrument.
+    /// whichever was met first. [`ResolvedVoxels::resolve`] stops at the first
+    /// and is not the instrument.
     #[must_use]
     pub fn names_held(&self) -> BTreeSet<&BlockName> {
         self.blocks
@@ -229,16 +238,23 @@ impl World {
         self.write(cell, Contents::Holds(block))
     }
 
-    /// **The one place either view is written**, and there is no other.
+    /// **The one place any view is written**, and there is no other.
     ///
-    /// Solidity is settled *before* either write, so a name the registry does
-    /// not know refuses without having changed anything — and the store and the
-    /// bitset are then written from that one answer. Deleting either line is the
-    /// only way to make the two disagree, which is what makes a test that
-    /// notices worth having.
+    /// Both answers are settled *before* either write, so a name the registry
+    /// does not know refuses without having changed anything — and the store and
+    /// both bitsets are then written from that one resolve. Deleting any of
+    /// those lines is the only way to make the views disagree with the store,
+    /// which is what makes a test that notices worth having.
     ///
-    /// A cell being emptied settles that answer without a registry at all: there
-    /// is nothing there to stand on, and no name to look up to find that out.
+    /// **What a swing can find follows an edit, and that is settled here.** A
+    /// view built when the world was loaded and never written again answers
+    /// every question about a *declared* world correctly and every question
+    /// about an edited one wrongly, and nothing that reads a cell it has just
+    /// written can tell the two apart.
+    ///
+    /// A cell being emptied settles both answers without a registry at all:
+    /// there is nothing there to stand on, nothing for a ray to stop at, and no
+    /// name to look up to find either out.
     ///
     /// # Errors
     ///
@@ -246,35 +262,44 @@ impl World {
     /// being written, and [`WorldError::OutsideWorld`] or
     /// [`WorldError::Section`] if the store refuses the position.
     fn write(&mut self, at: WorldPos, contents: Contents<&BlockName>) -> Result<(), WorldError> {
-        let solid = match contents {
-            Contents::Empty => false,
-            Contents::Holds(block) => self.registry.resolve(block)?.is_solid,
+        let (solid, targetable) = match contents {
+            Contents::Empty => (false, false),
+            Contents::Holds(block) => {
+                let declared = self.registry.resolve(block)?;
+                (declared.is_solid, declared.targetable)
+            }
         };
         match contents {
             Contents::Empty => self.blocks.empty_at(at)?,
             Contents::Holds(block) => self.blocks.set_block(at, block, &self.registry)?,
         }
-        self.solid.set(at, solid);
+        self.resolved.set(at, solid, targetable);
         self.mark_dirty(at);
         Ok(())
     }
 
-    /// **The other place either view is written**, and there is no third.
+    /// **The other place any view is written**, and there is no third.
     ///
-    /// Replaces the registry and the solidity it implies together. Solidity is
-    /// settled first, exactly as [`write`](Self::write) settles it, so a
-    /// registry that does not know a name some cell holds refuses without having
-    /// changed anything. Leaving the bitset to a later refresh would reopen the
-    /// disagreement this module's header is about, and no oracle in the tree
-    /// could see it.
+    /// Replaces the registry and everything it implies about the world's voxels
+    /// together. Both answers are settled first, exactly as
+    /// [`write`](Self::write) settles them, so a registry that does not know a
+    /// name some cell holds refuses without having changed anything. Leaving
+    /// either view to a later refresh would reopen the disagreement this
+    /// module's header is about, and no oracle in the tree could see it.
+    ///
+    /// **Both views are replaced wholesale rather than written bit by bit**, so
+    /// there is no arrangement of this function in which one is carried over
+    /// from the registry that has stopped serving. A reload that changed only
+    /// what a swing may find writes no cell of the world, so the replacement is
+    /// the only thing that can carry that answer to the walk.
     ///
     /// # Errors
     ///
     /// Returns [`RegistryError::UnknownName`] if the blocks hold a name
     /// `registry` does not know, with this world untouched.
     fn adopt(&mut self, registry: Arc<BlockRegistry>) -> Result<(), RegistryError> {
-        let solid = SolidVoxels::resolve(&self.blocks, &registry)?;
-        self.solid = solid;
+        let resolved = ResolvedVoxels::resolve(&self.blocks, &registry)?;
+        self.resolved = resolved;
         self.registry = registry;
         Ok(())
     }
@@ -331,7 +356,20 @@ impl World {
 /// and is worth keeping true.
 impl Solidity for World {
     fn is_solid(&self, at: BlockPos) -> bool {
-        self.solid.is_solid(at)
+        self.resolved.is_solid(at)
+    }
+}
+
+/// What a swing can find is the **other bitset**, for the same reason and with
+/// one more of its own.
+///
+/// A walk that asked the registry would resolve a name per voxel along every
+/// ray, and it would have a failure to answer for on a path whose whole contract
+/// is that it is total — the walk terminates on the reach bound, which needs an
+/// answer everywhere rather than a refusal somewhere.
+impl Targetable for World {
+    fn is_targetable(&self, at: BlockPos) -> bool {
+        self.resolved.is_targetable(at)
     }
 }
 

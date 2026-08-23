@@ -11,6 +11,14 @@
 //! occlusion arrives, per-vertex, narrowing merges and changing quad counts —
 //! so that the failure lands here, before any image is compared, with the remedy
 //! in the test's own message rather than as an inscrutable golden diff.
+//!
+//! **A count is not derivable the way an area is**, which is why the two jobs
+//! cannot be made one. The mesher emits the scanline-greedy decomposition and
+//! deliberately not the fewest rectangles covering the same faces, so the count
+//! is the sweep's answer rather than the geometry's: a merger growing columns
+//! before rows would be equally correct and report a different number for
+//! identical geometry. An independent walk agreeing with it would have to repeat
+//! those ordering choices and would be a copy of its subject.
 
 use std::collections::BTreeMap;
 
@@ -25,7 +33,15 @@ use super::prepare::SectionQuads;
 /// assertions — not this number — are what say the geometry is right. Editing it
 /// to reach green is the one thing it must not be used for; see the failure
 /// message on the test that reads it.
-pub const SCENE_QUAD_COUNT: u32 = 2759;
+///
+/// **A move here does not by itself mean the goldens are stale**, and the test's
+/// message carries both branches. Merging is pixel-neutral today: texture
+/// coordinates come from a corner's own position under a repeating sampler, so
+/// the same faces cut into different rectangles produce the same frames. What a
+/// moved count means is that the *grouping* changed; whether the *visible faces*
+/// changed with it is what decides whether a re-shoot is owed, and the area
+/// assertions are what answer that.
+pub const SCENE_QUAD_COUNT: u32 = 2770;
 
 /// What one meshing of the replay world came to.
 #[derive(Debug, Clone, PartialEq, Eq)]

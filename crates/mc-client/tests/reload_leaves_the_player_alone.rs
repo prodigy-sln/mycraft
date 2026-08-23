@@ -48,14 +48,39 @@
 //! So the state is reached the way a player reaches it. The pocket is packed solid
 //! through the whole of the search, which is a world entry itself leaves the player
 //! embedded in — nothing within eight blocks is clear, so the door reports that and
-//! moves nobody. Their feet are in stone and their head is in water, which is *not*
-//! solid while the shipped content is serving: that is what leaves their eye in a
-//! cell they can aim out of, since `crates/mc-sim/src/world/action/trace.rs` gives an
-//! eye inside a solid block a target at distance zero and no face. One break
+//! moves nobody. Their feet are in stone and their head is in water. One break
 //! straight up empties the cell over their head, and the position one block up — head
 //! cell and broken cell — becomes the somewhere the wrongly-reached search would take
 //! them to. Nothing clears a player on a break, so they are still standing in stone
 //! when the refused candidate arrives.
+//!
+//! # The refused scenario states its own water rather than borrowing content's, and
+//! that is a repair rather than a preference
+//!
+//! The break above works only from an eye in a cell a ray can leave: `targeted`
+//! considers the voxel the ray starts in, at distance zero, before it steps. That
+//! used to be free — while nothing non-solid could be aimed at, an eye inside water
+//! saw straight through the cell it was in, and the fixture inherited the property
+//! from the shipped declaration without saying so.
+//!
+//! It is not free any more. Shipped water declares that a swing can find it and that
+//! it cannot be broken, so a break from inside it stops on the water the eye is in
+//! and is refused as indestructible; the ceiling is never opened and the way out
+//! never exists. **The fixture's premise was falsified by the content, which is what
+//! a borrowed premise is always exposed to.** So this scenario serves a root of its
+//! own, declaring `base:water` neither solid nor findable by a swing, and the
+//! candidate it is refused for still declares it solid — both halves of what the head
+//! cell is for, and neither of them inherited.
+//!
+//! **The water is not moved, and could not be.** The player's box spans two cells,
+//! their feet's and their head's, and the feet's must stay stone or the break frees
+//! them. The head cell is therefore the only cell in which a candidate declaring
+//! water solid traps them further, so emptying it would leave a scenario about a
+//! candidate that traps nobody — green, and no longer asking its question.
+//!
+//! That an eye inside a findable, unbreakable block can aim at nothing at all is a
+//! real defect rather than something this fixture is asserting is acceptable. It is
+//! tracked as work of its own and is not repaired here.
 
 #[path = "support/input/mod.rs"]
 mod input;
@@ -89,7 +114,7 @@ use reload_clearing::{
 use reload_trap::{
     A_SEARCH_OF, FEET_ROW, HEAD_ROW, ON_THE_FLOOR, Shape, a_client_over, a_world,
     require_a_refusal_could_have_moved_them, require_the_reload_misses, water_that_is_solid,
-    within_the_search,
+    water_that_no_swing_can_find, within_the_search,
 };
 use reload_watch::solidity_of;
 use reload_world::{ACROSS, Cell, Edit, edit, registry_of, standing_at};
@@ -154,13 +179,13 @@ fn a_reload_that_makes_a_cell_no_part_of_the_player_stands_in_solid_moves_them_n
 #[test]
 fn a_candidate_that_would_have_trapped_the_player_and_was_refused_moves_them_nowhere() -> TestResult
 {
-    let root = content_root()?;
-    let (mut client, _) = a_client_over(&root, standing_at(EMBEDDED), |registry| {
+    let root = water_the_eye_can_aim_out_of()?;
+    let (mut client, _) = a_client_over(root.path(), standing_at(EMBEDDED), |registry| {
         a_pocket_opened_at(registry, &[])
     })?;
     let broke = edit(a_break_straight_up(&mut client));
     require_a_refusal_could_have_moved_them(
-        &a_pocket_opened_at(&registry_of(&root)?.clone(), &[BROKEN_OPEN])?,
+        &a_pocket_opened_at(&registry_of(root.path())?.clone(), &[BROKEN_OPEN])?,
         client.published(),
     )?;
 
@@ -184,10 +209,13 @@ fn a_candidate_that_would_have_trapped_the_player_and_was_refused_moves_them_now
 /// The one break: aimed straight up from an eye standing in water, spent on the next
 /// tick.
 ///
-/// Their head cell is the non-solid one precisely so this is possible. An eye inside
-/// a solid block has a target at distance zero, so an embedded player whose head cell
-/// were stone could only ever break the cell they are standing in — which would let
-/// them out of the very thing this scenario needs them to be in.
+/// Their head cell is the one a ray can leave, precisely so this is possible. The
+/// walk considers the voxel it starts in before it steps, so an embedded player whose
+/// head cell stopped a ray could only ever break the cell they are standing in —
+/// which would let them out of the very thing this scenario needs them to be in.
+/// **That is a question about what a swing can find and not about solidity**, which
+/// is why the root this scenario serves declares both of water rather than leaving
+/// the second to follow the first.
 fn a_break_straight_up(client: &mut InputHarness) -> Option<EditReport> {
     client.move_pointer(0.0, AIM_AT_THE_CEILING);
     client.click(MouseButton::Left);
@@ -197,6 +225,18 @@ fn a_break_straight_up(client: &mut InputHarness) -> Option<EditReport> {
 /// A copy of the shipped root whose `water.luau` declares `base:water` solid.
 fn water_declared_solid() -> Result<ContentRoot, Box<dyn Error>> {
     restating(shipped()?, WATER_FILE, &water_that_is_solid())
+}
+
+/// A copy of the shipped root whose `water.luau` declares `base:water` neither solid
+/// nor findable by a swing — the content the refused scenario *serves*, as against
+/// the candidate it turns away.
+///
+/// The two differ in that one word: what this root serves is a block a ray passes
+/// through, and what the candidate declares is a block that stops a player. Both are
+/// what the head cell is for, and this scenario now states each rather than inheriting
+/// either.
+fn water_the_eye_can_aim_out_of() -> Result<ContentRoot, Box<dyn Error>> {
+    restating(shipped()?, WATER_FILE, &water_that_no_swing_can_find())
 }
 
 /// The same, also stopping declaring `base:grass` — which the floor holds, so the
@@ -244,6 +284,13 @@ fn a_floor(registry: &BlockRegistry) -> Result<VoxelWorld, Box<dyn Error>> {
 /// same cell. It is what the refused candidate would make solid, so the candidate
 /// really is one that would have trapped them further; and it leaves their eye in a
 /// cell they can aim out of.
+///
+/// **Only the first of those follows from water being water.** The second is a
+/// property of the root the scenario serves — see this file's header — and used to be
+/// inherited from the shipped declaration until that declaration made water findable
+/// by a swing. Neither reason may be taken away: the box spans the feet's cell and
+/// the head's, the feet's must stay stone, so this is the only cell where a candidate
+/// declaring water solid traps them further.
 ///
 /// The player is stable in it — a box overlapping a block is resolved back onto the
 /// face below it, not pushed out — so no tick moves them and the readings are of the

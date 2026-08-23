@@ -48,9 +48,9 @@ const ACCEPTING: Acceptance = Acceptance::OnlyUnchangedBlocks;
 
 /// The block column the player spawns over, how far above that column's own
 /// surface height the feet start, and which way they face, in degrees.
-const SPAWN_COLUMN: (u32, u32) = (32, 32);
+const SPAWN_COLUMN: (u32, u32) = (63, 35);
 const SPAWN_ABOVE_SURFACE: u32 = 3;
-const SPAWN_YAW_DEGREES: f32 = 225.0;
+const SPAWN_YAW_DEGREES: f32 = 230.0;
 
 /// How high a column reaches, in blocks — the top of the range the oracle below
 /// searches downward from.

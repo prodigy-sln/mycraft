@@ -47,6 +47,40 @@ the whole workspace already passed the day it went in — so it never needed a g
 failure here is always something introduced rather than something inherited. Verified to bite by
 planting an unresolved link (rustdoc exits 101) and reverting by hand.
 
+**`-D warnings` also brings a second lint, and it is the one that has actually bitten — twice.**
+`rustdoc::private_intra_doc_links` fires when a **public** item's documentation links a **private**
+one. That is not a broken link: the target exists, it is right there in the same file, and the
+mental model "the target resolves, so the link is fine" is exactly what fails. It caught a
+`mc-render` doc comment once and `mesh_section` pointing at the private `visible_face` later, in a
+different crate months apart. **The repair is never `#[allow]`** — the lint is reporting a real
+documentation defect, because a public API's docs that send an external reader to a private function
+have failed that reader whether or not rustdoc complains. Inline what the public reader needs and
+leave the fuller explanation on the private item.
+
+### Reading a gate's verdict, and what it costs to run one
+
+**A gate's verdict is readable only from its log.** Two other things look like verdicts and are not:
+
+- **A background task's exit code belongs to whatever command ran last.** A failing gate once arrived
+  reported as *"completed (exit code 0)"* because a trailing `echo` followed it in the wrapper. The
+  fix is to make the gate the last command in whatever launches it, which was confirmed to restore a
+  correct *"failed with exit code 1"* — but it is a mitigation rather than a guarantee, and the next
+  person to wrap the script reintroduces the trap silently.
+- **A pattern match on the script's own banner is encoding-dependent.** A watcher matching `FAILED — `
+  never fired against a log rendering `FAILED - `, and the surrounding rule of box-drawing characters
+  arrives mangled through console encoding. Match on nothing decorative.
+
+Three gate finishes in one spec went unreported for these reasons and were recovered by reading the
+log directly. Check the log's mtime if in doubt about whether a run is still going, and note that the
+process to look for is `pwsh`, not `powershell.exe`.
+
+**A full gate is a fifteen-minute job that saturates every core**, of which roughly two minutes is
+tests; a repeated-sample measurement is far longer. On a workstation somebody is using, that is not a
+background detail — an instrumented workspace run has made a developer's machine unusable, capturing
+the mouse and pinning the CPU. **Ask before starting one on a machine you are sharing, and kill the
+driver along with the workers if you have to stop it**: terminating `cargo`, `rustc` and `llvm-cov`
+leaves the loop that launched them alive, and it starts the next iteration.
+
 ### The two art stages, and the one exception to "every stage runs"
 
 The base game's texture set is derived from `content/base/textures.toml` by `voxforge build`
@@ -725,9 +759,9 @@ it is held by the file's own doc comments and by review, the same lesson as the 
 above. Over the declared replay, the same independence rule holds at world scale:
 `crates/mc-sim/tests/support/overlap.rs` re-derives whether the player's box overlaps a solid voxel
 from the world's own per-voxel accessor and the registry, sharing no lookup chain with the physics'
-own resolved `SolidVoxels` bitset — an adapter that transposed an axis, saturated a coordinate or
+own resolved `ResolvedVoxels` bitsets — an adapter that transposed an axis, saturated a coordinate or
 resolved a name wrongly cannot make both sides wrong the same way, which is exactly what would
-happen if the invariant borrowed `SolidVoxels` itself. A resting height is checked the same way:
+happen if the invariant borrowed `ResolvedVoxels` itself. A resting height is checked the same way:
 against `surface_height(x, z) + 1`, read from the world's heightmap at the position the player
 actually stopped, never against a coordinate committed from a run of the code under test.
 
@@ -860,12 +894,34 @@ entries are what matter.**
 ### Assertions that are unfalsifiable alone and load-bearing together
 
 `crates/mc-world/tests/mesh_properties.rs` asserts three properties over
-generated sections: no emitted quad adjoins a solid voxel; every visible
-(solid voxel, facing) pair is covered; no two quads cover the same pair. The
-middle two are **satisfied by an over-covering mesher** and read as vacuous
-in isolation — they are falsifiable only as a trio with the first. Recorded
-here so a future reviewer meeting one of them alone does not delete it as
-dead weight; the unit of judgement is the set, not the test function.
+generated sections: every face a quad covers is one an independent scan finds
+visible; every face that scan finds visible is covered by some quad; no two
+quads cover the same face. Together they are the **exact partition** that is
+this project's only witness for merge shape — see the four reaches under
+"The scene contract" below. The middle two are **satisfied by an over-covering
+mesher** and read as vacuous in isolation — they are falsifiable only as a
+trio with the first. Recorded here so a future reviewer meeting one of them
+alone does not delete it as dead weight; the unit of judgement is the set, not
+the test function.
+
+**The scan asks a different question from the mesher, and the pool is what makes
+the two answers agree.** The scan asks `Section::is_solid_at` of the voxel and of
+whatever is beyond it, through its own six sides and its own neighbour lookups.
+The mesher asks three questions — is the voxel `drawn`, does what is beyond it
+fail to `occlude`, and are they different blocks. The generated pool declares
+`solid` per block and lets `drawn` and `occludes` fall out of the loader's
+default, so over this content the first two coincide with solidity and the third
+never decides anything: occlusion culls first every time, exactly as it did for
+all shipped content before water became drawn.
+
+That is what these properties are pinned over, and it is worth saying plainly
+because it bounds them. **They witness the partition, not the predicate** — the
+predicate is graded by hand-built fixtures (`mesh_declared_drawnness.rs`,
+`mesh_declared_occlusion.rs`, `mesh_same_kind.rs`) where the three questions are
+deliberately made to disagree. Whoever widens the pool so that `drawn`,
+`occludes` and `solid` come apart must move the scan onto the same three
+questions in the same commit, or the two sides stop being comparable and the
+properties go vacuous rather than red.
 
 Those property tests run at ~32 `proptest` cases rather than the default
 256. Each case meshes a section against up to six generated neighbours and
@@ -1214,10 +1270,53 @@ assertions first, never waived; the snapshot only after they pass.
   missing landmark fails, and it costs nothing.
 - **A labelled change-detection snapshot.** The scene's quad count is a committed snapshot and says
   so: it verifies nothing, and its only job is to **fail first** — before any image comparison — the
-  moment the mesh contract moves. On the day ambient occlusion narrows the merge predicate, every
-  area assertion above still holds while the quad count changes, so this is the test that speaks, and
-  its message names the remedy: bump the scene revision, delete the previous revision's golden
-  directories, re-shoot under the opt-in, justify it in the commit.
+  moment the mesh contract moves. Every area assertion above still holds while the quad count
+  changes, so this is the test that speaks. **Its message names two remedies and makes the reader
+  choose**, which is the correction below: bumping the scene revision and re-shooting is right for a
+  change that moves pixels and is churn for one that does not.
+
+#### Four instruments guard the mesh, and they have four different reaches
+
+Written out because the reaches are not obvious from any one of them, and because the
+attractive wrong answer — that the goldens witness merge shape — was proposed, measured
+and refuted while this spec was being validated.
+
+| Instrument | What it sees | Where |
+|---|---|---|
+| **Area** | *which faces are visible*, in aggregate and per block name | the independent per-voxel walk above, plus the arithmetic per-direction figures |
+| **Merge shape** | the quads being an **exact partition** of the visible-face set, per face and per position | `crates/mc-world/tests/mesh_properties.rs` |
+| **What the camera sees** | the pixels the declared captures actually produce | the golden set |
+| **The quad count** | a *count* moving, and nothing else | the committed tripwire |
+
+**The merge-shape instrument is the property tests, not the goldens, and a re-partition
+is pixel-neutral by design.** A packed terrain vertex carries no field derived from a
+quad's extent; texture coordinates come from a corner's own section-local position; the
+terrain sampler is `AddressMode::Repeat` on all three axes. So one 4×1 quad and four 1×1
+quads emit the same texels at the same depths, and the goldens are compared perceptually
+against a disagreement budget besides — they could not see the difference if there were
+one. The codebase already said so in a failure message before anybody asked: two quads
+overlapping is *"invisible in a count of covered area and invisible in a rendered frame"*.
+
+**The exact partition is strictly stronger than any area sum**, because it catches a face
+relocated with its area preserved, which a sum cannot see.
+
+**So a merge change is one of two things and there is no third.** Either it keeps the
+partition — then it is area-neutral and pixel-neutral by construction and observable only
+as a count: not a defect, but a strategy change somebody owes an explanation for, which is
+exactly what the tripwire extracts. Or it breaks the partition — then the property tests
+redden directly and name the face. There is no case in which something a stakeholder can
+observe changes and nothing reports it.
+
+**The day merge shape becomes visible, the goldens join the list.** Ambient occlusion is
+per-vertex, and PRO-952's translucency makes interior faces matter; either turns the
+tripwire's message about stale goldens from conditionally true into literally true. That
+is the day, and only that day.
+
+**One reach limit, recorded rather than left to be discovered.** The merge-shape
+instrument witnesses the *partition*, not the *predicate*: its generated pool declares
+only `solid`, and the scan it compares against asks solidity on both sides. §"Assertions
+that are unfalsifiable alone and load-bearing together" above sets out what that bounds
+and what a future widening owes.
 - **The inventory test** then asserts `crates/mc-render/goldens/` holds exactly the capture ids the
   current scene revision produces. A bumped revision *renames* the directories, so the orphaned
   previous set fails the gate until it is deleted and the commit shows added and removed PNGs rather
@@ -1237,8 +1336,9 @@ ids. Not taken: what remains is a one-line edit beside an explanatory comment, w
 See `technical/rendering.md` for the orientation and pixel-format contract this harness asserts —
 recorded there once, not repeated here, because it binds every future caller of draw work, not only
 this harness. That file also carries a warning any future golden of rendered terrain depends on:
-adding ambient occlusion narrows the mesher's merge predicate and changes quad counts, so every
-golden captured against today's mesh is invalidated when AO arrives.
+every golden captured against today's mesh is invalidated when AO arrives. **Because AO shades
+corners** — it also narrows the merge predicate and changes quad counts, but the narrowing on its own
+would move no pixel, per the four reaches above.
 
 ### Multiplayer — bot clients
 
@@ -2219,7 +2319,10 @@ treat a consumer that cannot falsify as a finding to record rather than a scenar
 mutation is spelled against a *specific value*, check that the value can bite: refilling empty space
 with a **non-solid** block emits no quad and leaves every rendering scenario green, so the same
 mutation spelled against a solid block is the one that grades four scenarios instead of two. A single
-row claiming both spellings would claim four falsifiers and deliver two.
+row claiming both spellings would claim four falsifiers and deliver two. (The mesher reads `drawn`
+rather than `is_solid` now; a block declaring `solid = false` and nothing else is still undrawn,
+because `drawn` defaults to it — so this reading survives, by the default rather than by the
+predicate. One declaring `solid = false, drawn = true` would bite.)
 
 **A third rule, from the same family and a different instrument: a caller search cannot see an
 unexercised branch inside a function that *is* called.** A claim that "nothing runs this code" was
@@ -2526,6 +2629,48 @@ that quotes a program line would come under the same comparison, and several quo
 lines no fixture produces. The hole is small, one-directional and recorded; whichever
 spec next touches that walk should decide it deliberately rather than by widening a
 constant.
+
+**The narrower and more expensive limit is that even inside the walk, only fenced
+`mycraft: ` blocks are held — the prose around them is checked by nothing.** That is
+easy to read as a smaller claim than it is. Everything a page asserts *about* the
+program in sentences — how many fields a fold covers, which revision a format is at,
+which block a report names and why — is unguarded on **every** page, the scanned ones
+included. A guard whose subject is an artefact can only ever hold the artefact.
+
+The map, so nobody has to infer it:
+
+| Under | Held by | What is held |
+|---|---|---|
+| `docs/modding/` | the guard above | fenced `mycraft: ` blocks, line for line |
+| `docs/user/`, `docs/technical/`, `docs/ops/`, `docs/planning/` | nothing | — |
+| every page, prose | nothing | — |
+
+**Measured on the spec that split `solid` into declared drawnness, occlusion and
+targetability**, which moved both of the save format's revision bytes and so
+falsified documentation broadly: thirteen sites across four pages needed changing,
+and **three of them were gate-visible.** The other ten were prose — field counts, a
+revision number, two whole player-facing sections asserting the opposite of what had
+become true — and every one of them was found by reading, not by any instrument. Two
+of the three visible ones, meanwhile, turned out to be **correct as they stood** and
+had to be defended rather than fixed: a mechanical sweep that rewrote every quoted
+line to match the new answer would have broken them.
+
+Three consequences worth carrying:
+
+- **A doc sweep's provenance matters more than its result.** State the greps and
+  their scope, because a reader cannot otherwise tell a page that was checked from a
+  page that was skipped — and a sweep reporting only what it changed cannot be
+  audited at all. Report what was examined and deliberately left alone.
+- **A mechanical sweep is as dangerous as a missing one.** With ten of thirteen
+  invisible, nothing would have reported a correct sentence rewritten into a wrong
+  one. Both directions are unchecked.
+- **`docs/` is a second index of what exists, and the place a previous decision was
+  written down.** Three times over that one spec, a page already recorded what a task
+  list did not: which files build a byte sequence by hand, that fenced blocks are
+  compared against a real run, and — in this very section — that quoting a text the
+  run does not produce fails the guard rather than covering it. When a change touches
+  something, read what the documentation says *about* that thing before trusting any
+  enumeration of it, including your own.
 
 **A substring assertion cannot see rendering, and that is how a malformed refusal
 shipped.** The declared-text bound's own test asks whether both quantities are

@@ -117,7 +117,12 @@ const PATIENCE: Duration = Duration::from_secs(20);
 /// A fragment rather than the whole sentence: waiting for the exact text would
 /// make a *wrong* line indistinguishable from no line at all, and the failure
 /// message could then not show what was actually written.
-const THE_CLAUSE: &str = "no longer behaves";
+///
+/// **Short of the verb's ending on purpose.** The line reads `behaves` for one
+/// block and `behave` for more than one, so a fragment carrying the `s` waits
+/// forever on the plural line the run below actually produces — and a wait that
+/// times out is reported as the client never printing.
+const THE_CLAUSE: &str = "no longer behave";
 
 /// The whole line the child has to write, for the save and content below.
 ///
@@ -125,8 +130,9 @@ const THE_CLAUSE: &str = "no longer behaves";
 /// `notice_test.rs`'s rule: what a player reads is the artefact, and a test that
 /// assembled it the way the client does would agree with the client about a
 /// rewording neither of them noticed.
-const NAMES_WATER: &str = "mycraft: `base:water` no longer behaves as it did when this world was \
-                           saved, and it was loaded anyway";
+const NAMES_ALL_FOUR: &str = "mycraft: `base:dirt`, `base:grass`, `base:stone`, `base:water` no \
+                              longer behave as they did when this world was saved, and it was \
+                              loaded anyway";
 
 /// The save the child is given, relative to the repository root: written before
 /// this repository's blocks were Luau, and never regenerated.
@@ -143,8 +149,10 @@ const OLDER_SAVE: [&str; 5] = [
 const CONTENT: [&str; 2] = ["content", "base"];
 const SAVE: [&str; 2] = ["saves", "world.mcw"];
 
-/// The block the committed save and the shipped content disagree about.
-const THE_CHANGED_BLOCK: &str = "base:water";
+/// The blocks the committed save and the shipped content disagree about,
+/// ascending — which is every block the save holds, because the list a behaviour
+/// fold goes over has grown since it was written.
+const THE_CHANGED_BLOCKS: [&str; 4] = ["base:dirt", "base:grass", "base:stone", "base:water"];
 
 /// What a player types to have such a save refused rather than loaded.
 ///
@@ -205,7 +213,7 @@ fn the_shipped_binary_started_away_from_its_content_says_why_on_its_error_stream
 }
 
 #[test]
-fn the_shipped_binary_over_a_save_whose_block_behaves_differently_names_it_on_its_error_stream()
+fn the_shipped_binary_over_a_save_whose_blocks_behave_differently_names_them_on_its_error_stream()
 -> TestResult {
     let game = a_game_directory_holding_the_older_save()?;
 
@@ -213,7 +221,7 @@ fn the_shipped_binary_over_a_save_whose_block_behaves_differently_names_it_on_it
 
     assert_eq!(
         found.as_deref(),
-        Some(NAMES_WATER),
+        Some(NAMES_ALL_FOUR),
         "the built binary — not a library call — has to reach the saying and write the whole line \
          to the stream a player reads notices on. A client that composes the sentence and never \
          says it out loud is what this reading exists for, and every other test of that line stays \
@@ -299,7 +307,7 @@ fn the_shipped_binary_told_to_refuse_a_changed_save_leaves_it_shut_and_says_why(
         Answered::RefusedNamingTheBlockAndTheWayOut,
         "a player who passed `{REFUSE_CHANGED_BLOCKS}` asked for a world whose blocks have moved to \
          be left shut, and this is the only reading in the workspace that grades whether the \
-         *process* honoured them. It has to name `{THE_CHANGED_BLOCK}`, end with the argument to \
+         *process* honoured them. It has to name {THE_CHANGED_BLOCKS:?}, end with the argument to \
          drop, and exit with a status a shell can act on. `LoadedAndNamedTheBlockAsANotice` is the \
          argument reaching no decision, which no library-level reading can see; \
          `NeverGotAsFarAsReadingTheSave` on a machine with no device is this reading being unable \
@@ -426,13 +434,16 @@ fn line_by_line(everything: &[String]) -> String {
 ///
 /// # Errors
 ///
-/// Returns an error if the changed block's name is not a namespaced id.
+/// Returns an error if a changed block's name is not a namespaced id.
 fn the_refusal_a_shut_world_reads() -> Result<String, Box<dyn Error>> {
     let refused = PreparationError::Launch(LaunchError::Load {
         save: SAVE.iter().collect(),
         source: Box::new(LoadError::Unresolvable {
             missing: Vec::new(),
-            changed: vec![BlockName::parse(THE_CHANGED_BLOCK)?],
+            changed: THE_CHANGED_BLOCKS
+                .iter()
+                .map(|name| BlockName::parse(name))
+                .collect::<Result<Vec<_>, _>>()?,
         }),
     });
     Ok(format!(

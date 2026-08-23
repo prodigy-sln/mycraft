@@ -16,6 +16,7 @@ mod trace;
 use glam::Vec3;
 use mc_core::block::{BlockId, BlockRegistry, RegistryError};
 use mc_core::id::BlockName;
+use mc_world::mesh::Facing;
 use mc_world::section::Contents;
 use mc_world::world::WorldError;
 
@@ -90,7 +91,7 @@ pub enum EditReport {
 /// there is no second comparison. So "nothing is there" and "something is there
 /// but it is too far" arrive at the same place, and telling them apart would
 /// need a search *past* the reach — the unbounded traversal that does not
-/// terminate, because `Solidity` is total. Both are [`Refusal::NoTarget`].
+/// terminate, because `Targetable` is total. Both are [`Refusal::NoTarget`].
 ///
 /// **There is deliberately no `NotSolid` either.** A place naming a block that
 /// is not solid used to be refused outright, which made water unplaceable; the
@@ -100,8 +101,8 @@ pub enum EditReport {
 /// *anything*, air included.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
-    /// Nothing solid lies along the look direction inside the reach — including
-    /// the case where something solid lies just past it.
+    /// Nothing a ray may stop at lies along the look direction inside the reach
+    /// — including the case where something does lie just past it.
     NoTarget,
     /// The ray began inside the block it met, so there is no face to place
     /// against and no cell the placement could be meant for.
@@ -110,22 +111,19 @@ pub enum Refusal {
     NoFace,
     /// Content declares this block cannot be broken.
     ///
-    /// **Unreachable for a block content declares non-solid, and the shipped
-    /// content has one.** [`targeted`] returns a hit only where `is_solid`
-    /// answers true, so the walk steps through a non-solid cell and `broken` is
-    /// never called on it. `base:water` declares
-    /// `solid = false` and `breakable = false`, and a swing at a water cell
-    /// empties whatever solid block stands behind it — measured in
-    /// `crates/mc-sim/tests/shipped_water_is_not_broken_and_is_built_through.rs`,
-    /// which reddens the day that stops being true.
+    /// **Reachable for the shipped content, and only because aiming is its own
+    /// declaration.** [`targeted`] returns a hit where `is_targetable` answers
+    /// true, and `base:water` declares `targetable = true` beside
+    /// `breakable = false` — so a swing arrives at a water cell, `broken` is
+    /// called on it, and this is what a player meets.
     ///
-    /// **Splitting `solid` into drawn, occludes and targetable makes this live.**
-    /// The moment a non-solid block can be targeted, `broken` is called on one for
-    /// the first time and `breakable = false` acquires a player-visible
-    /// consequence it does not have today. Whoever makes that split owes the
-    /// scenario that cannot be written now: a break swung at water is refused and
-    /// leaves the water in the cell. It is recorded here rather than in a spec
-    /// folder because this is where somebody changing targetability reads.
+    /// **Aiming and yielding are separate claims, and that is the whole of why
+    /// this variant exists at all.** While a walk stopped at the first *solid*
+    /// cell, water's `breakable = false` refused nothing: the swing went through
+    /// it and emptied whatever stood behind, so the declaration said what water
+    /// was without ever stopping anything. A block declaring `targetable = false`
+    /// puts it back in that state, whatever it says about breaking — the refusal
+    /// is only reachable because the swing arrives.
     Indestructible,
     /// The cell the placement would land in holds a block content does not
     /// declare replaceable.
@@ -191,10 +189,10 @@ fn broken(cell: BlockPos, world: &mut World) -> EditReport {
     // would make the collapse invisible in the report.
     let broken = match world.block_at(cell) {
         None => return EditReport::Refused(Refusal::NoTarget),
-        // The walk stops only at a solid cell and an empty cell is not solid, so
-        // nothing reaches this. It keeps its own arm so that a break that ever
-        // did reach an empty cell refuses rather than being read as a cell the
-        // world does not have.
+        // The walk stops only where a block declares a ray may, and an empty
+        // cell holds no block to declare anything, so nothing reaches this. It
+        // keeps its own arm so that a break that ever did reach an empty cell
+        // refuses rather than being read as a cell the world does not have.
         Some(Contents::Empty) => return EditReport::Refused(Refusal::NoTarget),
         Some(Contents::Holds(name)) => name.clone(),
     };
@@ -222,19 +220,27 @@ fn broken(cell: BlockPos, world: &mut World) -> EditReport {
 
 /// What placing `block` against the face `hit` came in through does.
 ///
-/// **The cell is the one the ray came from**, one step back through the face it
-/// entered by — so a placement lands on the near side of what you are looking
-/// at, never inside it and never behind it.
+/// **The cell is [`landing`]'s**, which is ordinarily the one the ray came from
+/// — one step back through the face it entered by, so a placement goes on the
+/// near side of what you are looking at rather than inside it.
 ///
 /// The four refusals below are asked in the order they are written, and each
 /// answers before anything is written. Their order is what a report says when
 /// more than one applies, and the one thing it must not do is let a rule's
 /// refusal arrive under another rule's name.
+///
+/// **Choosing a different cell is not licence to skip a question asked about
+/// it.** Every check below reads whatever cell was chosen, so a placement aimed
+/// at a replaceable cell the player is standing in is refused as
+/// [`InsidePlayer`](Refusal::InsidePlayer) exactly as any other would be.
 fn placed(hit: &Hit, block: &BlockName, player: &PlayerState, world: &mut World) -> EditReport {
     let Some(face) = hit.face else {
         return EditReport::Refused(Refusal::NoFace);
     };
-    let cell = stepped(hit.cell, face);
+    let cell = match landing(hit.cell, face, world) {
+        Ok(cell) => cell,
+        Err(refused) => return EditReport::Refused(refused),
+    };
     if let Err(refused) = world.registry().resolve(block) {
         return EditReport::Refused(unresolved(block, refused));
     }
@@ -244,6 +250,15 @@ fn placed(hit: &Hit, block: &BlockName, player: &PlayerState, world: &mut World)
     if occupies(player.position, cell) {
         return EditReport::Refused(Refusal::InsidePlayer);
     }
+    written_into(cell, block, world)
+}
+
+/// Puts `block` in `cell` and says what that replaced.
+///
+/// Separated from the rules above because it is the write and nothing else:
+/// every question about whether the placement is allowed has been answered by
+/// the time this is reached, and what is left is the store's own refusals.
+fn written_into(cell: BlockPos, block: &BlockName, world: &mut World) -> EditReport {
     // Both ways out of the world under one name: a negative cell has no unsigned
     // position to be stored at, and a cell past the far edge is one the world
     // does not reach. That is one thing a caller asked about, so it answers with
@@ -264,6 +279,48 @@ fn placed(hit: &Hit, block: &BlockName, player: &PlayerState, world: &mut World)
             to: Contents::Holds(block.clone()),
         },
         Err(refused) => EditReport::Refused(outside_or_storage(cell, refused)),
+    }
+}
+
+/// The cell a placement aimed at `hit` lands in.
+///
+/// **Ordinarily one step back through `face`**, the face the ray entered `hit`
+/// by, so a block goes on the near side of what you are looking at.
+///
+/// **The exception is a cell holding a block content declares `replaceable`,
+/// which is built *into* rather than against — and it has to be, because
+/// otherwise no ray could land a block in such a cell at all.** The cell one
+/// step back is the cell the ray occupied immediately before it stopped, and had
+/// that cell held something replaceable the walk would have stopped there
+/// instead. Without this the only remaining case is a ray beginning inside the
+/// cell, which has no entry face and is refused above.
+///
+/// **Read from what content declared, never from which block it is.** The rule
+/// is about `replaceable` and knows no name; a name here would be a game rule
+/// written into the engine that content could not override, which invariant 1
+/// forbids. Nothing shipped could reach this branch before what a swing may find
+/// became its own declaration: `base:water` is the only block content ships that
+/// declares `replaceable`, and until it declared `targetable` no ray stopped at
+/// it.
+///
+/// # Errors
+///
+/// Returns [`Refusal::Storage`] if the registry cannot answer for the block the
+/// hit cell holds. Unreachable through a world resolved against its own registry
+/// — both write doors refuse a name it does not know — and reported rather than
+/// swallowed for the reason [`overwritable`] reports the same thing: a decision
+/// taken on an answer nobody got is how the wrong cell gets built into.
+fn landing(hit: BlockPos, face: Facing, world: &World) -> Result<BlockPos, Refusal> {
+    // Three arms and never two. A cell the world does not reach and a cell
+    // holding nothing are separate facts, and neither is a cell content declared
+    // anything about — so a placement against either lands where it always did.
+    match world.block_at(hit) {
+        None | Some(Contents::Empty) => Ok(stepped(hit, face)),
+        Some(Contents::Holds(held)) => match world.registry().resolve(held) {
+            Ok(declared) if declared.replaceable => Ok(hit),
+            Ok(_) => Ok(stepped(hit, face)),
+            Err(refused) => Err(Refusal::Storage(refused.into())),
+        },
     }
 }
 
@@ -337,6 +394,14 @@ fn outside_or_storage(cell: BlockPos, refused: WorldError) -> Refusal {
 /// It lives here rather than in the client because it is a policy, and the
 /// client carries none. `None` means the registry holds no solid block at all,
 /// which is a content pack a client can place nothing in.
+///
+/// **It reads `is_solid` and went on reading it when that bit was split into
+/// what is drawn, what occludes and what a ray may stop at — deliberately, and
+/// this is the fourth consumer of the old bit answered rather than left to fall
+/// out.** A held block is one you place to build with, and building means an
+/// obstacle. A registry declaring nothing but blocks that stop nobody offers no
+/// held block here **even where some of them are drawn**, which is what says the
+/// question being asked is collision and not visibility.
 #[must_use]
 pub fn default_held_block(registry: &BlockRegistry) -> Option<BlockName> {
     (0..registry.registered_count())

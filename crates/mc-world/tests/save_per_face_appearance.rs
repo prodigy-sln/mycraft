@@ -11,13 +11,38 @@
 //! # The expected value is built here, byte by byte, and never copied
 //!
 //! The appearance is the format's own field list — a revision byte, the block's
-//! name, then its six keys in the order `up`, `down`, `north`, `south`, `east`,
-//! `west` — each variable-length field carrying its own length in front of it, so
-//! that `("ab", "c")` and `("a", "bc")` cannot fold identically. The fold is
+//! name, its six keys in the order `up`, `down`, `north`, `south`, `east`,
+//! `west`, and then whether the block is drawn and whether it occludes — each
+//! variable-length field carrying its own length in front of it, so that
+//! `("ab", "c")` and `("a", "bc")` cannot fold identically. The fold is
 //! FNV-1a-64 from the published constants, written out again here. **No number in
 //! this file came from a run of the code under test, and nothing here calls the
 //! fold it is judging**: a test calling the function under test is agreement
 //! between two copies of one decision.
+//!
+//! # The two flags are appended after the keys, and the fixture is what can see
+//! their order
+//!
+//! `drawn` and `occludes` are appearance because a block that stopped being drawn
+//! is still the same block to stand on. They are *appended* because the canonical
+//! encoding writes a struct positionally, so a field placed among the existing
+//! ones moves every byte after it.
+//!
+//! **The fixture below states the two differently, and that is the whole of what
+//! makes their order visible here.** A block stating them alike folds the same
+//! two bytes whichever way round they are written, so a fold that emitted
+//! `occludes` first, or emitted one of them twice, or answered from a constant
+//! rather than from the declaration, agrees with such a fixture exactly. Drawn
+//! and see-through is a real combination and not a contrivance built to break a
+//! tie: it is what a pane of glass is, and what `base:water` is.
+//!
+//! The other witness for that order is `base:water` itself, in
+//! `src/persistence/format_test.rs` — the one *shipped* block whose two flags
+//! disagree. Two witnesses and not one, because that one is a fact about the base
+//! game's current opinion rather than about the format: the day anybody declares
+//! water's `drawn` and `occludes` alike, or stops shipping water, it goes silent
+//! without failing. This fixture cannot, because nothing outside this file
+//! decides what it says.
 //!
 //! Sixty-four bits over sixty-odd bytes is not something a person derives on
 //! paper, so what is derived is the **relation** — a recorded hash equals what the
@@ -80,9 +105,28 @@ const A_DIFFERENT_NORTH: &str = "fixture:andesite_reworked";
 /// Written out here rather than read from the format, so that a revision bumped
 /// without the fields changing is a disagreement rather than a change both sides
 /// make together. It is the appearance list's own revision and not the behaviour
-/// list's: a block's recorded behaviour is unchanged by this feature, and a single
-/// number shared between the two lists would move it.
-const STATED_APPEARANCE_REVISION: u8 = 2;
+/// list's, and the two are different numbers: a single number shared between the
+/// two lists would report every block in every save as behaving differently the
+/// moment a texture key or a rendering flag joined this one.
+const STATED_APPEARANCE_REVISION: u8 = 3;
+
+/// What the fixture block declares about being seen, stated once and read by both
+/// the declaration and the oracle.
+///
+/// **The two are deliberately unequal**, which is what lets the byte sequence
+/// below see them transposed, see one of them folded twice, and see a fold that
+/// answers `true` from a constant instead of from the declaration. See the module
+/// header for why that job is this fixture's rather than a shipped block's.
+///
+/// One constant per flag rather than a literal in each place: two literals that
+/// drifted apart would leave the oracle folding a block the fixture never
+/// declared, and the comparison would fail for a reason that is about neither.
+const DRAWN: bool = true;
+const OCCLUDES: bool = false;
+
+/// How the canonical encoding writes a `bool`.
+const FALSE_BYTE: u8 = 0x00;
+const TRUE_BYTE: u8 = 0x01;
 
 /// Where an FNV-1a 64 fold starts, and what it multiplies by.
 ///
@@ -135,6 +179,9 @@ fn registry_texturing(keys: [&str; 6]) -> Result<BlockRegistry, Box<dyn Error>> 
         replaceable: false,
         breakable: true,
         breaks_into: None,
+        drawn: DRAWN,
+        occludes: OCCLUDES,
+        targetable: true,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
     })];
     let mut registry = BlockRegistry::new();
@@ -174,14 +221,23 @@ fn six_keys_with_north(key: &'static str) -> [&'static str; 6] {
 }
 
 /// The bytes the format states a block's declared appearance is: the revision,
-/// the name, then the six keys in the order the six words are written.
+/// the name, the six keys in the order the six words are written, and then the
+/// two flags that say whether the block is drawn and whether it hides what is
+/// behind it.
 fn stated_appearance_bytes(name: &str, keys: [&str; 6]) -> Vec<u8> {
     let mut stated = vec![STATED_APPEARANCE_REVISION];
     push_text(&mut stated, name);
     for key in keys {
         push_text(&mut stated, key);
     }
+    push_flag(&mut stated, DRAWN);
+    push_flag(&mut stated, OCCLUDES);
     stated
+}
+
+/// `flag` as the canonical encoding writes it.
+fn push_flag(stated: &mut Vec<u8>, flag: bool) {
+    stated.push(if flag { TRUE_BYTE } else { FALSE_BYTE });
 }
 
 /// `text` as the canonical encoding writes it: its length, then its bytes.
@@ -250,7 +306,9 @@ fn an_unchanged_declaration_records_the_appearance_the_stated_byte_sequence_fold
          with FNV-1a-64, and this is that same fold arrived at without calling it. The standard \
          library's hasher is unspecified and moves with the toolchain, so a save written with it \
          would report every block as changed after an unrelated compiler upgrade — a report a \
-         player cannot act on and learns to ignore"
+         player cannot act on and learns to ignore. **The fixture is drawn and see-through, so \
+         this comparison also grades the order of the two flags**: a fold emitting `occludes` \
+         first agrees with every block that states them alike and disagrees here"
     );
     Ok(())
 }

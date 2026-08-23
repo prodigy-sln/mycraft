@@ -84,6 +84,9 @@ fn foreign_registry() -> Result<BlockRegistry, Box<dyn Error>> {
         replaceable: false,
         breakable: true,
         breaks_into: None,
+        drawn: true,
+        occludes: true,
+        targetable: true,
         origin: origin.clone(),
     };
     let mut registry = BlockRegistry::new();

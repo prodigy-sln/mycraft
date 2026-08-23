@@ -93,6 +93,27 @@ pub trait Solidity {
     fn is_solid(&self, at: BlockPos) -> bool;
 }
 
+/// Whether a ray may stop at a voxel.
+///
+/// **A second narrow trait rather than a second method on [`Solidity`], and the
+/// separation is the point.** Collision reads solidity at nine sites and means
+/// "does this stop a player" by it; the walk a swing travels means "may this be
+/// aimed at", and content declares the two independently. One trait carrying
+/// both questions would give every one of those nine sites access to a question
+/// it must never ask, and a collision scenario could then exercise aiming by
+/// accident. One type answers both; each consumer depends on the one question it
+/// asks.
+///
+/// **Total**, for the same reason and by the same construction as [`Solidity`]:
+/// every position has an answer, and everything outside the loaded world answers
+/// `false`. The walk depends on that — it stops when the next voxel's entry
+/// distance exceeds the reach, so a ray that meets nothing must terminate on the
+/// bound rather than on running out of world.
+pub trait Targetable {
+    /// Whether a ray may stop at the voxel at `at`.
+    fn is_targetable(&self, at: BlockPos) -> bool;
+}
+
 /// The camera the player's state implies.
 ///
 /// Derived rather than driven: the eye stands over the feet at [`EYE_HEIGHT`]

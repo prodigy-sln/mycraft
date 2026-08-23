@@ -36,7 +36,7 @@ use std::error::Error;
 use glam::Vec3;
 use mc_core::block::BlockRegistry;
 use mc_sim::player::{MovementIntent, PlayerState, advance_player};
-use mc_sim::replay::{ReplayWorld, SolidVoxels};
+use mc_sim::replay::{ReplayWorld, ResolvedVoxels};
 use mc_world::column::COLUMN_HEIGHT;
 use mc_world::section::Contents;
 
@@ -171,7 +171,7 @@ fn the_cell_one_step_above_a_columns_surface_holds_no_block_and_does_not_stop_a_
 -> TestResult {
     let registry = content_registry()?;
     let world = replay_world(&registry)?;
-    let voxels = SolidVoxels::resolve(&world, &registry)?;
+    let voxels = ResolvedVoxels::resolve(&world, &registry)?;
     let column = a_column_open_to_the_sky(&world)?;
     let standing_on_the_surface = (column.surface + 1) as f32;
 
@@ -390,7 +390,7 @@ fn dropped_over(column: OpenColumn) -> PlayerState {
 }
 
 /// Where a fall watched for [`SETTLE_TICKS`] ticks leaves `state`.
-fn settled(state: PlayerState, voxels: &SolidVoxels) -> PlayerState {
+fn settled(state: PlayerState, voxels: &ResolvedVoxels) -> PlayerState {
     (0..SETTLE_TICKS).fold(state, |state, _| {
         advance_player(state, &MovementIntent::default(), voxels)
     })

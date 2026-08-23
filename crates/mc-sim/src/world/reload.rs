@@ -62,29 +62,48 @@ pub(crate) fn adopt_candidate(
 
 /// Whether replacing `serving` with `candidate` changes what is drawn.
 ///
-/// Binary, and the marking it drives is all-or-nothing: solidity, the keys the
-/// six faces draw from, or the set of names. `replaceable`, `breakable` and
-/// `breaks_into` change no geometry. Narrowing this to the sections that hold a
-/// changed name marks about 82 of 256 in the shipped world and fails the spec's
+/// Binary, and the marking it drives is all-or-nothing: whether a block is
+/// drawn, whether it hides what stands behind it, the keys the six faces draw
+/// from, or the set of names. `solid`, `targetable`, `replaceable`, `breakable`
+/// and `breaks_into` change no geometry. Narrowing this to the sections that hold
+/// a changed name marks about 82 of 256 in the shipped world and fails the spec's
 /// stated bound, so it is a spec change rather than an optimisation.
 fn changes_geometry(serving: &BlockRegistry, candidate: &BlockRegistry) -> bool {
     drawn_of(serving) != drawn_of(candidate)
 }
 
-/// Every block's name against the two fields that decide what is drawn.
+/// Every block's name against the three fields that decide what is drawn.
 ///
 /// A map rather than a list, so a re-ordered declaration is not mistaken for a
 /// geometry change.
+///
+/// **Solidity is deliberately not among them, and its removal looks like a
+/// regression until you read what replaced it.** This keyed on `is_solid` while
+/// one bit answered every question about a block, so it stood in for drawnness
+/// rather than meaning collision. Now that a declaration states the two apart,
+/// keeping solidity here would rebuild all 256 sections for a physics edit that
+/// changes not one pixel. A declaration stating `solid` and nothing else still
+/// marks the world, because `drawn` and `occludes` default to it — so the shipped
+/// fixtures are unaffected, and the reason is the loader's default rather than
+/// this key.
+///
+/// **`targetable` is not among them either.** What a swing can find is not
+/// something a section could show.
 ///
 /// **All six keys and not one.** A block whose `north` alone was re-pointed is a
 /// block that draws differently, and comparing a single key would leave such a
 /// reload marking nothing at all — the edit would be accepted and no section
 /// would be built again to show it.
-fn drawn_of(registry: &BlockRegistry) -> BTreeMap<&BlockName, (bool, &FaceTextures)> {
+fn drawn_of(registry: &BlockRegistry) -> BTreeMap<&BlockName, (bool, bool, &FaceTextures)> {
     (0..registry.registered_count())
         .filter_map(|position| u32::try_from(position).ok())
         .filter_map(|raw| registry.definition(BlockId::from_raw(raw)).ok())
-        .map(|declared| (&declared.name, (declared.is_solid, &declared.textures)))
+        .map(|declared| {
+            (
+                &declared.name,
+                (declared.drawn, declared.occludes, &declared.textures),
+            )
+        })
         .collect()
 }
 

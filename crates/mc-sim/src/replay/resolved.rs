@@ -1,14 +1,22 @@
-//! The world's voxels, resolved once into the solidity the physics reads.
+//! The world's voxels, resolved once into the two answers a tick reads: what
+//! stops the player, and what a ray may stop at.
 //!
-//! The physics asks a bitset and never a world. Resolving every voxel once, at
-//! construction, is what makes the answer **total**: afterwards a query is a
+//! The tick asks a bitset and never a world. Resolving every voxel once, at
+//! construction, is what makes each answer **total**: afterwards a query is a
 //! bounds test and a bit test, with no name to look up, no registry to consult
 //! and so no failure for anything on the tick path to swallow. It is also what
 //! keeps the replay's overlap oracle independent — the oracle re-reads the
 //! world's own block query and the registry, so the two judgements share no
 //! lookup chain and cannot agree with each other's mistakes.
 //!
-//! Solidity comes from `BlockDefinition::is_solid` through the registry and from
+//! **Two views and not one widened view.** Collision and aiming are separate
+//! claims content declares separately, so they are separate bits and separate
+//! traits; what they share is the walk that fills them and the write that keeps
+//! them in step. The cost is derived rather than estimated: the shipped world is
+//! 64 × 64 × 256 = 1 048 576 voxels at one bit each, so the second view is
+//! **+128 KiB**, once, at world scale.
+//!
+//! Both answers come from `BlockDefinition` through the registry and from
 //! nothing else. Comparing a block *name* here would be a game rule written in
 //! Rust, which invariant 1 forbids, and nothing in this module knows what any
 //! block is called.
@@ -23,17 +31,17 @@
 
 use std::fmt;
 
-use mc_core::block::{BlockRegistry, RegistryError};
+use mc_core::block::{BlockDefinition, BlockRegistry, RegistryError};
 use mc_core::id::BlockName;
 use mc_world::column::COLUMN_HEIGHT;
 use mc_world::section::Contents;
 use mc_world::world::{Extent, VoxelWorld, WorldPos};
 
-use crate::player::{BlockPos, Solidity};
+use crate::player::{BlockPos, Solidity, Targetable};
 
 use super::world::{FOOTPRINT, ReplayWorld};
 
-/// A finite volume of named voxels, which [`SolidVoxels`] resolves once.
+/// A finite volume of named voxels, which [`ResolvedVoxels`] resolves once.
 ///
 /// The world is read through this rather than concretely, because the replay's
 /// world can only place the blocks the scripted scene declares — so a scenario
@@ -85,18 +93,24 @@ impl BlockVolume for VoxelWorld {
     }
 }
 
-/// Whether each voxel of a volume blocks the player, resolved once.
+/// What each voxel of a volume answers about stopping the player and about
+/// stopping a ray, resolved once.
+///
+/// **Named for neither question, because it answers both.** A type called after
+/// one of the two properties it carries is how a reader comes to believe the
+/// other is derived from it, and they are independent declarations.
 ///
 /// Total by construction: every position outside the volume — past its far
-/// edges, above it, or negative on any axis — is not solid, and that is a
-/// property of one bounds test rather than of a conversion that could saturate
-/// or wrap into a column that is not the one asked about.
-pub struct SolidVoxels {
+/// edges, above it, or negative on any axis — is neither solid nor targetable,
+/// and that is a property of one bounds test rather than of a conversion that
+/// could saturate or wrap into a column that is not the one asked about.
+pub struct ResolvedVoxels {
     extent: Extent,
     solid: Bitset,
+    targetable: Bitset,
 }
 
-impl SolidVoxels {
+impl ResolvedVoxels {
     /// Resolves every voxel of `volume` through `registry`.
     ///
     /// A cell holding nothing contributes nothing, and so does a position the
@@ -122,35 +136,88 @@ impl SolidVoxels {
         let extent = volume.extent();
         let mut recent = LastResolved::nothing();
         let mut solid = Vec::with_capacity(extent.voxel_count());
+        let mut targetable = Vec::with_capacity(extent.voxel_count());
         for at in extent.positions() {
-            solid.push(match volume.block_at(at.x, at.y, at.z) {
+            let answers = match volume.block_at(at.x, at.y, at.z) {
                 Some(Contents::Holds(name)) => recent.answer_for(name, registry)?,
-                // Nothing to stand on.
-                Some(Contents::Empty) => false,
+                // Nothing to stand on, and nothing for a ray to stop at.
+                Some(Contents::Empty) => Resolved::NOTHING,
                 // Outside the volume, which the walk never produces.
-                None => false,
-            });
+                None => Resolved::NOTHING,
+            };
+            solid.push(answers.solid);
+            targetable.push(answers.targetable);
         }
         Ok(Self {
             extent,
             solid: Bitset::packing(&solid),
+            targetable: Bitset::packing(&targetable),
         })
     }
 
-    /// Records whether the voxel at `at` blocks the player.
+    /// Records what the voxel at `at` answers about both questions.
+    ///
+    /// **Both, in one call, because a caller that could write one without the
+    /// other is the disagreement this type exists to make unspellable.** The
+    /// arguments are separate rather than one packed value so that a caller
+    /// passing the same answer twice reads as a caller doing so on purpose.
     ///
     /// A position outside the volume has no bit to write and none is written:
     /// the type's answer for it is `false` by construction and there is nothing
     /// a caller could do with a refusal here that it has not already done at the
     /// store, which refuses the same position first.
-    pub fn set(&mut self, at: WorldPos, solid: bool) {
+    pub fn set(&mut self, at: WorldPos, solid: bool, targetable: bool) {
         if self.extent.contains(at) {
-            self.solid.set(self.extent.offset(at), solid);
+            let offset = self.extent.offset(at);
+            self.solid.set(offset, solid);
+            self.targetable.set(offset, targetable);
+        }
+    }
+
+    /// Whether the bit at `at` is marked in `view`, for a position that may lie
+    /// anywhere in the signed space the tick asks about.
+    ///
+    /// The one place the bounds test and the sign refusal are spelled, so the
+    /// two views cannot come to disagree about what "outside" means.
+    fn marked(&self, view: &Bitset, at: BlockPos) -> bool {
+        inside_the_positive_octant(at).is_some_and(|voxel| {
+            self.extent.contains(voxel) && view.holds(self.extent.offset(voxel))
+        })
+    }
+}
+
+/// What one voxel answers about the two questions a tick asks of it.
+///
+/// A named pair rather than a tuple of two booleans, because the two are the
+/// same type and reading them the wrong way round is a resolve that still
+/// compiles and still fills both bitsets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Resolved {
+    solid: bool,
+    targetable: bool,
+}
+
+impl Resolved {
+    /// What a cell with no block in it answers: neither.
+    const NOTHING: Self = Self {
+        solid: false,
+        targetable: false,
+    };
+
+    /// What `declared` says about both questions.
+    ///
+    /// Each read from its own field. Deriving either from the other here would
+    /// put back the single bit this whole change exists to split, and it would
+    /// do it in the one place no declaration could override.
+    fn of(declared: &BlockDefinition) -> Self {
+        Self {
+            solid: declared.is_solid,
+            targetable: declared.targetable,
         }
     }
 }
 
-/// The last name resolved, and what it resolved to.
+/// The last name resolved, and what both of its answers were.
 ///
 /// **Run coherence, and it is worth the type.** A resolve walks a whole world —
 /// the smallest one is 16 × 256 × 16 = 65 536 voxels — and every voxel of it
@@ -163,7 +230,7 @@ impl SolidVoxels {
 /// text simply miss and are resolved the slow way, which is the answer they
 /// would have got anyway — so the resolution rule is still stated exactly once,
 /// at `registry.resolve`.
-struct LastResolved(Option<(BlockName, bool)>);
+struct LastResolved(Option<(BlockName, Resolved)>);
 
 impl LastResolved {
     /// Nothing seen yet.
@@ -171,21 +238,26 @@ impl LastResolved {
         Self(None)
     }
 
-    /// Whether `name` is solid, reusing the previous answer where it is the
-    /// previous name.
+    /// What `name` answers about both questions, reusing the previous answers
+    /// where it is the previous name.
+    ///
+    /// **The pair is cached rather than either half.** Caching one and resolving
+    /// the other would cost the lookup this type exists to avoid on every voxel
+    /// of every run, and would leave two answers about one name reaching the
+    /// bitsets from two different reads of the registry.
     fn answer_for(
         &mut self,
         name: &BlockName,
         registry: &BlockRegistry,
-    ) -> Result<bool, RegistryError> {
-        if let Some((seen, answer)) = &self.0
+    ) -> Result<Resolved, RegistryError> {
+        if let Some((seen, answers)) = &self.0
             && shares_an_allocation(seen, name)
         {
-            return Ok(*answer);
+            return Ok(*answers);
         }
-        let answer = registry.resolve(name)?.is_solid;
-        self.0 = Some((name.clone(), answer));
-        Ok(answer)
+        let answers = Resolved::of(registry.resolve(name)?);
+        self.0 = Some((name.clone(), answers));
+        Ok(answers)
     }
 }
 
@@ -199,21 +271,25 @@ fn shares_an_allocation(one: &BlockName, other: &BlockName) -> bool {
     std::ptr::eq(left.as_ptr(), right.as_ptr()) && left.len() == right.len()
 }
 
-impl Solidity for SolidVoxels {
+impl Solidity for ResolvedVoxels {
     fn is_solid(&self, at: BlockPos) -> bool {
-        inside_the_positive_octant(at).is_some_and(|voxel| {
-            self.extent.contains(voxel) && self.solid.holds(self.extent.offset(voxel))
-        })
+        self.marked(&self.solid, at)
     }
 }
 
-/// The verbose half of this type is the bitset, and it says how many voxels it
-/// covers rather than which — a million bits quoted into a panic message would
-/// bury whatever the panic was about.
-impl fmt::Debug for SolidVoxels {
+impl Targetable for ResolvedVoxels {
+    fn is_targetable(&self, at: BlockPos) -> bool {
+        self.marked(&self.targetable, at)
+    }
+}
+
+/// The verbose half of this type is the two bitsets, and it says how many voxels
+/// they cover rather than which — a million bits quoted into a panic message
+/// would bury whatever the panic was about.
+impl fmt::Debug for ResolvedVoxels {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("SolidVoxels")
+            .debug_struct("ResolvedVoxels")
             .field("extent", &self.extent)
             .field("voxels", &self.extent.voxel_count())
             .finish_non_exhaustive()
@@ -251,7 +327,10 @@ const WORD_MASK: usize = VOXELS_PER_WORD - 1;
 ///
 /// A bitset rather than a `Vec<bool>` because the replay's footprint is a
 /// million voxels: 128 KB held for the run, against the megabyte a byte apiece
-/// would cost for the same answer.
+/// would cost for the same answer. That figure is per view, and there are two.
+///
+/// It carries no idea of *which* question it answers, which is what lets one
+/// type serve both without either view's arithmetic being written twice.
 #[derive(Debug)]
 struct Bitset {
     words: Vec<u64>,
@@ -263,9 +342,9 @@ impl Bitset {
     /// Built whole from the flags rather than filled in by offset, so there is
     /// no position a caller could mark that the bitset does not cover — the
     /// length is the flags' length by construction.
-    fn packing(solid: &[bool]) -> Self {
+    fn packing(flags: &[bool]) -> Self {
         Self {
-            words: solid.chunks(VOXELS_PER_WORD).map(packed).collect(),
+            words: flags.chunks(VOXELS_PER_WORD).map(packed).collect(),
         }
     }
 
@@ -306,9 +385,9 @@ const fn with_bit(word: u64, bit: usize, holds: bool) -> u64 {
 
 /// One word from up to [`VOXELS_PER_WORD`] flags, the lowest offset in the
 /// lowest bit.
-fn packed(solid: &[bool]) -> u64 {
-    solid
+fn packed(flags: &[bool]) -> u64 {
+    flags
         .iter()
         .enumerate()
-        .fold(0, |word, (bit, &blocks)| word | (u64::from(blocks) << bit))
+        .fold(0, |word, (bit, &marked)| word | (u64::from(marked) << bit))
 }

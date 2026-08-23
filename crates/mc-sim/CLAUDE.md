@@ -34,11 +34,21 @@ everything authoritative. `mc-render` reads what it publishes and never the othe
 
 - **The world has a second write door, and it is a child module for a reason.**
   `World::write` is one edit; `World::adopt` is the whole registry replaced by
-  content read while the game was running. Both settle solidity before writing
-  either view, both carry no `pub` at all, and the reload admission that reaches
-  `adopt` is a *child* of `world` for exactly that reason — a sibling would have
-  forced `pub(crate)`, which is a much weaker claim. The dirty set is not one of the
-  three views that claim protects.
+  content read while the game was running. Both settle **every** view's answer
+  before writing any of them, both carry no `pub` at all, and the reload admission
+  that reaches `adopt` is a *child* of `world` for exactly that reason — a sibling
+  would have forced `pub(crate)`, which is a much weaker claim. The dirty set is not
+  one of the views that claim protects.
+
+- **There are two resolved views, not one, and they answer different questions.**
+  `ResolvedVoxels` carries a bitset for what stops the player and a second for what
+  a ray may stop at, behind two narrow traits — `Solidity` and `Targetable`. Content
+  declares the two independently, so an engine that derived either from the other
+  would be writing a game rule content could not override. Collision reads
+  `Solidity` at nine sites and means collision by it; the walk a swing travels reads
+  `Targetable` and nothing else does. **Keep them two traits**: one trait with both
+  methods gives every collision site access to a question it must never ask, and a
+  collision test could then exercise aiming by accident.
 
 - **Content is published through a second `ArcSwap` beside the snapshot**, carrying
   a serial that increments on every accepted candidate. A re-mesh batch carries its

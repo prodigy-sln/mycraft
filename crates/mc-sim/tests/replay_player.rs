@@ -44,14 +44,25 @@ use support::{
 const EPSILON: f32 = 1e-4;
 
 /// The block column the player spawns over.
-const SPAWN_COLUMN: (u32, u32) = (32, 32);
+///
+/// A dry coastal column on the far `+x` edge, standing exactly at the declared
+/// sea level with the sea beginning one column over. It is derived rather than
+/// chosen, and this is a hand-written restatement of what the derivation
+/// settled on — which is why moving the spawn reddens this test instead of
+/// being followed silently.
+const SPAWN_COLUMN: (u32, u32) = (63, 35);
 
 /// How far above its column's surface height the feet start, in blocks.
 const SPAWN_ABOVE_SURFACE: u32 = 3;
 
-/// Which way the player faces at the spawn, in degrees: toward the landmark
-/// pillar.
-const SPAWN_YAW_DEGREES: f32 = 225.0;
+/// Which way the player faces at the spawn, in degrees: along the sea.
+///
+/// **The landmark pillar is a residue of this angle rather than its purpose.**
+/// It was the purpose once; the yaw now exists so that water is in frame at
+/// every declared capture tick, and the pillar happening to survive in the
+/// opening frames is measured rather than intended. Anything that needs it in
+/// frame says so itself.
+const SPAWN_YAW_DEGREES: f32 = 230.0;
 
 /// How far the feet fall between the spawn and coming to rest, in blocks.
 ///
@@ -153,7 +164,7 @@ fn furthest_axis(placed: [f32; 3], against: [f32; 3]) -> f32 {
 ///
 /// One table, asserted in one place (`spec.md` §Table-driven scenarios): the
 /// horizontal centre of the declared column, the feet three blocks over its own
-/// surface, the yaw that faces the landmark, level, and at rest on every axis.
+/// surface, the declared yaw, level, and at rest on every axis.
 fn declared_spawn(start: &PlayerState, surface: u32) -> [(&'static str, f32, f32); 8] {
     let (column_x, column_z) = SPAWN_COLUMN;
     [
@@ -173,7 +184,8 @@ fn declared_spawn(start: &PlayerState, surface: u32) -> [(&'static str, f32, f32
 }
 
 #[test]
-fn the_player_spawns_over_the_declared_column_facing_the_landmark() -> TestResult {
+fn the_player_spawns_over_the_declared_column_at_the_declared_yaw_and_has_not_yet_landed()
+-> TestResult {
     let registry = content_registry()?;
     let world = replay_world(&registry)?;
     let (column_x, column_z) = SPAWN_COLUMN;
@@ -190,8 +202,8 @@ fn the_player_spawns_over_the_declared_column_facing_the_landmark() -> TestResul
         wrong.is_empty(),
         "the spawn is derived from the world and not committed: the horizontal centre of \
          column {SPAWN_COLUMN:?}, {SPAWN_ABOVE_SURFACE} blocks above that column's own \
-         surface height of {surface}, facing the landmark at {SPAWN_YAW_DEGREES} degrees, \
-         level and at rest. These rows say otherwise: {wrong:?}"
+         surface height of {surface}, facing {SPAWN_YAW_DEGREES} degrees, level and at \
+         rest. These rows say otherwise: {wrong:?}"
     );
     Ok(())
 }

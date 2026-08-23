@@ -42,7 +42,7 @@ const ACCEPTING: Acceptance = Acceptance::OnlyUnchangedBlocks;
 /// Declarations of the replay, restated here rather than read out of the crate:
 /// a fixture reading the constant it asserts against would agree with a spawn
 /// that moved as readily as with one that did not.
-const SPAWN_COLUMN: (u32, u32) = (32, 32);
+const SPAWN_COLUMN: (u32, u32) = (63, 35);
 const SPAWN_ABOVE_SURFACE: u32 = 3;
 
 /// How many ticks the saved player falls for, and how fast that leaves them

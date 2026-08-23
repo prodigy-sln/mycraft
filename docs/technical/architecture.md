@@ -355,10 +355,11 @@ produced either.
 **The strongest evidence the swap changed nothing it should not: a world saved
 against the TOML declarations loads against the Luau ones reporting no block as
 missing, changed or retextured.** `persistence/format.rs` folds a definition into
-two hashes — `DeclaredBehaviour` over `name`, `is_solid`, `replaceable`,
-`breakable`, `breaks_into`, and `DeclaredAppearance` over `name` and `texture` —
-and **deliberately excludes `origin`**, so a save does not depend on the path a
-definition was read from. That exclusion is what makes the comparison possible,
+two hashes, `DeclaredBehaviour` and `DeclaredAppearance` — the field lists and
+their revision bytes are stated once in `technical/world-format.md` and have both
+grown since — and **deliberately excludes `origin`** from both, so a save does not
+depend on the path a definition was read from. That exclusion is what makes the
+comparison possible,
 and it is the one instrument in the swap that compares a whole resolved
 definition against an oracle computed before the swap existed.
 
@@ -545,12 +546,22 @@ no sub-boxes.
 | Pitch limit | ±89° | keeps the look direction off `Vec3::Y`, so `look_at` never degenerates |
 | Look sensitivity | 0.0022 rad per raw pointer count | applied client-side in `InputState::look`; the intent carries radians |
 
-**Physics reads the world through `Solidity`, resolved once.**
-`mc_sim::player::Solidity::is_solid(BlockPos) -> bool` is total — outside the loaded world, below
-`y = 0` and every negative coordinate all answer `false` — so a caller has nothing to handle and
-nothing to swallow. `SolidVoxels::resolve(volume: &dyn BlockVolume, registry: &BlockRegistry) ->
-Result<Self, RegistryError>` builds a one-bit-per-voxel grid once, over the volume's declared
-extent, resolving every name it finds through the registry. It takes a `BlockVolume` rather than
+**Physics reads the world through `Solidity`, resolved once — and the walk a swing travels reads
+`Targetable`, resolved beside it.** `mc_sim::player::Solidity::is_solid(BlockPos) -> bool` and
+`mc_sim::player::Targetable::is_targetable(BlockPos) -> bool` are both total — outside the loaded
+world, below `y = 0` and every negative coordinate all answer `false` — so a caller has nothing to
+handle and nothing to swallow.
+
+**Two narrow traits over one type, never one trait with two methods.** Content declares "does this
+stop a player" and "may a swing find this" independently, and the nine sites that read `Solidity`
+mean collision by it. A single trait carrying both would hand every one of those sites a question it
+must never ask, and a collision test could then exercise aiming by accident.
+
+`ResolvedVoxels::resolve(volume: &dyn BlockVolume, registry: &BlockRegistry) ->
+Result<Self, RegistryError>` builds **two** one-bit-per-voxel grids once, over the volume's declared
+extent, resolving every name it finds through the registry — each bit read from its own declared
+field, never derived from the other. The second grid costs 1 048 576 voxels × 1 bit = **+128 KiB**
+once, at world scale. It takes a `BlockVolume` rather than
 `&ReplayWorld` concretely, because the only way to state "an invented block whose definition
 disagrees with its name" is a volume the replay world is merely one implementor of — `ReplayWorld`
 implements it, and a test fixture can too. This keeps solidity a bounds test and a bit test with no
@@ -559,17 +570,17 @@ replaces.
 
 `BlockVolume::block_at` returns `Option<Contents<&BlockName>>`, and the two negative answers stay
 separate all the way down: the `Option` says the volume reaches this position, and the `Contents`
-says whether anything is in it (`technical/world-format.md`). `SolidVoxels::resolve` then answers
-`false` for both — a position the volume does not reach and a cell holding nothing are both
-not-solid — and this is the one place in the codebase where the two readings genuinely **coincide in
-outcome**. That is worth naming rather than leaving implicit: no assertion on the resolved bitset,
+says whether anything is in it (`technical/world-format.md`). `ResolvedVoxels::resolve` then answers
+`false` for both, in both views — a position the volume does not reach and a cell holding nothing
+are alike neither solid nor targetable — and this is the one place in the codebase where the two
+readings genuinely **coincide in outcome**. That is worth naming rather than leaving implicit: no assertion on the resolved bitset,
 and no independent overlap oracle, can tell a defect that confuses them apart from correct code
 here. Everywhere else the split is observable; on this path it is held by the arms being written
 separately and by review.
 
 **The simulation cannot exist before the world does.**
 `mc_sim::replay::simulation_for(world: &ReplayWorld, registry: Arc<BlockRegistry>, content:
-PublishedContent) -> Result<Seated, SpawnError>` resolves `SolidVoxels`, derives the spawn and
+PublishedContent) -> Result<Seated, SpawnError>` resolves `ResolvedVoxels`, derives the spawn and
 seats the player; the client calls it and decides nothing. It hands back a `Seated` rather than a
 `Simulation` because every door into a world now passes through one seating function and carries
 that function's verdict out with it — see "The seating door" below. `PreparedScene` carries `world` and
@@ -702,8 +713,8 @@ adds a new event to this same dispatch; the seam it needs is already in place.
 ## The editable world: break and place
 
 Raycast targeting and block break/place (PRO-854) gave the simulation its first `&mut` world.
-Before this feature, `Simulation` held `Box<dyn Solidity + Send>` over a `SolidVoxels` bitset
-resolved once at construction, and no world type in the workspace had a mutating method at all.
+Before this feature, `Simulation` held `Box<dyn Solidity + Send>` over a resolved solidity bitset
+built once at construction, and no world type in the workspace had a mutating method at all.
 This section records the shape that replaced it, and the seam it deliberately does not cross.
 
 **The block store lives in `mc-world`, addressed in world coordinates.** `mc_world::world::VoxelWorld`
@@ -716,30 +727,39 @@ world's fixtures used it — moved to `mc_world::world` for the same reason `Wor
 `mc-sim` re-exporting it from its old path so existing fixtures keep compiling.
 
 **`Simulation` holds a concrete `mc_sim::world::World`, not a trait object.** `World` wraps a
-`VoxelWorld`, a `SolidVoxels` bitset, a dirty-section set and an `Arc<BlockRegistry>` — and keeps all
-four private. It carries **no** name for empty space: `World::new(VoxelWorld, Arc<BlockRegistry>)`
+`VoxelWorld`, a `ResolvedVoxels` — itself two bitsets, one for what stops the player and one for what
+a ray may stop at — a dirty-section set and an `Arc<BlockRegistry>`, and keeps all four fields
+private. It carries **no** name for empty space: `World::new(VoxelWorld, Arc<BlockRegistry>)`
 takes two parameters and there is no accessor handing one out, because a cell holds a block or
 nothing and nothing has no name to hand out (`technical/world-format.md`). Physics is unaffected: `advance_player` and the `collide` module still take `&dyn
 Solidity`, so the cheap `Chamber`/`Ground` collision fixtures are untouched and none of the exact-
 position collision scenarios changed. What changed is only what *feeds* solidity — a `World` now,
 where a bespoke test double used to stand in.
 
-**One private function writes both views, and nothing else may.**
+**One private function writes all three views, and nothing else may.**
 
 ```rust
 // crates/mc-sim/src/world/mod.rs — no `pub`, visible in this module and its
 // descendants (mc_sim::world::action) and nowhere else in the crate.
 fn write(&mut self, at: WorldPos, block: &BlockName) -> Result<(), WorldError> {
-    let solid = self.registry.resolve(block)?.is_solid;   // resolved once, before either write
+    let declared = self.registry.resolve(block)?;         // resolved once, before any write
+    let (solid, targetable) = (declared.is_solid, declared.targetable);
     self.blocks.set_block(at, block, &self.registry)?;    // the store
-    self.solid.set(at, solid);                            // the collision view
+    self.resolved.set(at, solid, targetable);             // both resolved views, together
     self.mark_dirty(at);                                  // remesh bookkeeping, see below
     Ok(())
 }
 ```
 
-The block store and the collision bitset cannot fall out of step because there is exactly one
-function that can write either, and it writes both together or neither. `break_at` and `place_at` —
+The block store and the two bitsets cannot fall out of step because there is exactly one function
+that can write any of them, and it writes them together or not at all. **`set` takes both answers in
+one call for that reason**: a caller able to write one without the other is the disagreement the type
+exists to make unspellable.
+
+**This is what makes what a swing can find follow an edit rather than only a load.** A targetability
+view built when the world was loaded and never written again answers every question about a
+*declared* world correctly and every question about an edited one wrongly — and nothing that writes a
+cell and then reads that same cell back can tell the two apart. `break_at` and `place_at` —
 the two domain operations — live in the same module as `write` and call it; the action-resolution
 code that calls *those* lives in a **child** module, `mc_sim::world::action`, specifically so it
 inherits visibility into its parent's private items rather than needing `write` widened to
@@ -753,7 +773,7 @@ truth there is no second view to disagree with, which is the kind of structural 
 codebase generally prefers over a test. What rules it out is a specific committed test it would
 silently gut: the replay's overlap oracle re-derives whether the player's box overlaps a solid voxel
 by reading `ReplayWorld::block_at` and asking the registry directly, sharing no lookup chain with the
-physics' own resolved `SolidVoxels` — deliberately, so that an adapter bug in the resolved bitset
+physics' own resolved `ResolvedVoxels` — deliberately, so that an adapter bug in the resolved bitset
 cannot make both sides wrong the same way. Deriving solidity from the store on every query would make
 that oracle's lookup chain *identical* to the code path it exists to check, so it would pass forever
 regardless of what broke, and its own positive control (a box placed inside the world's landmark)
@@ -767,15 +787,32 @@ so a call to `mesh` cannot also dirty what it just meshed, by the borrow checker
 convention or review. That is what lets a launch mesh a resumed world exactly once, at preparation
 time, with nothing left in the dirty set for the frame path to drain afterward.
 
-**The raycast's reach bound is a single site.** `targeted(origin, direction, reach, world) -> Option<Hit>`
-walks voxels in ascending entry distance and stops as soon as the next voxel's entry distance exceeds
-`REACH` (5.0 blocks) — there is no second, separate `distance <= REACH` check anywhere else. This is
-not a style preference: `Solidity` is **total** (it answers `false` for every position outside the
-loaded world), so an unbounded traversal plus a separate distance check would never terminate for a
-ray that hits nothing — the traversal has no other reason to stop. A reach bound spelled as a second,
-independent comparison is therefore not just redundant, it is a latent hang waiting for the one ray
-that never meets a solid voxel. The traversal additionally reports the entry face, which is what a
-placement's target cell is computed from.
+**The raycast asks `Targetable` and never `Solidity`.** `targeted(origin, direction, reach, world) ->
+Option<Hit>` stops at the first voxel whose block declares a ray may stop there. What stops a player
+and what a swing can find are separate declarations — `base:water` stops nobody and a swing finds it
+— so reading solidity here would put back a game rule content cannot override, at the one site every
+action's target comes from. The nine call sites that read `Solidity` all mean collision, and none of
+them is this one.
+
+**The reach bound is a single site.** The walk goes in ascending entry distance and stops as soon as
+the next voxel's entry distance exceeds `REACH` (5.0 blocks) — there is no second, separate
+`distance <= REACH` check anywhere else. This is not a style preference: `Targetable` is **total**
+(it answers `false` for every position outside the loaded world), so an unbounded traversal plus a
+separate distance check would never terminate for a ray that hits nothing — the traversal has no
+other reason to stop. A reach bound spelled as a second, independent comparison is therefore not just
+redundant, it is a latent hang waiting for the one ray that never meets a targetable voxel. The
+traversal additionally reports the entry face, which is what a placement's target cell is computed
+from.
+
+**A placement lands one step back, except into a cell content declares `replaceable`.** Ordinarily
+the cell is the one the ray occupied immediately before the hit, so a block goes on the near side of
+what you are looking at. A hit cell holding something `replaceable` is built *into* instead — and it
+has to be, because otherwise no ray could land a block in such a cell at all: had the cell one step
+back held something replaceable, the walk would have stopped *there*. The rule is stated by the
+declaration and knows no block name; `base:water` is the only shipped block that reaches it, and it
+could not before water declared `targetable`. **Choosing a different cell changes which cell the
+later checks read and nothing about whether they run** — a placement aimed at a replaceable cell the
+player is standing in is still `InsidePlayer`.
 
 **The production traversal is deliberately not the goldens' oracle.** `crates/mc-client/tests/support/oracle.rs`'s
 `March` is the independent DDA the golden frames are judged against; promoting it to production would
@@ -811,7 +848,7 @@ for the engine to fall back to, and picking one would be a game rule content cou
 
 | Refusal | Decided by |
 |---|---|
-| `NoTarget` | the raycast finds no solid voxel within reach — this also covers "something is there but too far away": the reach bound is one site, so a target beyond it and no target at all are indistinguishable without an unbounded search, and none is done |
+| `NoTarget` | the raycast finds no voxel within reach that a block declares a ray may stop at — this also covers "something is there but too far away": the reach bound is one site, so a target beyond it and no target at all are indistinguishable without an unbounded search, and none is done |
 | `NoFace` | the eye is inside the targeted block, so there is no entry face to place against |
 | `Indestructible` | the targeted block's definition declares `breakable = false` |
 | `Occupied` | a placement's target cell holds a block content does not declare `replaceable` — read from content, never derived from solidity. An **empty** cell is never occupied: it permits the placement because it is empty, not because content said so, and `replaceable` cannot speak for it |
@@ -827,18 +864,24 @@ Two refusal variants were designed and then struck before shipping. `OutOfReach`
 non-solid block still cannot delete stone, so the extra check bought no additional safety while
 costing `base:water` its own placeability.
 
-**One shipped variant is unreachable, and the shipped content is why.** `Indestructible` is decided
-against the *targeted* block, and `targeted` returns a hit only where `is_solid` answers true — so a
-break swung at a cell of `base:water`, the one base block declaring both `solid = false` and
-`breakable = false`, walks through it and empties the solid block standing behind. The declaration
-says what water is; it refuses nothing, and no request the shipped content can produce reaches this
-variant at all. A reader of the table above would otherwise conclude that water is protected from
-breaking — it is not broken because it cannot be aimed at, which is a different fact with a different
-future. `crates/mc-sim/tests/shipped_water_is_not_broken_and_is_built_through.rs` asserts the break's
-real answer and reddens the day that changes, and the variant's own doc comment carries the handover:
-splitting `solid` into drawn, occludes and targetable makes the refusal live, and whoever makes that
-split owes the scenario that cannot be written now — a break swung at water refused, with the water
-left in the cell.
+**`Indestructible` is reachable for the shipped content, and aiming being its own declaration is
+why.** It is decided against the *targeted* block, and `targeted` returns a hit where
+`is_targetable` answers true. `base:water` declares `targetable = true` beside `breakable = false`,
+so a swing arrives at a water cell, `broken` is called on it, and the player is refused with the
+water left where it was.
+
+**It was unreachable until `solid` was split, and the reason is worth keeping.** While the walk
+stopped at the first *solid* cell, water's `breakable = false` refused nothing — a swing went
+straight through the water and emptied whatever stood behind it. Water was not broken because it
+could not be aimed at, which is a different fact from being protected, and the declaration said what
+water was without ever stopping anything. **Aiming and yielding are two claims and the first is what
+makes the second reachable**: a block declaring `targetable = false` puts `breakable` back in that
+inert state whatever it says, and a mod can do exactly that.
+
+`crates/mc-sim/tests/shipped_water_is_not_broken_and_is_built_through.rs` holds both halves — the
+swing stopping at the water rather than at the stone behind it, and the refusal naming
+`Indestructible` with the cell read back by name. It carried a fuse recording the debt while the
+variant was unreachable; the fuse has been blown and the scenario it asked for is what replaced it.
 
 **Three arms and never two, wherever both wrappers survive.** `broken`, `placed` and `overwritable`
 each read the world through `Option<Contents<&BlockName>>`, and each writes `None`,
@@ -847,7 +890,8 @@ Some(Contents::Holds(..)) = .. else` would answer "there is no such cell" and "t
 nothing" with one refusal. Both readings reach the same permitting or refusing outcome at every one
 of those sites today, which is precisely what would make the collapse invisible: the arms are
 separate because the facts are separate, not because the outcomes differ. `broken`'s empty arm is
-unreachable in practice — the raycast stops only at a solid cell — and it is written out anyway, so
+unreachable in practice — the raycast stops only where a block declares a ray may, and an empty cell
+holds no block to declare anything — and it is written out anyway, so
 that a break which ever did reach an empty cell refuses rather than being read as a cell the world
 does not have.
 
@@ -1951,10 +1995,11 @@ Three clauses, because the first alone reads as a note about an edge case:
 An *emptied* directory works under either spelling, because its parent still exists.
 That is what the scenarios grade, and it is why this is deferred rather than a defect.
 
-**2. `SolidVoxels::is_solid` answers `false` for every position past the world's
+**2. `ResolvedVoxels::is_solid` answers `false` for every position past the world's
 footprint, and that is unsound wherever it is consulted — not only in the clearing
 search.** Outside the loaded world is *unknown*, not empty. Collision, meshing and the
-physics all read the same answer.
+physics all read the same answer, and `is_targetable` answers the same way for the same
+reason — so a ray leaving the footprint meets nothing rather than meeting the unknown.
 
 **In the clearing search it was a live defect and it is now closed**, because there
 the answer was acted on. The eligibility rule above is the repair: a candidate counts

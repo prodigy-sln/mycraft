@@ -34,8 +34,23 @@ pub enum SpawnError {
     Solidity(#[from] RegistryError),
 }
 
-/// The block column the player spawns over.
-const SPAWN_COLUMN: (u32, u32) = (32, 32);
+/// The block column the player spawns over: a dry column on the coast, from
+/// which the sea is in frame at every declared capture tick.
+///
+/// **Derived by advancing the simulation, not by looking at the map.** A column
+/// is only a candidate if the camera the script publishes at each declared
+/// capture tick has water in it — which is a different question from whether the
+/// sea is nearby, because the spawn falls three blocks and then walks, and the
+/// declared world puts its water in a strip on the far `+x` edge that terrain
+/// hides from anywhere further inland. The column that stood here before showed
+/// no water at any tick and from no yaw at all.
+///
+/// This column stands at the waterline: its own surface height is exactly the
+/// declared sea level, so it is dry — water fills a column only where the
+/// surface is *below* that level — and the sea begins at the next column over.
+/// A column below the sea level would put the player in the water, which is a
+/// different scene from the one the spec asks for.
+const SPAWN_COLUMN: (u32, u32) = (63, 35);
 
 /// How far above its column's own surface height the feet start, in blocks.
 ///
@@ -44,9 +59,16 @@ const SPAWN_COLUMN: (u32, u32) = (32, 32);
 /// long before the walk begins.
 const SPAWN_ABOVE_SURFACE: u32 = 3;
 
-/// Which way the player faces at the spawn, in degrees: toward the landmark
-/// pillar, so the first frame has the scene's one hand-placed feature in it.
-const SPAWN_YAW_DEGREES: f32 = 225.0;
+/// Which way the player faces at the spawn, in degrees: toward the sea, so the
+/// captured frames hold the water the content declares.
+///
+/// **This replaces the landmark as the reason the constant exists.** It was 225°
+/// to put the pillar at column (12, 12) in the first frame. The pair was
+/// re-derived together for the sea, and the pillar is now a residue rather than
+/// a purpose — measured, not assumed: it reaches the first frame at four of the
+/// judge's 576 sample pixels and has left by the end of the walk. Anything that
+/// needs the pillar in frame should say so itself rather than lean on this.
+const SPAWN_YAW_DEGREES: f32 = 230.0;
 
 /// Where the player starts in `world`.
 ///

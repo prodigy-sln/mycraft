@@ -34,3 +34,45 @@ slow-timeout = { period = "30s" }
 [[profile.default.overrides]]
 filter = 'test(=a_chunk_whose_top_level_never_returns_is_aborted_and_leaves_the_host_usable) + test(=a_chunk_that_catches_its_own_abort_in_a_loop_is_still_stopped) + test(=an_attachment_looping_under_a_full_state_is_still_not_quarantined_for_it) + test(=a_table_whose_index_never_returns_is_read_and_leaves_its_attachment_a_whole_budget) + test(=a_cascade_that_never_terminates_ends_its_round_and_blames_whoever_asked_for_what_is_left) + test(=all_six_hostile_cases_are_contained_in_sequence_and_the_host_still_evaluates_afterwards) + test(=a_callback_that_never_returns_is_stopped_under_the_shipped_budget_and_reported_as_exhausted)'
 slow-timeout = { period = "10s", terminate-after = 1 }
+
+# The re-mesh collects are the second place where a missing answer does not
+# produce a failure.
+#
+# Their fixture polls the worker until it answers, with no clock, because no
+# clock is derivable: from above nothing pushes on such a bound, since every
+# assertion made against it is a presence, and from below the data can never
+# contain the case being bounded — a run that exceeds a bound is censored at it
+# and known only as longer than it. Two wall-clock bounds were tried and both
+# failed on a busy machine, the second after being widened fifteenfold, each one
+# reporting the property as false when the machine had merely been slow.
+#
+# So the two binaries below can wedge where they used to go red, and this is
+# where that is bounded, because a runner bound and an assertion bound are
+# different acts. Exceeding a runner bound says *this run is broken, stop it*,
+# which is true whatever the number. Exceeding an assertion bound says *the
+# property is false*, which is the lie the fixture no longer tells.
+#
+# A worker that panics is not the case this guards: its sending end drops and
+# the next ask says so at once. What is left is a worker that neither answers
+# nor dies, which today needs an unbounded loop inside a bounded pass over a
+# fixed voxel count — unconstructible, and cheap to bound anyway.
+#
+# The period distinguishes *finite* from *never*, which is the only thing it has
+# to do, so it is set far above any finite completion rather than near one. The
+# collect these bound costs 63.838 ms on an idle machine; the worst of four
+# complete coverage-instrumented runs measured it at 10.151 s, and the runs that
+# broke the old 15 s bound are censored above it. Terminating at ten periods —
+# 300 s — is some thirty times the worst complete observation and about 4 700
+# times the idle cost, while the 30 s period keeps the same SLOW notices every
+# other test gets. The whole of both binaries runs in 0.253 s idle.
+#
+# THE BINARY NAMES BELOW ARE LOAD-BEARING, and nextest offers no form that fails
+# loudly: a filter matching nothing looks exactly like one never reached. They
+# are binaries rather than the seven test names inside them because a binary is a
+# file, so dropping this override takes a rename visible in a diff header rather
+# than one identifier in a body. **A new binary that calls the fixture's
+# `collected` or `handled` waits unbounded with nothing here to stop it — add it
+# in the same change.**
+[[profile.default.overrides]]
+filter = 'binary(reload_remesh_blocks_no_tick) + binary(reload_supersedes_a_batch_in_flight)'
+slow-timeout = { period = "30s", terminate-after = 10 }

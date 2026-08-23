@@ -15,7 +15,7 @@
 //! [`overlap_at`] walks the box over the world the fixture declared, using the
 //! declared `0.6 × 1.8 × 0.6` box and the half-open `[v, v + 1)` rule, and asks a
 //! *named* list of blocks which are solid. It reaches none of `collide::overlaps`,
-//! none of `SolidVoxels` and none of the search. What that buys is the premise of
+//! none of `ResolvedVoxels` and none of the search. What that buys is the premise of
 //! every scenario, asserted rather than described: that the reload is what trapped
 //! the player, and that a position a scenario names as available really is clear. A
 //! guard that asked the subject's own predicate would agree with it whatever it did.
@@ -105,6 +105,21 @@ pub const SOLID_ONCE_WATER_IS: [&str; 4] = [DIRT, GRASS, STONE, WATER];
 #[must_use]
 pub fn water_that_is_solid() -> Declaration {
     Declaration::of(WATER).solid(true)
+}
+
+/// A serving root's declaration of `base:water`: not solid, and beyond what a
+/// swing can find.
+///
+/// **Both answers are stated because a fixture that inherits one from content is
+/// hostage to every content edit, and this one was.** A trap world stands a player
+/// with their eye inside water and needs them able to aim out of it; that came free
+/// while nothing non-solid could be aimed at, and stopped being free when the
+/// shipped water declared `targetable = true`. The caller that depends on it carries
+/// the whole argument, including why the water may not simply be moved —
+/// `reload_leaves_the_player_alone.rs`.
+#[must_use]
+pub fn water_that_no_swing_can_find() -> Declaration {
+    Declaration::of(WATER).solid(false).targetable(false)
 }
 
 /// Which cells of a world a player's box overlaps that something calls solid.

@@ -53,11 +53,12 @@ pub const SIDES: [Facing; 4] = [Facing::NegZ, Facing::PosZ, Facing::PosX, Facing
 /// without touching its neighbour.
 pub const IN_FRONT: f32 = 1.5;
 
-/// How many cells outward of the face have to be empty for the eye to stand there.
+/// How many cells outward of the face have to hold nothing drawn for the eye to
+/// stand there.
 ///
 /// Two: the eye is 1.5 blocks out, so the cell it occupies and the one between it
-/// and the face both have to be air, or the camera is inside terrain and the frame
-/// is of whatever is nearer.
+/// and the face both have to hold nothing drawn, or something nearer than the
+/// face is what the frame is of.
 const CLEAR_CELLS_NEEDED: i32 = 2;
 
 /// One grass block per facing whose face on that facing is exposed and reachable.
@@ -81,8 +82,9 @@ pub struct Silhouette {
 ///
 /// **Searched in a declared order, so the answer is the same on every run and on
 /// every machine**, and each hit is checked for the two things a reading needs:
-/// the neighbouring cell is air, so the mesher emitted that face at all, and the
-/// two cells outward are air, so the camera is not inside terrain.
+/// the neighbouring cell holds nothing drawn, so the mesher emitted that face at
+/// all, and the two cells outward hold nothing drawn either, so nothing nearer
+/// than the face is what the frame shows.
 ///
 /// # Errors
 ///
@@ -100,8 +102,8 @@ pub fn exposed_side_faces(prepared: &PreparedScene) -> Result<Exposed, Box<dyn E
         let at = first_exposed(facing, &voxels, &grass).ok_or_else(|| {
             format!(
                 "the replay world exposes no `{GRASS}` face on its {} side with \
-                 {CLEAR_CELLS_NEEDED} clear cells in front of it, so this reading has no pose to \
-                 be taken from",
+                 {CLEAR_CELLS_NEEDED} cells in front of it holding nothing drawn, so this reading \
+                 has no pose to be taken from",
                 named(facing)
             )
         })?;
@@ -284,13 +286,40 @@ fn first_exposed(facing: Facing, voxels: &Voxels<'_>, grass: &BlockName) -> Opti
         .find(|at| holds(voxels, *at, grass) && reachable(voxels, *at, step))
 }
 
-/// Whether the eye can stand in front of the face outward of `at` along `step`.
+/// Whether the eye can stand in front of the face outward of `at` along `step`
+/// with nothing drawn in the way.
 ///
 /// Both cells matter: the one the eye occupies and the one between it and the
-/// face. A solid cell in either puts the camera inside terrain, and the frame is
-/// then of whatever is nearer than the face the reading is about.
+/// face. Anything drawn in either is nearer to the eye than the face this
+/// reading is about, and the frame is then of that instead.
+///
+/// **The question is drawnness and not collision, and the two are no longer the
+/// same question.** This helper used to ask whether either cell was solid, and
+/// described what it was avoiding as "the camera inside terrain" — which was the
+/// same set of cells while every drawn block was also an obstacle. It is not any
+/// more: the sea is drawn and is not an obstacle, so an eye that may legitimately
+/// *stand* in a cell of water still cannot read a face through one, because
+/// water's own face toward the eye is emitted and is nearer than the face being
+/// read.
+///
+/// **The two questions are incomparable rather than nested, and the difference
+/// runs both ways.** Drawnness rejects a `drawn = true, solid = false` cell that
+/// solidity admitted — the water case, and the tightening this reading needs.
+/// But solidity rejected a `drawn = false, solid = true` cell that drawnness
+/// admits, so a pose with an invisible obstacle standing between the eye and the
+/// face is now accepted. **That is a real limit with a failure mode**: such a
+/// block occludes unless its own declaration says otherwise, so the face this
+/// reading was going to read is culled and never emitted at all, and the reading
+/// would then be taken against a face that is not in the picture.
+///
+/// It cannot arise from the content as it ships — dirt, grass and stone state
+/// nothing about being drawn and so answer it from their solidity, leaving water
+/// the one block where the two part — but **that is a fact about what the four
+/// declarations say and not about the two predicates**. A fixture declaring an
+/// undrawn obstacle needs this helper to ask about occlusion as well, and it does
+/// not ask today.
 fn reachable(voxels: &Voxels<'_>, at: IVec3, step: IVec3) -> bool {
-    (1..=CLEAR_CELLS_NEEDED).all(|out| voxels.is_solid(at + step * out).ok() == Some(false))
+    (1..=CLEAR_CELLS_NEEDED).all(|out| voxels.is_drawn(at + step * out).ok() == Some(false))
 }
 
 /// Whether the cell at `at` holds `block`.

@@ -53,6 +53,17 @@
 //! crosses its ticks in microseconds. Said out loud because no assertion below can
 //! enforce it.
 //!
+//! # A second test lives here for its fixture rather than for its subject
+//!
+//! Waiting a batch out through the client's own collect is not about ticks, so on
+//! subject alone it belongs elsewhere. It is here because **this is the only place
+//! a batch big enough to still be meshing at the first ask is built**, and that
+//! fixture is the whole of what makes the waiting reachable — a two-section batch
+//! has answered before anybody asks, which is why the supersession scenarios grade
+//! the client's collect without ever reaching its wait. Duplicating a whole-world
+//! fixture into a binary of its own would buy a tidier heading with a second
+//! world-builder to keep in step.
+//!
 //! # No device, no window
 //!
 //! The worker packs a scene and nothing here uploads one.
@@ -81,8 +92,8 @@ use input::InputHarness;
 use reload::{AMBER, AMBER_FILE, Adoption, accepted, adoption, amber, declaring, shipped};
 use reload_content::candidate_against;
 use reload_remesh::{
-    Collected, EVERY_SECTION_OF_THE_SHIPPED_WORLD, Marking, NOTHING_WAS_LEFT_TO_MESH,
-    a_client_over, collected, every_section_once, keys_of, marked, marking_of, require,
+    Collected, EVERY_SECTION_OF_THE_SHIPPED_WORLD, Handled, Marking, NOTHING_WAS_LEFT_TO_MESH,
+    a_client_over, collected, every_section_once, handled, keys_of, marked, marking_of, require,
     resolution_serving, retained_at_launch, serial_serving,
 };
 use reload_world::{published_tick, registry_of, shipped_world, standing_and_facing, standing_at};
@@ -134,6 +145,54 @@ fn the_ticks_a_whole_world_re_mesh_runs_over_are_the_ticks_a_run_with_no_reload_
          judged against a second run rather than a clock — and the last three elements are what say \
          there was a whole-world re-mesh to be blocked by at all: the candidate was taken up, every \
          section of the world was left to mesh, and a scene of all of them came back"
+    );
+    Ok(())
+}
+
+/// A batch the client's own collect has to wait out arrives as a scene of the whole
+/// world.
+///
+/// **The only reading taken on the client's side of the seam that is not a
+/// discard.** `Session::collect_remesh` maps a finished scene to `Remeshing::Show`,
+/// and until this existed nothing asserted through that arm at all — the one other
+/// reading through the client is about a *discarded* batch, so a collect that lost
+/// every scene it was handed left the suite green.
+///
+/// # The batch is genuinely still meshing when the client first asks, and that is
+/// fixture construction rather than an assertion
+///
+/// Nothing below asserts that the first ask came back empty; a count of polls would
+/// be a timing assertion wearing a count's clothes, and it is the assertion this
+/// file's own bound was made of. What holds the premise is the size of the work:
+/// meshing 256 sections is tens of milliseconds against a submit and an ask that
+/// take microseconds. Measured over twenty runs on an idle machine, the wait turned
+/// **40 to 53 polls** at a millisecond each and never fewer than 40 — so the arm
+/// this reaches is reached with two orders of magnitude of room, and a machine fast
+/// enough to close that gap would still pass, because the scene is what is asserted
+/// and not the waiting.
+#[test]
+fn a_whole_world_batch_the_client_waits_out_arrives_as_a_scene_of_every_section() -> TestResult {
+    let serving = content_root()?;
+    let (mut reloading, _oracle) = two_clients_falling_over_the_shipped_world(&serving)?;
+    let mut worker = a_worker_a_launch_would_have_spawned(&serving, &reloading)?;
+
+    let answered = a_reload_declaring_a_new_block(&mut reloading)?;
+    let marking = whole_world_batch_in_flight(&mut reloading, &mut worker)?;
+    let shown = handled(&mut reloading, &mut worker);
+
+    assert_eq!(
+        (answered, marking, shown),
+        (
+            accepted(AMBER),
+            every_section_once(),
+            Handled::Scene {
+                sections: EVERY_SECTION_OF_THE_SHIPPED_WORLD
+            }
+        ),
+        "a scene the worker finished has to reach the client's own collect, or an edit is meshed and \
+         then thrown away with no error anywhere. The first two elements are what say there was a \
+         whole-world batch to be waited out at all: the candidate was taken up, and every section of \
+         the world was left to mesh"
     );
     Ok(())
 }

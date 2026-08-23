@@ -16,6 +16,17 @@
 //! column and one downward face per column, and the landmark's stone cap takes
 //! exactly one of the upward ones off grass.
 //!
+//! **The sea's upward area is the fifth such figure, and it is counted from the
+//! heightmap rather than written down.** Water fills every column whose surface
+//! stands below the declared sea level, from one block above that surface up to
+//! the sea level itself, and nothing is declared above the sea level anywhere —
+//! so each such column shows exactly one upward water face and no other column
+//! shows any. [`submerged_columns`] counts them, reading the surface heights and
+//! the declared sea level and touching neither the mesher nor the walk. Water
+//! shows no *downward* face at all for the same reason its neighbours cull it:
+//! the cell below the lowest water in a column is that column's surface block,
+//! which occludes, and the cell below any other water is water.
+//!
 //! The one committed number is `SCENE_QUAD_COUNT`, and it is committed as a
 //! tripwire rather than as an oracle — see the test that reads it.
 
@@ -30,7 +41,10 @@ use mc_sim::replay::mesh_all;
 use mc_world::mesh::Facing;
 
 use support::oracle::{FaceArea, visible_face_area};
-use support::{GRASS, STONE, TestResult, block_name, content_registry, replay_world};
+use support::{
+    GRASS, SEA_LEVEL, STONE, TestResult, WATER, block_name, content_registry, replay_world,
+    submerged_columns,
+};
 
 /// Upward face area belonging to grass: one top face per column of the 64 by 64
 /// footprint, less the landmark column, whose surface block the declaration
@@ -82,19 +96,34 @@ fn every_blocks_meshed_area_equals_the_independent_walks_area_for_that_block() -
 }
 
 #[test]
-fn the_surface_shows_one_upward_face_per_column_and_the_landmark_caps_exactly_one() -> TestResult {
-    let walked = walked_world()?;
+fn the_surface_shows_one_upward_face_per_column_with_the_landmark_capping_one_and_the_sea_over_the_rest()
+-> TestResult {
+    let registry = content_registry()?;
+    let world = replay_world(&registry)?;
+    let submerged = submerged_columns(&world)?;
+    let walked = visible_face_area(&world, &registry)?;
 
     let upward = towards(&walked, Facing::PosY);
 
+    assert!(
+        submerged > 0,
+        "no column of the declared world stands below the sea level at {SEA_LEVEL}, so the \
+         water entry below would be zero and every claim this test makes about the sea \
+         would be a claim about nothing"
+    );
     assert_eq!(
         upward,
         BTreeMap::from([
             (block_name(GRASS)?, GRASS_UPWARD),
             (block_name(STONE)?, STONE_UPWARD),
+            (block_name(WATER)?, submerged),
         ]),
-        "one top face per column, all grass but the landmark's stone cap; a world without \
-         the landmark shows 4096 of grass and none of stone"
+        "one top face per column, all grass but the landmark's stone cap — and one more per \
+         submerged column, belonging to the water standing over it. The two ground figures \
+         are what they were before water was drawn at all, and that is the point of them \
+         here: water hides nothing, so the grass under the sea still shows the top face it \
+         always did. A grass figure that came out short by exactly the {submerged} columns \
+         the sea covers is water occluding what it stands on"
     );
     Ok(())
 }
@@ -118,18 +147,32 @@ fn the_world_floor_shows_one_downward_face_per_column() -> TestResult {
 /// the merge predicate moves — which is the day ambient occlusion arrives — so
 /// that the failure lands here, before any image is compared, with the remedy in
 /// its own message.
+///
+/// **It is also the only instrument that can see the merge shape over this
+/// world.** A re-partition of the same visible faces is pixel-neutral: a corner's
+/// texture coordinates come from its own position under a repeating sampler, so
+/// one four-block quad shows the texture four times rather than stretched once,
+/// and four one-block quads emit the same texels at the same depths. What pins
+/// the shape itself is `mc-world`'s `mesh_properties`, whose three proptests hold
+/// the quads to an exact partition of the visible faces, per face and per
+/// position.
 #[test]
 fn the_meshed_quad_count_matches_the_committed_scene_contract_snapshot() -> TestResult {
     let (contract, _) = meshed_and_walked()?;
 
     assert_eq!(
         contract.quad_count, SCENE_QUAD_COUNT,
-        "the replay's quad count moved, which means the mesh contract moved and every \
-         committed golden is now a golden of a different scene. This number verifies \
-         nothing on its own — the area assertions in this file do that — so do not simply \
-         edit it. Bump SCENE_REVISION, delete the previous revision's golden \
-         directories, re-shoot the goldens under MYCRAFT_UPDATE_GOLDENS, and justify the \
-         change in the commit"
+        "the replay's quad count moved, which means the way visible faces are grouped into \
+         rectangles moved. This number verifies nothing on its own — the area assertions in \
+         this file do that — so do not simply edit it. Which remedy is owed depends on what \
+         moved, and the two are not the same. If the *visible faces* changed, every committed \
+         golden is now a golden of a different scene: bump SCENE_REVISION, delete the previous \
+         revision's golden directories, re-shoot under MYCRAFT_UPDATE_GOLDENS, and justify the \
+         change in the commit. If only the *grouping* changed — the same faces cut into \
+         different rectangles, which is what a new merge strategy does — the frames are \
+         identical and re-shooting would churn the whole set to reproduce the same images: \
+         confirm mc-world's mesh_properties still passes, then re-mint this number alone and \
+         say in the commit why the merge moved"
     );
     Ok(())
 }

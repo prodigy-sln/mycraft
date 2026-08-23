@@ -20,28 +20,31 @@
 //! all four of them, with the shipped reader of the day. It is not regenerated:
 //! the day it is, this test stops being evidence about anything.
 //!
-//! # What a block's appearance now folds, and why that shows up here
+//! # Both of a block's records have now moved, and the behaviour one moved on
+//! purpose
 //!
 //! A block's recorded appearance folds **every key it declares**, one per facing,
-//! under a revision byte of its own. Every save written before that — this fixture
-//! included — recorded an appearance over one key under the previous revision, so
-//! every block in it looks different now. That is correct rather than a migration
-//! defect, and a retexture is loaded without a word said about it.
+//! and then whether it is drawn and whether it occludes. A block's recorded
+//! behaviour folds its own field list and now ends with whether a swing can find
+//! it. Each list carries a revision byte of its own and each byte has moved — the
+//! appearance one twice, the behaviour one once.
 //!
-//! **What must not have moved is the other half, and one block's half really
-//! did.** A block's behaviour is folded over its own field list under its own
-//! revision. `content/base/blocks/water.luau` declares `breakable = false`, which
-//! is one of the five fields that fold goes over, so water — and water alone — is
-//! reported as behaving differently. That is the two-hash separation firing on a
-//! real content edit rather than on a fixture, and it is the whole reason the
-//! expectations below name four blocks in two lists rather than four in one.
+//! **So every block this save holds is reported as behaving differently, and that
+//! is the designed answer rather than a defect.** A behaviour list that grows is a
+//! list every existing save recorded under the old shape, and there is no reading
+//! of those bytes that could say otherwise. The cost is paid once, deliberately,
+//! and it is survivable because such a save *loads* and names its blocks instead
+//! of being refused. What would be wrong now is a byte that failed to move: an
+//! implementation that folded the new fields into nothing at all reports water
+//! alone, over its `breakable = false`, and three blocks as merely retextured —
+//! which is the answer this file used to expect and is now the defect it catches.
 //!
-//! The revision byte is per field list and not one number shared between the two:
-//! bumping a shared one would move every behaviour fold in existence as a side
-//! effect of adding a texture key, and the split below is what says it did not.
-//! **A shared byte reports all four blocks as changed and none as retextured**,
-//! which is a different answer from every expectation here rather than a nearly
-//! equal one.
+//! **The two revision bytes stay separate, and that is unchanged.** One number
+//! shared between the lists would move every behaviour fold in existence as a
+//! side effect of adding a texture key, which is a claim about how every block
+//! behaves made on the strength of art. That the behaviour byte moved here is a
+//! decision somebody took about `targetable`; a shared byte would have taken it
+//! for them, on every future retexture, forever.
 //!
 //! # An empty verdict is what the wrong answer looks like too
 //!
@@ -78,14 +81,6 @@ const NEEDED_BY_THE_OLDER_SAVE: [&str; 4] = ["base:dirt", "base:grass", "base:st
 const WITHDRAWN: &str = "water";
 const WITHDRAWN_BLOCK: &str = "base:water";
 
-/// The one shipped block whose declared *behaviour* moved after this save was
-/// written: `content/base/blocks/water.luau` states `breakable = false`, and
-/// `breakable` is one of the five fields a behaviour fold goes over.
-const BEHAVES_DIFFERENTLY: &str = "base:water";
-
-/// The three whose *appearance* alone moved, ascending.
-const LOOK_DIFFERENT: [&str; 3] = ["base:dirt", "base:grass", "base:stone"];
-
 /// What the shipped content declares its blocks in, and what it declares its HUD
 /// in.
 ///
@@ -97,7 +92,7 @@ const BLOCK_EXTENSION: &str = "luau";
 const HUD_EXTENSION: &str = "toml";
 
 #[test]
-fn the_shipped_content_reports_water_as_behaving_differently_and_the_other_three_as_retextured()
+fn the_shipped_content_reports_every_block_the_older_save_holds_as_behaving_differently()
 -> TestResult {
     let needed = requirements(&older_save()?)?;
 
@@ -107,31 +102,31 @@ fn the_shipped_content_reports_water_as_behaving_differently_and_the_other_three
         verdict,
         RegistryVerdict {
             missing: Vec::new(),
-            changed: vec![BlockName::parse(BEHAVES_DIFFERENTLY)?],
-            retextured: named(&LOOK_DIFFERENT)?,
+            changed: every_block_the_older_save_holds()?,
+            retextured: Vec::new(),
         },
-        "this is the one fixed oracle over whole resolved definitions, and what it says is that \
-         the two halves of a block's record moved independently. `{BEHAVES_DIFFERENTLY}` states \
-         `breakable = false`, which is a behaviour field, so it lands in `changed`; the other \
-         three declare the same behaviour they always did and differ only in folding a key per \
-         facing, so they land in `retextured`. A revision byte shared between the two field \
-         lists puts all four in `changed` and leaves `retextured` empty, and a field mapped to \
-         the wrong list swaps a name between them — neither of which is a near miss of this \
-         expectation"
+        "this is the one fixed oracle over whole resolved definitions, and what it says is what a \
+         player pays for a behaviour list that grew: every block of every save written before it \
+         is reported. `retextured` is necessarily empty because behaviour is asked first and \
+         answers alone, so the appearance byte having moved as well is invisible here — which is \
+         why the byte sequences have guards of their own. The verdict is compared whole, and the \
+         near miss it rules out is the one that used to be right: water alone in `changed` over \
+         its `breakable = false`, with the other three merely retextured, is exactly what an \
+         implementation that folded the three new fields into nothing produces"
     );
     Ok(())
 }
 
 /// Both arms of the acceptance decision over the same save, in one reading.
 ///
-/// **The argument is not simply flipped from what this test used to pass**, and
-/// that matters. Under the accepting default `refusal` answers `None` for *any*
-/// changed list at all, so a reading that asserted only that arm would pass
-/// however badly the behaviour fold broke — a shared revision byte, every block
-/// reported changed, still `None`. The strict arm is what carries the evidence:
-/// it names the changed blocks, so it disagrees with a shared byte by three names.
+/// **The strict arm is the one carrying the evidence**, and that is why both are
+/// read here rather than only the default. Under the accepting default `refusal`
+/// answers `None` for *any* changed list at all, so a reading of that arm alone
+/// passes however badly the behaviour fold broke — every block reported changed,
+/// no block reported changed, still `None`. The strict arm names the list, so it
+/// disagrees with an implementation that folded nothing by three names.
 #[test]
-fn the_same_save_loads_by_default_and_is_refused_naming_water_alone_when_strictness_is_asked_for()
+fn the_same_save_loads_by_default_and_is_refused_naming_all_four_when_strictness_is_asked_for()
 -> TestResult {
     let needed = requirements(&older_save()?)?;
 
@@ -146,13 +141,14 @@ fn the_same_save_loads_by_default_and_is_refused_naming_water_alone_when_strictn
             None,
             Some(LoadError::Unresolvable {
                 missing: Vec::new(),
-                changed: vec![BlockName::parse(BEHAVES_DIFFERENTLY)?],
+                changed: every_block_the_older_save_holds()?,
             })
         ),
         "a player who has updated their content opens their world: the default answer over a save \
-         whose blocks merely behave differently is no refusal at all. Somebody who asked for the \
-         strict answer is turned away and told which block it was — one name and not four, which \
-         is the reading a revision byte shared between the two field lists cannot satisfy"
+         whose blocks merely behave differently is no refusal at all, however many of them there \
+         are. Somebody who asked for the strict answer is turned away and told every one — four \
+         names and not one, which is the reading an implementation that folded no new field and \
+         left the revision byte alone cannot satisfy"
     );
     Ok(())
 }
@@ -220,17 +216,17 @@ fn the_same_comparison_reports_a_block_whose_declaration_the_content_no_longer_h
         verdict,
         RegistryVerdict {
             missing: vec![BlockName::parse(WITHDRAWN_BLOCK)?],
-            changed: Vec::new(),
-            retextured: every_block_the_older_save_holds()?
+            changed: every_block_the_older_save_holds()?
                 .into_iter()
                 .filter(|name| name.as_str() != WITHDRAWN_BLOCK)
                 .collect(),
+            retextured: Vec::new(),
         },
         "a save whose block nothing declares any more is a save nothing can put in that cell, and \
          it has to be named. A comparison that could not report it is one whose agreement above \
-         means nothing. The three that remain are still reported retextured, which is what keeps \
-         the two lists separate: a missing block is not a judgement a player is in a position to \
-         make, and a retextured one needs no judgement at all"
+         means nothing. The three that remain move to `changed` rather than vanishing, which is \
+         what keeps the two lists separate: a missing block is not a judgement a player is in a \
+         position to make, and a changed one is exactly that"
     );
     Ok(())
 }

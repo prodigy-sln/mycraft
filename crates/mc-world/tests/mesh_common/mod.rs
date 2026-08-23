@@ -44,6 +44,31 @@ pub const SOLID: &str = "example:mesh_stone";
 pub const ALPHA: &str = "example:alpha";
 pub const BETA: &str = "example:beta";
 
+/// A block declared drawn and neither solid nor occluding: a player walks
+/// through it, sees it, and sees what is behind it.
+pub const HAZE: &str = "example:haze";
+
+/// A second block declared exactly as [`HAZE`] is, so that two adjacent cells
+/// can hold two *different* drawn, non-occluding blocks. It differs from `HAZE`
+/// in its name and in nothing else a declaration carries.
+pub const MURK: &str = "example:murk";
+
+/// A block declared solid and occluding and *not* drawn: it stops a player, it
+/// hides what is behind it, and it shows nothing of itself.
+///
+/// The fixture block in which no two of the three answers can be derived from
+/// each other — `drawn = is_solid` and `occludes = is_solid` cannot both hold of
+/// it — which is why it is what the independence scenarios are built from.
+pub const GHOST: &str = "example:ghost";
+
+/// A block declared solid but neither drawn nor occluding: a neighbour that
+/// stops a player and hides nothing.
+pub const MIST: &str = "example:mist";
+
+/// A block declared occluding but not solid: it hides what is behind it while a
+/// player walks through it.
+pub const SHROUD: &str = "example:shroud";
+
 /// What the registries built here attribute their definitions to. Nothing
 /// asserts it; a definition has to say where it came from.
 const FIXTURE_ORIGIN: &str = "a meshing test's registry";
@@ -98,6 +123,37 @@ pub const fn single_face(facing: Facing, plane: u32, origin: (u32, u32)) -> Face
     face(facing, plane, origin, (1, 1))
 }
 
+/// The six sides one voxel shows when nothing hides any of them.
+///
+/// Each side sits on the plane of the voxel that emitted it and starts at the
+/// voxel's two remaining coordinates, taken in the plane's own order: primary y
+/// and secondary z for ±X, primary x and secondary z for ±Y, primary x and
+/// secondary y for ±Z.
+///
+/// A voxel whose three coordinates are equal collapses all six onto one plane,
+/// where no convention could be told apart from another — so a fixture reading
+/// this picks a voxel whose coordinates are pairwise distinct, and says so.
+#[must_use]
+pub fn every_side_of(voxel: LocalPos) -> Vec<Face> {
+    vec![
+        single_face(Facing::NegX, voxel.x, (voxel.y, voxel.z)),
+        single_face(Facing::PosX, voxel.x, (voxel.y, voxel.z)),
+        single_face(Facing::NegY, voxel.y, (voxel.x, voxel.z)),
+        single_face(Facing::PosY, voxel.y, (voxel.x, voxel.z)),
+        single_face(Facing::NegZ, voxel.z, (voxel.x, voxel.y)),
+        single_face(Facing::PosZ, voxel.z, (voxel.x, voxel.y)),
+    ]
+}
+
+/// The same six sides with the one pointing `hidden` left out.
+#[must_use]
+pub fn every_side_of_but(voxel: LocalPos, hidden: Facing) -> Vec<Face> {
+    every_side_of(voxel)
+        .into_iter()
+        .filter(|side| side.facing != hidden)
+        .collect()
+}
+
 /// Every quad, as the scenarios describe them.
 #[must_use]
 pub fn faces(quads: &[Quad]) -> Vec<Face> {
@@ -130,6 +186,20 @@ pub fn blocks_towards(quads: &[Quad], facing: Facing) -> Vec<((u32, u32), String
                 quad.block.as_str().to_owned(),
             )
         })
+        .collect()
+}
+
+/// Every quad as the scenarios describe them, each beside the block it names.
+///
+/// The module note keeps the block a quad names out of [`faces`] so that it is
+/// asserted deliberately rather than incidentally. One scenario is about *which*
+/// of two blocks shows a face on the boundary they share, and that is
+/// unobservable without the name — so it is asserted deliberately, here.
+#[must_use]
+pub fn named_faces(quads: &[Quad]) -> Vec<(Face, String)> {
+    quads
+        .iter()
+        .map(|quad| (described(quad), quad.block.as_str().to_owned()))
         .collect()
 }
 
@@ -177,8 +247,68 @@ pub fn every_position() -> impl Iterator<Item = LocalPos> {
     })
 }
 
+/// What a block declares about the three questions a mesh asks of it: whether
+/// something stands there, whether something is drawn there, and whether what is
+/// there hides whatever is behind it.
+///
+/// The three are separate answers, and a fixture that cannot state them
+/// separately cannot fail a mesher that reads all three off solidity. Written as
+/// a struct rather than as three positional booleans so a fixture reads the way
+/// its scenario is worded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Declaration {
+    pub solid: bool,
+    pub drawn: bool,
+    pub occludes: bool,
+}
+
+impl Declaration {
+    /// What every fixture written before drawnness and occlusion existed means:
+    /// all three answers are the block's solidity.
+    #[must_use]
+    pub const fn like_solidity(solid: bool) -> Self {
+        Self {
+            solid,
+            drawn: solid,
+            occludes: solid,
+        }
+    }
+}
+
+/// What [`HAZE`] and [`MURK`] declare: drawn, and neither solid nor occluding.
+pub const DRAWN_ONLY: Declaration = Declaration {
+    solid: false,
+    drawn: true,
+    occludes: false,
+};
+
+/// What [`GHOST`] declares: solid and occluding, and never drawn.
+pub const SOLID_AND_OCCLUDING: Declaration = Declaration {
+    solid: true,
+    drawn: false,
+    occludes: true,
+};
+
+/// What [`MIST`] declares: solid, and neither drawn nor occluding.
+pub const SOLID_ONLY: Declaration = Declaration {
+    solid: true,
+    drawn: false,
+    occludes: false,
+};
+
+/// What [`SHROUD`] declares: occluding, and neither drawn nor solid.
+pub const OCCLUDING_ONLY: Declaration = Declaration {
+    solid: false,
+    drawn: false,
+    occludes: true,
+};
+
 /// A registry holding exactly `blocks`, in the order given, each carrying the
 /// solidity declared beside it and textured by its own name.
+///
+/// Every one of the three questions a mesh asks is answered by that solidity,
+/// which is what a fixture written before the three were separable meant — see
+/// [`registry_of_declarations`] for the builder that can state them apart.
 ///
 /// The order is never incidental: it is what decides the runtime id each block
 /// gets, and three scenarios turn on that.
@@ -188,19 +318,45 @@ pub fn every_position() -> impl Iterator<Item = LocalPos> {
 /// Returns an error if a name is not a namespaced id, or if the registry refuses
 /// the batch.
 pub fn registry_declaring(blocks: &[(&str, bool)]) -> Result<BlockRegistry, Box<dyn Error>> {
+    let declared: Vec<(&str, Declaration)> = blocks
+        .iter()
+        .map(|&(name, is_solid)| (name, Declaration::like_solidity(is_solid)))
+        .collect();
+    registry_of_declarations(&declared)
+}
+
+/// A registry holding exactly `blocks`, in the order given, each carrying the
+/// declaration beside it and textured by its own name.
+///
+/// The one place a meshing fixture's definitions are built, so that a fixture
+/// stating three answers and a fixture stating one reach the registry by the same
+/// route rather than by two that could drift.
+///
+/// # Errors
+///
+/// Returns an error if a name is not a namespaced id, or if the registry refuses
+/// the batch.
+pub fn registry_of_declarations(
+    blocks: &[(&str, Declaration)],
+) -> Result<BlockRegistry, Box<dyn Error>> {
     let mut declared = Vec::with_capacity(blocks.len());
-    for &(name, is_solid) in blocks {
-        // A mesh is decided by solidity and by the texture key, and by nothing
-        // else a definition carries — so every block declared for a meshing
-        // fixture leaves breakability, replaceability and residue at what a
-        // declaration saying nothing about them means.
+    for &(name, states) in blocks {
+        // A mesh is decided by what a block states about being drawn, occluding
+        // and solid, and by the texture key — so every block declared for a
+        // meshing fixture leaves breakability, replaceability and residue at what
+        // a declaration saying nothing about them means. Targetability is read by
+        // nothing a meshing fixture drives, and follows solidity for the same
+        // reason.
         declared.push(Ok(BlockDefinition {
             name: BlockName::parse(name)?,
             textures: FaceTextures::uniform(TextureKey::parse(name)?),
-            is_solid,
+            is_solid: states.solid,
             replaceable: false,
             breakable: true,
             breaks_into: None,
+            drawn: states.drawn,
+            occludes: states.occludes,
+            targetable: states.solid,
             origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
         }));
     }
@@ -243,6 +399,33 @@ pub fn section_holding(
             .collect(),
     };
     Ok(Section::import(&described, registry)?)
+}
+
+/// A section every cell of which holds nothing, except that the cells `held`
+/// names hold the block named beside them.
+///
+/// **Every other cell is genuinely `Contents::Empty` rather than a block declared
+/// to show nothing**, which [`section_holding`] cannot express because it parses
+/// every palette entry as a name. A scenario about a voxel with empty space
+/// beside it means the absence of a block, and standing a block in for it would
+/// leave the same scenario satisfied by a mesher that never looked at emptiness
+/// at all.
+///
+/// Written one cell at a time, which is the only door emptiness has.
+///
+/// # Errors
+///
+/// Returns an error if a name is not a namespaced id, or if `registry` does not
+/// register one of them.
+pub fn section_of_nothing_but(
+    held: &[(LocalPos, &str)],
+    registry: &BlockRegistry,
+) -> Result<Section, Box<dyn Error>> {
+    let mut section = Section::empty();
+    for &(position, name) in held {
+        section.set_block(position, &BlockName::parse(name)?, registry)?;
+    }
+    Ok(section)
 }
 
 /// A section of [`VOID`] holding [`SOLID`] at exactly the positions `is_solid`

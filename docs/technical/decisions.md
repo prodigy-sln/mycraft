@@ -593,6 +593,26 @@ already be provably one. A world-wide bitset sized at construction is also the o
 MVP 3's chunk streaming cannot keep as-is; moving to a per-section bitset is a change confined inside
 `SolidVoxels` and is deferred until the world footprint stops being fixed.
 
+**Amendment (SPEC-021, splitting `solid` into four declared properties).** The decision above is
+recorded as it was taken and is not rewritten; what follows is what has changed since, and the
+decision was **extended rather than reversed**.
+
+`SolidVoxels` is now **`ResolvedVoxels`** — the type answers two questions and should not be named
+for one of them. It carries **two** bitsets: one for what stops the player, read through `Solidity`,
+and one for what a ray may stop at, read through a second narrow trait `Targetable`. Content declares
+the two independently (`base:water` stops nobody and a swing finds it), so neither may be derived
+from the other. `write` resolves the block once and settles **both** answers before it touches the
+store; `set` takes both in one call, so a caller able to write one without the other is unspellable.
+
+**This ADR's principle held under exactly the pressure that would have broken it.** What was decided
+here was not "one bitset" but a mirrored view kept in step through **one private write path**. A
+second mirrored view was added, and it went through that same path — the same two functions, `write`
+and `adopt`, and no third. The count changed; the guarantee did not, and the doc comments that name
+it now read "the one place **any** view is written" where they read "either".
+
+The deferred per-section change above is unaffected in kind and doubled in size: both bitsets are
+world-wide and sized at construction, and both move together when the footprint stops being fixed.
+
 ---
 
 ## ADR-016 — A save is one `postcard`-encoded plain file, replaced atomically, not a `redb` database

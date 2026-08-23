@@ -29,7 +29,7 @@ use thiserror::Error;
 /// Bumped whenever a change to the mesh contract invalidates every committed
 /// frame. `crates/mc-sim`'s scene contract is the tripwire that fails first and
 /// names this constant as the remedy.
-pub const SCENE_REVISION: &str = "r1";
+pub const SCENE_REVISION: &str = "r2";
 
 /// The ticks of the replay that carry a committed golden.
 ///
@@ -44,8 +44,21 @@ pub const DECLARED_CAPTURE_TICKS: [u16; 3] = [0, 59, 119];
 ///
 /// One, and deliberately not three. The HUD does not animate and the held block
 /// is set once, so ticks 59 and 119 would assert the same rectangles against
-/// different terrain. Tick 0 is the frame with the least terrain coverage, so the
-/// crosshair stands against the most sky.
+/// different terrain.
+///
+/// **The reason tick 0 was chosen is no longer true.** It was the frame with the
+/// least terrain coverage — 77.91% against the mid-nineties — so the crosshair
+/// stood against the most sky, while the spawn was inland. Measured per pixel
+/// from the coast column the three read **57.11%, 71.05% and 55.00%**, so the
+/// least-covered frame is now **tick 119**, by 2.1 points. Crosshair contrast no
+/// longer selects tick 0 and no longer selects this tick at all.
+///
+/// Tick 0 is kept anyway, and the honest reason is that there is no longer a
+/// measured one: the set has always been shot here, moving it would re-shoot a
+/// capture for no benefit anybody has demonstrated, and the HUD's own assertions
+/// pass against this frame. That is a reason to leave it alone rather than a
+/// reason to have picked it. **A later spec wanting maximum crosshair contrast
+/// should take tick 119 and say so**, rather than inheriting this one.
 ///
 /// A set of its own rather than a second use of [`DECLARED_CAPTURE_TICKS`]: the
 /// two sets are shot through different calls — the terrain captures through

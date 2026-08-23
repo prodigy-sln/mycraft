@@ -1,11 +1,19 @@
-//! The bounded walk from an eye to the first solid voxel it meets.
+//! The bounded walk from an eye to the first voxel it meets that a block
+//! declares a ray may stop at.
+//!
+//! **It asks [`Targetable`] and never [`Solidity`], and the two are different
+//! questions.** What stops a player and what a swing can find are separate
+//! declarations, and the shipped water is the block where they differ: it stops
+//! nobody and a swing finds it. Reading solidity here would put back a game rule
+//! content cannot override, and would do it at the one site every action's
+//! target comes from.
 //!
 //! **The bound is one site.** Voxels are walked in ascending entry distance and
 //! the walk stops when the next voxel's entry distance exceeds the reach; there
 //! is no second `distance <= reach` comparison anywhere. That is not tidiness:
-//! [`Solidity`] is total and answers `false` everywhere outside the world, so an
-//! unbounded traversal followed by a range check *does not terminate* for a ray
-//! that hits nothing. A limit whose falsifier is a hang rather than a red
+//! [`Targetable`] is total and answers `false` everywhere outside the world, so
+//! an unbounded traversal followed by a range check *does not terminate* for a
+//! ray that hits nothing. A limit whose falsifier is a hang rather than a red
 //! assertion is a limit nothing can measure.
 //!
 //! **This is deliberately not the golden frames' `March`.** That one lives in
@@ -17,8 +25,9 @@
 //! has no use for it.
 //!
 //! The voxel containing the origin is considered, at entry distance 0 and with
-//! no entry face. An eye inside a solid block therefore has a target and no face
-//! to place against, which is the one thing the two arms answer differently.
+//! no entry face. An eye inside a block a swing can find therefore has a target
+//! and no face to place against, which is the one thing the two arms answer
+//! differently.
 
 use std::cmp::Ordering;
 
@@ -26,7 +35,7 @@ use glam::Vec3;
 use mc_world::mesh::Facing;
 use mc_world::section::Axis;
 
-use crate::player::{BlockPos, Solidity};
+use crate::player::{BlockPos, Targetable};
 
 /// The voxel a ray met, how it entered, and how far along it that was.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -39,21 +48,20 @@ pub struct Hit {
     pub distance: f32,
 }
 
-/// The first solid voxel `direction` meets from `origin`, within `reach`
-/// blocks.
+/// The first voxel `direction` meets from `origin` that a block declares a ray
+/// may stop at, within `reach` blocks.
 ///
 /// `direction` need not be a unit vector; it is normalised here, which is what
 /// makes `reach` mean blocks rather than multiples of whatever was passed. A
 /// direction of no length points nowhere and meets nothing.
 ///
-/// **`is_solid` is the whole of what stops the walk, and that decides more than
-/// aiming.** A block content declares non-solid is a block no action can ever be
-/// aimed at, so every rule read off the targeted cell — breakability first among
-/// them — is inert for it. Widening what may be targeted therefore reaches
-/// `Refusal::Indestructible`, whose own documentation records the scenario that
-/// becomes writable the day it happens.
+/// **`is_targetable` is the whole of what stops the walk, and that decides more
+/// than aiming.** Every rule read off the targeted cell — breakability first
+/// among them — is inert for a block no ray stops at, so what content declares
+/// here is what makes `Refusal::Indestructible` reachable for the shipped water
+/// at all. Aiming and yielding are separate claims, and this is the first.
 #[must_use]
-pub fn targeted(origin: Vec3, direction: Vec3, reach: f32, world: &dyn Solidity) -> Option<Hit> {
+pub fn targeted(origin: Vec3, direction: Vec3, reach: f32, world: &dyn Targetable) -> Option<Hit> {
     let ray = direction.normalize_or_zero();
     let mut crossings = [
         Crossing::of(Axis::X, origin.x, ray.x)?,
@@ -66,7 +74,7 @@ pub fn targeted(origin: Vec3, direction: Vec3, reach: f32, world: &dyn Solidity)
         distance: 0.0,
     };
     loop {
-        if world.is_solid(met.cell) {
+        if world.is_targetable(met.cell) {
             return Some(met);
         }
         // A ray of no length leaves all three crossings at infinity, so the

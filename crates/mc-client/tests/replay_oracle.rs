@@ -40,15 +40,28 @@
 //! The dominant edge in these frames is the terrain horizon, which a yaw rotation
 //! slides *along* rather than across. Only a downward pitch predicts terrain
 //! where the frame has sky, which is the one direction a one-sided check can see.
-//! Tick 0 is the perturbed frame because its horizon sits highest in the frame of
-//! the three; by tick 59 the frame is almost entirely terrain and a small pitch
-//! lands inside terrain either way.
+//!
+//! **Which tick is perturbed no longer selects anything, and that is a change
+//! rather than a detail.** The reason used to be that tick 0's horizon sat
+//! highest of the three — when the sky counts were 135 against tick 59's 32, a
+//! fourfold gap that genuinely picked a frame. Since the declared spawn moved to
+//! the coast they are **241 / 168 / 259** of 576, and tick 0 is not even the
+//! roomiest: tick 119 is. Measured at the same time, the 3° control finds
+//! **22 / 26 / 25** disagreements at the three ticks — an order of magnitude over
+//! the budget of 2 at every one of them, and near enough the same order at each.
+//!
+//! So any of the three would serve, and tick 0 is kept because it is the opening
+//! frame and because keeping it leaves the control unchanged in every respect but
+//! the spawn. **The reason is recorded as no longer discriminating rather than
+//! repaired to a fresher number**, because a justification that sounds decisive
+//! over an 18-sample margin is worse than one that admits it is arbitrary.
 
 mod support;
 
 use std::error::Error;
 use std::sync::Arc;
 
+use glam::Vec3;
 use mc_core::block::BlockRegistry;
 use mc_render::camera::camera_view;
 use mc_render::color::CLEAR_COLOR_SRGB;
@@ -81,13 +94,42 @@ const DISAGREEMENT_BUDGET: usize = 2;
 /// The fewest samples a march may predict as terrain in any judged frame.
 ///
 /// Slack by design and unlike the budget above. Its job is to catch a
-/// *collapsed* oracle rather than to be tight: a uniform grid over a frame that
-/// is 78% not sky predicts on the order of 450 of the 576, so any value well
-/// above zero and well below that serves.
+/// *collapsed* oracle rather than to be tight, so it is derived from both
+/// directions and from neither tightly: **above zero**, because an oracle
+/// predicting nothing is the one failure the one-sided comparison beside it
+/// cannot see, and **below the tightest of the judged frames**, or a correct
+/// march fails it.
+///
+/// Re-measured after the declared spawn moved to the coast: the three frames are
+/// 58 % / 71 % / 55 % not sky and predict **335 / 408 / 317** of 576, so the
+/// tightest is 317 and 100 sits 3.2× under it. The figures the coastal spawn
+/// replaced were 78 % and around 450; the conclusion survived the move and the
+/// sentence supporting it did not, which is why it is restated rather than left
+/// standing beside a value it no longer describes.
 const PREDICTION_FLOOR: usize = 100;
 
 /// How far below the camera the control's prediction is marched from.
 const CONTROL_PITCH_DEGREES: f32 = 3.0;
+
+/// Everything a declared sample of these frames may be classified as: the sky,
+/// and the four blocks the replay's declaration places.
+///
+/// **Written out rather than read off the registry**, which is the thing the
+/// classification resolves through — a list discovered from the registry would
+/// agree with it whatever it came to hold. The sea is among them and is the one
+/// that was unreachable before this feature: for as long as the mesher and the
+/// judge both decided by solidity, no ray could stop at water and no sample could
+/// be classified as it.
+const THE_CLASSES: [&str; 5] = [
+    oracle::SKY,
+    "base:dirt",
+    "base:grass",
+    "base:stone",
+    "base:water",
+];
+
+/// The class a frame has to show at one sample at least.
+const WATER: &str = "base:water";
 
 #[test]
 fn every_sample_a_marched_ray_calls_terrain_is_drawn_as_something_other_than_sky() -> TestResult {
@@ -139,6 +181,113 @@ fn every_frames_march_predicts_terrain_at_a_hundred_of_the_declared_samples_or_m
          hold; it is a collapse detector and not a coverage assertion. Predicted per tick: \
          {counted:?}, short of the floor at {collapsed:?}",
         oracle::SAMPLE_COUNT
+    );
+    Ok(())
+}
+
+/// The one reading here that judges the march itself rather than judging a frame
+/// by it, and it needs no device for the same reason the floor above does not: a
+/// classification is a statement about the world and the camera and about nothing
+/// drawn.
+///
+/// **An enumerated verdict rather than a filter for the class of interest.** A
+/// reading that counted water samples and asked for one could not see a march
+/// that had come to answer nothing everywhere else, or one that classified a
+/// sample as a block the declaration never places. Every sample is classified,
+/// the classes are compared against the whole of what the world can offer, and
+/// the count is compared against the grid's own size — so a march that stopped
+/// short and a march that answered outside the world are two distinct failures
+/// of one comparison.
+#[test]
+fn every_declared_sample_of_every_judged_frame_is_sky_or_a_block_the_world_places_and_some_is_sea()
+-> TestResult {
+    let classified = classifications(&JUDGED_TICKS)?;
+
+    assert_eq!(
+        classified,
+        JUDGED_TICKS
+            .iter()
+            .map(|tick| Classified {
+                tick: *tick,
+                outside_the_declared_classes: Vec::new(),
+                samples: oracle::SAMPLE_COUNT,
+                sea: AT_LEAST_ONE,
+            })
+            .collect::<Vec<_>>(),
+        "every one of the {} declared samples is looking at exactly one of {THE_CLASSES:?}, and \
+         the sea is among them in every judged frame. A class outside that list is a march \
+         answering about a world the declaration does not describe; a count short of the grid is \
+         a march that stopped classifying; and a frame without the sea is a camera that cannot \
+         see it, which is the state this feature found the declared spawn in",
+        oracle::SAMPLE_COUNT
+    );
+    Ok(())
+}
+
+/// The premise every reading in this file and in the sea's own rests on, which
+/// nothing else here states.
+///
+/// # A saturated frame passes everything, and only the spawn's position prevents it
+///
+/// If the eye stood **inside** a drawn voxel, `first_drawn` tests the voxel the
+/// eye occupies before it steps, so every one of the 576 samples would classify
+/// as that block. Follow that through the file:
+///
+/// - the classification totals the grid, and 576 of one class totals it perfectly;
+/// - [`PREDICTION_FLOOR`] is a **floor** — 576 clears 100 without trouble, so the
+///   collapse detector is silent;
+/// - the one-sided comparison asks that predicted terrain not be drawn as sky, and
+///   576 water samples are all non-sky;
+/// - and the sea's own reading would then judge a frame that genuinely *is* water
+///   at every sample, and pass **honestly**.
+///
+/// **Nothing in the workspace bounds terrain from above.** So a saturated
+/// classification is not unrepresentable — it is merely absent, and what makes it
+/// absent is where the declared spawn happens to sit. That is a contingency, and
+/// this test is what turns it into a property: the counts *cannot* be 576 because
+/// the eye is not inside anything drawn, rather than happening not to be.
+///
+/// It matters here more than it would have before this phase. `predicted_terrain`
+/// now derives from the classification instead of marching separately — which is
+/// right, and stops the two disagreeing about which samples are terrain — but it
+/// also removes the second opinion that would have reported this.
+///
+/// # Why it needs no positive control of its own
+///
+/// The way an absence assertion rots is the subject coming to answer "no" to
+/// everything. Here that is a judge whose `is_drawn` answers false everywhere,
+/// and that judge predicts **nothing** as terrain — which is exactly what the
+/// prediction floor above catches, in this same file. The two guards fail in
+/// opposite directions and neither can go quiet without the other speaking.
+#[test]
+fn the_camera_of_every_judged_frame_stands_in_open_air() -> TestResult {
+    let prepared = prepare_scene()?;
+    let voxels = Voxels {
+        world: &prepared.world,
+        registry: &prepared.registry,
+    };
+
+    let mut standing = Vec::new();
+    for tick in JUDGED_TICKS {
+        let camera = support::frames::player_pose(tick, &prepared.world, &prepared.registry)?;
+        let eye = Vec3::from_array(camera.eye).floor().as_ivec3();
+        standing.push((
+            tick,
+            voxels
+                .drawn_block(eye)?
+                .map(|block| block.as_str().to_owned()),
+        ));
+    }
+
+    assert_eq!(
+        standing,
+        JUDGED_TICKS.map(|tick| (tick, None)).to_vec(),
+        "the eye has to stand in open air at every judged tick, and the cell it occupies is \
+         named here rather than merely denied. A block reported for any of them is an eye \
+         inside terrain — and if that block were the sea, every reading in this file and the \
+         one that judges water's own colour would pass on a frame classified 576 out of 576 as \
+         water. The declared spawn stands one column from the sea, so this is near enough to \
+         be worth stating"
     );
     Ok(())
 }
@@ -235,6 +384,71 @@ impl Session {
 /// What one tick's march predicted: the tick, and the sample pixels it called
 /// terrain.
 type Predicted = (u32, Vec<(u32, u32)>);
+
+/// What one tick's classification of the declared grid came to.
+#[derive(Debug, PartialEq, Eq)]
+struct Classified {
+    tick: u32,
+    /// Every class the march used that the declaration does not place, ascending
+    /// and without repeats, so a failure names them rather than counting them.
+    outside_the_declared_classes: Vec<String>,
+    /// How many samples were classified at all.
+    samples: usize,
+    /// Whether the sea was among them.
+    sea: &'static str,
+}
+
+/// What a frame that classified the sea at one sample or more reports.
+const AT_LEAST_ONE: &str = "the sea at one sample or more";
+
+/// What a frame that classified the sea nowhere reports.
+const NONE_AT_ALL: &str = "the sea at no sample at all";
+
+/// What the march classifies each declared sample as, at each of `ticks`, with
+/// no device involved.
+fn classifications(ticks: &[u32]) -> Result<Vec<Classified>, Box<dyn Error>> {
+    let prepared = prepare_scene()?;
+    let voxels = Voxels {
+        world: &prepared.world,
+        registry: &prepared.registry,
+    };
+    let mut classified = Vec::new();
+    for tick in ticks {
+        let camera = support::frames::player_pose(*tick, &prepared.world, &prepared.registry)?;
+        let sighted = oracle::sighted_samples(&camera, CAPTURE_SIZE, &voxels)?;
+        classified.push(summarised(
+            *tick,
+            sighted.iter().map(|(_, sighted)| sighted.described()),
+        ));
+    }
+    Ok(classified)
+}
+
+/// What one tick's classes add up to.
+///
+/// The classes arrive as the words a tally is keyed by rather than as the
+/// classifications themselves, so the comparison this feeds is over the same
+/// spelling on both sides and a block name cannot arrive under the sky's word.
+fn summarised(tick: u32, classes: impl Iterator<Item = String>) -> Classified {
+    let classes: Vec<String> = classes.collect();
+    let mut outside: Vec<String> = classes
+        .iter()
+        .filter(|class| !THE_CLASSES.contains(&class.as_str()))
+        .cloned()
+        .collect();
+    outside.sort();
+    outside.dedup();
+    Classified {
+        tick,
+        outside_the_declared_classes: outside,
+        samples: classes.len(),
+        sea: if classes.iter().any(|class| class == WATER) {
+            AT_LEAST_ONE
+        } else {
+            NONE_AT_ALL
+        },
+    }
+}
 
 /// What the march predicts at each of `ticks`, with no device involved.
 ///

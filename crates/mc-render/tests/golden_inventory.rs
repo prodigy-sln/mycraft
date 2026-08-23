@@ -46,10 +46,23 @@ type TestResult = Result<(), Box<dyn Error>>;
 
 /// A revision nobody has captured anything for.
 ///
-/// The scenarios ask what a *second* revision produces, so this is the one the
-/// spec names rather than an arbitrary string: `r2` is what the day after
-/// ambient occlusion looks like.
-const SECOND_REVISION: &str = "r2";
+/// **Derived from the current revision rather than written down, and that is the
+/// whole point of it.** It used to be the literal `r2` — the next revision the
+/// spec named — and the day the scene revision became `r2` the two would have
+/// been the same string: the test below would have compared a list of ids
+/// against itself, found every one of them repeated, and failed for a reason
+/// with nothing to do with whatever had moved the revision. Suffixing the
+/// current one cannot collide with it however far it advances, and no directory
+/// can be committed under a name the id functions will only ever produce for
+/// this test.
+///
+/// The suffix is spelled in the alphabet a capture id admits — lowercase letters
+/// and `_` — so this is a revision the id functions accept and not one they
+/// refuse, which is what keeps the scenario about a *missing* golden rather than
+/// about a rejected name.
+fn a_revision_nothing_was_captured_for() -> String {
+    format!("{SCENE_REVISION}_uncaptured")
+}
 
 /// The tick whose id the missing-golden refusal is asked for.
 ///
@@ -88,13 +101,11 @@ const NOT_UPDATING: OptIns = OptIns {
 #[test]
 fn the_capture_ids_of_a_second_scene_revision_all_carry_it_and_none_repeats_the_first() -> TestResult
 {
+    let uncaptured = a_revision_nothing_was_captured_for();
     let first = declared_capture_ids(SCENE_REVISION)?;
-    let second = declared_capture_ids(SECOND_REVISION)?;
+    let second = declared_capture_ids(&uncaptured)?;
 
-    let carrying = second
-        .iter()
-        .filter(|id| id.contains(SECOND_REVISION))
-        .count();
+    let carrying = second.iter().filter(|id| id.contains(&uncaptured)).count();
     let repeated = first
         .iter()
         .zip(&second)
@@ -109,7 +120,7 @@ fn the_capture_ids_of_a_second_scene_revision_all_carry_it_and_none_repeats_the_
          the old one, which is exactly the silent re-shoot the revision exists to prevent. \
          Every declared capture, terrain and HUD alike — a set that renamed only some of \
          itself is the same collision arriving through half the ids. \
-         `{SCENE_REVISION}` gave {first:?} and `{SECOND_REVISION}` gave {second:?}"
+         `{SCENE_REVISION}` gave {first:?} and `{uncaptured}` gave {second:?}"
     );
     Ok(())
 }
@@ -150,7 +161,7 @@ fn a_revision_whose_goldens_were_never_captured_fails_naming_the_path_it_looked_
 fn settings_for_an_uncaptured_revision(
     workspace: &Path,
 ) -> Result<(GoldenSettings, PathBuf), Box<dyn Error>> {
-    let capture = CaptureId::new(&capture_id(TICK, SECOND_REVISION)?)?;
+    let capture = CaptureId::new(&capture_id(TICK, &a_revision_nothing_was_captured_for())?)?;
     let golden_root = workspace.join("goldens");
     let looked_for = golden_root.join(capture.as_str()).join(GOLDEN_FILE);
     let settings = GoldenSettings {

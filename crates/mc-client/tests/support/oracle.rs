@@ -5,7 +5,7 @@
 //! one-sided — *every sample this predicts as terrain has to be something other
 //! than sky in the frame* — because a ray passing within a pixel of a silhouette
 //! cannot be trusted to predict **sky** correctly, while a ray that entered a
-//! solid voxel a long way from any edge can be trusted to predict terrain.
+//! drawn voxel a long way from any edge can be trusted to predict terrain.
 //!
 //! # It shares no code with the renderer's projection
 //!
@@ -32,24 +32,50 @@
 //! One voxel at a time, one registry lookup per voxel, no bitset and no
 //! acceleration structure — `crates/mc-sim/tests/support/oracle.rs` is the same
 //! shape and for the same reason. Being obviously right is the only property it
-//! needs. In particular it reads solidity through
-//! [`BlockDefinition::is_solid`](mc_core::block::BlockDefinition) and never
-//! through the pre-resolved bitset the physics uses, so an oracle and a subject
-//! that were both wrong about a block would still have to be wrong in two
-//! separate places.
+//! needs. In particular it reads drawnness through
+//! [`BlockDefinition::drawn`](mc_core::block::BlockDefinition) and never through
+//! the pre-resolved bitset the physics uses, so an oracle and a subject that
+//! were both wrong about a block would still have to be wrong in two separate
+//! places.
 //!
-//! # Water
+//! # Why marching on `drawn` is not marching on the mesher's decision
 //!
-//! A ray passes straight through water, because water's definition is not solid
-//! — and the renderer draws the lakebed for the same reason, since a non-solid
-//! block is never meshed. The two agree about a submerged surface by
-//! construction rather than by luck. `spec.md` records this as an assumption the
-//! oracle depends on.
+//! The mesher decides a face by three questions at once — is this block drawn,
+//! does what lies beyond it fail to occlude, and is what lies beyond it a
+//! different kind — computed over a resolved key table and a boundary plane
+//! carrying one key per cell. **This judge is given none of those.** It has no
+//! boundary plane, no key table and no `occludes` answer; it asks one question,
+//! of one voxel at a time, and never looks at a neighbour at all. Two different
+//! questions, answered by two implementations that share nothing but the
+//! registry lookup — which is the same relationship the two had when both read
+//! solidity.
+//!
+//! # The two directions that make the prediction non-vacuous
+//!
+//! A judge that had quietly stopped reading the registry would once have gone on
+//! agreeing about water for free, and nothing would have said so. Two readings
+//! close that, and they are the reason this module's old paragraph about water
+//! is gone rather than softened:
+//!
+//! - every declared sample is classified as exactly one of sky or a block the
+//!   world holds, the classes sum to the whole grid, and the sea is predicted at
+//!   one sample at least — so a march that collapsed, or that came to answer
+//!   "nothing" everywhere, is reported rather than passing quietly;
+//! - a world holding a block declared `drawn = false, solid = true` is marched
+//!   *through* — which no judge reading solidity can do.
+//!
+//! **The named breaker.** A first-drawn-voxel march is right only while every
+//! drawn block is opaque: the nearest drawn surface is then the one a pixel
+//! shows. The day a translucent block exists — PRO-952 — this judge needs a
+//! second rule, because the nearest drawn surface will no longer be the only
+//! thing the pixel is of. Recorded here, at the assumption, rather than
+//! reconstructed later.
 
 use std::error::Error;
 
 use glam::{IVec3, Vec3};
 use mc_core::block::{BlockRegistry, RegistryError};
+use mc_core::id::BlockName;
 use mc_render::camera::projection_for;
 use mc_render::color::CLEAR_COLOR_SRGB;
 use mc_render::surface::SurfaceSize;
@@ -89,7 +115,49 @@ pub const SAMPLE_COUNT: usize = (SAMPLE_COLUMNS * SAMPLE_ROWS) as usize;
 /// has left everything solidity can be asked about — whichever way it left.
 const MARCH_LIMIT: f32 = 272.0;
 
-/// The world the oracle marches, and the definitions it reads solidity from.
+/// What one marched ray is looking at.
+///
+/// **Two arms, and no third for "I could not tell".** A ray either meets a drawn
+/// voxel inside the march limit or it does not, and there is no answer in
+/// between: a block the registry does not register is a [`RegistryError`] the
+/// caller receives, never a sample quietly classified as nothing. That is what
+/// lets a reading compare the whole classification of a grid — an answer outside
+/// the set the world can offer, and a grid that stopped summing to itself, are
+/// both failures of the same comparison.
+///
+/// `Sky` is a **prediction and not a reading of any frame**: it means the march
+/// met no drawn voxel, which is a statement about the world and the camera
+/// alone.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Sighted {
+    /// The march met no drawn voxel inside [`MARCH_LIMIT`].
+    Sky,
+    /// The nearest drawn voxel along the ray holds this block.
+    Terrain(BlockName),
+}
+
+/// One declared sample pixel and what a ray through it is looking at.
+pub type SightedSample = ((u32, u32), Sighted);
+
+/// What a sample is called wherever this suite tallies classifications as text.
+///
+/// **It is not a block name and cannot become one**: every namespaced name
+/// carries a colon, so sky and a block can sit in one tally without either being
+/// able to impersonate the other.
+pub const SKY: &str = "sky";
+
+impl Sighted {
+    /// This classification as the one word a tally is keyed by.
+    #[must_use]
+    pub fn described(&self) -> String {
+        match self {
+            Self::Sky => SKY.to_owned(),
+            Self::Terrain(block) => block.as_str().to_owned(),
+        }
+    }
+}
+
+/// The world the oracle marches, and the definitions it reads drawnness from.
 ///
 /// Both by reference and both re-read per voxel. This is the pair
 /// `crates/mc-sim/tests/support/overlap.rs` walks for the same reason: the
@@ -102,22 +170,23 @@ pub struct Voxels<'a> {
 }
 
 impl Voxels<'_> {
-    /// Whether the voxel at `voxel` is solid, reading anything outside the
-    /// loaded world as not solid.
+    /// The block at `voxel` where the registry says that block is drawn, and
+    /// nothing where the cell is empty, outside the loaded world, or holds a
+    /// block nothing draws.
     ///
     /// # Errors
     ///
     /// Returns [`RegistryError`] when the world holds a block the registry does
-    /// not register. Reported rather than read as non-solid: a silent non-solid
+    /// not register. Reported rather than read as not drawn: a silent not-drawn
     /// would shrink the prediction, and a shrinking prediction is exactly what a
     /// one-sided comparison cannot see.
-    pub fn is_solid(&self, voxel: IVec3) -> Result<bool, RegistryError> {
+    pub fn drawn_block(&self, voxel: IVec3) -> Result<Option<&BlockName>, RegistryError> {
         let (Ok(x), Ok(y), Ok(z)) = (
             u32::try_from(voxel.x),
             u32::try_from(voxel.y),
             u32::try_from(voxel.z),
         ) else {
-            return Ok(false);
+            return Ok(None);
         };
         // Three answers, three arms, and never two of them folded together. A
         // position the world does not reach and a cell holding nothing both mean
@@ -127,10 +196,22 @@ impl Voxels<'_> {
         // answer reached here is reached independently of the one the subject
         // reached.
         match self.world.block_at(x, y, z) {
-            None => Ok(false),
-            Some(Contents::Empty) => Ok(false),
-            Some(Contents::Holds(name)) => Ok(self.registry.resolve(name)?.is_solid),
+            None => Ok(None),
+            Some(Contents::Empty) => Ok(None),
+            Some(Contents::Holds(name)) => Ok(self.registry.resolve(name)?.drawn.then_some(name)),
         }
+    }
+
+    /// Whether the voxel at `voxel` is drawn, reading anything outside the
+    /// loaded world as not drawn.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RegistryError`] when the world holds a block the registry does
+    /// not register — see [`drawn_block`](Self::drawn_block), which this is the
+    /// yes-or-no form of.
+    pub fn is_drawn(&self, voxel: IVec3) -> Result<bool, RegistryError> {
+        Ok(self.drawn_block(voxel)?.is_some())
     }
 }
 
@@ -149,8 +230,40 @@ pub fn sample_pixels() -> Vec<(u32, u32)> {
         .collect()
 }
 
+/// What every declared sample pixel of a frame of `size` is looking at, from
+/// `camera`, in [`sample_pixels`] order.
+///
+/// **Every sample is classified and none is skipped**, so the answers sum to
+/// [`SAMPLE_COUNT`] by construction and a reading that came to find fewer has
+/// found a march that stopped rather than a grid that shrank.
+///
+/// # Errors
+///
+/// Returns [`RegistryError`] when the world holds a block `voxels`' registry
+/// does not register.
+pub fn sighted_samples(
+    camera: &CameraPose,
+    size: SurfaceSize,
+    voxels: &Voxels<'_>,
+) -> Result<Vec<SightedSample>, RegistryError> {
+    let basis = Basis::of(camera);
+    let lens = Lens::of(size);
+    let mut sighted = Vec::new();
+    for pixel in sample_pixels() {
+        let met = first_drawn(basis.eye, basis.ray_through(pixel, &lens), voxels)?;
+        sighted.push((pixel, met));
+    }
+    Ok(sighted)
+}
+
 /// The sample pixels a ray cast from `camera` onto a frame of `size` meets a
-/// solid voxel through.
+/// drawn voxel through.
+///
+/// **The samples [`sighted_samples`] does not call sky**, rather than a second
+/// march of its own. The one-sided comparison this feeds and the classification
+/// the grid is judged by must not be able to disagree about which samples are
+/// terrain: two marches would be two answers, and the day they parted the
+/// difference would read as a renderer fault.
 ///
 /// # Errors
 ///
@@ -161,15 +274,11 @@ pub fn predicted_terrain(
     size: SurfaceSize,
     voxels: &Voxels<'_>,
 ) -> Result<Vec<(u32, u32)>, RegistryError> {
-    let basis = Basis::of(camera);
-    let lens = Lens::of(size);
-    let mut terrain = Vec::new();
-    for pixel in sample_pixels() {
-        if marches_into_terrain(basis.eye, basis.ray_through(pixel, &lens), voxels)? {
-            terrain.push(pixel);
-        }
-    }
-    Ok(terrain)
+    Ok(sighted_samples(camera, size, voxels)?
+        .into_iter()
+        .filter(|(_, sighted)| *sighted != Sighted::Sky)
+        .map(|(pixel, _)| pixel)
+        .collect())
 }
 
 /// The predicted samples `frame` draws as the sky.
@@ -284,11 +393,11 @@ impl Lens {
     }
 }
 
-/// The first solid voxel a ray cast from `camera` through `pixel` meets on a
+/// The first drawn voxel a ray cast from `camera` through `pixel` meets on a
 /// frame of `size`, and the facing of it the ray came in through.
 ///
 /// **The independent answer to "what is this pixel looking at".** It reads the
-/// world's own voxels and the registry's own solidity and consults nothing the
+/// world's own voxels and the registry's own drawnness and consults nothing the
 /// renderer produced, which is what lets a reading assert a colour at a pixel
 /// *and* say which block face that pixel is of without one of the two coming
 /// from the other.
@@ -296,14 +405,14 @@ impl Lens {
 /// The facing is the one the ray entered by, taken from the axis the march last
 /// crossed a boundary on — a march that steps one boundary at a time cannot
 /// enter a voxel by two faces at once. `None` where the ray met nothing, and
-/// also where the eye already stands inside a solid voxel: there is no face to
+/// also where the eye already stands inside a drawn voxel: there is no face to
 /// have entered by, and answering one would be an invention.
 ///
 /// # Errors
 ///
 /// Returns [`RegistryError`] when the world holds a block `voxels`' registry
 /// does not register.
-pub fn first_solid_face(
+pub fn first_drawn_face(
     camera: &CameraPose,
     size: SurfaceSize,
     pixel: (u32, u32),
@@ -311,32 +420,36 @@ pub fn first_solid_face(
 ) -> Result<Option<(IVec3, Facing)>, RegistryError> {
     let basis = Basis::of(camera);
     let mut march = March::of(basis.eye, basis.ray_through(pixel, &Lens::of(size)));
-    if voxels.is_solid(march.voxel)? {
+    if voxels.is_drawn(march.voxel)? {
         return Ok(None);
     }
     while march.travelled <= MARCH_LIMIT {
         let entered = march.step();
-        if voxels.is_solid(march.voxel)? {
+        if voxels.is_drawn(march.voxel)? {
             return Ok(Some((march.voxel, entered)));
         }
     }
     Ok(None)
 }
 
-/// Whether a ray leaving `origin` along `direction` meets a solid voxel.
-fn marches_into_terrain(
+/// What a ray leaving `origin` along `direction` is looking at: the block of the
+/// first drawn voxel it meets, or sky where it met none inside [`MARCH_LIMIT`].
+///
+/// The voxel the eye already stands in counts, which is what makes an eye inside
+/// terrain a prediction of that terrain rather than of the sky beyond it.
+fn first_drawn(
     origin: Vec3,
     direction: Vec3,
     voxels: &Voxels<'_>,
-) -> Result<bool, RegistryError> {
+) -> Result<Sighted, RegistryError> {
     let mut march = March::of(origin, direction);
     while march.travelled <= MARCH_LIMIT {
-        if voxels.is_solid(march.voxel)? {
-            return Ok(true);
+        if let Some(block) = voxels.drawn_block(march.voxel)? {
+            return Ok(Sighted::Terrain(block.clone()));
         }
         let _entered = march.step();
     }
-    Ok(false)
+    Ok(Sighted::Sky)
 }
 
 /// The facing a voxel was entered by, given which way the march is travelling on

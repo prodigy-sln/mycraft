@@ -29,7 +29,7 @@ pub fn mesh_section(
 ```
 
 A `Quad` is a `facing`, a `plane` (the coordinate, along the facing's axis, of
-the **solid voxel that emitted the face** — never of the face itself, so
+the **drawn voxel that emitted the face** — never of the face itself, so
 every plane stays inside `0..16` and matches `world-format.md`'s
 exclusive-bound convention), an origin `PlanePos` and an extent
 `PlaneExtent` (both components ≥ 1), and a `block: BlockName`. A
@@ -57,10 +57,11 @@ secondary are the plane's two remaining axes taken in x < y < z order.
 Identical section contents produce a byte-identical quad sequence regardless
 of write history, palette order, palette length, index width, compaction
 state, reference counts, or the order blocks were registered in. This holds
-because solidity and block identity are resolved into **contents-ordered**
-keys before the sweep ever runs: one pass over the section's own voxels in
-their linear (x-fastest) order builds one entry per *distinct block the
-section actually holds*, in first-encounter order. Nothing registry-local or
+because block identity and what each block declares are resolved into
+**contents-ordered** keys before the sweep ever runs: one pass over the
+section's own voxels in their linear (x-fastest) order builds one entry per
+*distinct block the section actually holds*, in first-encounter order, and
+the six shared faces are then keyed into the same table. Nothing registry-local or
 history-dependent survives into that pass's output, so nothing
 registry-local or history-dependent can reach the emitted quads either.
 
@@ -73,8 +74,8 @@ warranted structurally rather than by convention.
 ### An empty cell is answered before the registry
 
 A cell holds a block or nothing (`technical/world-format.md`), and a
-palette entry holding nothing resolves to **non-solid without the registry
-being consulted at all**. That is one arm in one place, and it covers both
+palette entry holding nothing resolves to **neither drawn nor occluding,
+without the registry being consulted at all**. That is one arm in one place, and it covers both
 the meshed section and every supplied neighbour — which is what keeps "an
 empty cell shows no face" a single rule rather than two that could drift
 apart at a chunk boundary, where the difference would show as a seam only
@@ -85,8 +86,9 @@ Two consequences worth stating, because both are load-bearing:
 - **A section holding nothing anywhere meshes into a mesh carrying no
   quads, even against a registry holding no block at all.** Emptiness is
   not an unresolved block, so it earns no `UnresolvedBlock` refusal.
-- **Nothing about the sweep changes.** Emptiness reaches it as a non-solid
-  cell, and a non-solid cell already emitted no face. `visible_face`, the
+- **Nothing about the sweep changes.** Emptiness reaches it as a cell that
+  is not drawn and does not occlude, and an undrawn cell already emitted no
+  face. `visible_face`, the
   merge predicate, the loop nesting and the emission order are untouched by
   it — which is the reason retiring the base game's former empty block
   moved no pixel of any committed golden frame.
@@ -114,7 +116,7 @@ separately.
 
 Absence is **per neighbour**, never all-or-nothing: each of the six slots is
 independently `Some` or `None`. An absent neighbour is decided as if the
-adjacent voxel were non-solid — deliberately, because treating an unloaded
+adjacent voxel held nothing — deliberately, because treating an unloaded
 neighbour as solid would hide the streaming edge behind a silently missing
 face, and a visible wall at the world edge is correctable in a way a silently
 missing surface at every chunk boundary is not.
@@ -124,6 +126,95 @@ facing-plane voxels reference** — narrower than the rule for the meshed
 section itself, which resolves every palette entry any of its 4096 voxels
 reference. A block a neighbour holds away from the shared face is never read
 and can never fail the mesh.
+
+### Which faces exist: three questions, and one of them is an engine rule
+
+A face is emitted at a cell only when all three of these answer yes. The first
+two are read off the declarations either side of the face; the third is derived
+by the engine and stated in `visible_face` and nowhere else.
+
+```
+drawn(self) && !occludes(beyond) && key(self) != key(beyond)
+```
+
+1. **Is this block drawn?** `BlockDefinition::drawn` — the only question asked
+   of the cell showing the face. A block declared solid and undrawn is an
+   invisible barrier: it reaches the sweep and emits nothing.
+2. **Does whatever is beyond it fail to occlude?** `BlockDefinition::occludes`
+   of the neighbouring cell. Separate from the first because a block may be seen
+   without hiding what is behind it, which is the whole of what makes water look
+   like water — and a block may hide what is behind it without being seen or
+   being solid.
+3. **Is whatever is beyond it a different block?** **A block never draws a face
+   against its own kind.** Without this a body of water is a stack of visible
+   sheets, one interior face per cell; with it, a sea shows only its surface and
+   its edges.
+
+None of the three is derived from `is_solid`, which now means collision and
+nothing else. They coincide across the four blocks the base game ships, and
+deriving any of them from another would put that accident in the engine where
+content could not override it.
+
+**The third is a rule, not a declaration — and PRO-952 is its named breaker.**
+It is evaluated over **key identity**: keys are handed out per distinct
+*contents* over a table deduplicated by name, so `key(self) != key(beyond)`
+compares identity and reads neither a block name nor a runtime id. `visible_face`'s
+standing property — that no name and no runtime id is looked at anywhere in the
+file, which is what makes a mod's block behave exactly as the base game's — is
+therefore preserved by the comparison rather than weakened by it.
+
+What that costs a mod author, stated because it is not currently askable: **two
+adjacent cells holding the same non-occluding block show no seam between them,
+and there is no field that turns the rule off.** The value that would do it is
+`merges_with_self = false`, whose one identified use is drawing the interior
+faces of a translucent volume — per-pane glass — and translucency is PRO-952.
+The day that spec lands, this rule has to become a declaration; until then the
+engine's answer is the only answer.
+
+Until the shipped water declaration made water drawn, no shipped content ever
+reached this third question: `occludes(beyond)` culled first every time. That
+was measured rather than assumed — the clause was deleted and `scene_contract`,
+`replay_world` and all four of the then-committed **`r1`** captures stayed green,
+over a world whose sea emitted no faces at all. **That measurement cannot be
+re-run against the set in front of you.** The `r2` captures were minted from a
+world in which water is drawn, and from that declaration onward the sea is
+exactly the case where the first two questions hold and the third decides.
+**So a mutation that removes this clause and moves the goldens is the rule
+beginning to bind, not a defect** — which is the reading that measurement was
+taken for, and the one a future engineer will otherwise get backwards.
+
+#### The boundary plane carries a key, not a flag
+
+`Boundaries` is `[[Key; 256]; 6]` — one key per cell of each of the six faces a
+section shares with its neighbours, over **the same key table as the section
+being meshed**, resolved second. A plane of booleans has no room for the third
+question, and the boundary is exactly where it has to be asked: a body of water
+spans sections, so a mesher that could only answer it inside a section shows a
+sheet at every chunk edge.
+
+Four properties a future change must not break, recorded here rather than
+reconstructed later from the code:
+
+1. **The meshed section is keyed before its boundaries.** This is what makes
+   `UnresolvedBlock` outrank `UnresolvedNeighbourBlock` when a section and a
+   neighbour both hold something unresolvable, and what keeps a refusal naming
+   the lowest voxel of the meshed section's *own* linear order rather than the
+   lowest of the two sections' union.
+2. **Key 0 is `Contents::Empty`**, seeded before any voxel is read. An
+   unsupplied neighbour's plane is therefore all zeros, which is "nothing
+   beyond" — it occludes nothing and is not the same kind as anything. Absence
+   stays a value the sweep reads rather than a branch it tests for.
+3. **Keys never reach the output.** They order nothing a caller sees. Their
+   numeric values are deliberately unobservable, and the seeding in (2) shifts
+   every key by one relative to a table that did not seed — which is harmless
+   only for as long as this stays true.
+4. **Only the 256 voxels of each shared face are ever read.** A block a
+   neighbour holds away from that face still never reaches the registry and
+   still cannot refuse a mesh it could not have appeared in.
+
+`Key` is `u16`. Its ceiling is the 4096 voxels of the meshed section plus the
+256 of each of six shared faces — 4096 + 6 × 256 = **5632** distinct blocks,
+*derived* from those shapes rather than measured, and far inside the type.
 
 ### The merge predicate, as built
 
@@ -151,6 +242,17 @@ differing corner occlusion may no longer merge. Adding AO narrows the merge
 predicate, changes quad counts, and invalidates every golden frame captured
 against today's mesh.** A renderer capturing goldens today is capturing them
 against a merge predicate that is already known to be going to change.
+
+**Read that chain in the right direction: AO invalidates the goldens because AO
+shades corners, not because the merge predicate narrowed.** A change to *how the
+same visible faces are cut into rectangles* moves no pixel at all — texture
+coordinates come from a corner's own section-local position and the terrain
+sampler repeats on every axis, so one 4×1 quad and four 1×1 quads emit the same
+texels at the same depths. **The goldens are not the witness for merge shape**; the
+exact-partition property tests are, and `technical/testing.md` §"Four instruments
+guard the mesh" sets out which instrument sees what. AO is the change that makes
+merge shape visible for the first time, and that is precisely why it invalidates
+them.
 
 ### Terrain magnifies with `Nearest` and minifies with `Linear`
 
@@ -269,16 +371,16 @@ resolved before any neighbour, so its error wins if both are unresolvable;
 neighbours are resolved in `Facing::ALL` order, so the lowest-ordered
 facing's error wins between two bad neighbours.
 
-The refusal is deliberate: treating an unresolvable block as non-solid
-punches a hole in the world; treating it as solid seals a cavity; both are
-silent and indistinguishable from a correct mesh at the call site. A failed
+The refusal is deliberate: treating an unresolvable block as neither drawn nor
+occluding punches a hole in the world; treating it as both seals a cavity; both
+are silent and indistinguishable from a correct mesh at the call site. A failed
 mesh is not a breach of the "a bad mod never takes down the server"
 invariant — nothing panics, and a caller running meshing on a worker simply
 keeps its previous mesh.
 
 `MeshError::EmptyBlockFace { key }` is a fourth variant and an **internal
-invariant**, not anything a caller did: emptiness resolves to non-solid and
-a face is emitted only where the voxel is solid, so no quad can name the
+invariant**, not anything a caller did: emptiness resolves to undrawn and
+a face is emitted only where the voxel is drawn, so no quad can name the
 empty entry. It exists because a `Quad` names a block and nothing is not a
 block — there is no honest quad to build for one, and dropping it silently
 would remove geometry nobody asked to remove. Like `CorruptMeshIndex`
@@ -336,21 +438,26 @@ edit are not built.
 
 Current behaviour, not a roadmap.
 
-- **Only solid blocks produce faces.** A section of water (`solid = false`)
-  meshes to nothing, and water is invisible in MVP 1. That is the stated
-  consequence of one solidity bit and no transparency pass, not an
-  oversight.
-- **The name-based merge predicate is held by one module and by review, not
-  by the test suite.** Keying merges by palette position instead of
-  deduplicating by name leaves the whole suite green: `Section::set_block`
-  cannot build a palette naming one block twice, and no test builds one
-  through `Section::import` either. It matters because `Section::import`
-  *does* accept such a palette — its registration check verifies every named
-  block is registered, not that the palette's names are unique — so a
-  position-keyed predicate would refuse a legitimate merge and make the mesh
-  depend on import history rather than on content. Whether `import` should
-  reject a duplicate-name palette outright is owned by the section
-  import/export work, not settled here.
+- **Only `drawn` blocks produce faces, and drawnness is declared.** A block
+  is drawn because its declaration says so, never because it is solid — see
+  "Which faces exist" above. `base:water` declares `solid = false, drawn =
+  true, occludes = false`, so the sea is meshed and shows its surface and
+  edges while the lakebed shows through. It is drawn **opaque**: there is
+  still no transparency pass, no alpha and no sorted draw, and that is
+  PRO-952 rather than a limitation of the mesher.
+- **The merge predicate keys on a deduplicated key, and the deduplication is
+  held by one module and by review, not by the test suite.** A run merges
+  while the next cell shows an uncovered face of the same `Key`, and keys are
+  handed out one per *distinct block the section actually holds*, over a table
+  deduplicated by name. Handing out a key per palette *position* instead
+  leaves the whole suite green: `Section::set_block` cannot build a palette
+  naming one block twice, and no test builds one through `Section::import`
+  either. It matters because `Section::import` *does* accept such a palette —
+  its registration check verifies every named block is registered, not that
+  the palette's names are unique — so a position-keyed table would refuse a
+  legitimate merge and make the mesh depend on import history rather than on
+  content. Whether `import` should reject a duplicate-name palette outright is
+  owned by the section import/export work, not settled here.
 - **No non-cube geometry, block models, rotations, or per-block shape data.**
   No lighting of any kind. No level of detail. No merging across a section
   boundary. No column- or world-level meshing — a caller assembles a
@@ -708,15 +815,35 @@ re-mesh worker will accept runs through the upload.
 
 ### A reload that changes what is drawn re-meshes the whole world
 
-The rule is **binary**: a candidate that changes some block's declared solidity or
-**any of the six keys its faces draw from**, or adds or removes a block, marks every
-section; one that changes neither marks none. `replaceable`, `breakable` and
-`breaks_into` change no geometry.
+The rule is **binary**: a candidate that changes some block's declared `drawn` or
+`occludes`, or **any of the six keys its faces draw from**, or adds or removes a
+block, marks every section; one that changes none of those marks none. `solid`,
+`targetable`, `replaceable`, `breakable` and `breaks_into` change no geometry.
 
-All six and not one: a block whose `north` alone was re-pointed is a block that
-draws differently, and a comparison reading a single key would accept that edit and
-mark nothing at all — the reload would succeed and the world would never be built
-again to show it.
+The key is a **map from name to `(drawn, occludes, textures)`** rather than a
+list, so a re-ordered declaration file is not mistaken for a geometry change.
+
+All six keys and not one: a block whose `north` alone was re-pointed is a block
+that draws differently, and a comparison reading a single key would accept that
+edit and mark nothing at all — the reload would succeed and the world would never
+be built again to show it.
+
+**Solidity left this key when `solid` was split, and its removal reads as a
+regression until you see what replaced it.** While one bit answered every question
+about a block, keying on `is_solid` stood in for *drawnness* rather than meaning
+collision. Now that a declaration states the two apart, keeping solidity here would
+rebuild all 256 sections for a physics edit that changes not one pixel. **A
+declaration that edits `solid` and states nothing else still marks the world** —
+because `drawn` and `occludes` default to whatever that declaration says about
+`solid`, so editing it moves them too. That is the loader's default doing the work,
+not this key, and the distinction matters to whoever changes either: a declaration
+that states `drawn` explicitly and then edits `solid` alone now marks nothing, and
+that is correct.
+
+**`targetable` is not among them either**, and it is the clearest case: what a
+swing can find is not something a section could show. A reload changing only
+`targetable` is accepted, publishes an advanced serial, and rebuilds **zero**
+sections.
 
 **Selective marking was measured and refused, and the measurement is the reason.**
 The shipped world's highest occupied section is 3 in fifteen columns and 4 in one, so
@@ -1321,6 +1448,64 @@ the thing the ordering rule at the top of this section is really about.
 **The advice is not withdrawn.** Where two pixel changes *can* be landed apart,
 land them apart. Where they cannot, the substitute is a judgement of the picture
 that shares no path with the golden — not a frame nobody can attribute.
+
+#### 2026-08-23, the spec that made the sea visible — and the first bump of `SCENE_REVISION`
+
+**`r1` → `r2`, four directories deleted and four added.** This is the first entry
+in this log where the revision moves, and the two above explain why they held it
+at `r1`: *art* changed while the scene contract did not, and bumping for an art
+edit would have redefined the revision as "something visible changed". **This
+time the contract itself moved**, in two of the six things it names.
+
+**What the merge predicate emits moved first, and moved no pixel.** The shipped
+water declaration gained `drawn = true`, `occludes = false`, so the sea began
+emitting faces and the replay's quad count went **2759 → 2770**. Every committed
+`r1` golden still matched afterwards — thirteen golden and probe tests green on a
+real device — because from the declared spawn the sea was behind terrain at every
+capture tick. **The sea emitted faces no declared capture could see.** A reader
+who expects "water became visible, so the goldens moved" will find that it is not
+what happened, and could check it against `r1` and be right.
+
+**The camera path moved second, and that is what re-shot the set.** The declared
+spawn moved from an inland column to the coast, because no yaw from the old one
+saw water at any of the 120 ticks. That is the change every pixel in the `r2` set
+comes from.
+
+**`r2` was minted twice on this branch, and the account matters more than the
+tidiness.** The first mint was taken from a spawn that was **not** the
+derivation's own output: the candidate ranking put an optional property above the
+water margin the requirement rests on. Re-ranking exposed a worse fault — the
+candidate filter never required the spawn column to stand above the sea, so the
+corrected ranking's top was a submerged column. The set was re-minted from the
+corrected column once that constraint was restored. **The fault was a dropped
+constraint, not a bad candidate**, which is the part worth carrying: a criterion
+can be wrong in a way re-sorting it cannot reveal.
+
+The revision does not move again for either mint. `r1` was already deleted, and a
+spec branch squashes, so `main` goes `r1` → `r2` exactly once however many times
+`r2` is re-minted before merge. The one-re-shoot bound is a statement about what
+`main` carries and what a later spec must not redo, not a budget on in-branch
+corrections.
+
+**What was verified before each mint, in the order this section prescribes:**
+`terrain_probes` 9 of 9, `replay_oracle` 5 of 5, `hud_prediction` 6 of 6 — twenty
+tests before a pixel became ground truth. Then the mint, naming only the two
+golden binaries. Then the set re-verified with the opt-in unset and
+`golden_mismatch` selected — 4 passed — and `golden_inventory` — 3 passed. One
+adapter across the set.
+
+**No intermediate reference capture was taken, and the first reason is that an
+extra capture is not free.** The one failure this procedure exists to prevent is a
+run reaching `golden_mismatch` with `MYCRAFT_UPDATE_GOLDENS` set; every further
+occasion on which that opt-in is set is another chance to reach it. Declining the
+intermediate capture **reduces** that exposure rather than merely saving effort.
+The second is that nothing was destroyed: the changes are separate commits, so
+anyone debugging the minted set can check out the earlier one and capture from
+there. The capture was not forgone — it was left uncomputed until somebody needs
+it. And in this instance it would have carried **no information at all**: the
+declaration change was demonstrated to move no pixel, so a capture taken between
+the two would have been byte-identical to the `r1` set it was meant to be
+compared against.
 
 ## What golden-frame verification cannot see
 

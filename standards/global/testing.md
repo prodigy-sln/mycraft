@@ -86,6 +86,19 @@ scenarios assert something is *not* removed: there the over-eager
 skeleton is the one that passes vacuously. Pick the skeletons that make
 *this phase's* scenarios fail.
 
+**But that states the symptom. The cause is that an assertion can pass
+vacuously, and a second skeleton is only needed while it can.** Fix the
+assertion and the second tree becomes redundant. A phase whose "no output"
+scenarios each assert a **complete enumerated result that also has to
+account for a control** — one element deliberately present, whose absence
+the same comparison would catch — is reddened by a single skeleton in both
+directions at once: an emit-nothing implementation fails on the control it
+owes, and an over-eager one fails on the extras. That was measured over
+fourteen scenarios, where every "shows nothing" case compared the whole
+output against the control's own contribution rather than against a count of
+zero. Reach for the second skeleton when an assertion is bare; prefer making
+it unbare.
+
 ## 2. Falsifiability
 
 **Green is not evidence unless the test could have been red, for the
@@ -181,6 +194,50 @@ the next is in the diff you are looking at.
   positive control above: the hole that survives is *inside* the good
   verdict, where a scan that came to return an empty list unconditionally
   would answer "all treated" forever.
+- **A hand-maintained list compared by *filtering* cannot see an extra
+  member.** This is the same rule one step further in, and it is the shape
+  that rots quietly, because it compiles and it stays green. Two mirrors of
+  a nine-name field list were each held at six while the loader grew, and
+  neither reddened: one filtered its *needles* by presence in the observed
+  message, so six needles against a nine-name message found all six and
+  matched; the other looked each observed item up in the held list and
+  skipped what it could not rank, so the three new names were passed over
+  rather than reported. Both were measured — cut either mirror to six with
+  the loader at nine and exactly one test reddens, and it is not the mirror's
+  own. The repair is to read the list *out of* the observed output and
+  compare the whole thing in order, so a missing name, an extra name and a
+  reordering are three distinct failures.
+- **A count is only a count with `--no-fail-fast`.** A test runner that
+  stops at the first failure cancels the rest, and its summary still reads
+  like a complete result: `186/388 tests run: 185 passed, 1 failed` says
+  nothing whatever about the other 202. The tell for `cargo nextest` is the
+  slash — `N/M tests run` is a cancelled run, a bare `N tests run` is a
+  complete one. This bites hardest on **mutation checks**, whose load-bearing
+  half is usually the *green* one: "exactly one test reddened" and "nothing
+  else moved" are not observations if the rest never ran, and they look
+  identical to the real thing in a report. Record the invocation beside every
+  count, including the counts that were sound for some other reason —
+  provenance recorded unevenly reads as provenance absent. A per-test named
+  outcome is stronger than any count, because a cancelled test cannot be
+  named green.
+- **A reading names the tree it was taken on, and the check that names it
+  must be taken at that moment.** A gate reading is a statement about a tree
+  object rather than about a commit, so it transfers only when the object
+  matches — arguing about *which* files changed can only predict what a
+  re-run would say. The way that rule gets defeated while appearing to be
+  followed is subtler: an equality check taken *afterwards* and read as
+  retroactive. One such check compared a commit against a working tree that
+  had since been made to match it, printed nothing, and was quoted as proof
+  about a tree measured half an hour earlier — a true statement about the
+  wrong instant. An observation of a shared tree ages exactly as fast as any
+  other, **including the one being used to validate another**. Worse, the
+  tree in question had never been committed at all, so no later check could
+  have recovered it.
+- **Prefer a reading that dates itself.** Where a result could only have come
+  from the tree in question, say so and the provenance question closes on the
+  spot: a run reporting a named test as FAILED cannot have come from the tree
+  where that test passes. Evidence carried inside the reading cannot be taken
+  at the wrong moment, which is exactly what defeats an external check.
 - **Red for a known reason hides red for an unknown one.** A test already
   failing on a stale count also swallowed a revision-substitution defect —
   the only test in 661 that could see it. This is the same family with the
@@ -200,6 +257,35 @@ the next is in the diff you are looking at.
   without `-D warnings` cargo attributes the diagnostic to the first
   binary and marks the rest `(1 duplicate)` — which means *this same
   diagnostic, repeated*, not *a pre-existing one lives elsewhere*.
+- **A screen is subject to the same rule as a fixture, and its error is not
+  uniform across the quantities it predicts.** A screen that stands in for
+  the real system — a cheap sweep, a static approximation, anything that
+  answers "which candidates are worth running properly" — is a fixture by
+  another name, so *what does the shipped caller supply and which shipped
+  path reaches this* applies to it unchanged. The failure that is specific
+  to screens is subtler: **a screen validated against the real system on one
+  output has not been validated at all on another.** One sweep of 73 620
+  poses predicted 300–500 terrain samples where the real simulation gives
+  323–367 — accurate — and predicted visible water for four named
+  candidates that give **0, 0, 0 and 1** once the simulation actually runs.
+  It was right about the bulk quantity and wrong about the narrow one,
+  because a terrain fraction survives a two-block fall and a walk while a
+  line of sight through a gap in rising terrain does not. **That is worse
+  than being uniformly wrong: the accuracy is what makes a reader trust
+  it**, and anybody spot-checking the coarse number would have confirmed the
+  screen and proceeded on its wrong answer. Derive the thing that matters
+  from the real system, and treat a screen as a way to shorten a list and
+  never as a measurement.
+- **A criterion can be wrong in a way re-sorting it cannot reveal.** Ranking
+  candidates by a stated rule is what makes a chosen fixture derived rather
+  than defended — but the ranking only ever searches inside whatever the
+  *filter* admitted, so a constraint the filter never applied is invisible
+  to every ordering of it. A candidate filter once omitted the requirement
+  that a spawn column stand above sea level; no re-weighting of its sort
+  would have surfaced that, and what did was running a **differently
+  ordered** pass, whose top was a column underwater. State the filter and
+  the ranking separately, and when a ranking returns something
+  unexpected, check the filter before adjusting the sort.
 
 Test placement — sibling `foo_test.rs` files for unit tests (a considered
 departure from Rust's inline default), `tests/` for integration tests,

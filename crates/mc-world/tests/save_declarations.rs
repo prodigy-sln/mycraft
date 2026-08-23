@@ -66,17 +66,18 @@ const SECOND_TEXTURE: &str = "fixture:andesite_reworked";
 /// The block whose behaviour hash is pinned to a value derived by hand.
 const PINNED: &str = "fixture:stone";
 
-/// What version 1 of this format records for a block named `fixture:stone`
-/// declared solid, not replaceable, breakable, and breaking into nothing.
+/// What version 2 of this format records for a block named `fixture:stone`
+/// declared solid, not replaceable, breakable, breaking into nothing, and
+/// aimable.
 ///
 /// **Derived by hand from the documented encoding**, in a scratch computation
 /// sharing no code with the writer. The canonical input is the declared
-/// behaviour — an input-version byte, the name, the three flags, and the absence
-/// of a residue — encoded little-endian with variable-length lengths, which for
-/// values this small is one byte each:
+/// behaviour — an input-version byte, the name, the three flags, the absence of a
+/// residue, and last whether a swing can find the block — encoded little-endian
+/// with variable-length lengths, which for values this small is one byte each:
 ///
 /// ```text
-///   01                          input version 1
+///   02                          input version 2
 ///   0d                          the name is 13 bytes long
 ///   66 69 78 74 75 72 65        f i x t u r e
 ///   3a                          :
@@ -85,14 +86,29 @@ const PINNED: &str = "fixture:stone";
 ///   00                          not replaceable
 ///   01                          breakable
 ///   00                          breaks into nothing
+///   01                          targetable
 /// ```
 ///
 /// Folded with FNV-1a 64 — start at `0xcbf2_9ce4_8422_2325`, and for each byte
 /// exclusive-or it in and multiply by `0x0000_0100_0000_01b3`, wrapping — those
-/// nineteen bytes give the value below. The fold was checked against FNV's own
+/// twenty bytes give the value below. The fold was checked against FNV's own
 /// published vectors (`""`, `"a"`, `"foobar"`) before it was pointed at this
 /// input.
-const VERSION_1_BEHAVIOUR_OF_PINNED: u64 = 0x5e9d_3089_5b2e_0d5f;
+///
+/// **The trailing `01` is the fixture's own doing and not a default the loader
+/// derived.** These registries are built in memory, so `defaulting_to_solidity`
+/// never runs: `common::registry_from` states `targetable: is_solid` for every
+/// block it builds and `registry_of` declares every block solid, which is what
+/// makes this byte a `01` rather than something a reader has to infer from a
+/// declaration file.
+///
+/// **The re-derivation was checked against the value it replaces before it was
+/// trusted.** The same scratch computation, run over the *nineteen*-byte version 1
+/// input, reproduces `0x5e9d_3089_5b2e_0d5f` — the constant this one supersedes,
+/// derived years apart by somebody else. A method that lands on the old number
+/// for the old input is the method the old number was derived by, which is a
+/// stronger thing to know than that the new number agrees with a run.
+const VERSION_2_BEHAVIOUR_OF_PINNED: u64 = 0xbee1_336f_0dc4_f79d;
 
 /// A world holding a block the registry it is saved against does not declare,
 /// and the block that is missing from it.
@@ -214,8 +230,8 @@ fn changing_only_a_block_texture_moves_its_recorded_appearance_and_leaves_its_be
 }
 
 #[test]
-fn a_solid_breakable_block_that_breaks_into_nothing_records_the_version_1_behaviour() -> TestResult
-{
+fn a_solid_breakable_aimable_block_that_breaks_into_nothing_records_the_version_2_behaviour()
+-> TestResult {
     let directory = TempDir::new()?;
     let registry = registry_of(&[PINNED])?;
     let world = world_holding(&[(A_CELL, PINNED)], &registry)?;
@@ -224,13 +240,14 @@ fn a_solid_breakable_block_that_breaks_into_nothing_records_the_version_1_behavi
 
     assert_eq!(
         required.blocks().first().map(|block| block.behaviour.get()),
-        Some(VERSION_1_BEHAVIOUR_OF_PINNED),
-        "this is what version 1 of the format means by that declaration, and the value is derived \
+        Some(VERSION_2_BEHAVIOUR_OF_PINNED),
+        "this is what version 2 of the format means by that declaration, and the value is derived \
          from the documented encoding rather than read off a run — a number copied out of the \
          first green run records whatever the writer did that day and pins nothing. Recording \
          one value today and another tomorrow makes every save in existence report its blocks as \
          changed, which is the report this whole mechanism exists to make only when something \
-         really did change"
+         really did change. The version byte moved because the list grew a field, and this is one \
+         of the four places in the workspace that can see either happen"
     );
     Ok(())
 }

@@ -57,18 +57,42 @@ Stand close to a face and you see the individual texels with hard edges between
 them — that is deliberate, not a missing filter. Look at a hillside in the
 distance and it stays still as you move instead of crawling and sparkling.
 
-**Water** is declared by the world's content and draws nothing: no face of it is
-ever emitted, so it has no picture on screen even though it holds a place in the
-texture set like every other block.
+**You can see the sea.** Water is drawn now, where before it was a hole in the
+world you walked through and could not see. A new world starts you on the shore
+facing it, so the water is in front of you from the first frame — and it fills
+more of the view as you walk toward it, from roughly a tenth of the screen at the
+start to about a third partway down the beach.
 
-The content now declares water **unbreakable**, and that changes nothing you can
-do — it was never something you could aim at. The crosshair only ever targets
-*solid* blocks, and water is not one, so a swing at a cell of water goes straight
-through it and breaks whatever solid block is behind. What the declaration does
-change is your save: water is the one shipped block whose recorded behaviour
-moved, which is why a world saved before this build reports it by name on the
-terminal (see below). You can still build straight into water — a placement
-replaces it rather than needing it broken first.
+What you see is the **surface and the edges only**. Water does not draw the
+insides of itself, so a body of it looks like one sheet rather than a stack of
+panes, and it does not hide what is underneath: the sand and stone of the lakebed
+show through, which is what makes it read as water rather than as a lid. Nothing
+about walking through it has changed — it still does not hold you up, and you
+still walk straight into it.
+
+**You can now aim at water, and swinging at it does nothing.** The crosshair used
+to look straight through water and find whatever solid block was behind it, so a
+swing aimed at the sea broke the lakebed under it. It stops at the water now — and
+because the content declares water unbreakable, the swing is refused and the
+water stays where it is. Nothing behind it is touched either: the swing never
+reaches that far.
+
+The practical difference is that **you can no longer dig through water to what is
+under it by aiming at the water**. Aim at the lakebed from somewhere the water is
+not in the way, and it breaks as it always did.
+
+**Building into water is unchanged.** Aim at a cell of water, place a block, and
+the block goes *into* that cell — water is declared as something a placement may
+overwrite, so you never have to clear it first. That is worth stating beside the
+paragraph above, because the two answers now differ: a swing aimed at water is
+refused, and a placement aimed at the same cell goes through.
+
+What the unbreakable declaration also changes is your save — though this build
+changes it more bluntly than that. Water's own declaration moved, and so did the
+way the game records what *any* block does, so a world saved before this build
+reports all four blocks on the terminal rather than water alone. That happens
+once. "A save from before this build" below says why, and why the next launch is
+quiet again.
 
 **A block whose art nobody has drawn still works.** If you install a mod that
 declares a block and ships no picture for it, that block draws a generated
@@ -76,20 +100,30 @@ stand-in — a two-colour pattern derived from the texture's name, deterministic
 and unmistakably not real art — and the game runs. The terminal says so on
 startup, so a stand-in never reads as something you did wrong.
 
-## A save from before this build opens, and looks different
+## A save from before this build opens, and is told about once
 
-Every block's appearance really did change with this build — grass, dirt and
-stone draw pictures now where they drew generated stand-ins before, and grass
-draws six of them where it drew one. A save records what each block looked like
-when it was written, so a world saved before this build **does** come back with
-every block reported as retextured.
+A save records what each block *was* when it was written: what it looked like,
+and what it did. The game has changed both of those records, at two different
+builds, and an old save crosses whichever of them it predates.
 
-**Nothing stops you and nothing is said about it.** The world opens as normal:
-your terrain, your edits and where you were standing all come back exactly as you
-left them, and what changed is what they are painted with. That is deliberate, and
-it is different from the case below. A block that merely looks different gets no
-line on the terminal at all, because a message after every texture edit is what
-teaches people that a message means nothing.
+**The looks record moved when the game got real art.** Grass, dirt and stone
+draw pictures now where they drew generated stand-ins before, and grass draws six
+of them where it drew one. A world saved before that build comes back with every
+block counting as retextured — and **nothing is said about it**, because a
+message after every art change is what teaches people that a message means
+nothing. The world opens as normal: your terrain, your edits and where you were
+standing all come back exactly as you left them.
+
+**The behaviour record moved with this build**, because blocks can now say
+whether a swing can find them and that is part of what a block *is*. So a world
+saved before this build opens with one line naming **all four** of the game's
+blocks — not because all four were changed by anybody, but because the old record
+and the new one are not comparable, and the honest answer is to say so rather
+than to guess block by block.
+
+**It happens once.** Quit normally and the save is rewritten under the new
+record; the next launch says nothing. From then on that line means what it says
+below: a mod changed something.
 
 There is no way to decline the new art, and no mechanism keeps a save on the old
 pictures: what a block looks like comes from the content the game is running, not
@@ -97,9 +131,10 @@ from the save.
 
 ## A save whose blocks *behave* differently also opens, and the terminal says which
 
-A mod can change what a block *is* rather than what it looks like — whether it is
-solid, whether it can be broken, what it drops. Your world opens anyway, and the
-game names the blocks it found:
+That one-off aside, this is the line's ordinary job. A mod can change what a
+block *is* rather than what it looks like — whether it is solid, whether it can
+be broken, whether a swing can find it, what it drops. Your world opens anyway,
+and the game names the blocks **that mod** touched, which is usually one:
 
 ```
 mycraft: `base:water` no longer behaves as it did when this world was saved, and it was loaded anyway
@@ -230,13 +265,14 @@ differently:
 - **A block that only *looks* different** — a retextured mod, with nothing about how it behaves
   changed — is not reported at all. That world loads with nothing said about it.
 
-**A world you saved before this build records every one of its blocks as having been
-retextured**, and that is expected rather than a sign anything is wrong: the game
-changed how it records what a block looks like, so the old record and the new one
-are not comparable and the honest answer is that they all look different. Looking
-different is the case nothing is said about, so such a world opens exactly as it
-did before, with no line on the terminal — and nothing on screen is different
-either. What blocks actually look like has not changed yet.
+**A world you saved before one of these builds reports every one of its blocks at
+once**, and that is expected rather than a sign anything is wrong. The game has
+twice changed how it records what a block is: once for what a block looks like,
+and once — this build — for what it does. Across either change the old record and
+the new one are not comparable, so the honest answer is that they all moved.
+Which of the two you crossed decides what you see: the looks change is the case
+nothing is said about, and the behaviour change is one line naming every block,
+once, on the first launch and never again.
 
 A save that loads can still put you somewhere that stopped being standable while the
 game was off. That is answered rather than refused, and "Coming back to a save never

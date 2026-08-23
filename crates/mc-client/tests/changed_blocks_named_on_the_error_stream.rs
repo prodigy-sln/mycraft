@@ -23,12 +23,22 @@
 //! being verified, and a test that composed it from the same pieces the client
 //! does would agree with the client about a rewording neither of them noticed.
 //!
-//! # The singular and the plural are both here
+//! # Both readings here are plural now, and the singular is witnessed elsewhere
 //!
 //! One block is the common case and more than one is the case the line exists
 //! for, and a sentence that reads correctly for one of them reads wrongly for the
-//! other. So both counts are asserted, and the second of them over the content
-//! this repository actually ships.
+//! other. Both counts used to be asserted here, the singular one over the
+//! committed pre-Luau save. That save now disagrees with the shipped content
+//! about **every** block it holds — a behaviour list that grew is a list every
+//! earlier save recorded under the shape it had before — so the reading over the
+//! shipped content is the plural one, as the fixture reading beside it already
+//! was.
+//!
+//! The singular clause is not left unwitnessed by that. `src/notice_test.rs`
+//! asserts it over a one-name list, and `support/launch_notices.rs` produces it
+//! from a real load — a save this build wrote, read against a root restating one
+//! block — which is the line the modding pages quote for the offline
+//! edit-and-relaunch loop.
 
 #[path = "support/changed_blocks.rs"]
 mod changed_blocks;
@@ -61,8 +71,15 @@ const BOTH_OF_THEM: &str = "mycraft: `fixture:alpha`, `fixture:omega` no longer 
 
 /// The line a launch over the committed pre-Luau save writes against the content
 /// this repository ships.
-const WATER_ALONE: &str = "mycraft: `base:water` no longer behaves as it did when this world was \
-                           saved, and it was loaded anyway";
+///
+/// **Every block the save holds, and that is the designed answer.** The list a
+/// block's behaviour is folded over has grown since this save was written, so
+/// there is no reading of its bytes that could report fewer. A line naming
+/// `base:water` alone is what an implementation that folded no new field and left
+/// the revision byte where it was produces.
+const ALL_FOUR_SHIPPED_BLOCKS: &str = "mycraft: `base:dirt`, `base:grass`, `base:stone`, \
+                                       `base:water` no longer behave as they did when this world \
+                                       was saved, and it was loaded anyway";
 
 /// The save written before this repository's blocks were Luau, relative to the
 /// repository root.
@@ -149,19 +166,19 @@ fn a_launch_with_no_save_to_read_generates_a_world_and_says_nothing_about_blocks
 }
 
 #[test]
-fn the_committed_pre_luau_save_names_water_and_no_other_block_against_the_shipped_content()
--> TestResult {
+fn the_committed_pre_luau_save_names_every_block_it_holds_against_the_shipped_content() -> TestResult
+{
     let launched = over_the_older_save()?;
 
     assert_eq!(
         line_of(&launched),
-        Ok(Some(WATER_ALONE.to_owned())),
+        Ok(Some(ALL_FOUR_SHIPPED_BLOCKS.to_owned())),
         "this is the shipped content against a save written before its blocks were Luau, which is \
          the one comparison in this suite neither side of which was written to agree with the \
-         other. `base:water` states `breakable = false` and lands in the line; the other three \
-         blocks the save holds differ only in the keys they draw from and must not. A line naming \
-         four blocks is a revision byte shared between the two halves of a block's record. It \
-         answered: {}",
+         other. It is also what a player actually pays for the behaviour list growing: one line, \
+         every block, ascending, and the world open behind it. A line naming `base:water` alone is \
+         the answer this reading used to expect and is now the defect it catches — a build that \
+         folded the three new declaration fields into nothing at all. It answered: {}",
         refusal(&launched)
     );
     Ok(())

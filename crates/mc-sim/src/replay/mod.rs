@@ -19,8 +19,8 @@ pub mod contract;
 pub mod height;
 pub mod patch;
 pub mod prepare;
+pub mod resolved;
 pub mod script;
-pub mod solid;
 pub mod spawn;
 pub mod world;
 
@@ -31,7 +31,7 @@ pub use crate::camera::CameraPose;
 pub use mc_world::world::Extent;
 pub use patch::{SpliceError, remesh, splice};
 pub use prepare::{PrepareError, SectionQuads, mesh_all};
+pub use resolved::{BlockVolume, ResolvedVoxels};
 pub use script::{SCRIPT_TICKS, TickError, TickIndex, scripted_intent};
-pub use solid::{BlockVolume, SolidVoxels};
 pub use spawn::{SpawnError, simulation_for, spawn};
 pub use world::{ReplayWorld, WorldGenError};

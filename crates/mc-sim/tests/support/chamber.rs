@@ -180,9 +180,29 @@ impl Solidity for Chamber {
 /// it. It is the cheapest of the two disagreeing shapes, and it is what makes a
 /// placement into it refused under the right reading and allowed under the wrong
 /// one.
+///
+/// [`AIMABLE`] and [`UNAIMABLE`] are the pair in which **`targetable` and
+/// `is_solid` disagree**, one in each direction, and they exist for the reason
+/// [`UNBUILDABLE`] does one field along: every block content ships has the two
+/// agreeing except water, so against shipped content alone a walk stopping at
+/// the first solid cell and one stopping at the first targetable cell answer
+/// identically everywhere. [`AIMABLE`] stops nobody and a ray stops at it;
+/// [`UNAIMABLE`] stops a player and a ray goes straight through it. A rule
+/// reading solidity where it means targetability reports the wrong cell in both,
+/// and reports it in opposite directions, which is why there are two.
+///
+/// [`BUILDABLE`] is the block that is **solid and replaceable at once**. Nothing
+/// content ships is: water is replaceable and stops nobody, and dirt, grass and
+/// stone stop a player and may not be built over. It is what lets a placement be
+/// aimed at a cell a ray already stops at *today*, so a rule about where a
+/// placement lands when the cell it hit is itself replaceable can be measured
+/// without waiting for anything to become targetable.
 pub const UNBREAKABLE: &str = "fixture:unbreakable";
 pub const CRUMBLING: &str = "fixture:crumbling";
 pub const UNBUILDABLE: &str = "fixture:unbuildable";
+pub const AIMABLE: &str = "fixture:aimable";
+pub const UNAIMABLE: &str = "fixture:unaimable";
+pub const BUILDABLE: &str = "fixture:buildable";
 
 /// What the fixture registry's definitions are attributed to.
 const FIXTURE_ORIGIN: &str = "a break-and-place test's declared registry";
@@ -196,6 +216,9 @@ const FIXTURE_ORIGIN: &str = "a break-and-place test's declared registry";
 struct Declared {
     name: &'static str,
     is_solid: bool,
+    /// Whether a ray may stop at this block, which is a separate claim from
+    /// whether it stops a player and is stated per block for that reason.
+    targetable: bool,
     replaceable: bool,
     breakable: bool,
     breaks_into: Option<&'static str>,
@@ -207,6 +230,7 @@ const fn solid(name: &'static str) -> Declared {
     Declared {
         name,
         is_solid: true,
+        targetable: true,
         replaceable: false,
         breakable: true,
         breaks_into: None,
@@ -218,13 +242,24 @@ const fn open(name: &'static str) -> Declared {
     Declared {
         name,
         is_solid: false,
+        targetable: false,
         replaceable: true,
         breakable: true,
         breaks_into: None,
     }
 }
 
-/// The four blocks content ships, spelled and declared as content declares them.
+/// The four names content ships, declared as this fixture needs them.
+///
+/// **It borrows content's *names*, not its *declarations*, and the difference is
+/// load-bearing rather than an oversight.** Content declares `base:water`
+/// `breakable = false`, `drawn = true` and `targetable = true`; here it is
+/// declared breakable and neither drawn nor targetable. Do not "correct" it:
+/// `block_breaking.rs` builds a chamber whose *background* is water, to tell
+/// "this cell was emptied" apart from "this cell holds the background", and a
+/// targetable background stops every ray in that fixture at the first cell it
+/// crosses. The scenarios that are about what content really declares build over
+/// `super::content_registry()` and read the shipped root.
 ///
 /// **The order is the file-name order `LuauFileDefinitionSource` reads them in,
 /// and that is load-bearing** — base content applies before the `fixture:`
@@ -245,10 +280,11 @@ const BASE_CONTENT: [Declared; 4] = [
 ];
 
 /// The blocks the `fixture:` overlay adds over base content.
-const OVERLAY: [Declared; 3] = [
+const OVERLAY: [Declared; 6] = [
     Declared {
         name: UNBREAKABLE,
         is_solid: true,
+        targetable: true,
         replaceable: false,
         breakable: false,
         breaks_into: None,
@@ -256,6 +292,7 @@ const OVERLAY: [Declared; 3] = [
     Declared {
         name: CRUMBLING,
         is_solid: true,
+        targetable: true,
         replaceable: false,
         breakable: true,
         breaks_into: Some("base:dirt"),
@@ -263,7 +300,32 @@ const OVERLAY: [Declared; 3] = [
     Declared {
         name: UNBUILDABLE,
         is_solid: false,
+        targetable: false,
         replaceable: false,
+        breakable: true,
+        breaks_into: None,
+    },
+    Declared {
+        name: AIMABLE,
+        is_solid: false,
+        targetable: true,
+        replaceable: false,
+        breakable: true,
+        breaks_into: None,
+    },
+    Declared {
+        name: UNAIMABLE,
+        is_solid: true,
+        targetable: false,
+        replaceable: false,
+        breakable: true,
+        breaks_into: None,
+    },
+    Declared {
+        name: BUILDABLE,
+        is_solid: true,
+        targetable: true,
+        replaceable: true,
         breakable: true,
         breaks_into: None,
     },
@@ -329,6 +391,9 @@ fn declaring(
             replaceable: block.replaceable,
             breakable: block.breakable,
             breaks_into: block.breaks_into.map(BlockName::parse).transpose()?,
+            drawn: block.is_solid,
+            occludes: block.is_solid,
+            targetable: block.targetable,
             origin: origin.clone(),
         }));
     }

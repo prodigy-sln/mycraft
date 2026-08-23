@@ -33,7 +33,7 @@ use std::error::Error;
 
 use glam::Vec3;
 use mc_sim::player::{BlockPos, MovementIntent, PlayerState, Solidity, advance_player};
-use mc_sim::replay::{Extent, ReplayWorld, SolidVoxels};
+use mc_sim::replay::{Extent, ReplayWorld, ResolvedVoxels};
 use mc_world::column::COLUMN_HEIGHT;
 
 use support::volume::{NamedSlab, registry_declaring};
@@ -249,19 +249,19 @@ fn advance(
 
 /// The declared world, and its voxels resolved through the registry this
 /// repository ships as content.
-fn declared_world() -> Result<(ReplayWorld, SolidVoxels), Box<dyn Error>> {
+fn declared_world() -> Result<(ReplayWorld, ResolvedVoxels), Box<dyn Error>> {
     let registry = content_registry()?;
     let world = replay_world(&registry)?;
-    let voxels = SolidVoxels::resolve(&world, &registry)?;
+    let voxels = ResolvedVoxels::resolve(&world, &registry)?;
     Ok((world, voxels))
 }
 
 /// A slab of `filling` under open space, resolved through a registry declaring
 /// that block's solidity and nothing else about it.
-fn slab_of(filling: &str, is_solid: bool) -> Result<SolidVoxels, Box<dyn Error>> {
+fn slab_of(filling: &str, is_solid: bool) -> Result<ResolvedVoxels, Box<dyn Error>> {
     let slab = NamedSlab::new(SLAB_EXTENT, SLAB_TOP, filling, OPEN_BLOCK)?;
     let registry = registry_declaring(&[(filling, is_solid), (OPEN_BLOCK, false)])?;
-    Ok(SolidVoxels::resolve(&slab, &registry)?)
+    Ok(ResolvedVoxels::resolve(&slab, &registry)?)
 }
 
 /// Where a fall onto the slab starts.

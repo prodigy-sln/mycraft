@@ -59,7 +59,7 @@ use mc_world::section::Contents;
 
 use support::art::{drawn_texels, linear_mean, means_agree};
 use support::frames::{CAPTURE_SIZE, ReplayFrame};
-use support::oracle::{self, Voxels, first_solid_face};
+use support::oracle::{self, Voxels, first_drawn_face};
 use support::probe::{distance, pixel_color};
 use support::swatch::require;
 use support::{TestResult, prepare_scene};
@@ -199,7 +199,7 @@ fn grass_top_at(
     voxels: &Voxels<'_>,
     grass: &BlockName,
 ) -> Result<Option<IVec3>, Box<dyn Error>> {
-    let Some((voxel, entered)) = first_solid_face(camera, CAPTURE_SIZE, pixel, voxels)? else {
+    let Some((voxel, entered)) = first_drawn_face(camera, CAPTURE_SIZE, pixel, voxels)? else {
         return Ok(None);
     };
     if entered != Facing::PosY {

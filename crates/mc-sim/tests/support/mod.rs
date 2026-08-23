@@ -232,6 +232,29 @@ pub fn block_at(world: &ReplayWorld, x: u32, y: u32, z: u32) -> Result<String, B
     Ok(described(held))
 }
 
+/// How many columns of the declared world stand below the declared sea level.
+///
+/// **Counted from the surface heights and [`SEA_LEVEL`] alone** — no mesh, no
+/// per-voxel walk, and no reading of what any cell holds. That is what makes it
+/// an independent statement of how many upward water faces the world owes: the
+/// sea fills a submerged column from one block above its surface up to the sea
+/// level and stops there, and the cell over it holds nothing, which the replay's
+/// own contents suite asserts separately. So each submerged column shows exactly
+/// one upward water face and no other column shows any.
+///
+/// # Errors
+///
+/// Returns an error if the world reports no height for some column.
+pub fn submerged_columns(world: &ReplayWorld) -> Result<u64, Box<dyn Error>> {
+    let mut submerged = 0;
+    for (x, z) in every_column() {
+        if surface_height(world, x, z)? < SEA_LEVEL {
+            submerged += 1;
+        }
+    }
+    Ok(submerged)
+}
+
 /// The whole surface heightmap, one entry per column, in [`every_column`] order.
 ///
 /// # Errors

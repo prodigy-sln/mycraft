@@ -100,6 +100,28 @@ pub const UNRECOGNISED_FIELD: &str = "slid";
 const CARRYING_AN_UNRECOGNISED_FIELD: &str = "return {\n\tname = 'example:amber',\n\ttexture = 'example:amber',\n\tsolid = true,\n\tslid = \
      true,\n}\n";
 
+/// A field name one letter *past* a real one, which is the typo the newest field
+/// on the recognised list invites.
+///
+/// Distinct from [`UNRECOGNISED_FIELD`] on purpose: that one is a letter short of
+/// `solid` and is what the pages have always shown, and a page quoting the same
+/// mistake twice teaches an author nothing about the field that was just added.
+pub const A_MISSPELLING_OF_DRAWN: &str = "drawnn";
+
+/// A block declaration whose three well-formed fields sit beside a field a letter
+/// past `drawn`.
+const CARRYING_A_MISSPELLING_OF_DRAWN: &str = "return {\n\tname = 'example:amber',\n\ttexture = 'example:amber',\n\tsolid = true,\n\tdrawnn = \
+     true,\n}\n";
+
+/// A block declaration stating its drawnness as a number.
+///
+/// `1` rather than `'true'` because a number is what somebody arriving from any
+/// other language writes, and because the refusal it produces names the kind found
+/// as well as the kind expected — which is the half of that sentence a page cannot
+/// show with a string.
+const STATING_A_DRAWNNESS_AS_A_NUMBER: &str = "return {\n\tname = 'example:amber',\n\ttexture = 'example:amber',\n\tsolid = true,\n\tdrawn = \
+     1,\n}\n";
+
 /// A well-formed block declaration naming a texture key no other declaration names.
 ///
 /// Well formed on purpose: what refuses it is the session having no layer left for
@@ -142,7 +164,7 @@ const REFUSED_HUD_DECLARATION: &str = "name = \"example:malformed-readout\"\nanc
 /// notices an entry writes — each as a person running from their own game
 /// directory reads it.
 ///
-/// **Eight roots and not one**, because each is refused whole: a root carrying two
+/// **Ten roots and not one**, because each is refused whole: a root carrying two
 /// mistakes is refused for whichever the loader reaches first, and the second refusal
 /// would be one no run ever prints. The two entries are a launch each for the same
 /// reason: one launch answers one thing about one player.
@@ -170,6 +192,8 @@ pub fn printed_refusals() -> Result<Vec<String>, Box<dyn Error>> {
         a_reload_dropping_a_block_the_world_holds()?,
         a_reload_declaring_nothing_solid()?,
         a_reload_over_the_layer_budget()?,
+        a_drawnness_stated_as_a_number()?,
+        a_field_a_letter_past_drawn()?,
     ];
     // The seven a texture table raises live in their own module: this file is
     // within fifty non-blank lines of the size the gate allows a test file, and
@@ -216,6 +240,36 @@ fn stating_a_texture_past_the_bound() -> String {
          \ttexture = '{NAMESPACE}' .. string.rep('q', {padding}),\n\
          \tsolid = true,\n\
          }}\n"
+    )
+}
+
+/// What the client writes for a declaration stating its drawnness as a number.
+///
+/// A launch refusal like the first three, and produced the same way. It is exposed
+/// separately as well as appended to the set above, because the guard that asks
+/// whether the pages quote *this* refusal needs it on its own — asking that
+/// question over the whole set would demand a page for every refusal a mod author
+/// can trip, which the pages deliberately do not carry.
+///
+/// # Errors
+///
+/// Returns an error if the root is accepted, or if the refusal does not name the
+/// fixture root.
+pub fn a_drawnness_stated_as_a_number() -> Result<String, Box<dyn Error>> {
+    as_read_from_a_game_directory(
+        &content::shipped_copy()?.declaring_block(BLOCK_FILE, STATING_A_DRAWNNESS_AS_A_NUMBER)?,
+    )
+}
+
+/// What the client writes for a declaration carrying a field a letter past `drawn`.
+///
+/// # Errors
+///
+/// Returns an error if the root is accepted, or if the refusal does not name the
+/// fixture root.
+pub fn a_field_a_letter_past_drawn() -> Result<String, Box<dyn Error>> {
+    as_read_from_a_game_directory(
+        &content::shipped_copy()?.declaring_block(BLOCK_FILE, CARRYING_A_MISSPELLING_OF_DRAWN)?,
     )
 }
 

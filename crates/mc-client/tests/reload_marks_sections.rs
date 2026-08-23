@@ -22,12 +22,26 @@
 //!
 //! **No expectation here is ~82, and that is deliberate rather than an
 //! approximation.** The rule the architecture measured into place is binary: a
-//! candidate changing some block's declared solidity or declared texture key, or
-//! adding or removing a block, marks *every* section, and one changing neither
-//! marks none. A count derived from "the sections whose own or whose neighbours'
-//! blocks include stone" is a lower bound on that set and would redden against a
-//! conforming implementation, whose cheapest repair narrows the rule and silently
-//! breaks the exactly-256 bound in the same commit.
+//! candidate changing what any block *draws* — whether it is drawn at all,
+//! whether it hides what stands behind it, or the key any of its six faces draws
+//! from — or adding or removing a block, marks *every* section, and one changing
+//! none of those marks none. A count derived from "the sections whose own or
+//! whose neighbours' blocks include stone" is a lower bound on that set and would
+//! redden against a conforming implementation, whose cheapest repair narrows the
+//! rule and silently breaks the exactly-256 bound in the same commit.
+//!
+//! # Solidity is not in that rule, and two scenarios below still turn on it
+//!
+//! Declared solidity decides whether a player falls through a cell and nothing
+//! else, so a candidate that moves it alone has no picture to correct. What it
+//! cannot do is move it *alone*: each of `drawn`, `occludes` and `targetable`
+//! defaults to whatever its own declaration says about `solid`, so a fixture
+//! stating `solid = false` and saying nothing more states drawnness and occlusion
+//! as false with it. The solidity scenarios below mark the world for that reason
+//! rather than because solidity is in the key — a distinction that costs nothing
+//! to state and would cost a future author a wrong conclusion if it were not
+//! stated. A fixture that spelled `drawn` explicitly beside `solid` in one of
+//! them would quietly change what the scenario is about.
 //!
 //! # The player stands in open air, and nothing they do writes to the world
 //!
@@ -41,6 +55,8 @@
 mod input;
 #[path = "support/reload.rs"]
 mod reload;
+#[path = "support/reload_content.rs"]
+mod reload_content;
 #[path = "support/reload_remesh.rs"]
 mod reload_remesh;
 #[path = "support/reload_world.rs"]
@@ -57,7 +73,8 @@ use reload::{
     accepted, adoption, candidate, declaring, restating, shipped, shipped_restating_stone,
     stone_that_is_not_solid,
 };
-use reload_remesh::{Marking, a_client_over, every_section_once, marked, require};
+use reload_content::{Run, run_of, serial_reported};
+use reload_remesh::{Marking, a_client_over, every_section_once, marked, require, serial_serving};
 use reload_world::{published_tick, shipped_world, standing_at};
 use support::content::ContentRoot;
 use support::{TestResult, content_root};
@@ -240,6 +257,84 @@ fn a_reload_that_changes_no_geometry_and_one_that_does_are_told_apart_on_one_ins
          exactly-256 one** — the first because it is right and the second because nothing would be \
          comparing them. What is graded here is the discrimination itself: `breakable` moves \
          nothing and declared solidity moves everything"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_candidate_that_stops_stone_being_drawn_leaves_every_section_of_the_world_to_mesh() -> TestResult
+{
+    let mut client = a_client_over_the_shipped_world()?;
+    require_nothing_outstanding(&mut client)?;
+    let invisible = shipped_restating_stone(&Declaration::of(STONE).drawn(false))?;
+
+    let answered = adoption(client.adopt(candidate(invisible.path())?));
+    let left_to_mesh = marked(&mut client);
+
+    assert_eq!(
+        (answered, left_to_mesh),
+        (accepted(DIRT), every_section_once()),
+        "an author who says a block is no longer drawn is asking for it to stop appearing, and \
+         until the world is meshed again it goes on appearing exactly as it did. **This is the \
+         wiring rather than the policy**: a mesher that reads `drawn` perfectly leaves every \
+         scenario about what it emits green while a reload that never learned the field leaves \
+         the picture stale until a relaunch. The candidate keeps stone solid, so nothing the \
+         player stands on has moved and the mark cannot be solidity's"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_candidate_that_stops_stone_occluding_leaves_every_section_of_the_world_to_mesh() -> TestResult
+{
+    let mut client = a_client_over_the_shipped_world()?;
+    require_nothing_outstanding(&mut client)?;
+    let see_through = shipped_restating_stone(&Declaration::of(STONE).occludes(false))?;
+
+    let answered = adoption(client.adopt(candidate(see_through.path())?));
+    let left_to_mesh = marked(&mut client);
+
+    assert_eq!(
+        (answered, left_to_mesh),
+        (accepted(DIRT), every_section_once()),
+        "occlusion decides which of a *neighbour's* faces are drawn, so a block that stops hiding \
+         what stands behind it changes a picture it is not itself in — every face that was culled \
+         against stone has to be emitted. That is why the whole world is the set rather than the \
+         sections holding stone. Stone stays solid and stays drawn here, so neither of the other \
+         two answers can be what marked it"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_candidate_taking_stones_targetability_away_publishes_a_later_serial_and_marks_no_section()
+-> TestResult {
+    let mut client = a_client_over_the_shipped_world()?;
+    require_nothing_outstanding(&mut client)?;
+    let unaimable = shipped_restating_stone(&Declaration::of(STONE).targetable(false))?;
+    let launched = serial_serving(&client)?.get();
+
+    let answered = client.adopt(candidate(unaimable.path())?);
+    let published = serial_reported(&answered);
+    let left_to_mesh = marked(&mut client);
+
+    assert_eq!(
+        (
+            adoption(answered),
+            run_of(launched, &[published]),
+            left_to_mesh
+        ),
+        (
+            accepted(DIRT),
+            Run::EachLaterThanTheLast,
+            Marking::NoSectionAtAll
+        ),
+        "what a swing can find changes not one pixel, so a reload that moves it alone has nothing \
+         to draw again — and an implementation folding all five declaration properties into one \
+         geometry key passes both scenarios above and fails only here. **The zero is asserted \
+         beside the acceptance and the serial because a refused reload marks nothing either**, \
+         and so does one that published no content at all: on its own, `NoSectionAtAll` is \
+         satisfied by a reload that never happened"
     );
     Ok(())
 }

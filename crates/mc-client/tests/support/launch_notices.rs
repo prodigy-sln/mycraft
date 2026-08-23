@@ -28,25 +28,34 @@
 #![allow(dead_code)]
 
 use std::error::Error;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use glam::Vec3;
 use mc_client::notice::{changed_blocks, entering};
+use mc_core::block::BlockRegistry;
+use mc_core::id::BlockName;
 use mc_sim::world::Clearing;
+use mc_world::content::LuauFileDefinitionSource;
+use mc_world::persistence::{SavedPlayer, save_world};
+use mc_world::world::{VoxelWorld, WorldPos};
+use tempfile::TempDir;
 
 use crate::entry;
-use crate::persistence::GROUND;
+use crate::persistence::{COLUMNS, GROUND, save_in};
 use crate::printed_refusals::normalised;
 use crate::support;
+use crate::support::content::{BLOCK_DIRECTORY, ContentRoot, shipped_copy};
 
 /// Every line a launch writes about the save it read: the two an entry can write
-/// about where it put the player, and the one naming blocks that no longer behave
+/// about where it put the player, and the two naming blocks that no longer behave
 /// as the save recorded them.
 ///
-/// **Three launches and not one.** One launch answers one thing about one player,
-/// and the two entry answers differ in the world that was read rather than in
-/// anything asked for.
+/// **Four launches and not one.** One launch answers one thing about one player;
+/// the two entry answers differ in the world that was read rather than in
+/// anything asked for, and the two changed-block answers differ in *when the save
+/// was written*, which is what decides how many blocks a line names.
 ///
 /// # Errors
 ///
@@ -58,6 +67,7 @@ pub fn launch_notices() -> Result<Vec<String>, Box<dyn Error>> {
         an_entry_moving_a_trapped_player()?,
         an_entry_with_nowhere_to_put_them()?,
         a_launch_over_a_save_whose_block_behaves_differently()?,
+        a_launch_over_a_save_this_build_wrote_and_one_edited_declaration()?,
     ])
 }
 
@@ -173,6 +183,167 @@ fn a_launch_over_a_save_whose_block_behaves_differently() -> Result<String, Box<
             "this producer needs a save the shipped content disagrees with about a block's              behaviour, and the load reported none. There is no line for a page to quote"
                 .into()
         })
+}
+
+/// The block a mod author edits in the offline edit-and-relaunch loop, the file
+/// that declares it, and the one line the edit replaces.
+///
+/// The edit is the one the hot-reload page walks a player through: make water
+/// solid, and nothing else. Matched with its surrounding newlines and its leading
+/// tab so it is the table's own line rather than the sentence in the comment
+/// above it that quotes the same three words.
+const THE_EDITED_BLOCK: &str = "base:water";
+const EDITED_FILE: &str = "water.luau";
+const AS_SHIPPED: &str = "\n\tsolid = false,\n";
+const AS_EDITED: &str = "\n\tsolid = true,\n";
+
+/// Every block the save this build writes holds, and the row it stands them in.
+///
+/// All four rather than water alone: the line has to name the block the author
+/// edited and no other, and a save holding only that block could not tell a
+/// correct answer from one that names whatever it finds.
+const BLOCKS_THE_SAVE_HOLDS: [&str; 4] = ["base:dirt", "base:grass", "base:stone", "base:water"];
+const THE_ROW_THEY_STAND_IN: u32 = 1;
+
+/// Where the save this build writes records the player.
+///
+/// Somewhere in open air above the row the blocks stand in, so the launch reads
+/// the save rather than answering about a player it had to move.
+const QUIT_STANDING_HERE: SavedPlayer = SavedPlayer {
+    position: [8.5, 12.25, 8.5],
+    yaw: 0.75,
+    pitch: -0.25,
+};
+
+/// What a launch writes for a player who quit with **this** build and then edited
+/// one declaration.
+///
+/// **This is the other half of the changed-blocks line and it is a different
+/// number of blocks.** The producer above reads a save written before the
+/// behaviour list grew, so every block in it is reported; this one writes its save
+/// with the build under test, so the only thing the save and the content disagree
+/// about is the declaration an author edited — one block, and the sentence reads
+/// in the singular. Both are lines a real load produced and neither is spelled
+/// out here.
+///
+/// It is the offline loop the hot-reload page walks through, step for step: play,
+/// quit normally so the save is written, edit `content/base/blocks/water.luau` to
+/// make water solid, and start again.
+///
+/// # Errors
+///
+/// Returns an error if the shipped content cannot be read or copied, if the save
+/// cannot be written, if the launch was turned away, or if the load reported
+/// anything other than the one edited block — a run that disagreed about more
+/// than the author edited has none of this line for a page to quote.
+fn a_launch_over_a_save_this_build_wrote_and_one_edited_declaration()
+-> Result<String, Box<dyn Error>> {
+    let saved = a_world_saved_against_the_shipped_content()?;
+    let edited = shipped_making_water_solid()?;
+    let registry = Arc::new(registry_over(edited.path())?);
+    let launched = mc_client::launch::simulation_to_play(
+        &save_in(&saved),
+        mc_sim::persistence::Launching {
+            seed: mc_sim::REPLAY_SEED,
+            registry: Arc::clone(&registry),
+            content: support::published_content(&registry)?,
+            accepting: mc_world::persistence::Acceptance::ChangedBlocksToo,
+        },
+    );
+    let (seated, _) = launched.map_err(|refused| refused.to_string())?;
+    require_it_named_only_the_edited_block(&seated.changed)?;
+    changed_blocks(&seated.changed)
+        .map(|said| normalised(&said))
+        .ok_or_else(|| "this producer's load reported no changed block at all".into())
+}
+
+/// Refuses unless `changed` names the edited block and nothing else.
+///
+/// The premise the singular sentence rests on. A load disagreeing about more than
+/// the author edited composes the plural line, which is a different page's line —
+/// and a producer that handed it over would leave both pages quoting whichever one
+/// happened to arrive.
+///
+/// # Errors
+///
+/// Returns an error naming what the load actually reported.
+fn require_it_named_only_the_edited_block(changed: &[BlockName]) -> Result<(), Box<dyn Error>> {
+    let named: Vec<&str> = changed.iter().map(BlockName::as_str).collect();
+    entry::require(
+        named == [THE_EDITED_BLOCK],
+        format!(
+            "a page quoting the line for one edited declaration needs a load that disagreed about \
+             one block, and this load reported {named:?}"
+        ),
+    )
+}
+
+/// A save of a world holding all four shipped blocks, written by **this** build
+/// against the content this repository ships.
+///
+/// The directory travels back so the save outlives this call; dropped one line
+/// early it takes the file the launch is about to read with it.
+///
+/// # Errors
+///
+/// Returns an error if the shipped content cannot be read, if a name is not a
+/// namespaced id, if a block will not go in the world, or if the save cannot be
+/// written.
+fn a_world_saved_against_the_shipped_content() -> Result<TempDir, Box<dyn Error>> {
+    let registry = support::content_registry()?;
+    let mut blocks = VoxelWorld::empty(COLUMNS);
+    for (along, name) in BLOCKS_THE_SAVE_HOLDS.iter().enumerate() {
+        let at = WorldPos {
+            x: u32::try_from(along)? + 1,
+            y: THE_ROW_THEY_STAND_IN,
+            z: 1,
+        };
+        blocks.set_block(at, &BlockName::parse(name)?, &registry)?;
+    }
+    let directory = TempDir::new()?;
+    save_world(&save_in(&directory), &blocks, QUIT_STANDING_HERE, &registry)?;
+    Ok(directory)
+}
+
+/// A copy of the shipped content root with water made solid and nothing else
+/// touched.
+///
+/// The shipped text is **edited** rather than rewritten from a builder, which is
+/// what the page tells an author to do and what keeps the other six fields water
+/// declares exactly as they ship — a rewritten declaration that dropped one of
+/// them would move a second fold and the line would name a block for a reason the
+/// page does not describe.
+///
+/// # Errors
+///
+/// Returns an error if the root cannot be copied or written, or if the shipped
+/// declaration does not hold exactly one line to replace.
+fn shipped_making_water_solid() -> Result<ContentRoot, Box<dyn Error>> {
+    let root = shipped_copy()?;
+    let declared = root.path().join(BLOCK_DIRECTORY).join(EDITED_FILE);
+    let shipped = fs::read_to_string(&declared)?;
+    entry::require(
+        shipped.matches(AS_SHIPPED).count() == 1,
+        format!(
+            "this fixture makes the one edit the offline loop describes, and it has to be able to \
+             find the line to make it on: `{EDITED_FILE}` holds {found} lines matching the \
+             shipped one",
+            found = shipped.matches(AS_SHIPPED).count()
+        ),
+    )?;
+    fs::write(&declared, shipped.replace(AS_SHIPPED, AS_EDITED))?;
+    Ok(root)
+}
+
+/// A registry holding what the content root at `root` declares.
+///
+/// # Errors
+///
+/// Returns whatever the reader refused the root with.
+fn registry_over(root: &Path) -> Result<BlockRegistry, Box<dyn Error>> {
+    let mut registry = BlockRegistry::new();
+    registry.apply(&LuauFileDefinitionSource::new(root.to_owned()))?;
+    Ok(registry)
 }
 
 /// The line the client writes about `clearing` when a player enters.

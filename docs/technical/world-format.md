@@ -165,6 +165,20 @@ empty cell need a block registered in order to mean nothing. A cell holding
 a block still resolves through the registry and still fails if that block
 is not registered.
 
+**A section answers solidity and drawnness as two separate questions.**
+`Section::is_drawn_at` sits beside `is_solid_at`, reads
+`BlockDefinition::drawn`, and is **never derived from it** — a block may be
+walked through and seen, or stood on and invisible. Both short-circuit
+`Contents::Empty` the same way and neither compares a name or a runtime id.
+
+They are two functions rather than one because of what a shared one would
+cost the tests: the mesher's fixtures and its bench oracle both decided
+drawnness by asking a section whether a cell was solid, so an implementation
+that left one site answering one question would keep oracle and subject
+agreeing while both ignored what a block declares. The two answers being
+*separately readable* is what lets an independent oracle disagree with the
+mesher at all.
+
 Inside a section there is exactly one write path. Writing a block and
 emptying a cell differ only in the `Contents` they resolve, so the
 reference counting, the palette growth and the index widening are stated
@@ -574,8 +588,25 @@ that changes for reasons having nothing to do with storage.
 
 | List | Fields, in order | Revision |
 |---|---|---|
-| Behaviour | revision byte, `name`, `is_solid`, `replaceable`, `breakable`, `breaks_into` | 1 |
-| Appearance | revision byte, `name`, then the six declared keys in `up`, `down`, `north`, `south`, `east`, `west` order | 2 |
+| Behaviour | revision byte, `name`, `is_solid`, `replaceable`, `breakable`, `breaks_into`, `targetable` | 2 |
+| Appearance | revision byte, `name`, the six declared keys in `up`, `down`, `north`, `south`, `east`, `west` order, then `drawn`, `occludes` | 3 |
+
+**A new field is appended and never inserted**, which is why `targetable`
+sits after the residue and `drawn`/`occludes` sit after the keys rather
+than anywhere more readable. The canonical encoding writes a struct
+positionally, so a rename costs nothing and a field placed among the
+existing ones moves every byte after it — every save in existence would
+then disagree for a reason nobody declared, and the revision byte would be
+reporting a change larger than the one that was made.
+
+**Which list each of the three joined, and why.** `targetable` is
+behaviour because it decides what a swing *does* to a world: it is what
+makes `breakable = false` reachable at all, so a block that becomes
+aimable is a different block to stand in front of. `drawn` and `occludes`
+are appearance because a block that stopped being drawn, or stopped hiding
+what stands behind it, is still the same block to stand on, to build
+through and to break — nothing about mutating the world changes, so
+nothing a player has to decide about changes either.
 
 The **origin is in neither list**, and it is the field that would have
 broken everything: it is a label derived from the path a definition was
@@ -591,13 +622,22 @@ them, and the cost of unifying them has been measured rather than
 argued.** The two lists grow for unrelated reasons, so a shared byte
 bumped because the appearance list gained a field moves every block's
 *behaviour* hash in every save in existence. Run against the committed
-pre-spec save at the moment the appearance list grew to six keys, the two
-arrangements answer:
+pre-spec save at the moment the appearance list grew to six keys — **a
+reading of that tree, not of this one** — the two arrangements answer:
 
 ```
 changed:    [base:dirt, base:grass, base:stone, base:water]   // one shared byte
 retextured: [base:dirt, base:grass, base:stone, base:water]   // a byte per list
 ```
+
+**Do not re-read that against today's answer and conclude the split bought
+nothing.** The behaviour byte has since moved on its own account, so the
+same save now reports all four `changed` under *either* arrangement — the
+two agree today because a behaviour field really was added, which is the
+one circumstance in which they are supposed to agree. What the split
+bought is that the appearance list's two growths cost no player anything,
+and no reading taken on a tree where both bytes have moved can recover
+that.
 
 Those are not two shades of the same answer. Read the three-outcome
 decision above: a non-empty `changed` is **named on the player's terminal**,
@@ -622,23 +662,44 @@ of 1 385, one of them the run of the shipped binary itself.
 they can see.** Two constants where there was one is duplication, two
 numbers doing one job, and unifying them is the obvious tidy-up — obvious,
 one line, and it turns a silent retexture into a refused world. So there
-are two constants, only one of them has ever moved, and the reason is
-written here rather than left to be rediscovered.
+are two constants, they have moved at different times and for unrelated
+reasons, and the reason is written here rather than left to be
+rediscovered. **That both have now moved is not an argument for one.** It
+is the arrangement doing its job twice: each move is recorded in its own
+list's byte and in no other, which is exactly the property a shared
+constant cannot have.
 
-**The appearance list is at revision 2 because an appearance became six
-keys instead of one.** The consequence is player-visible and intended:
-every save written before that revision reports **every block it holds as
+**The appearance list is at revision 3.** It reached 2 when an appearance
+became six keys instead of one, and 3 when `drawn` and `occludes` joined
+it. Both consequences are player-visible and intended in the same way:
+every save written before a revision reports **every block it holds as
 retextured** on its next load. That is correct rather than a migration
 defect — every block's appearance really did change — and a retexture is
 in the arm that is neither reported nor refused, so nothing about opening
-an older world changed. **The shipped content has since moved a behaviour
-hash as well**: `content/base/blocks/water.luau` declares
-`breakable = false`, so the committed pre-Luau save now reports `base:water`
-as changed and its other three blocks as retextured, which is the two-hash
-separation firing on a real content edit rather than on a fixture.
+an older world changed for either move.
 
-A future change to what a block looks like moves this byte again and no
-other; a future change to what a block *is* moves the other one.
+**The behaviour list is at revision 2, and that move is the expensive
+one.** It reached 2 when `targetable` joined it, and every block of every
+save written before that reports as `changed` on its next load — so every
+player is told that the blocks they built with behave differently. That is
+survivable only because such a save loads and names them rather than being
+refused, and it is exactly why `drawn` and `occludes` are on the *other*
+list: routing a rendering field through this byte would buy that cost
+again for a change no player can act on.
+
+**What that costs the committed pre-Luau save, concretely.** It used to
+report `base:water` alone as changed — `content/base/blocks/water.luau`
+declares `breakable = false` — with its other three blocks retextured,
+which was the two-hash separation firing on a real content edit rather
+than on a fixture. Under revision 2 it reports **all four as changed and
+none as retextured**, because a behaviour byte that moved outranks any
+per-block comparison: the two records are not comparable across the move.
+The per-block signal is not lost so much as spent — it returns on the next
+save written under this revision.
+
+A future change to what a block looks like moves the appearance byte again
+and no other; a future change to what a block *is* moves the behaviour
+one.
 
 A save written before a revision is never compared field-by-field against
 one written after it. Two values folded over different field lists agree
@@ -654,6 +715,33 @@ guard — and **nothing else in the workspace**. In particular the guard
 over the committed pre-spec save stays green, because six keys under
 revision 1 still fold differently from one key under revision 1, so an
 older save still reports its blocks retextured either way.
+
+**Four files state a byte sequence, not two, and the sentence above names
+the two that a reading of *that* tree reddened.** The enumeration, from
+`grep -rn "REVISION" --include=*.rs crates/` plus a read of each hit:
+`crates/mc-world/src/persistence/format_test.rs` builds both lists;
+`crates/mc-world/tests/save_per_face_appearance.rs` builds the appearance
+list over six distinct keys; and
+`crates/mc-world/tests/save_declarations.rs` pins one behaviour fold to a
+hash derived by hand, with the whole byte table written out in its doc
+comment. **Which of the four a given move reddens depends on which list
+moved**, so read the enumeration before predicting the blast radius.
+
+**The behaviour side has now been measured too, and it is the mirror
+image.** Leaving `BEHAVIOUR_REVISION` at 1 while `targetable` joined its
+list reddens exactly the two behaviour-stating guards —
+`format_test.rs`'s behaviour half and `save_declarations.rs`'s pinned fold
+— at `1435 tests run: 1433 passed, 2 failed, 1 skipped`, complete run
+under `--no-fail-fast`. **Both appearance-stating guards stay green**,
+which is the asymmetry the two constants exist to produce: a byte left
+behind in one list is reported by that list's guards and by nothing else.
+
+**And the whole-verdict guard over the committed pre-spec save stays green
+under it**, exactly as it does for the appearance case above. Under the
+mutation that save still reports all four blocks `changed`, because a fold
+over the grown list differs from the recorded one whatever the leading
+byte says. That is the same blindness read from the other end, and it is
+the concrete reason a green suite is not evidence that a byte is right.
 
 The consequence for whoever changes one of these: **a green suite is not
 evidence that the byte is right.** Every other witness compares one fold

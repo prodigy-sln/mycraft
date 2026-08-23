@@ -53,6 +53,12 @@ const REPLACEABLE_FIELD: &str = "replaceable";
 const BREAKABLE_FIELD: &str = "breakable";
 /// The key a declaration names its residue in.
 const BREAKS_INTO_FIELD: &str = "breaks_into";
+/// The key a declaration states being drawn in.
+const DRAWN_FIELD: &str = "drawn";
+/// The key a declaration states hiding its neighbours in.
+const OCCLUDES_FIELD: &str = "occludes";
+/// The key a declaration states being aimable at in.
+const TARGETABLE_FIELD: &str = "targetable";
 
 /// Every field name a declaration may state, in the order the documentation
 /// introduces them.
@@ -60,14 +66,21 @@ const BREAKS_INTO_FIELD: &str = "breaks_into";
 /// The order is fixed because a refusal quotes this list back, and
 /// `documented_refusals.rs` compares a quoted refusal against a real run **line
 /// for line** — a list ordered by anything that can vary makes that guard
-/// intermittently red and the page it guards unwritable.
-const RECOGNISED_FIELDS: [&str; 6] = [
+/// intermittently red and the pages it guards unwritable. Three pages quote this
+/// list today: `docs/modding/blocks-items.md`, `docs/modding/hot-reload.md` and
+/// `docs/modding/README.md`. Growing it means editing all three, and the guard
+/// sweeps every page under `docs/modding/` rather than a named one, so a page
+/// missed is a page reported.
+const RECOGNISED_FIELDS: [&str; 9] = [
     NAME_FIELD,
     TEXTURE_FIELD,
     SOLID_FIELD,
     REPLACEABLE_FIELD,
     BREAKABLE_FIELD,
     BREAKS_INTO_FIELD,
+    DRAWN_FIELD,
+    OCCLUDES_FIELD,
+    TARGETABLE_FIELD,
 ];
 
 /// How many field names the loader will read out of one declaration.
@@ -157,6 +170,9 @@ fn check(
         BREAKABLE_BY_DEFAULT,
     )?;
     let breaks_into = optional_residue(host.read_field(declaration, BREAKS_INTO_FIELD))?;
+    let drawn = defaulting_to_solidity(host, declaration, DRAWN_FIELD, is_solid)?;
+    let occludes = defaulting_to_solidity(host, declaration, OCCLUDES_FIELD, is_solid)?;
+    let targetable = defaulting_to_solidity(host, declaration, TARGETABLE_FIELD, is_solid)?;
     Ok(BlockDefinition {
         name: BlockName::parse(&name).map_err(|error| FieldFault::invalid(NAME_FIELD, &error))?,
         textures,
@@ -164,8 +180,34 @@ fn check(
         replaceable,
         breakable,
         breaks_into,
+        drawn,
+        occludes,
+        targetable,
         origin: origin.clone(),
     })
+}
+
+/// One of the three fields whose absence means whatever the same declaration
+/// says about being solid.
+///
+/// **The only derived default the loader has**, and the reason the split costs no
+/// existing declaration its meaning: one bit used to answer all four questions,
+/// so a declaration stating `solid` alone is still stating all four. Every other
+/// field's absence means a constant — [`REPLACEABLE_BY_DEFAULT`],
+/// [`BREAKABLE_BY_DEFAULT`], an empty residue — and those say the same thing
+/// whatever else the declaration says.
+///
+/// **Each of the three falls back on its own.** An author who states `drawn` has
+/// said nothing about whether the block hides what is behind it or whether a
+/// swing can find it, so carrying that answer across to the other two would take
+/// one decision and make three of it.
+fn defaulting_to_solidity(
+    host: &ScriptHost,
+    declaration: &ScriptTable,
+    field: &str,
+    is_solid: bool,
+) -> Result<bool, FieldFault> {
+    optional_boolean(host.read_field(declaration, field), field, is_solid)
 }
 
 /// Nothing, once every field `declaration` states is one the loader has a
