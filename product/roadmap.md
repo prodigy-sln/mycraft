@@ -121,8 +121,8 @@ it before a run starts.
 | P0 | Hot reload — *edit a block while playing* | PRO-918 | **Done** |
 | P0 | A player entering a world is never left inside solid rock — *the shove, at every door rather than only at a reload* | PRO-948 | **Done** |
 | P0 | The composition root moves to `mc-server`, and the registry stops travelling to the client — *the split becomes structural instead of a comment* | PRO-944 | Todo |
-| P0 | Solid splits into drawn, occludes and targetable — *you can see water* | PRO-904 | In Progress |
-| P0 | The medium properties: swimmable, and one resistance field — *you can swim in it* | PRO-957 | Todo — after PRO-904 |
+| P0 | Solid splits into drawn, occludes and targetable — *you can see water* | PRO-904 | **Done** |
+| P0 | The medium properties: swimmable, and one resistance field — *you can swim in it* | PRO-957 | In Progress |
 | P0 | Where generated art comes from at build time — *a decision and an ADR amendment, not a spec* | PRO-930 | **Done** — ADR-026 |
 | P0 | The grass block looks like a grass block: per-face keys, baked art, real pixels from disk — *the world stops being teal* | PRO-947, PRO-902 | **Done** |
 | P0 | A save whose blocks changed behaviour loads and reports instead of being refused — *your world opens after a content update* | PRO-956 | **Done** |
