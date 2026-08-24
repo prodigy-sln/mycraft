@@ -35,7 +35,7 @@
 
 .PARAMETER SkipCoverage
     Skip coverage instrumentation and run tests directly. Fast local iteration
-    only — CI and /sdd-validate must never use it.
+    only — CI and the validate phase must never use it.
 
 .PARAMETER Quick
     Format, lint and size only. For tight edit loops; not a substitute for the
@@ -435,7 +435,7 @@ elseif ($ArtOnly) {
 }
 elseif ($SkipCoverage) {
     Write-Host ""
-    Write-Warn 'coverage skipped (-SkipCoverage). Not valid for CI or /sdd-validate.'
+    Write-Warn 'coverage skipped (-SkipCoverage). Not valid for CI or the validate phase.'
     if (Test-ToolPresent 'cargo-nextest' 'cargo install cargo-nextest --locked') {
         # --no-tests=pass: an empty suite is a valid skeleton state, not a failure.
         Invoke-Stage 'tests (nextest)' { cargo nextest run --workspace --no-tests=pass }

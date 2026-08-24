@@ -13,7 +13,7 @@ elsewhere, which is why it is strict and why a red gate is an absolute stop.
   Kebab-case, 2–4 words, max 50 characters total.
 - The branch is created at the start of `/sdd-start`; all work — spec, tests,
   code — happens on it.
-- It merges into `main` once `/sdd-validate` passes and the gate is green.
+- It merges into `main` once the validate phase passes and the gate is green.
   Merge locally; nothing waits on review.
 - Rebasing to tidy a feature branch before merge is encouraged. After an
   intentional rebase, publish it with `git push --force-with-lease`.
@@ -28,11 +28,12 @@ elsewhere, which is why it is strict and why a red gate is an absolute stop.
 - Conventional Commits: `<type>(<scope>): <description>` with types
   feat, fix, test, refactor, docs, chore, style. Imperative mood, present
   tense, description ≤72 characters.
-- TDD sequence per task: `test: add failing tests for X` →
-  `feat: implement X` → `refactor: improve Y` (refactor only when changes
-  were made). Never mix test and implementation code in one commit.
-- Commit after each RED, GREEN, and REFACTOR step, and when consolidating
-  docs and registering the spec. Spec changes commit separately from code.
+- TDD cadence: `test: add failing tests for X` once per phase (the test
+  author's commit) → `feat: implement X` per task → `refactor: improve Y`
+  once per phase, only when changes were made. Never mix test and
+  implementation code in one commit.
+- Commit when consolidating docs and registering the spec. Spec changes
+  commit separately from code.
 - Reference scenario IDs (FR-x.y-Sz) in commit messages on the feature branch —
   never in code or test names.
 - Never: "WIP"/"temp" as messages, committing failing tests, bundling
@@ -57,7 +58,10 @@ elsewhere, which is why it is strict and why a red gate is an absolute stop.
 
 ## 3. Merging
 
-- The merge condition is: `/sdd-validate` PASS **and** `scripts/sdd-gate.ps1`
+- This project runs `review-mode: solo` (CLAUDE.md): the complete phase
+  merges directly once the prerequisites below hold. The setting is what the
+  resolver reads — changing this section without changing it is a no-op.
+- The merge condition is: validate-phase PASS **and** `scripts/sdd-gate.ps1`
   exits 0 **and** spec status is `implemented` **and** docs are consolidated
   and the spec is registered in `specs/REGISTRY.md`.
 - All four are required. A green gate alone is not sufficient, and no other

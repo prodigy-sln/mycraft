@@ -9,7 +9,7 @@ rule** (`docs/INDEX.md`). Everything under `docs/planning/` is *forward-looking*
 and carries no promise: any statement here may be contradicted by the spec that
 eventually lands, and the spec wins. When a feature discussed here is actually
 built, its permanent documentation is consolidated into the ordinary `docs/`
-branches by `/sdd-complete`, and the planning document is either deleted or
+branches by the complete phase, and the planning document is either deleted or
 trimmed to what remains unbuilt.
 
 A planning document should:

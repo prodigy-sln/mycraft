@@ -280,7 +280,7 @@ Two consequences:
 ## Lifting a limitation costs one grep per place it was stated
 
 A spec that *adds* a surface is documented by the obligation in `CLAUDE.md`'s Key
-Principle 3 — the author knows what they built and writes it down. A spec that
+Principle 4 — the author knows what they built and writes it down. A spec that
 **lifts a stated limitation** has no such prompt, and the work is the mirror image:
 the new surface documents itself, while every passage that recorded the old
 limitation goes silently false. Nobody is reading those passages, because the person

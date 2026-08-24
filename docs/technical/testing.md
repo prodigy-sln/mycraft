@@ -1397,9 +1397,9 @@ cargo bench -p mc-world --bench meshing
 ```
 
 This runs as a **standalone command that the quality gate deliberately does not run.**
-`CLAUDE.md` principle 4 requires gates to be deterministic, and a wall-clock threshold is not one —
+`CLAUDE.md` principle 5 requires gates to be deterministic, and a wall-clock threshold is not one —
 a gate that goes red on a slower machine is a gate people learn to ignore. The command has exactly
-two required run points: a spec's own `/sdd-validate`, and MVP exit verification. Both are
+two required run points: a spec's own validate phase, and MVP exit verification. Both are
 deliberate acts by a person who can account for a slow machine, which is exactly why the check does
 not live where every gate run would hit it automatically. `cargo nextest` neither runs nor builds
 the bench target — confirmed against the real tree with the `harness = false` target present (the

@@ -156,8 +156,8 @@ server is authoritative, and verification precedes the thing it verifies.
 
 MyCraft is developed with **Prospect**, a spec-driven development framework for Claude Code:
 BDD scenarios as the test contract, TDD with an isolated test author, deterministic gates, tiered
-rigor, and living documentation. Every feature runs `/sdd-start → /sdd-tasks → /sdd-implement →
-/sdd-validate → /sdd-complete`; completed specs consolidate into `docs/` and leave a line in
+rigor, and living documentation. Every spec runs `/sdd-start`, then `/sdd-next` per phase
+until the resolver reports done; completed specs consolidate into `docs/` and leave a line in
 [`specs/REGISTRY.md`](specs/REGISTRY.md).
 
 The framework itself lives at

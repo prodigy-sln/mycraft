@@ -79,15 +79,11 @@ Read `product/roadmap.md` for the current MVP and its exit criteria.
 
 Per spec, in order. Each stage is a **new** subagent.
 
-| # | Stage | Skill the subagent invokes | Notes |
-|---|-------|---------------------------|-------|
-| 1 | Spec | `/sdd-start <description>` | Creates branch, spec, audited scenarios |
-| 2 | Architecture | `/sdd-architect` | Default at rigor `high`. Skip only if the spec is genuinely mechanical, and say why. |
-| 3 | Discuss | `/sdd-discuss` | **Conditional.** Invoke when design space is genuinely contested — competing viable approaches, a security or data-loss surface, or a decision expensive to reverse. Skip for settled work. This is your judgement call; make it deliberately, not by default. |
-| 4 | Tasks | `/sdd-tasks` | Scenario-grouped breakdown |
-| 5 | Implement | `/sdd-implement` | TDD. At `medium+` the test author owns the tests and the implementer must not edit them. |
-| 6 | Validate | `/sdd-validate` | Gate + tier-scaled review |
-| 7 | Complete | `/sdd-complete` | Docs consolidation, registry, merge. **No PR** — see `standards/global/git-workflow.md`. |
+| # | Phase | How the subagent runs it | Notes |
+|---|-------|--------------------------|-------|
+| 1 | Spec | `/sdd-start <description>` | Classifies work-type and rigor, creates the branch and the spec folder. |
+| 2+ | Every following phase | `/sdd-next` | The resolver reads the spec folder's frontmatter and disk state and picks the phase — architect, tasks, implement, validate, complete. **You no longer choose the phase or its prompt**; do not tell the subagent which one to run. |
+| — | Discuss | `/sdd-discuss` | **Conditional.** Invoke when design space is genuinely contested — competing viable approaches, a security or data-loss surface, or a decision expensive to reverse. Skip for settled work. This is your judgement call; make it deliberately, not by default. |
 
 Default rigor is `high` (`product/mission.md`). Escalate when new risk appears
 and record the reason. Downgrade only with explicit user confirmation.
@@ -253,9 +249,10 @@ or invoke it yourself. This produced one hollow validation on PRO-849 — a
 reviewer that read the diff instead of running the reviewer workflow.
 
 **Subagents cannot call the `Workflow` tool. Only you can.** At rigor `high+`,
-`/sdd-validate` requires
+the validate phase requires
 `Workflow({name: "sdd-validate", args: {specFolder, manifest, calibration, passNumber}})`,
-so **you run that stage yourself** rather than delegating it. This is a
+so **you run that phase yourself** (`/sdd-next` in your own context) rather
+than delegating it. This is a
 deliberate exception to delegating every stage; the three specialist reviewers
 inside the workflow are fresh agents, so the independence that matters
 survives. Build the manifest from `tasks.md` plus
@@ -270,10 +267,10 @@ nothing being wrong.
 
 ### User sign-off does not apply in conductor mode
 
-`/sdd-validate` says user sign-off is required at `high+` before
-`/sdd-complete`. **That does not apply here** — the user has overridden it and
-you are the approving authority. On a valid PASS, proceed straight to
-`/sdd-complete`. Never stall a tick waiting for a sign-off that is not coming.
+The validate phase says user sign-off is required at `high+` before the
+complete phase. **That does not apply here** — the user has overridden it and
+you are the approving authority. On a valid PASS, proceed straight to the
+complete phase. Never stall a tick waiting for a sign-off that is not coming.
 
 ### Messages are delivered at the end of the recipient's turn
 
@@ -405,7 +402,7 @@ Per `standards/global/git-workflow.md`. No pull requests; `origin` is a backup
 remote.
 
 - `/sdd-start` creates `feature/PRO-123-short-name`. All work happens there.
-- Merge to `main` only when all four hold: `/sdd-validate` PASS, gate exits 0,
+- Merge to `main` only when all four hold: validate-phase PASS, gate exits 0,
   spec status `implemented`, docs consolidated and spec registered.
 - **Squash, always.** One spec is one commit on `main`. There is no
   meaningful-history exception to weigh — do not re-open that judgement per
