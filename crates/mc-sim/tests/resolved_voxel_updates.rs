@@ -26,6 +26,16 @@
 //! nothing there at all, and one that ignored either argument leaves one of the
 //! two positions out of the list entirely.
 //!
+//! **A write now settles a third answer, and this file deliberately does not
+//! move it.** The write is one [`VoxelAnswers`], whose fields are named at the
+//! call site so the pair below still reads as two answers deliberately unlike
+//! each other. Every block the fixture registry declares states no medium, so
+//! both positions already answer "no medium here" before anything is written and
+//! [`MediumIndex::NOTHING`] is what leaves that true — which is what keeps this
+//! file about the two views whose disagreement it was built to catch. A medium
+//! that *did* move at one position would add a row to the list below that no
+//! sentence here explains.
+//!
 //! The fixture is deliberately not a cube of equal coordinates. The two
 //! positions written below have all three coordinates different from each other,
 //! so an exchange of any two axes lands on a position this assertion reports
@@ -34,7 +44,7 @@
 mod support;
 
 use mc_sim::player::{BlockPos, Solidity, Targetable};
-use mc_sim::replay::{Extent, ResolvedVoxels};
+use mc_sim::replay::{Extent, MediumIndex, ResolvedVoxels, VoxelAnswers};
 use mc_world::world::WorldPos;
 
 use support::TestResult;
@@ -73,6 +83,22 @@ type Answers = (bool, bool);
 /// exactly one of the two views may move at each and they are not the same view.
 const AN_OBSTACLE_NO_RAY_STOPS_AT: Answers = (true, false);
 
+/// A pair of answers as the one value a write takes, carrying the medium every
+/// block this fixture's registry already answers.
+///
+/// The two views' answers stay a *pair* declared once and named here, rather
+/// than three fields spelled at the call site: what this file is about is that
+/// the same pair reaches two positions that started from different ones, and a
+/// second literal at the second position is a second place for that to drift.
+const fn settling(answers: Answers) -> VoxelAnswers {
+    let (solid, targetable) = answers;
+    VoxelAnswers {
+        solid,
+        targetable,
+        medium: MediumIndex::NOTHING,
+    }
+}
+
 #[test]
 fn setting_one_voxels_answers_changes_that_voxel_and_no_other() -> TestResult {
     let registry = registry_declaring(&[(PACKED, true), (HOLLOW, false)])?;
@@ -80,9 +106,9 @@ fn setting_one_voxels_answers_changes_that_voxel_and_no_other() -> TestResult {
         ResolvedVoxels::resolve(&NamedSlab::new(EXTENT, TOP, PACKED, HOLLOW)?, &registry)?;
     let before: Vec<Answers> = every_position().map(|at| answers(&resolved, at)).collect();
 
-    let (solid, targetable) = AN_OBSTACLE_NO_RAY_STOPS_AT;
-    resolved.set(RAISED, solid, targetable);
-    resolved.set(HOLLOWED, solid, targetable);
+    let settled = settling(AN_OBSTACLE_NO_RAY_STOPS_AT);
+    resolved.set(RAISED, settled);
+    resolved.set(HOLLOWED, settled);
 
     let moved: Vec<(BlockPos, Answers)> = every_position()
         .zip(before)

@@ -33,7 +33,7 @@
 //! read a box's z where it meant its x lands on the wrong column of a ledge or a
 //! step and is caught, rather than being hidden by a fixture symmetric in both.
 
-use mc_sim::player::{BlockPos, Solidity};
+use mc_sim::player::{BlockPos, Medium, Solidity, VoxelMedium};
 
 /// A declared world, solid from `y = 0` up to and including a per-column surface
 /// height.
@@ -70,5 +70,30 @@ impl Ground {
 impl Solidity for Ground {
     fn is_solid(&self, at: BlockPos) -> bool {
         at.y >= 0 && self.surface(at.x).is_some_and(|surface| at.y <= surface)
+    }
+}
+
+/// **[`VoxelMedium::NOTHING`] unconditionally, and never a function of this
+/// fixture's own solidity.**
+///
+/// The temptation is concrete rather than hypothetical: this fixture computes
+/// solidity from a geometric rule, and the negation of that rule *is* the air,
+/// so "the air is the medium" is a one-line change that reads as insight. It
+/// would put a buoyancy under every held-jump assertion in the suite and a
+/// resistance under every assertion about where a box comes to rest — and no
+/// assertion written against a fixture can see its own fixture lying.
+///
+/// What catches it is not a scenario but **the collision suite staying green**,
+/// which it does only because a resistance of zero divides by one and is the
+/// velocity itself in every bit.
+///
+/// **Both halves, with no exemption for the resistance.** A resistance derived
+/// here looks inert, on the reasoning that a box never overlaps a solid cell —
+/// but that is a maintained invariant and not a geometric fact, two rules hold
+/// it and neither of them binds a fixture, and the half nothing watches is the
+/// half that rots.
+impl Medium for Ground {
+    fn medium_at(&self, _: BlockPos) -> VoxelMedium {
+        VoxelMedium::NOTHING
     }
 }

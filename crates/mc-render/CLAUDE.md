@@ -20,6 +20,11 @@ is a bet that the frame harness is good. Keep that bet honest:
 - Golden frames are compared perceptually, not byte-wise — GPU drivers differ.
 - A deliberate visual change updates the golden and says so in the commit. An unexplained golden
   update in a diff is a review stop.
+- **A golden can be invalidated with nothing visual changed at all.** The captures are shot along a
+  declared camera path, and that path is the simulation's output — so content-declared *physics*
+  moves it over a world nobody touched. `crates/mc-sim`'s scene contract compares quad count and
+  per-block area and cannot see that; see `SCENE_REVISION` in `src/capture.rs` for what is and is not
+  guarded, and `docs/technical/rendering.md` for the re-shoots on record.
 - Anything expressible as a pure function — meshing, packing, culling maths, atlas layout, light
   propagation — is unit-tested normally and is **not** exempt. Only GPU-resident work gets the
   exclusion.

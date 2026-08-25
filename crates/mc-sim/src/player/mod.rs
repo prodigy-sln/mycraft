@@ -114,6 +114,79 @@ pub trait Targetable {
     fn is_targetable(&self, at: BlockPos) -> bool;
 }
 
+/// What a voxel's volume does to something moving through it.
+///
+/// Two independent declarations in one value, because a caller that could read
+/// one without the other is the disagreement this type exists to make
+/// unspellable — the same reason [`crate::replay::ResolvedVoxels::set`] writes
+/// every answer at once.
+///
+/// **No [`Default`], deliberately**: `..Default::default()` would make
+/// inheriting a field invisible again, and the scenarios that separate a
+/// resistant block from a buoyant one depend on a fixture stating both.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VoxelMedium {
+    /// Whether a player can hold itself up in this volume.
+    pub swimmable: bool,
+    /// How much this volume slows what moves through it: a speed through it is
+    /// divided by `1 + resistance`. Finite and not less than zero.
+    pub resistance: f32,
+}
+
+impl VoxelMedium {
+    /// What a cell with no block in it answers, and what everything outside the
+    /// world answers: neither buoyant nor resistant. The identity of
+    /// [`with`](Self::with).
+    pub const NOTHING: Self = Self {
+        swimmable: false,
+        resistance: 0.0,
+    };
+
+    /// The medium of two overlapped cells taken together: buoyant if either is,
+    /// and the greater of the two resistances.
+    #[must_use]
+    pub fn with(self, other: Self) -> Self {
+        Self {
+            swimmable: self.swimmable || other.swimmable,
+            resistance: self.resistance.max(other.resistance),
+        }
+    }
+}
+
+/// What medium a voxel is.
+///
+/// **One trait with one method returning both answers**, where [`Solidity`] and
+/// [`Targetable`] are two traits — and the difference is which hazard is live.
+/// Those two are read by different code that must not reach each other's
+/// question. Both of these are read by [`physics::advance_player`] alone, one
+/// line apart, folded over one box at one instant, so segregating them would
+/// separate nothing. The live hazard here is the opposite one: a fixture
+/// stating one property and inheriting the other, which no assertion inside the
+/// physics can see.
+///
+/// **Total**, by the same construction as [`Solidity`] and [`Targetable`]:
+/// every position has an answer, and everything outside the loaded world
+/// answers [`VoxelMedium::NOTHING`].
+pub trait Medium {
+    /// What medium the voxel at `at` is.
+    fn medium_at(&self, at: BlockPos) -> VoxelMedium;
+}
+
+/// What one tick of motion may ask of the world, and no more.
+///
+/// [`Targetable`] is deliberately absent: a tick of motion has no aiming
+/// question to ask, and this composite is where that is stated. The blanket impl
+/// means a fixture writes nothing extra — implement [`Solidity`] and [`Medium`]
+/// and this follows.
+///
+/// It does **not** make an inconsistent pair unspellable; the blanket impl
+/// composes two independently written halves. What it buys is one wiring
+/// argument at the one production site, so there is no arrangement of that call
+/// that passes a stale view beside a fresh one.
+pub trait Traversal: Solidity + Medium {}
+
+impl<T: Solidity + Medium + ?Sized> Traversal for T {}
+
 /// The camera the player's state implies.
 ///
 /// Derived rather than driven: the eye stands over the feet at [`EYE_HEIGHT`]

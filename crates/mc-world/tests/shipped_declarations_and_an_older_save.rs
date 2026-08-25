@@ -5,12 +5,19 @@
 //! definition.** Every other reading of a declaration compares one field against
 //! an expectation written beside it; this one compares the lot at once, against
 //! numbers nobody here computed. A save records each block it holds as two folds —
-//! its declared behaviour over `name`, `is_solid`, `replaceable`, `breakable` and
-//! `breaks_into`, and its declared appearance over `name` and the keys its faces
-//! draw from — and deliberately excludes the origin, precisely so that a save does
+//! its declared behaviour over `name`, `is_solid`, `replaceable`, `breakable`,
+//! `breaks_into`, `targetable`, `swimmable` and `move_resistance`, and its declared
+//! appearance over `name`, the keys its six faces draw from, `drawn` and
+//! `occludes` — and deliberately excludes the origin, precisely so that a save does
 //! not depend on the path a definition was read from. So a field mapped to the
 //! wrong place, a default resolved differently by a new reader, or a texture key
 //! that quietly became the block's own name all show up here and nowhere else.
+//!
+//! **Both lists are restated here in full rather than cited**, because a doc
+//! comment naming five of eight is the same hand-maintained mirror this project
+//! has twice found sitting short while the thing it mirrors grew. This one is
+//! prose and no assertion rests on it, which makes it worse rather than better: a
+//! stale list here misleads a reader with nothing to redden.
 //!
 //! **The oracle is a save written against the declarations that came before, and
 //! it is committed rather than generated.** A save this suite wrote from the
@@ -25,26 +32,61 @@
 //!
 //! A block's recorded appearance folds **every key it declares**, one per facing,
 //! and then whether it is drawn and whether it occludes. A block's recorded
-//! behaviour folds its own field list and now ends with whether a swing can find
-//! it. Each list carries a revision byte of its own and each byte has moved — the
-//! appearance one twice, the behaviour one once.
+//! behaviour folds its own field list, and now ends with whether a swing can find
+//! the block and then with the two properties that say what its volume is to move
+//! through. Each list carries a revision byte of its own and **each has moved
+//! twice** — the appearance one for five texture keys and then for `drawn` and
+//! `occludes`, the behaviour one for `targetable` and then for `swimmable` and
+//! `move_resistance` together.
+//!
+//! **Both bytes now read 3, and that is a coincidence of counting rather than an
+//! argument for one byte.** They arrived there by different routes, one growth
+//! apart, for unrelated reasons, and the next change to either list moves one of
+//! them alone. It is the least durable fact on this page, and it is stated so that
+//! nobody reads today's equality as a case for collapsing the two constants into
+//! one — which would move every behaviour fold in existence as a side effect of a
+//! texture key. `docs/technical/world-format.md` says the same thing in the same
+//! words, for the same reason.
 //!
 //! **So every block this save holds is reported as behaving differently, and that
 //! is the designed answer rather than a defect.** A behaviour list that grows is a
 //! list every existing save recorded under the old shape, and there is no reading
 //! of those bytes that could say otherwise. The cost is paid once, deliberately,
 //! and it is survivable because such a save *loads* and names its blocks instead
-//! of being refused. What would be wrong now is a byte that failed to move: an
-//! implementation that folded the new fields into nothing at all reports water
-//! alone, over its `breakable = false`, and three blocks as merely retextured —
-//! which is the answer this file used to expect and is now the defect it catches.
+//! of being refused. What would be wrong now is a **list that failed to grow**: an
+//! implementation folding the new fields into nothing at all reports water alone,
+//! over its `breakable = false`, and three blocks as merely retextured — which is
+//! the answer this file used to expect and is now the defect it catches.
+//!
+//! **What it cannot catch is a byte that failed to move, and that is measured
+//! rather than argued.** Putting `BEHAVIOUR_REVISION` back to 2 with the list left
+//! grown reddens exactly two tests in the workspace — the two that state a byte
+//! sequence by hand — and every reading in this file stays green, because a fold
+//! over a grown list disagrees with a recorded one whatever the leading byte says.
+//! That is not a gap in the fixture: which *list* a field joined and which *byte*
+//! it moved are different questions, and this file answers the first. It is stated
+//! so that nobody later reads a committed save as closing the hole only a
+//! byte-stating test closes.
 //!
 //! **The two revision bytes stay separate, and that is unchanged.** One number
 //! shared between the lists would move every behaviour fold in existence as a
 //! side effect of adding a texture key, which is a claim about how every block
-//! behaves made on the strength of art. That the behaviour byte moved here is a
-//! decision somebody took about `targetable`; a shared byte would have taken it
-//! for them, on every future retexture, forever.
+//! behaves made on the strength of art. That the behaviour byte has moved here is
+//! two decisions somebody took, about `targetable` and then about the medium pair;
+//! a shared byte would have taken them for them, on every future retexture,
+//! forever.
+//!
+//! # There are two committed saves now, and each answers what the other cannot
+//!
+//! This one predates the move to Luau, so **both** of its records are stale: it
+//! can say that every block behaves differently and every block looks different,
+//! and it cannot separate the two. `world_saved_against_behaviour_revision_2.mcw`,
+//! read by `shipped_declarations_and_a_revision_2_save.rs`, was minted while the
+//! behaviour list stood at 2 and the appearance list already stood at 3 — so under
+//! today's declarations every block it holds behaves differently and **not one of
+//! them looks different**, which is the asymmetry that catches a medium field
+//! folded onto the appearance list. Neither fixture subsumes the other, and
+//! neither can be minted a second time.
 //!
 //! # An empty verdict is what the wrong answer looks like too
 //!

@@ -90,6 +90,8 @@ pub fn registry_with_the_marker() -> Result<BlockRegistry, Box<dyn Error>> {
             drawn: true,
             occludes: true,
             targetable: true,
+            swimmable: false,
+            move_resistance: 0.0,
             origin,
         })],
     ))?;

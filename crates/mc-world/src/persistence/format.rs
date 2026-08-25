@@ -271,19 +271,34 @@ impl DefinitionHash {
 /// that the appearance list's two growths cost no player anything, and no later
 /// reading can recover that from a tree where both bytes have moved.
 ///
-/// Both lists have now grown, one phase apart and for unrelated reasons: the
+/// Both lists have now grown, and for unrelated reasons each time: the
 /// appearance list gained five keys and then `drawn` and `occludes`, and the
-/// behaviour list gained `targetable`. Each move is in that list's own byte and
-/// in no other, which is the arrangement working rather than an exception to it.
-/// `docs/technical/world-format.md` carries the numbers.
+/// behaviour list gained `targetable` and then the two medium fields. Each move
+/// is in that list's own byte and in no other, which is the arrangement working
+/// rather than an exception to it. `docs/technical/world-format.md` carries the
+/// numbers.
 ///
-/// **The behaviour byte's move is the expensive one, and it was paid
-/// deliberately.** Every block of every save written before it reports as
-/// `changed` on its next load, so every player is told the blocks they built with
-/// behave differently. That is survivable only because such a save loads and
-/// names them rather than being refused, and it is exactly why `drawn` and
-/// `occludes` are on the *other* list: routing a rendering field through this
-/// byte would buy that cost again for a change no player can act on.
+/// **The two are equal at 3 today, and that is a coincidence of counting.** They
+/// arrived there by different routes — two growths each, none of them shared —
+/// and the next change to either list moves one of them alone. Unifying them on
+/// the strength of today's equality would make that divergence unrepresentable,
+/// which is the failure the paragraph above describes and not a tidier spelling
+/// of it.
+///
+/// **The behaviour byte's move is the expensive one, and it has now been paid
+/// twice.** Every block of every save written before a move reports as `changed`
+/// on its next load, so every player is told the blocks they built with behave
+/// differently. That is survivable only because such a save loads and names them
+/// rather than being refused, and it is exactly why `drawn` and `occludes` are on
+/// the *other* list: routing a rendering field through this byte would buy that
+/// cost again for a change no player can act on.
+///
+/// **The second move costs a player who already paid for the first.** A world
+/// saved after `targetable` joined the list, and quit normally so that its blocks
+/// were rewritten under revision 2, is told again on its first launch under
+/// revision 3 — because the two records are folded over different field lists and
+/// nothing in either can say the blocks are the same. "Told once" is once *per
+/// move*, not once ever, and `docs/user/gameplay.md` is where a player reads that.
 ///
 /// **Only a test that states the byte sequence can see one of these move.**
 /// Measured: leaving the appearance byte at 1 while its list grew reddens the two
@@ -291,10 +306,10 @@ impl DefinitionHash {
 /// workspace. Every other witness compares one fold to another, and that cannot
 /// see a leading byte which moved in both — so a green suite is no evidence a
 /// revision is right.
-const BEHAVIOUR_REVISION: u8 = 2;
+const BEHAVIOUR_REVISION: u8 = 3;
 const APPEARANCE_REVISION: u8 = 3;
 
-/// The declared behaviour of a block, as revision 2 of this list defines it.
+/// The declared behaviour of a block, as revision 3 of this list defines it.
 ///
 /// **Written out by hand rather than derived from [`BlockDefinition`], and that
 /// is the whole of it.** A derive over that type would bind every save to a
@@ -325,6 +340,18 @@ const APPEARANCE_REVISION: u8 = 3;
 /// what a swing *does* to a world: it is what makes `breakable = false`
 /// reachable at all, so a block that becomes aimable is a different block to
 /// stand in front of.
+///
+/// **`swimmable` and `move_resistance` are here for that question asked of a
+/// volume rather than of a swing.** Whether a player can hold itself up inside a
+/// block, and how much that block slows what moves through it, decide whether
+/// walking into it drops you, floats you or barely delays you. Neither is visible
+/// in a still frame, which is the same test that put `drawn` and `occludes` on
+/// the other list and puts these two here.
+///
+/// **`move_resistance` is the first number on either list**, and it is folded as
+/// the four bytes of its `f32` bit pattern at the width the physics divides by. A
+/// declared `-0.0` is normalised to `0.0` when it is read, so two declarations
+/// meaning no resistance cannot fold apart over a sign bit no player wrote.
 #[derive(Serialize)]
 struct DeclaredBehaviour<'a> {
     input_version: u8,
@@ -334,6 +361,8 @@ struct DeclaredBehaviour<'a> {
     breakable: bool,
     breaks_into: Option<&'a str>,
     targetable: bool,
+    swimmable: bool,
+    move_resistance: f32,
 }
 
 /// The declared appearance of a block.
@@ -374,15 +403,21 @@ struct DeclaredAppearance<'a> {
     occludes: bool,
 }
 
-/// What revision 2 of the behaviour list records as `definition`'s declared
+/// What revision 3 of the behaviour list records as `definition`'s declared
 /// behaviour.
 ///
 /// **Every save written before this revision reports every block it holds as
-/// `changed` on its next load**, and that is the designed cost of adding
-/// `targetable` rather than a migration defect: what a swing can find is part of
-/// what a block is, and the two records are not comparable across the move. Such
-/// a save loads and names its blocks instead of being refused, which is the only
-/// reason the cost is payable at all.
+/// `changed` on its next load**, and that is the designed cost of adding the two
+/// medium fields rather than a migration defect: what a block's volume does to a
+/// player who walks into it is part of what that block is, and the two records
+/// are not comparable across the move. Such a save loads and names its blocks
+/// instead of being refused, which is the only reason the cost is payable at all.
+///
+/// **Payable is not the same as free, and this is the second consecutive move.**
+/// A world saved under revision 2 was already told once, over `targetable`, and
+/// is told again here — so whoever crosses both pays twice, one report each. That
+/// is the honest answer rather than a defect: nothing in either record can say
+/// the blocks are unchanged, because the two were folded over different lists.
 pub(crate) fn behaviour_of(definition: &BlockDefinition) -> DefinitionHash {
     folded(&DeclaredBehaviour {
         input_version: BEHAVIOUR_REVISION,
@@ -392,6 +427,8 @@ pub(crate) fn behaviour_of(definition: &BlockDefinition) -> DefinitionHash {
         breakable: definition.breakable,
         breaks_into: definition.breaks_into.as_ref().map(BlockName::as_str),
         targetable: definition.targetable,
+        swimmable: definition.swimmable,
+        move_resistance: definition.move_resistance,
     })
 }
 

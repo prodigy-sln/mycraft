@@ -42,7 +42,7 @@ use mc_core::block::source::InMemoryDefinitionSource;
 use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
 use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
-use mc_sim::player::{BlockPos, Solidity};
+use mc_sim::player::{BlockPos, Medium, Solidity, VoxelMedium};
 use mc_sim::simulation::PublishedContent;
 use mc_sim::world::World;
 use mc_world::section::Contents;
@@ -151,6 +151,15 @@ impl Chamber {
 impl Solidity for Chamber {
     fn is_solid(&self, at: BlockPos) -> bool {
         self.0.iter().any(|slab| slab.holds(at))
+    }
+}
+
+/// [`VoxelMedium::NOTHING`] unconditionally, both halves, and never derived from
+/// this fixture's own solidity — the rule stated at length on
+/// `crates/mc-sim/tests/support/solidity.rs`'s own implementation.
+impl Medium for Chamber {
+    fn medium_at(&self, _: BlockPos) -> VoxelMedium {
+        VoxelMedium::NOTHING
     }
 }
 
@@ -394,6 +403,11 @@ fn declaring(
             drawn: block.is_solid,
             occludes: block.is_solid,
             targetable: block.targetable,
+            // Constants, never derived from this fixture's own solidity: nothing
+            // has ever answered these two, so a derived medium would make the air
+            // swimmable and no assertion in this file could see it.
+            swimmable: false,
+            move_resistance: 0.0,
             origin: origin.clone(),
         }));
     }

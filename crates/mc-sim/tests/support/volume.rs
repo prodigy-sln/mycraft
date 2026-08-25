@@ -34,6 +34,7 @@ use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::replay::{BlockVolume, Extent};
 use mc_world::section::Contents;
+use mc_world::world::WorldPos;
 
 /// What every registry declared here is attributed to. Nothing asserts it; a
 /// definition has to say where it came from.
@@ -98,26 +99,38 @@ impl BlockVolume for NamedSlab {
     }
 }
 
-/// What a block declares about the four questions this suite's fixtures ask of
-/// one: whether it stops a player, whether it is drawn, whether it hides what is
-/// behind it, and whether a ray may stop at it.
+/// What a block declares about the questions this suite's fixtures ask of one:
+/// whether it stops a player, whether it is drawn, whether it hides what is
+/// behind it, whether a ray may stop at it, whether a player can hold itself up
+/// in its volume, and how much that volume slows what moves through it.
 ///
-/// **Four separate answers, because a fixture that cannot state them separately
-/// cannot fail a rule that reads all four off solidity.** Written as a struct
-/// rather than as four positional booleans, so a declaration reads the way its
-/// scenario is worded and getting two of them the wrong way round is a fixture
-/// that no longer compiles rather than one that still passes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// **Separate answers, because a fixture that cannot state them separately
+/// cannot fail a rule that reads them all off solidity.** Written as a struct
+/// rather than as positional fields, so a declaration reads the way its scenario
+/// is worded and getting two of them the wrong way round is a fixture that no
+/// longer compiles rather than one that still passes.
+///
+/// It is deliberately not [`Eq`]: a resistance is a number, and a fixture
+/// comparing two declarations for exact equality would be asking a question
+/// about bits it has no reason to ask.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Declaration {
     pub solid: bool,
     pub drawn: bool,
     pub occludes: bool,
     pub targetable: bool,
+    pub swimmable: bool,
+    pub move_resistance: f32,
 }
 
 impl Declaration {
-    /// What every fixture written before the four were separable means: all four
-    /// answers are the block's solidity.
+    /// What every fixture written before the four drawing-and-aiming answers
+    /// were separable means: all four are the block's solidity.
+    ///
+    /// **The medium is not among them.** Both medium answers are constants here
+    /// and are never derived from `solid`: a declaration whose buoyancy followed
+    /// its solidity would make either the air or every wall swimmable, and no
+    /// assertion written against a fixture can see its own fixture lying.
     #[must_use]
     pub const fn like_solidity(solid: bool) -> Self {
         Self {
@@ -125,6 +138,30 @@ impl Declaration {
             drawn: solid,
             occludes: solid,
             targetable: solid,
+            swimmable: false,
+            move_resistance: 0.0,
+        }
+    }
+
+    /// The same declaration, stating a medium: whether a player can hold itself
+    /// up in this block's volume, and how much that volume slows what moves
+    /// through it.
+    ///
+    /// **Both in one call**, never one at a time. The two are independent
+    /// declarations, and a builder that could state one and leave the other
+    /// standing is how a resistance nobody wrote arrives under a buoyancy
+    /// somebody did — which is the one thing the fixtures for a swimmable block
+    /// that resists nothing, and for a resistant block nobody can swim in, exist
+    /// to tell apart.
+    #[must_use]
+    pub const fn stating_a_medium(self, swimmable: bool, move_resistance: f32) -> Self {
+        Self {
+            solid: self.solid,
+            drawn: self.drawn,
+            occludes: self.occludes,
+            targetable: self.targetable,
+            swimmable,
+            move_resistance,
         }
     }
 }
@@ -141,6 +178,8 @@ pub const DRAWN_AND_AIMED_AT_ONLY: Declaration = Declaration {
     drawn: true,
     occludes: false,
     targetable: true,
+    swimmable: false,
+    move_resistance: 0.0,
 };
 
 /// A registry holding exactly `blocks`, each carrying the solidity declared
@@ -197,6 +236,11 @@ pub fn registry_of_declarations(
             drawn: states.drawn,
             occludes: states.occludes,
             targetable: states.targetable,
+            // Read off the declaration beside the name, never off its solidity:
+            // a medium derived here would make the air swimmable and no
+            // assertion written against such a fixture could see it.
+            swimmable: states.swimmable,
+            move_resistance: states.move_resistance,
             origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
         }));
     }
@@ -206,4 +250,84 @@ pub fn registry_of_declarations(
         declared,
     ))?;
     Ok(registry)
+}
+
+/// A volume of declared cells: every cell holds nothing, except where a run says
+/// otherwise.
+///
+/// [`NamedSlab`] cannot give an empty answer — every cell of a slab holds one of
+/// the two blocks it was declared with, which is what makes it a slab — so a
+/// scenario about what an *empty* cell contributes has no way to state itself
+/// against one. This is that other half, and it is what the medium fixtures are
+/// declared against: a resistance is a property of a block's volume, so "a cell
+/// holding no block contributes nothing" needs a cell holding no block.
+///
+/// **Runs are written in the order they are declared and a later run wins**, so
+/// a floor laid first and a band written over it read the way they are written
+/// rather than in whichever order the walk happens to reach them.
+#[derive(Debug, Clone)]
+pub struct Cells {
+    extent: Extent,
+    runs: Vec<(WorldPos, WorldPos, BlockName)>,
+}
+
+impl Cells {
+    /// A volume of `extent` in which every cell holds nothing.
+    #[must_use]
+    pub const fn empty(extent: Extent) -> Self {
+        Self {
+            extent,
+            runs: Vec::new(),
+        }
+    }
+
+    /// The same volume with `block` written over the half-open box from `low` up
+    /// to but not including `high`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `block` is not a namespaced block name.
+    pub fn holding(
+        mut self,
+        low: WorldPos,
+        high: WorldPos,
+        block: &str,
+    ) -> Result<Self, Box<dyn Error>> {
+        self.runs.push((low, high, BlockName::parse(block)?));
+        Ok(self)
+    }
+}
+
+impl BlockVolume for Cells {
+    fn extent(&self) -> Extent {
+        self.extent
+    }
+
+    /// **Three answers and not two.** A cell this volume reaches that no run
+    /// covers holds nothing, a cell a run covers holds that run's block, and a
+    /// position outside the extent is neither — which is the distinction every
+    /// scenario about what lies beyond the world's volume is stated on.
+    fn block_at(&self, x: u32, y: u32, z: u32) -> Option<Contents<&BlockName>> {
+        let at = WorldPos { x, y, z };
+        if !self.extent.contains(at) {
+            return None;
+        }
+        let held = self
+            .runs
+            .iter()
+            .rev()
+            .find(|&&(low, high, _)| covers(low, high, at));
+        Some(held.map_or(Contents::Empty, |(_, _, name)| Contents::Holds(name)))
+    }
+}
+
+/// Whether the half-open box from `low` up to but not including `high` covers
+/// `at`.
+const fn covers(low: WorldPos, high: WorldPos, at: WorldPos) -> bool {
+    low.x <= at.x
+        && at.x < high.x
+        && low.y <= at.y
+        && at.y < high.y
+        && low.z <= at.z
+        && at.z < high.z
 }

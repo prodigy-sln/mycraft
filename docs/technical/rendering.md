@@ -1507,6 +1507,70 @@ declaration change was demonstrated to move no pixel, so a capture taken between
 the two would have been byte-identical to the `r1` set it was meant to be
 compared against.
 
+#### 2026-08-25, the spec that made the sea swimmable — and the bump the tripwire could not ask for
+
+**`r2` → `r3`, four directories deleted and four added.** The second bump, and
+the first whose cause is neither the mesh nor the spawn. **The world is
+unchanged**, so `SCENE_QUAD_COUNT`, `total_face_area` and `area_by_block` all
+hold and `scene_contract.rs` stays green throughout — **5 tests run, 5 passed**,
+taken on the tree carrying the re-shot set — and two committed frames are
+invalidated anyway. What moved is the **physics the declared walk runs
+under**: `base:water` gained `swimmable` and a `move_resistance`, the divisor
+acts on carried-forward velocity, and the scripted player wades through the sea
+from tick 44 onward.
+
+**This is what falsified the constant's own documentation**, which said the
+revision is bumped for a change to the *mesh contract* and that the scene
+contract "is the tripwire that fails first". Both halves were false here. The
+sentence had been true when written — the camera derived from the spawn and the
+spawn from the world, so the trajectory *was* a function of the mesh contract —
+and content-declared physics is a third input that severs that chain. The doc was
+**stale, not permissive**, and a reader taking it as permissive would have
+concluded no bump was needed. It now states what the tripwire can and cannot see,
+and says plainly that **the second case has no guard at all**. A tripwire over
+the declared camera path is recorded as deferred, not built: correcting a false
+sentence is repair, adding a guard is a feature.
+
+**All four directories re-shot, including the two that could not move**, and the
+premise was measured rather than argued. Hashing the minted `r3` images against
+the `r2` blobs they replace: `player-walk-t000` **byte-identical**, and so is
+`player-walk-hud-t000` — git recorded both as 100 % renames — while
+`player-walk-t059` and `player-walk-t119` both moved. Tick 0 is dry, and so is
+tick 44, the first *wet* tick, because the medium is read at the **start** of a
+tick and the first tick whose outcome differs is 45. **That sentence is what makes
+the unmoved frame a derivation rather than a coincidence**, and it is what should
+stop a later reader filing an unmoved first-wet capture as a bug. The declared
+walk's pose moves **1.0832 blocks at tick 59 and 3.2973 at tick 119**.
+
+**The churn this ruling accepted is therefore measured rather than estimated, and
+it is exactly two frames.** The decision to re-shoot all four was taken knowing
+two would reproduce byte-identically but before anyone had confirmed the other two
+were the *only* ones that moved; a third moving frame would have meant the physics
+reached a capture the architecture had measured as dry, which is a finding about
+the simulation rather than a reason to re-shoot fewer. It did not. So the
+asymmetry the ruling turns on is real: bumping cost two captures that reproduce identical
+images, while not bumping would have left `player-walk-t059-r2` meaning one thing
+before this spec and another after — a name silently redefined, permanently, in a
+repository that archives its specs and expects them to be re-readable.
+
+**What was verified before the mint, in the order this section prescribes:**
+`terrain_probes`, `replay_oracle` and `hud_prediction` selected together —
+**21 tests run, 21 passed**, a bare count and so a complete run. Then the mint,
+naming only the two golden binaries. Then the set re-verified with the opt-in
+**unset** and `golden_mismatch` selected — 4 passed — and `golden_inventory` —
+3 passed. One adapter across the set. The whole of `mc-client` and `mc-render`
+afterwards: **493 tests run, 493 passed**.
+
+**The oracle survived the moved poses untouched, and that is worth recording
+rather than passing over.** `PREDICTION_FLOOR` is slack by design — 100 against a
+tightest judged frame in the low three hundreds — and `DISAGREEMENT_BUDGET` is 2,
+so both held across a camera that moved several blocks. The reading that could
+have needed a moved sample, `the_sea_the_camera_sees_is_the_water_layer`, passed
+as well: no predicted sample straddles the sea's edge at the new poses, so the
+remedy that section prescribes had nothing to apply to. **A green pre-mint suite
+across a moved camera is evidence those tolerances are honest**, not evidence they
+were never asked anything.
+
 ## What golden-frame verification cannot see
 
 **This section is now about terrain, and no longer about the whole frame.**

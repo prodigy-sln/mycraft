@@ -649,6 +649,133 @@ is about what a mutation claim may assert:
   would have gone green. This is the section above, met a second time in a
   case where the absence assertion looks entirely adequate.
 
+### A count of mentions is not an observation of behaviour
+
+The `mc-sim` fixture rule says a fixture existing to state solidity implements
+`Medium` as `VoxelMedium::NOTHING` **unconditionally, both halves** — never
+derived from its own solidity (`crates/mc-sim/CLAUDE.md`). Nothing asserts that
+rule directly; what would catch a violation is the existing suite going red. So
+the question that matters is *which* tests carry it, and that question was
+answered by reading and got the wrong answer.
+
+The reading counted `jump` references in the files a buoyant-air fixture would
+disturb — 29 in `player_collision.rs`, 37 in `player_ground.rs` — and concluded
+that the **`swimmable`** half was the guarded one and the `move_resistance` half
+"inert". Measured by mutating the medium the air answers:
+
+| Air made | Pre-existing tests reddened |
+|---|---|
+| buoyant (`swimmable: true`) | **1**, and `player_collision.rs` does not move at all |
+| resistant (`resistance: 1.0`) | **46**, across twelve files |
+
+**Off by a factor of forty-six, and inverted.** The mechanism is visible only by
+running it: nearly every jump in that suite is asked *from the ground*, where
+`on_ground || buoyant` is already true, so buoyancy has almost no reach into
+collision — while a resistance divides every walk, every fall, every jump arc,
+the replay poses and a golden frame.
+
+**A file mentioning the feature is necessary and not sufficient**, and the
+substitution of the first for the second is the same error as a coverage
+percentage standing in for a checked assertion: both count *reachability* and
+report it as *observation*. Where the question is "what would redden if this
+broke", the only instrument that answers it is breaking the thing.
+
+The rule itself is unchanged and its case is stronger — it is unconditional over
+both halves **because the buoyant half is the thin one**, carried by a single
+`player_ground` test. A rule exempting the half nothing watches would have
+exempted exactly the half that turns out to be unguarded.
+
+### Which tests witness a change, and which merely survive one
+
+The section above asks which tests would redden if a rule broke. This is the
+same question asked of a change that has already landed, and the answer has a
+shape worth knowing in advance.
+
+**Twelve of `mc-sim`'s replay tests build the shipped world.** When water became
+a medium, every one of them came to measure a medium as well as whatever it was
+named for — a fall, a walk, a placement, a break. **Two reddened.** They are the
+two doing *arithmetic* over a distance or a tick count: a fall through the sea
+that watched 60 ticks for a landing that now takes 172, and a walk out of the
+world along a column that turned out to stand under the sea, which the same
+eleven ticks now carry 0.317 blocks instead of 0.825.
+
+**The other ten absorbed the change and are green today.** Not because they are
+weaker tests, and not because they miss the sea — several stand in it. They
+assert a *direction* or a *contact*: that the player ends up lower than it
+started, that it is resting on something, that the cell it was aimed at is now
+empty. Every one of those propositions survives the physics under it changing,
+because a quantity slowed by a factor is still a quantity with the same sign.
+
+**So the two failures are not the population; they are the part of it that
+happened to be arithmetic.** Two consequences follow, and the second is the one
+that costs something:
+
+- **A green replay suite after a physics change is evidence about arithmetic and
+  about nothing else.** Read the failures as a sample of what moved, never as
+  the extent of it.
+- **A test asserting only a direction or a contact is silent about magnitude
+  forever**, which is exactly what makes it robust and exactly what makes it
+  blind. That is a legitimate test to write — a scenario about *whether* a player
+  lands should not fail because it now lands more slowly. But it means the
+  magnitude needs its own witness somewhere, and "the replay suite covers that
+  path" is not it.
+
+The generalisation this belongs to is one door down: **an enumeration built by
+asking a narrower question misses precisely the thing the change is most about.**
+Asking "what does this move the camera past" reached the goldens and the judged
+ticks and never reached these two, because they are stated against a fall and a
+walk *through the sea* — the subject of the change rather than a mechanism it
+travelled through. The corrective question is **what does this change, and what
+stands on that?**
+
+### A grep does not date itself
+
+A gate reading at least announces that it names a tree. **A grep does not — it
+looks like it settles the matter, and it silently answers "is it there now" to a
+question about "was it there then."**
+
+The two are different claims and the difference is invisible in the output. A
+`grep -n` over the working tree is a statement about this instant; a claim like
+"that line was already there before this phase" or "nothing in that commit
+touched this file" is a statement about a commit. On a shared tree those come
+apart routinely, and the grep will happily confirm a false one — it finds the
+line, the line is there, and nothing in the result says *when* it arrived.
+
+**Only an instrument that carries a commit inside the reading answers the
+historical question**: `git log -S '<needle>' -- <path>` for when a string
+entered or left, `git show <commit>:<path>` for what a file held at a commit,
+`git diff <commit> -- <path>` for whether a range touched it. Each of those is
+dated by construction and cannot be taken at the wrong moment, which is the
+property `standards/global/testing.md` §2 calls *a reading that dates itself*.
+
+Two agents on one spec made the same claim the same way and both settled it
+correctly the moment they were pointed at the dating instrument — so this is not
+a subtle judgement call, it is a reflex nobody had. The tell is any sentence with
+a tense in it: **if the claim is about the past and the instrument is about the
+present, the instrument is wrong however good the match is.**
+
+### A one-way-door fixture hazard
+
+Three scenarios (FR-7.1-S5/S6/S7) needed a save minted under the *previous*
+`BEHAVIOUR_REVISION` (`crates/mc-world/src/persistence/format.rs`). The revision is
+a compile-time constant and the requirements type cannot be constructed by a
+test, so a save minted at test runtime always carries the *current* revision —
+meaning those three scenarios became **permanently untestable the moment the
+fold moved**. The fixture — the committed
+`crates/mc-world/tests/fixtures/world_saved_against_behaviour_revision_2.mcw` —
+was therefore minted and committed first, alone, before anything else on the
+branch changed. Nothing in the phase's task list named it; the implementer
+found it only by reading before briefing.
+
+The generalisation is worth more than the instance: **a scenario whose fixture
+can only be minted from a tree state the spec itself is about to destroy.**
+Such a fixture has to be minted before the destroying change lands, or the
+scenario is lost — and nothing in the pipeline detects that on its own,
+because the artefacts describe the end state, not the state a fixture needed
+to be taken from on the way there. Read a phase's scenarios for this shape
+before touching the constant they depend on: if a scenario's fixture requires
+a value the change is about to move past, mint it first.
+
 ### The derived-oracle rule: what coverage does not vouch for
 
 `benches/` code that a test reaches through `#[path]` is **outside the
@@ -2782,6 +2909,57 @@ layer index recorded as "the layer every committed frame was shot with" was true
 because no golden had ever moved; after a deliberate re-shoot it is true because
 they were all re-minted. Same sentence, different warrant. Updating only the
 number leaves a reader unable to tell a decision from a defect.
+
+### Every wrong premise here was reached by reasoning; every correction came from running something
+
+The section above is one instance of this; the medium-properties spec produced
+eleven more in a single increment, and the split is what makes the rule worth
+stating on its own.
+
+**Wrong by reasoning**: a movement-ceiling derivation whose arithmetic stopped
+one term early and was persuasive enough to survive drafting, review and
+approval; the estimate that expressing that ceiling in closed form would be "a
+much heavier scenario", which turned out to be one line; the assumption that two
+files stating the same rule needed the same repair, when one was already scoped
+and needed an extension instead; a fixed ceiling proposed as the fix for a
+ceiling that constrained the parameter being derived, which would have
+constrained it too; and the claim that a solidity-derived resistance is inert
+*because the collision box can never overlap a solid cell* — which asserted
+**geometry** where the truth is a **maintained invariant**, held by two rules
+that no fixture binds.
+
+**Caught by running something**: the declared replay walk wading the sea at 60 of
+its 120 ticks; a ballistic overshoot past a ceiling that had been computed as
+unreachable; a citation "correction" that moved a line number off by one in the
+other direction; a note about a bob peak that went stale the moment the ceiling
+changed under it; 425 of 512 samples mismatching where a 40-sample reading had
+suggested a much narrower trap; and one file carrying **zero** occurrences of the
+term a table had ranked it on.
+
+**The asymmetry is the lesson, not the tally.** A wrong premise arrives already
+dressed as a conclusion — the ceiling derivation reads exactly like a correct one,
+which is what carried it through three reviews — so reading it again mostly
+re-confirms it. Rebuilding the quantity independently is what disagrees, and the
+disagreement is the signal. Twice here the independent rebuild was *itself* wrong
+first, and finding that out was still what located the real answer.
+
+**And the dressing is proportional to the care taken.** That derivation survived
+audit and approval *because* it was carefully derived; a sloppy guess would have
+been challenged on sight. Care therefore raises rather than lowers the need for an
+independent rebuild — the opposite of how it feels while deriving it.
+
+So when a number is load-bearing, the cheapest sufficient check is to **derive it
+a second way and compare**, treating a disagreement as information rather than as
+a defect in the second derivation.
+
+**The counter-example carries the other half, and it is not "distrust
+derivations".** The one figure in that spec that held up under every re-run — a
+178-voxel census of the shipped sea, reproduced independently three times by three
+different parties — is the one nobody argued about afterwards. It was cheap to
+reproduce, so it was reproduced, so it was never in doubt. **A quantity nobody can
+cheaply re-derive is one that will be argued about instead**, which makes *"can
+this be re-derived in one command?"* a property worth designing **into** a figure
+rather than a question asked after it is challenged.
 
 ### Run a phase's verification instrument where its answer is still attributable
 

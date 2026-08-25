@@ -678,24 +678,54 @@ defect — every block's appearance really did change — and a retexture is
 in the arm that is neither reported nor refused, so nothing about opening
 an older world changed for either move.
 
-**The behaviour list is at revision 2, and that move is the expensive
-one.** It reached 2 when `targetable` joined it, and every block of every
-save written before that reports as `changed` on its next load — so every
+**The behaviour list is at revision 3, and each of its moves is the
+expensive kind.** It reached 2 when `targetable` joined it and 3 when
+`swimmable` and `move_resistance` did, and every block of every save
+written before a move reports as `changed` on its next load — so every
 player is told that the blocks they built with behave differently. That is
 survivable only because such a save loads and names them rather than being
 refused, and it is exactly why `drawn` and `occludes` are on the *other*
 list: routing a rendering field through this byte would buy that cost
 again for a change no player can act on.
 
+**The two bytes are both at 3 today, and that is a coincidence of
+counting.** Each list has grown twice, by different routes and for
+unrelated reasons, and the next change to either moves one of them alone.
+Everything the section above says about not unifying them stands unchanged
+— the equality is the least durable fact on this page, and a reader who
+reaches for it as evidence that one constant would do is reading a
+collision rather than an argument.
+
+**The second behaviour move costs a player who already paid for the
+first.** A world saved after `targetable` joined the list, and quit
+normally so that its blocks were rewritten under revision 2, is told again
+on its first launch under revision 3. Nothing in either record can say the
+blocks are unchanged, because the two were folded over different field
+lists — so "told once" is once **per move** rather than once ever. That is
+the promise `docs/user/gameplay.md` makes to a player, and it is why that
+page states the count of moves rather than naming "this build".
+
 **What that costs the committed pre-Luau save, concretely.** It used to
 report `base:water` alone as changed — `content/base/blocks/water.luau`
 declares `breakable = false` — with its other three blocks retextured,
 which was the two-hash separation firing on a real content edit rather
-than on a fixture. Under revision 2 it reports **all four as changed and
-none as retextured**, because a behaviour byte that moved outranks any
-per-block comparison: the two records are not comparable across the move.
-The per-block signal is not lost so much as spent — it returns on the next
+than on a fixture. Under revision 2 it reported **all four as changed and
+none as retextured**, and under revision 3 it goes on reporting exactly
+that, because a behaviour byte that moved outranks any per-block
+comparison: the two records are not comparable across the move. The
+per-block signal is not lost so much as spent — it returns on the next
 save written under this revision.
+
+**A save written under revision 2 is a second fixture, and it is the one
+that separates the two lists.** `tests/fixtures/world_saved_against_behaviour_revision_2.mcw`
+was minted from the shipped declarations while the behaviour byte was
+still 2 and the appearance byte was already 3, so loading it under
+revision 3 reports **every block as behaving differently and not one as
+looking different**. The pre-Luau fixture cannot make that distinction:
+its appearance record predates the six keys, so both halves moved for it
+and either answer is consistent with a fold that put the medium fields on
+the wrong list. Neither fixture is ever regenerated — the day one is, it
+stops being evidence about anything.
 
 A future change to what a block looks like moves the appearance byte again
 and no other; a future change to what a block *is* moves the behaviour
@@ -717,8 +747,7 @@ revision 1 still fold differently from one key under revision 1, so an
 older save still reports its blocks retextured either way.
 
 **Four files state a byte sequence, not two, and the sentence above names
-the two that a reading of *that* tree reddened.** The enumeration, from
-`grep -rn "REVISION" --include=*.rs crates/` plus a read of each hit:
+the two that a reading of *that* tree reddened.**
 `crates/mc-world/src/persistence/format_test.rs` builds both lists;
 `crates/mc-world/tests/save_per_face_appearance.rs` builds the appearance
 list over six distinct keys; and
@@ -726,6 +755,37 @@ list over six distinct keys; and
 hash derived by hand, with the whole byte table written out in its doc
 comment. **Which of the four a given move reddens depends on which list
 moved**, so read the enumeration before predicting the blast radius.
+
+**The grep this enumeration used to name no longer finds one of its own
+members, and that is worth more than the correction.** It was stated as
+`grep -rn "REVISION" --include=*.rs crates/` plus a read of each hit. Run
+today, that needle returns `format_test.rs` and
+`save_per_face_appearance.rs` and **not** `save_declarations.rs`, which
+states its version byte as `03` in a hand-written byte table and calls it
+"version 3" in prose — it never names the constant, so a needle spelled
+after the constant cannot see it. A file that states a byte sequence is not
+reliably a file that mentions `REVISION`, and the instrument was recorded
+here as though it were. Read the three files; do not re-derive the list
+from that grep.
+
+**The behaviour move to 3 was measured, and it reproduces the mirror image
+exactly.** Leaving `BEHAVIOUR_REVISION` at 2 while `swimmable` and
+`move_resistance` joined the list reddens exactly the same two
+behaviour-stating guards — `format_test.rs`'s behaviour half and
+`save_declarations.rs`'s pinned fold — at `1502 tests run: 1500 passed, 2
+failed, 1 skipped`, a bare count and so a complete run under
+`--no-fail-fast`. Predicted at 2 and named before the run.
+
+**And the new revision-2 fixture does not close the hole, which was
+predicted as a miss before the run and held.** All five tests over
+`world_saved_against_behaviour_revision_2.mcw` stay **green** under that
+mutation, as do all three of `save_folds_the_medium.rs`. The reason is the
+one this section has now demonstrated three times: a fold over the grown
+list differs from the recorded one whatever the leading byte says, so a
+save-against-registry comparison reports `changed` under a correct byte and
+a wrong one alike. A fixture that tells the two *lists* apart is still
+blind to the *byte* — those are different questions, and only a test that
+writes the sequence out answers the second.
 
 **The behaviour side has now been measured too, and it is the mirror
 image.** Leaving `BEHAVIOUR_REVISION` at 1 while `targetable` joined its

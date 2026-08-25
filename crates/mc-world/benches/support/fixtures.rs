@@ -213,10 +213,10 @@ fn fixture_registry() -> Result<BlockRegistry, Box<dyn Error>> {
 
 /// One block, textured by its own name and carrying the solidity given for it.
 ///
-/// Nothing it could declare about being broken or built over is stated: the
-/// budget these fixtures exist for is the mesher's, and a section is meshed from
-/// solidity and texture keys alone. Any of the three would be a field the
-/// measured work never reads.
+/// Nothing it could declare about being broken, built over or moved through is
+/// stated: the budget these fixtures exist for is the mesher's, and a section is
+/// meshed from solidity and texture keys alone. Any of the others would be a
+/// field the measured work never reads.
 fn definition(name: &str, is_solid: bool) -> Result<BlockDefinition, NamespacedIdError> {
     Ok(BlockDefinition {
         name: BlockName::parse(name)?,
@@ -228,6 +228,8 @@ fn definition(name: &str, is_solid: bool) -> Result<BlockDefinition, NamespacedI
         drawn: is_solid,
         occludes: is_solid,
         targetable: is_solid,
+        swimmable: false,
+        move_resistance: 0.0,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
     })
 }

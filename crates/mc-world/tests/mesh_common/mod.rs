@@ -357,6 +357,11 @@ pub fn registry_of_declarations(
             drawn: states.drawn,
             occludes: states.occludes,
             targetable: states.solid,
+            // Constants, never derived from this fixture's own solidity: nothing
+            // has ever answered these two, so a derived medium would make the air
+            // swimmable and no assertion in this file could see it.
+            swimmable: false,
+            move_resistance: 0.0,
             origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
         }));
     }

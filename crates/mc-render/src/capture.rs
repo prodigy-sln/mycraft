@@ -26,10 +26,25 @@ use thiserror::Error;
 
 /// The revision of the scene the committed goldens were captured from.
 ///
-/// Bumped whenever a change to the mesh contract invalidates every committed
-/// frame. `crates/mc-sim`'s scene contract is the tripwire that fails first and
-/// names this constant as the remedy.
-pub const SCENE_REVISION: &str = "r2";
+/// It names a **declared observation**, and it is bumped whenever a change makes
+/// a same-named capture incomparable with the frames already committed under
+/// that name — whether the change is to the **mesh contract** or to the
+/// **declared camera path**, which since PRO-957 includes the physics the
+/// scripted walk runs under.
+///
+/// **The tripwire sees only the first of those.** `crates/mc-sim`'s scene
+/// contract compares quad count and per-block area, both properties of the mesh
+/// alone; a camera path that moved over an unchanged world leaves every one of
+/// them green, and the failure arrives as an image comparison instead. **There
+/// is no guard for the second case.**
+///
+/// The narrower sentence this replaces — mesh contract only, tripwire fails
+/// first — was true when it was written, and it is worth saying why rather than
+/// leaving it to read as carelessness: the camera derived from the spawn and the
+/// spawn from the world, so the trajectory *was* a function of the mesh
+/// contract. Content-declared physics is a third input, and it severs that
+/// chain.
+pub const SCENE_REVISION: &str = "r3";
 
 /// The ticks of the replay that carry a committed golden.
 ///

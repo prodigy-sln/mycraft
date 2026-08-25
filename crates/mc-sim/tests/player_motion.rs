@@ -37,7 +37,7 @@ use std::error::Error;
 use std::f32::consts::FRAC_PI_2;
 
 use glam::Vec3;
-use mc_sim::player::{MovementIntent, PlayerState, Solidity, advance_player};
+use mc_sim::player::{MovementIntent, PlayerState, Traversal, advance_player};
 
 use support::solidity::Ground;
 
@@ -154,7 +154,7 @@ fn walking(forward: f32, strafe: f32) -> MovementIntent {
 fn advance(
     state: PlayerState,
     intent: &MovementIntent,
-    world: &dyn Solidity,
+    world: &dyn Traversal,
     ticks: u32,
 ) -> PlayerState {
     (0..ticks).fold(state, |state, _| advance_player(state, intent, world))

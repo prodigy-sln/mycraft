@@ -30,7 +30,7 @@ mod support;
 use std::error::Error;
 
 use glam::Vec3;
-use mc_sim::player::{MovementIntent, PlayerState, Solidity, advance_player};
+use mc_sim::player::{MovementIntent, PlayerState, Traversal, advance_player};
 
 use support::solidity::Ground;
 
@@ -208,7 +208,7 @@ fn walking_forward() -> MovementIntent {
 fn advance(
     state: PlayerState,
     intent: &MovementIntent,
-    world: &dyn Solidity,
+    world: &dyn Traversal,
     ticks: u32,
 ) -> PlayerState {
     (0..ticks).fold(state, |state, _| advance_player(state, intent, world))
@@ -216,7 +216,7 @@ fn advance(
 
 /// Where a player that jumped from the floor is `ticks` ticks later, having
 /// asked for nothing else since.
-fn after_jumping(ticks: u32, world: &dyn Solidity) -> PlayerState {
+fn after_jumping(ticks: u32, world: &dyn Traversal) -> PlayerState {
     let launched = advance_player(
         standing_at(Vec3::new(STAND_X, FLOOR_TOP, FIXTURE_Z)),
         &jumping(),

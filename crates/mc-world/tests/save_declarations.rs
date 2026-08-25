@@ -66,18 +66,21 @@ const SECOND_TEXTURE: &str = "fixture:andesite_reworked";
 /// The block whose behaviour hash is pinned to a value derived by hand.
 const PINNED: &str = "fixture:stone";
 
-/// What version 2 of this format records for a block named `fixture:stone`
-/// declared solid, not replaceable, breakable, breaking into nothing, and
-/// aimable.
+/// What version 3 of this format records for a block named `fixture:stone`
+/// declared solid, not replaceable, breakable, breaking into nothing, aimable,
+/// not swimmable, and resisting nothing.
 ///
 /// **Derived by hand from the documented encoding**, in a scratch computation
 /// sharing no code with the writer. The canonical input is the declared
 /// behaviour — an input-version byte, the name, the three flags, the absence of a
-/// residue, and last whether a swing can find the block — encoded little-endian
-/// with variable-length lengths, which for values this small is one byte each:
+/// residue, whether a swing can find the block, and last the two that say what
+/// its volume is to move through — encoded little-endian with variable-length
+/// lengths, which for values this small is one byte each. A number is the
+/// exception: it is written as the four bytes of its bit pattern, fixed width,
+/// least significant first.
 ///
 /// ```text
-///   02                          input version 2
+///   03                          input version 3
 ///   0d                          the name is 13 bytes long
 ///   66 69 78 74 75 72 65        f i x t u r e
 ///   3a                          :
@@ -87,28 +90,41 @@ const PINNED: &str = "fixture:stone";
 ///   01                          breakable
 ///   00                          breaks into nothing
 ///   01                          targetable
+///   00                          not swimmable
+///   00 00 00 00                 a resistance of 0.0, as its bits
 /// ```
 ///
 /// Folded with FNV-1a 64 — start at `0xcbf2_9ce4_8422_2325`, and for each byte
 /// exclusive-or it in and multiply by `0x0000_0100_0000_01b3`, wrapping — those
-/// twenty bytes give the value below. The fold was checked against FNV's own
+/// twenty-five bytes give the value below. The fold was checked against FNV's own
 /// published vectors (`""`, `"a"`, `"foobar"`) before it was pointed at this
 /// input.
 ///
-/// **The trailing `01` is the fixture's own doing and not a default the loader
+/// **The four zero bytes are a stated zero and not an omission**, which is the
+/// one thing about this input a reader is likely to get wrong. A fixed-width
+/// number contributes its four bytes whatever its value, so a block resisting
+/// nothing is not the same input as a block whose resistance the writer left out
+/// — and a fold that skipped a zero would agree with this only by dropping four
+/// bytes that are supposed to be there.
+///
+/// **The `01` before them is the fixture's own doing and not a default the loader
 /// derived.** These registries are built in memory, so `defaulting_to_solidity`
 /// never runs: `common::registry_from` states `targetable: is_solid` for every
 /// block it builds and `registry_of` declares every block solid, which is what
 /// makes this byte a `01` rather than something a reader has to infer from a
-/// declaration file.
+/// declaration file. The two after it are stated there as constants for the
+/// reason the same file records: nothing has ever answered them, so deriving one
+/// from solidity would make every solid fixture in the crate swimmable.
 ///
-/// **The re-derivation was checked against the value it replaces before it was
+/// **The re-derivation was checked against both values it succeeds before it was
 /// trusted.** The same scratch computation, run over the *nineteen*-byte version 1
-/// input, reproduces `0x5e9d_3089_5b2e_0d5f` — the constant this one supersedes,
-/// derived years apart by somebody else. A method that lands on the old number
-/// for the old input is the method the old number was derived by, which is a
-/// stronger thing to know than that the new number agrees with a run.
-const VERSION_2_BEHAVIOUR_OF_PINNED: u64 = 0xbee1_336f_0dc4_f79d;
+/// input, reproduces `0x5e9d_3089_5b2e_0d5f`, and over the *twenty*-byte version 2
+/// input reproduces `0xbee1_336f_0dc4_f79d` — the two constants this one
+/// supersedes, derived years apart by two other people. A method that lands on
+/// both old numbers for their own inputs is the method those numbers were derived
+/// by, which is a stronger thing to know than that the new number agrees with a
+/// run.
+const VERSION_3_BEHAVIOUR_OF_PINNED: u64 = 0x3e58_43bf_8f20_37bc;
 
 /// A world holding a block the registry it is saved against does not declare,
 /// and the block that is missing from it.
@@ -230,7 +246,7 @@ fn changing_only_a_block_texture_moves_its_recorded_appearance_and_leaves_its_be
 }
 
 #[test]
-fn a_solid_breakable_aimable_block_that_breaks_into_nothing_records_the_version_2_behaviour()
+fn a_solid_breakable_aimable_block_that_neither_floats_nor_slows_records_the_stated_behaviour()
 -> TestResult {
     let directory = TempDir::new()?;
     let registry = registry_of(&[PINNED])?;
@@ -240,14 +256,16 @@ fn a_solid_breakable_aimable_block_that_breaks_into_nothing_records_the_version_
 
     assert_eq!(
         required.blocks().first().map(|block| block.behaviour.get()),
-        Some(VERSION_2_BEHAVIOUR_OF_PINNED),
-        "this is what version 2 of the format means by that declaration, and the value is derived \
+        Some(VERSION_3_BEHAVIOUR_OF_PINNED),
+        "this is what version 3 of the format means by that declaration, and the value is derived \
          from the documented encoding rather than read off a run — a number copied out of the \
          first green run records whatever the writer did that day and pins nothing. Recording \
          one value today and another tomorrow makes every save in existence report its blocks as \
          changed, which is the report this whole mechanism exists to make only when something \
-         really did change. The version byte moved because the list grew a field, and this is one \
-         of the four places in the workspace that can see either happen"
+         really did change. The version byte moved because the list grew the two fields that say \
+         what a block's volume is to move through, and this is one of the places in the workspace \
+         that can see either happen — every other witness compares one fold to another and cannot \
+         see a leading byte that moved in both"
     );
     Ok(())
 }

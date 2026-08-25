@@ -118,11 +118,18 @@ const CRATE_DEPTH: usize = 2;
 ///
 /// **Two numbers and not one, and they stand apart.** The appearance list has
 /// grown twice — five texture keys, then `drawn` and `occludes` — against the
-/// behaviour list's once, for `targetable`, so the two bytes are two different
-/// numbers and a single shared constant could not state either. Each guard
-/// asserts its own, which is what lets one fold's byte fail to move while the
-/// other's does and be reported rather than absorbed.
-const STATED_BEHAVIOUR_REVISION: u8 = 2;
+/// behaviour list's twice, for `targetable` and then for the two medium fields,
+/// so the two bytes are two different numbers and a single shared constant could
+/// not state either. Each guard asserts its own, which is what lets one fold's
+/// byte fail to move while the other's does and be reported rather than
+/// absorbed.
+///
+/// **The two are equal today and that is a coincidence of counting.** They
+/// reached three by different routes and for unrelated reasons, and a later
+/// change to either list moves one of them alone. Collapsing them into one
+/// constant on the strength of today's equality would make the next divergence
+/// invisible here, which is the one thing this file exists to report.
+const STATED_BEHAVIOUR_REVISION: u8 = 3;
 const STATED_APPEARANCE_REVISION: u8 = 3;
 
 /// Where an FNV-1a 64 fold starts, and what it multiplies by.
@@ -249,13 +256,27 @@ fn stated_over(
 /// a file path, and folding it would make a save refuse to load from a second
 /// checkout.
 ///
-/// **`targetable` is appended and never inserted**, because the canonical
-/// encoding writes a struct positionally: a field placed among the existing ones
-/// moves every byte after it, and every save in existence would then disagree for
-/// a reason nobody declared. It is on this list rather than the appearance one
-/// because it is what makes `breakable = false` change what a break *does* — a
-/// block that becomes aimable is a different block to swing at, which is the
-/// question this list answers.
+/// **`targetable`, then `swimmable`, then `move_resistance`, appended and never
+/// inserted**, because the canonical encoding writes a struct positionally: a
+/// field placed among the existing ones moves every byte after it, and every save
+/// in existence would then disagree for a reason nobody declared. `targetable` is
+/// on this list rather than the appearance one because it is what makes
+/// `breakable = false` change what a break *does* — a block that becomes aimable
+/// is a different block to swing at, which is the question this list answers.
+///
+/// **The two medium fields are on it for the same question answered about a
+/// volume rather than about a swing.** Whether a player can hold itself up in a
+/// block, and how much that block slows what moves through it, decide whether
+/// walking into it sinks you, floats you or barely slows you. Nothing about
+/// either is visible in a still frame, so neither has any business on the
+/// appearance list — and putting one there would leave every save in existence
+/// reporting its blocks as merely retextured over a change to what the world does
+/// to a player.
+///
+/// **`move_resistance` is written as bits and never as a decimal.** The canonical
+/// encoding writes an `f32` as the four little-endian bytes of its bit pattern,
+/// so that is what is stated here; rendering the number and hashing the text would
+/// be a second encoding this file invented, agreeing with nothing.
 fn stated_behaviour_bytes(definition: &BlockDefinition) -> Vec<u8> {
     let mut stated = vec![STATED_BEHAVIOUR_REVISION];
     push_text(&mut stated, definition.name.as_str());
@@ -270,6 +291,8 @@ fn stated_behaviour_bytes(definition: &BlockDefinition) -> Vec<u8> {
         }
     }
     push_flag(&mut stated, definition.targetable);
+    push_flag(&mut stated, definition.swimmable);
+    push_number(&mut stated, definition.move_resistance);
     stated
 }
 
@@ -340,6 +363,17 @@ fn push_length(stated: &mut Vec<u8>, length: usize) {
 /// `flag` as the canonical encoding writes it.
 fn push_flag(stated: &mut Vec<u8>, flag: bool) {
     stated.push(if flag { TRUE_BYTE } else { FALSE_BYTE });
+}
+
+/// `number` as the canonical encoding writes it: the four bytes of its bit
+/// pattern, least significant first.
+///
+/// **Fixed width and not the variable-length form a length prefix uses.** A
+/// number is four bytes whatever its value, so a resistance of zero contributes
+/// four zero bytes rather than none — which is what makes a block stating no
+/// resistance fold differently from one whose field the writer left out.
+fn push_number(stated: &mut Vec<u8>, number: f32) {
+    stated.extend_from_slice(&number.to_bits().to_le_bytes());
 }
 
 /// The low seven bits of `value`, which are a byte by construction.

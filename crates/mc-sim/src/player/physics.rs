@@ -16,7 +16,7 @@
 use glam::{Vec2, Vec3};
 
 use crate::player::collide;
-use crate::player::{Look, MovementIntent, PlayerState, Solidity};
+use crate::player::{Look, MovementIntent, PlayerState, Traversal};
 
 /// How long one tick simulates, in seconds.
 ///
@@ -67,15 +67,30 @@ const DISPLACEMENT_LIMIT: f32 = 1.0;
 /// Deferring it by a tick would be a camera that lags its own player by one
 /// frame — invisible in a still, and exactly the drift a replay accumulates over
 /// a scripted turn.
+///
+/// **The medium is read once, from the box at the *start* of the tick.** The
+/// resistance decides the displacement, so a medium read from the resolved end
+/// position would be read from a position the resistance itself produced — and
+/// "while the player's box overlaps" is a fact about where the tick begins.
+///
+/// **One object answers both questions, and that is what the composite door is
+/// for.** Two parameters would let a caller hand a solidity view of one world
+/// beside a medium view of another, which is the disagreement `World::adopt`
+/// exists to prevent. `Targetable` is deliberately not among what
+/// [`Traversal`] names: a tick of motion has no aiming question to ask.
 #[must_use]
 pub fn advance_player(
     state: PlayerState,
     intent: &MovementIntent,
-    world: &dyn Solidity,
+    world: &dyn Traversal,
 ) -> PlayerState {
+    let medium = collide::medium_around(state.position, world);
     let look = Look::of(&state).accumulate(intent);
     let walk = walk_velocity(intent, look.yaw);
-    let velocity = walk.with_y(fallen(launched(&state, intent)));
+    let velocity = slowed(
+        walk.with_y(fallen(launched(&state, intent, medium.swimmable))),
+        medium.resistance,
+    );
     let displacement = bounded(velocity * TICK_DURATION);
     let resolved = collide::resolved_position(state.position, displacement, world);
     let on_ground = collide::on_ground(resolved.feet, world);
@@ -167,21 +182,51 @@ fn bounded(displacement: Vec3) -> Vec3 {
 
 /// The vertical velocity a jump leaves the tick starting from.
 ///
-/// Honoured from ground contact and from nowhere else, so asking again in
-/// mid-air does nothing to a fall. Contact is whatever the *previous* tick ended
-/// on, which is what makes a jump held down through a landing launch again on
-/// the very next tick without the request having to be a new one.
+/// Honoured from ground contact, from a medium the player can hold itself up in,
+/// and from nowhere else — so asking again in mid-air does nothing to a fall
+/// through air. Contact is whatever the *previous* tick ended on, which is what
+/// makes a jump held down through a landing launch again on the very next tick
+/// without the request having to be a new one.
+///
+/// **One condition widened at the one site that already answers "may this tick
+/// launch", rather than a second launch path.** That is what keeps a jump asked
+/// for in mid-air outside any such medium reading as exactly the rule it read as
+/// before: `buoyant` is false there, and the expression is the one it was.
+/// Buoyancy is the only thing it adds — being swimmable resists nothing by
+/// itself, and resisting nothing holds nobody up.
 ///
 /// Gravity takes its first bite from this before the position moves, so the
 /// declared jump speed is a value no caller ever observes — and that ordering is
 /// the whole reason the apex is 1.275 blocks rather than the 1.35 the continuous
 /// `v²/2g` gives.
-fn launched(state: &PlayerState, intent: &MovementIntent) -> f32 {
-    if intent.jump && state.on_ground {
+fn launched(state: &PlayerState, intent: &MovementIntent, buoyant: bool) -> f32 {
+    if intent.jump && (state.on_ground || buoyant) {
         JUMP_SPEED
     } else {
         state.velocity.y
     }
+}
+
+/// What a medium leaves a velocity at, once it has resisted it.
+///
+/// **A division by `1 + resistance`, never a multiplication by its reciprocal.**
+/// The two agree only where `1 + resistance` is a power of two, and content
+/// declares whatever it likes. A resistance of zero is therefore bit-exact
+/// identity — `v / 1.0` is `v` for every finite `v` in IEEE-754 — which is what
+/// lets a scenario say a walk through an unresisting volume covers *exactly*
+/// what air does, and be asserted by equality rather than by a tolerance.
+///
+/// **The whole velocity, on every axis alike, and after gravity.** Applying it
+/// to the whole velocity is what makes the medium's own terminal speed the fixed
+/// point of `v <- (v - g·dt) / (1 + resistance)`; applying it only to the
+/// displacement would leave the velocity a caller reads back accumulating as if
+/// the medium were not there.
+///
+/// The loader admits only a finite resistance not less than zero, so `1 + r` is
+/// at least one: the division can neither make a NaN out of a finite velocity,
+/// nor amplify one, nor reverse its sign.
+fn slowed(velocity: Vec3, resistance: f32) -> Vec3 {
+    velocity / (1.0 + resistance)
 }
 
 /// What one tick of gravity leaves a vertical velocity at.
@@ -189,6 +234,12 @@ fn launched(state: &PlayerState, intent: &MovementIntent) -> f32 {
 /// The clamp is on the speed rather than on the displacement, because the
 /// terminal speed is a fact about the fall that a scenario reads back off the
 /// state.
+///
+/// It stays *before* a medium's own resistance. The medium's terminal speed
+/// `GRAVITY · TICK_DURATION / resistance` lies below [`TERMINAL_SPEED`] for
+/// every resistance above `0.5 / 48`, so in any medium heavier than that the two
+/// clamps never compete; below it this one binds first, which is the right
+/// answer for a medium that is almost not there.
 fn fallen(vertical: f32) -> f32 {
     (vertical - GRAVITY * TICK_DURATION).max(-TERMINAL_SPEED)
 }

@@ -1,33 +1,46 @@
-//! The world's voxels, resolved once into the two answers a tick reads: what
-//! stops the player, and what a ray may stop at.
+//! The world's voxels, resolved once into the three answers a tick reads: what
+//! stops the player, what a ray may stop at, and what medium a voxel's volume
+//! is.
 //!
-//! The tick asks a bitset and never a world. Resolving every voxel once, at
-//! construction, is what makes each answer **total**: afterwards a query is a
-//! bounds test and a bit test, with no name to look up, no registry to consult
+//! The tick asks a packed array and never a world. Resolving every voxel once,
+//! at construction, is what makes each answer **total**: afterwards a query is a
+//! bounds test, one packed read and — for the medium — one lookup in a table of
+//! at most a handful of entries, with no name to look up, no registry to consult
 //! and so no failure for anything on the tick path to swallow. It is also what
 //! keeps the replay's overlap oracle independent — the oracle re-reads the
 //! world's own block query and the registry, so the two judgements share no
 //! lookup chain and cannot agree with each other's mistakes.
 //!
-//! **Two views and not one widened view.** Collision and aiming are separate
+//! **Three views and not one widened view.** Collision and aiming are separate
 //! claims content declares separately, so they are separate bits and separate
-//! traits; what they share is the walk that fills them and the write that keeps
-//! them in step. The cost is derived rather than estimated: the shipped world is
-//! 64 × 64 × 256 = 1 048 576 voxels at one bit each, so the second view is
-//! **+128 KiB**, once, at world scale.
+//! traits; a medium is a third claim, and it is one view rather than two because
+//! one site reads both of its properties from one fold over one box. What they
+//! share is the walk that fills them and the write that keeps them in step. The
+//! cost is derived rather than estimated: the shipped world is
+//! 64 × 64 × 256 = 1 048 576 voxels, so each one-bit view is **+128 KiB**, once,
+//! at world scale — and the medium view is an *index* whose width is chosen from
+//! how many distinct media the registry declares, which for the shipped content
+//! is one bit and so the same figure again.
 //!
-//! Both answers come from `BlockDefinition` through the registry and from
+//! **The medium table is built from the registry and never from the world's
+//! contents.** A block the world does not yet hold must already have an index,
+//! because a later write may place it — so a table built from what a volume
+//! happens to contain would have to grow, and widening the packing under an edit
+//! is what [`ResolvedVoxels::set`] exists not to do.
+//!
+//! Every answer comes from `BlockDefinition` through the registry and from
 //! nothing else. Comparing a block *name* here would be a game rule written in
 //! Rust, which invariant 1 forbids, and nothing in this module knows what any
 //! block is called.
 //!
-//! **Every coordinate outside the volume answers `false`, and that is one bounds
-//! test rather than a conversion.** A box that has walked off the footprint or
-//! fallen below `y = 0` carries negative coordinates, and an unsigned world query
-//! would have to convert them — where saturating stands the player on column 0's
-//! terrain and wrapping stands it on the far edge's, both silently and both while
-//! the player is nowhere near either. So the one conversion in this module
-//! refuses instead of converting, and it is the only place a sign is read.
+//! **Every coordinate outside the volume answers "nothing", and that is one
+//! bounds test rather than a conversion.** A box that has walked off the
+//! footprint or fallen below `y = 0` carries negative coordinates, and an
+//! unsigned world query would have to convert them — where saturating stands the
+//! player on column 0's terrain and wrapping stands it on the far edge's, both
+//! silently and both while the player is nowhere near either. So the one
+//! conversion in this module refuses instead of converting, and it is the only
+//! place a sign is read.
 
 use std::fmt;
 
@@ -37,7 +50,13 @@ use mc_world::column::COLUMN_HEIGHT;
 use mc_world::section::Contents;
 use mc_world::world::{Extent, VoxelWorld, WorldPos};
 
-use crate::player::{BlockPos, Solidity, Targetable};
+use crate::player::{BlockPos, Medium, Solidity, Targetable, VoxelMedium};
+
+use super::medium::{MediumIndex, MediumTable};
+use super::packed::PackedArray;
+
+/// How wide a view answering one `bool` per voxel is.
+const ONE_BIT: u32 = 1;
 
 use super::world::{FOOTPRINT, ReplayWorld};
 
@@ -93,21 +112,28 @@ impl BlockVolume for VoxelWorld {
     }
 }
 
-/// What each voxel of a volume answers about stopping the player and about
-/// stopping a ray, resolved once.
+/// What each voxel of a volume answers about stopping the player, about stopping
+/// a ray, and about what its volume does to something moving through it,
+/// resolved once.
 ///
-/// **Named for neither question, because it answers both.** A type called after
-/// one of the two properties it carries is how a reader comes to believe the
-/// other is derived from it, and they are independent declarations.
+/// **Named for no one question, because it answers three.** A type called after
+/// one of the properties it carries is how a reader comes to believe the others
+/// are derived from it, and they are independent declarations.
 ///
 /// Total by construction: every position outside the volume — past its far
-/// edges, above it, or negative on any axis — is neither solid nor targetable,
-/// and that is a property of one bounds test rather than of a conversion that
-/// could saturate or wrap into a column that is not the one asked about.
+/// edges, above it, or negative on any axis — is neither solid nor targetable
+/// and is [`VoxelMedium::NOTHING`], and that is a property of one bounds test
+/// rather than of a conversion that could saturate or wrap into a column that is
+/// not the one asked about.
 pub struct ResolvedVoxels {
     extent: Extent,
-    solid: Bitset,
-    targetable: Bitset,
+    solid: PackedArray,
+    targetable: PackedArray,
+    /// Which entry of [`media`](Self::media) each voxel's volume is.
+    medium: PackedArray,
+    /// The distinct media the registry declared, which
+    /// [`medium`](Self::medium) indexes.
+    media: MediumTable,
 }
 
 impl ResolvedVoxels {
@@ -134,90 +160,144 @@ impl ResolvedVoxels {
         registry: &BlockRegistry,
     ) -> Result<Self, RegistryError> {
         let extent = volume.extent();
+        let media = MediumTable::of(registry);
         let mut recent = LastResolved::nothing();
         let mut solid = Vec::with_capacity(extent.voxel_count());
         let mut targetable = Vec::with_capacity(extent.voxel_count());
+        let mut medium = Vec::with_capacity(extent.voxel_count());
         for at in extent.positions() {
             let answers = match volume.block_at(at.x, at.y, at.z) {
-                Some(Contents::Holds(name)) => recent.answer_for(name, registry)?,
-                // Nothing to stand on, and nothing for a ray to stop at.
-                Some(Contents::Empty) => Resolved::NOTHING,
+                Some(Contents::Holds(name)) => recent.answer_for(name, registry, &media)?,
+                // Nothing to stand on, nothing for a ray to stop at, and no
+                // medium to move through.
+                Some(Contents::Empty) => VoxelAnswers::NOTHING,
                 // Outside the volume, which the walk never produces.
-                None => Resolved::NOTHING,
+                None => VoxelAnswers::NOTHING,
             };
-            solid.push(answers.solid);
-            targetable.push(answers.targetable);
+            solid.push(u32::from(answers.solid));
+            targetable.push(u32::from(answers.targetable));
+            medium.push(answers.medium.get());
         }
+        let width = media.width_in_bits();
         Ok(Self {
             extent,
-            solid: Bitset::packing(&solid),
-            targetable: Bitset::packing(&targetable),
+            solid: PackedArray::packing(solid, ONE_BIT),
+            targetable: PackedArray::packing(targetable, ONE_BIT),
+            medium: PackedArray::packing(medium, width),
+            media,
         })
     }
 
-    /// Records what the voxel at `at` answers about both questions.
+    /// Records what the voxel at `at` answers about every question.
     ///
-    /// **Both, in one call, because a caller that could write one without the
-    /// other is the disagreement this type exists to make unspellable.** The
-    /// arguments are separate rather than one packed value so that a caller
-    /// passing the same answer twice reads as a caller doing so on purpose.
+    /// **All of them, in one call, because a caller that could write one without
+    /// the others is the disagreement this type exists to make unspellable.**
+    /// One [`VoxelAnswers`] rather than a run of loose arguments, and its fields
+    /// are named at the call site — so a caller passing the same answer to two
+    /// of them still reads as a caller doing so on purpose, which is the
+    /// property the loose form was chosen for when there were two of them.
     ///
-    /// A position outside the volume has no bit to write and none is written:
-    /// the type's answer for it is `false` by construction and there is nothing
-    /// a caller could do with a refusal here that it has not already done at the
-    /// store, which refuses the same position first.
-    pub fn set(&mut self, at: WorldPos, solid: bool, targetable: bool) {
+    /// **The medium is a minted index and never a value**, which is what keeps
+    /// this total. Every `bool` is writable, but a medium value is not: writing
+    /// one means finding it in a table built at resolve time, and this is `pub`.
+    /// Handed a value no registry produced, an implementation could only fall
+    /// back silently, panic on a write path, or widen the packing under an edit
+    /// — and this module's contract refuses all three. There is no way to name
+    /// an index the table does not hold, so the question never arises.
+    ///
+    /// A position outside the volume has nothing to write and nothing is
+    /// written: the type's answer for it is "nothing" by construction, and there
+    /// is nothing a caller could do with a refusal here that it has not already
+    /// done at the store, which refuses the same position first.
+    pub fn set(&mut self, at: WorldPos, answers: VoxelAnswers) {
         if self.extent.contains(at) {
             let offset = self.extent.offset(at);
-            self.solid.set(offset, solid);
-            self.targetable.set(offset, targetable);
+            self.solid.set(offset, u32::from(answers.solid));
+            self.targetable.set(offset, u32::from(answers.targetable));
+            self.medium.set(offset, answers.medium.get());
         }
     }
 
-    /// Whether the bit at `at` is marked in `view`, for a position that may lie
-    /// anywhere in the signed space the tick asks about.
+    /// The index this view's table holds for `declared`'s medium.
+    ///
+    /// The only door a [`MediumIndex`] comes through, and the reason
+    /// [`set`](Self::set) is infallible.
+    #[must_use]
+    pub fn medium_index_of(&self, declared: &BlockDefinition) -> MediumIndex {
+        self.media.index_of(declared)
+    }
+
+    /// How many bits this view spends on each voxel's medium index.
+    ///
+    /// One of `{1, 2, 4, 8, 16, 32}`, chosen once at resolve from how many
+    /// distinct media the registry declares. A property of *content* rather than
+    /// of this design: any number of blocks sharing one answer costs nothing,
+    /// and only the count of distinct answers moves it.
+    #[must_use]
+    pub fn medium_width_in_bits(&self) -> u32 {
+        self.medium.width()
+    }
+
+    /// The value `view` holds for `at`, for a position that may lie anywhere in
+    /// the signed space the tick asks about, and zero outside the volume.
     ///
     /// The one place the bounds test and the sign refusal are spelled, so the
-    /// two views cannot come to disagree about what "outside" means.
-    fn marked(&self, view: &Bitset, at: BlockPos) -> bool {
-        inside_the_positive_octant(at).is_some_and(|voxel| {
-            self.extent.contains(voxel) && view.holds(self.extent.offset(voxel))
-        })
+    /// three views cannot come to disagree about what "outside" means. Zero is
+    /// the outside answer for all of them: not solid, not targetable, and entry
+    /// zero of the medium table, which is always [`VoxelMedium::NOTHING`].
+    fn held(&self, view: &PackedArray, at: BlockPos) -> u32 {
+        inside_the_positive_octant(at)
+            .filter(|voxel| self.extent.contains(*voxel))
+            .map_or(0, |voxel| view.get(self.extent.offset(voxel)))
     }
 }
 
-/// What one voxel answers about the two questions a tick asks of it.
+/// What one voxel answers about the three questions a tick asks of it.
 ///
-/// A named pair rather than a tuple of two booleans, because the two are the
-/// same type and reading them the wrong way round is a resolve that still
-/// compiles and still fills both bitsets.
+/// A named triple rather than a tuple, because two of the three are the same
+/// type and reading them the wrong way round is a resolve that still compiles
+/// and still fills every view. Naming them is also what lets
+/// [`ResolvedVoxels::set`] take one value without losing the property loose
+/// arguments were chosen for: a call still says which answer is which.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Resolved {
-    solid: bool,
-    targetable: bool,
+pub struct VoxelAnswers {
+    /// Whether this voxel stops the player.
+    pub solid: bool,
+    /// Whether a ray may stop at this voxel.
+    pub targetable: bool,
+    /// Which medium this voxel's volume is, as an index minted by the view that
+    /// will hold it.
+    pub medium: MediumIndex,
 }
 
-impl Resolved {
-    /// What a cell with no block in it answers: neither.
-    const NOTHING: Self = Self {
+impl VoxelAnswers {
+    /// What a cell with no block in it answers: none of them.
+    ///
+    /// The one value a caller can name without a table having minted it, and it
+    /// is the same "nothing" a position outside the volume already reads.
+    pub const NOTHING: Self = Self {
         solid: false,
         targetable: false,
+        medium: MediumIndex::NOTHING,
     };
 
-    /// What `declared` says about both questions.
+    /// What `declared` says about all three questions, against the table `media`.
     ///
-    /// Each read from its own field. Deriving either from the other here would
-    /// put back the single bit this whole change exists to split, and it would
-    /// do it in the one place no declaration could override.
-    fn of(declared: &BlockDefinition) -> Self {
+    /// Each read from its own field. Deriving any of them from another here
+    /// would put back the single bit this whole change exists to split, and it
+    /// would do it in the one place no declaration could override — which is why
+    /// a medium is read from the two fields that state it and never from
+    /// `is_solid`.
+    fn of(declared: &BlockDefinition, media: &MediumTable) -> Self {
         Self {
             solid: declared.is_solid,
             targetable: declared.targetable,
+            medium: media.index_of(declared),
         }
     }
 }
 
-/// The last name resolved, and what both of its answers were.
+/// The last name resolved, and what all of its answers were.
 ///
 /// **Run coherence, and it is worth the type.** A resolve walks a whole world —
 /// the smallest one is 16 × 256 × 16 = 65 536 voxels — and every voxel of it
@@ -230,7 +310,7 @@ impl Resolved {
 /// text simply miss and are resolved the slow way, which is the answer they
 /// would have got anyway — so the resolution rule is still stated exactly once,
 /// at `registry.resolve`.
-struct LastResolved(Option<(BlockName, Resolved)>);
+struct LastResolved(Option<(BlockName, VoxelAnswers)>);
 
 impl LastResolved {
     /// Nothing seen yet.
@@ -238,24 +318,25 @@ impl LastResolved {
         Self(None)
     }
 
-    /// What `name` answers about both questions, reusing the previous answers
+    /// What `name` answers about every question, reusing the previous answers
     /// where it is the previous name.
     ///
-    /// **The pair is cached rather than either half.** Caching one and resolving
-    /// the other would cost the lookup this type exists to avoid on every voxel
-    /// of every run, and would leave two answers about one name reaching the
-    /// bitsets from two different reads of the registry.
+    /// **The triple is cached rather than any one of it.** Caching one and
+    /// resolving the rest would cost the lookup this type exists to avoid on
+    /// every voxel of every run, and would leave answers about one name reaching
+    /// the views from different reads of the registry.
     fn answer_for(
         &mut self,
         name: &BlockName,
         registry: &BlockRegistry,
-    ) -> Result<Resolved, RegistryError> {
+        media: &MediumTable,
+    ) -> Result<VoxelAnswers, RegistryError> {
         if let Some((seen, answers)) = &self.0
             && shares_an_allocation(seen, name)
         {
             return Ok(*answers);
         }
-        let answers = Resolved::of(registry.resolve(name)?);
+        let answers = VoxelAnswers::of(registry.resolve(name)?, media);
         self.0 = Some((name.clone(), answers));
         Ok(answers)
     }
@@ -273,19 +354,31 @@ fn shares_an_allocation(one: &BlockName, other: &BlockName) -> bool {
 
 impl Solidity for ResolvedVoxels {
     fn is_solid(&self, at: BlockPos) -> bool {
-        self.marked(&self.solid, at)
+        self.held(&self.solid, at) != 0
     }
 }
 
 impl Targetable for ResolvedVoxels {
     fn is_targetable(&self, at: BlockPos) -> bool {
-        self.marked(&self.targetable, at)
+        self.held(&self.targetable, at) != 0
     }
 }
 
-/// The verbose half of this type is the two bitsets, and it says how many voxels
-/// they cover rather than which — a million bits quoted into a panic message
-/// would bury whatever the panic was about.
+/// The medium is the **table entry the index names**, and the index is the third
+/// packed view.
+///
+/// A position outside the volume reads index zero, which is
+/// [`VoxelMedium::NOTHING`] by construction — the same totality the other two
+/// views have, arrived at by the same bounds test.
+impl Medium for ResolvedVoxels {
+    fn medium_at(&self, at: BlockPos) -> VoxelMedium {
+        self.media.at(self.held(&self.medium, at))
+    }
+}
+
+/// The verbose half of this type is the three packed views, and it says how many
+/// voxels they cover rather than which — a million values quoted into a panic
+/// message would bury whatever the panic was about.
 impl fmt::Debug for ResolvedVoxels {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -311,83 +404,4 @@ fn inside_the_positive_octant(at: BlockPos) -> Option<WorldPos> {
         y: at.y.try_into().ok()?,
         z: at.z.try_into().ok()?,
     })
-}
-
-/// How many voxels one word of the bitset carries, and how an offset is split
-/// into the word holding it and the bit of that word.
-///
-/// A shift and a mask rather than a division and a remainder, which is the same
-/// arithmetic for a power of two and is how `replay::world` already reads a
-/// world coordinate as a column and a position inside it.
-const VOXELS_PER_WORD: usize = u64::BITS as usize;
-const WORD_SHIFT: u32 = VOXELS_PER_WORD.trailing_zeros();
-const WORD_MASK: usize = VOXELS_PER_WORD - 1;
-
-/// One bit per voxel, in the order [`Extent::offset`] numbers them.
-///
-/// A bitset rather than a `Vec<bool>` because the replay's footprint is a
-/// million voxels: 128 KB held for the run, against the megabyte a byte apiece
-/// would cost for the same answer. That figure is per view, and there are two.
-///
-/// It carries no idea of *which* question it answers, which is what lets one
-/// type serve both without either view's arithmetic being written twice.
-#[derive(Debug)]
-struct Bitset {
-    words: Vec<u64>,
-}
-
-impl Bitset {
-    /// Packs one flag per voxel, in offset order, into words.
-    ///
-    /// Built whole from the flags rather than filled in by offset, so there is
-    /// no position a caller could mark that the bitset does not cover — the
-    /// length is the flags' length by construction.
-    fn packing(flags: &[bool]) -> Self {
-        Self {
-            words: flags.chunks(VOXELS_PER_WORD).map(packed).collect(),
-        }
-    }
-
-    /// Whether the voxel at `offset` is marked.
-    ///
-    /// An offset past the end is unmarked rather than a panic, which is the
-    /// answer that keeps this total; the bounds test that makes it unreachable
-    /// is the extent's, in the one caller.
-    fn holds(&self, offset: usize) -> bool {
-        let carried = 1 << (offset & WORD_MASK);
-        self.words
-            .get(offset >> WORD_SHIFT)
-            .is_some_and(|word| word & carried != 0)
-    }
-
-    /// Marks or unmarks the voxel at `offset`.
-    ///
-    /// An offset past the end writes nothing, for the same reason one past the
-    /// end reads as unmarked: the length is the flags' length by construction,
-    /// so there is no position a caller can reach that the bitset was built
-    /// without, and the bound that makes this unreachable is the extent's.
-    fn set(&mut self, offset: usize, holds: bool) {
-        if let Some(word) = self.words.get_mut(offset >> WORD_SHIFT) {
-            *word = with_bit(*word, offset & WORD_MASK, holds);
-        }
-    }
-}
-
-/// `word` with the flag at `bit` reading `holds`.
-const fn with_bit(word: u64, bit: usize, holds: bool) -> u64 {
-    let carried: u64 = 1 << bit;
-    if holds {
-        word | carried
-    } else {
-        word & !carried
-    }
-}
-
-/// One word from up to [`VOXELS_PER_WORD`] flags, the lowest offset in the
-/// lowest bit.
-fn packed(flags: &[bool]) -> u64 {
-    flags
-        .iter()
-        .enumerate()
-        .fold(0, |word, (bit, &marked)| word | (u64::from(marked) << bit))
 }

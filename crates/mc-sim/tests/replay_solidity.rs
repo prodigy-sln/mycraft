@@ -32,10 +32,11 @@ mod support;
 use std::error::Error;
 
 use glam::Vec3;
-use mc_sim::player::{BlockPos, MovementIntent, PlayerState, Solidity, advance_player};
+use mc_sim::player::{BlockPos, MovementIntent, PlayerState, Solidity, Traversal, advance_player};
 use mc_sim::replay::{Extent, ReplayWorld, ResolvedVoxels};
 use mc_world::column::COLUMN_HEIGHT;
 
+use support::sea;
 use support::volume::{NamedSlab, registry_declaring};
 use support::{
     FOOTPRINT, SEA_LEVEL, STONE, TestResult, WATER, block_at, content_registry, every_column,
@@ -57,11 +58,6 @@ const WALK_SPEED: f32 = 4.5;
 
 /// How far one tick of held walk covers, in blocks.
 const WALK_PER_TICK: f32 = WALK_SPEED * TICK_DURATION;
-
-/// How long a fall is given to land and settle. A four-block fall takes 31
-/// ticks, and a player that has landed stays landed, so a longer watch cannot
-/// change the answer.
-const SETTLE_TICKS: u32 = 60;
 
 /// How far above the sea's top face a fall into the declared world starts.
 ///
@@ -123,6 +119,21 @@ const OPEN_BLOCK: &str = "fixture:open";
 /// Different numbers, so that a query reading a box's z where it meant its x
 /// lands on a column of the world that answers differently.
 ///
+/// **The row moved from 32 to 35 when the sea became something to swim in, and
+/// the reason is a constraint the fixture always had and never stated.** The
+/// distance below is `WALK_PER_TICK × LEAVING_TICKS`, which is arithmetic over
+/// the declared walk speed and is the distance of an **unresisted** walk — and
+/// `(63, 32)` stands under the sea, so once water declared a resistance the same
+/// eleven ticks carried the box 0.317 blocks instead of 0.825 and it never left
+/// the world at all. Row 35 is the first row of the eastern edge that is dry,
+/// whose transposed column stands at a different height, and which is not the
+/// edge column itself; 27 of the 64 rows satisfy that, so the filter and not the
+/// arithmetic picked it. It is also the column FR-6.1-S6 names as the dry shore,
+/// which is a second witness for free rather than a coincidence worth hiding:
+/// flood it and two suites say so. The dryness is asserted in the scenario
+/// rather than left to this comment, because a fixture premise nothing checks is
+/// how this one came to be wrong.
+///
 /// The **last** column rather than the first, and the walk goes east: this is
 /// the only place in the phase that names a coordinate past the extent's *upper*
 /// bound. The other three scenarios about the world's edges are on the low side
@@ -132,7 +143,7 @@ const OPEN_BLOCK: &str = "fixture:open";
 /// all. FR-3.5-S1's wording names no edge, so either direction satisfies it and
 /// only one of them exercises both halves of the bound.
 const EDGE_COLUMN: u32 = FOOTPRINT - 1;
-const EDGE_ROW: u32 = 32;
+const EDGE_ROW: u32 = 35;
 
 /// Where the feet centre starts that walk: the middle of the last column, so the
 /// box reaches from `x = 63.2` to `x = 63.8` and is entirely inside the world.
@@ -241,10 +252,36 @@ fn walking_forward() -> MovementIntent {
 fn advance(
     state: PlayerState,
     intent: &MovementIntent,
-    world: &dyn Solidity,
+    world: &dyn Traversal,
     ticks: u32,
 ) -> PlayerState {
     (0..ticks).fold(state, |state, _| advance_player(state, intent, world))
+}
+
+/// How long a fall **into the shipped sea** is given to land and settle.
+///
+/// **Derived from the declared resistance rather than stated, and it replaces a
+/// constant that had become arithmetic about the wrong world.** The sixty ticks
+/// here before were justified as *"a four-block fall takes 31 ticks, and a player
+/// that has landed stays landed, so a longer watch cannot change the answer"* —
+/// true of a fall through gravity alone, and a fall through the shipped sea
+/// stopped being one when water declared a medium. A medium divides the velocity
+/// by `1 + resistance`, so the sink takes as many times longer; measured, this
+/// fall now lands on tick **172**, and sixty left the feet at 34.58 and reported
+/// a fall that never landed.
+///
+/// `support::sea::watch_for` is the one place this crate's tests say how long a
+/// fall through the shipped sea can take. It is generous by construction, which
+/// costs nothing: the assertion it serves is that the feet reached the lakebed,
+/// so a watch that ran out fails loudly rather than passing quietly.
+///
+/// # Errors
+///
+/// Returns an error if the content root cannot be read or does not apply.
+fn settling_in_the_sea() -> Result<u32, Box<dyn Error>> {
+    Ok(sea::watch_for(sea::declared_resistance(
+        &content_registry()?,
+    )?))
 }
 
 /// The declared world, and its voxels resolved through the registry this
@@ -370,7 +407,7 @@ fn a_fall_through_water_comes_to_rest_on_the_surface_beneath_it() -> TestResult 
         dropped_at(over_the_sea(column)),
         &MovementIntent::default(),
         &voxels,
-        SETTLE_TICKS,
+        settling_in_the_sea()?,
     );
 
     assert!(
@@ -429,6 +466,30 @@ fn a_fall_onto_blocks_their_definition_calls_solid_stops_on_their_top_face() -> 
     Ok(())
 }
 
+/// Refuses unless the row the edge walk is taken along stands clear of the sea.
+///
+/// **The fixture premise the distance below rests on, asserted rather than left
+/// to a comment.** `WALK_PER_TICK x LEAVING_TICKS` is the reach of an
+/// *unresisted* walk, and a walk whose box overlaps the sea covers less ground in
+/// the same ticks — so a flooded row turns this scenario into a reading about the
+/// medium wearing the words of one about the edge of the world. That is exactly
+/// what happened when water declared a resistance, and nothing said so.
+///
+/// # Errors
+///
+/// Returns an error if the world reaches no cell over that column, or if the
+/// column stands under the sea.
+fn require_a_dry_walk(world: &ReplayWorld, surface: u32) -> Result<(), Box<dyn Error>> {
+    let over = block_at(world, EDGE_COLUMN, surface + 1, EDGE_ROW)?;
+    if surface >= SEA_LEVEL && over != WATER {
+        return Ok(());
+    }
+    Err(format!(
+        "the walk out of the world is taken along column ({EDGE_COLUMN}, {EDGE_ROW}) because it          stands clear of the sea, and this world puts its surface at {surface} with `{over}`          over it. What it would measure is a walk the sea slowed, under the words of a scenario          about the edge of the world"
+    )
+    .into())
+}
+
 #[test]
 fn a_walk_past_the_edge_of_the_loaded_world_leaves_it_and_loses_the_ground() -> TestResult {
     let (world, voxels) = declared_world()?;
@@ -450,6 +511,7 @@ fn a_walk_past_the_edge_of_the_loaded_world_leaves_it_and_loses_the_ground() -> 
          claim about nothing: after {STILL_SUPPORTED_TICKS} ticks the box still overhangs \
          column {EDGE_COLUMN} at height {surface} and must still report contact"
     );
+    require_a_dry_walk(&world, surface)?;
     assert!(
         (gone.position.x - beyond).abs() <= EPSILON && !gone.on_ground,
         "outside the loaded world is not solid, so nothing stops the walk and nothing holds \

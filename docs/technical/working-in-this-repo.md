@@ -333,6 +333,80 @@ document — is in `technical/testing.md`. This section is about the habit that 
 it: **when a spec removes a "today" or a "not yet", grep for the words it just made
 false before calling the spec done.**
 
+## A quoted heredoc through the Bash tool loses one level of backslash
+
+**The damage compiles, runs, passes and is invisible to every instrument in this
+repository except `cat -A`.** That combination is what makes it worth a section
+rather than a shrug.
+
+### The mechanism
+
+Commands routed through the agent Bash tool are rewritten before they reach the
+shell, and the rewrite strips one level of backslash out of a quoted heredoc. So
+a Rust line continuation written correctly in the heredoc body —
+
+> a string literal ending in a backslash, with the next source line indented
+> under it, which Rust joins by discarding the newline **and** the leading
+> whitespace that follows
+
+— reaches disk with the backslash gone. The two source lines become one line, and
+the indentation that was supposed to be discarded survives as **literal spaces
+inside the string**. A message meant to read `where this snapshot records 1.6`
+renders as `where this snapshot          records 1.6`.
+
+### Why nothing catches it
+
+- `cargo build` is happy: the literal is well-formed, just wrong.
+- `cargo fmt` does not touch the inside of a string literal, and does not
+  reintroduce the continuation.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` says
+  nothing.
+- The test passes, because the assertion is on behaviour and the run of spaces is
+  in a *message*.
+
+`cat -A` shows it, and only if somebody already suspects. There is no instrument
+here that raises the suspicion for you.
+
+### What to do instead
+
+**Write anything containing a backslash — a Rust line continuation, a regex
+escape, a `\n` in a literal — with the Write or Edit tools rather than a shell
+heredoc.** That is not a preference; it is the only reliable route. Where a
+script genuinely must emit a backslash, construct it as `chr(92)` rather than
+writing one. This section was written with Edit for exactly that reason.
+
+### The three-strike account, because a hazard hit once reads as a typo
+
+**Who saw what is part of the record, because the two halves were seen by
+different people and flattening them loses the reason this is a section.**
+
+**The silent corruption was seen by one person only** — a test author, writing a
+failure message. They hit it once, then **twice more while fixing that very
+defect**: once loudly, as a Python `SyntaxError` on `' \\'`, and once
+**silently again**. Only the `chr(92)` construction produced a clean edit. Three
+strikes, one of them inside the repair for the first.
+
+**Two other people met only the loud form**, independently, and neither would
+have suspected the quiet one from what they saw. A plain `grep -n "^## " …` came
+back as `syntax error near unexpected token '&'` — the command having been
+rewritten into PowerShell syntax and handed to bash. It is obvious, it is
+harmless, and the natural response is to rephrase the command and carry on.
+All of them did.
+
+**That asymmetry is the whole value of this entry.** The loud failures and the
+silent corruption are the same wrapper rewriting command text, so **meeting the
+loud one is evidence that the quiet one is possible in this session** — not a
+nuisance to work around. Nobody made that connection at the time; it was made
+afterwards, by putting two people's separate reports next to each other.
+
+### The check that beats re-rendering the line you already know about
+
+After a fix, scan the **whole file** for the defect class rather than
+re-inspecting the one literal that was wrong: a regex for `\S {2,}\S`, run after
+`cargo fmt`. It covers every line instead of the one you already suspect, and it
+independently clears `cargo fmt` of being the culprit — which no single
+re-render can do.
+
 ## A living page carries the command; a dated observation carries the number
 
 The same drift arrives a second way, and it is quieter because nothing was ever

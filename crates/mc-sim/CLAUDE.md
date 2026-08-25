@@ -40,15 +40,44 @@ everything authoritative. `mc-render` reads what it publishes and never the othe
   would have forced `pub(crate)`, which is a much weaker claim. The dirty set is not
   one of the views that claim protects.
 
-- **There are two resolved views, not one, and they answer different questions.**
-  `ResolvedVoxels` carries a bitset for what stops the player and a second for what
-  a ray may stop at, behind two narrow traits — `Solidity` and `Targetable`. Content
-  declares the two independently, so an engine that derived either from the other
-  would be writing a game rule content could not override. Collision reads
-  `Solidity` at nine sites and means collision by it; the walk a swing travels reads
-  `Targetable` and nothing else does. **Keep them two traits**: one trait with both
-  methods gives every collision site access to a question it must never ask, and a
-  collision test could then exercise aiming by accident.
+- **There are three resolved views, not two, and they answer different questions.**
+  `ResolvedVoxels` carries a bitset for what stops the player, a second for what a
+  ray may stop at, and a packed index saying what medium each voxel's volume is,
+  behind three narrow traits — `Solidity`, `Targetable` and `Medium`. Content
+  declares them independently, so an engine that derived any from another would be
+  writing a game rule content could not override. Collision reads `Solidity` at nine
+  sites and means collision by it; the walk a swing travels reads `Targetable` and
+  nothing else does. **Keep those two traits two**: one trait with both methods
+  gives every collision site access to a question it must never ask, and a collision
+  test could then exercise aiming by accident.
+
+  **`Medium` is one trait returning one value** — `VoxelMedium { swimmable,
+  resistance }` — because one site reads both of its properties, one line apart,
+  from one fold over one box. Splitting it would separate nothing and would let a
+  fixture state one property and inherit the other, which is the live hazard here
+  rather than the one above. The composite `Traversal: Solidity + Medium` names what
+  **one tick of motion** may ask: `Targetable` is deliberately not among it, and
+  `advance_player` is its only production door. Coercion only ever narrows, so the
+  eight other `&dyn Solidity` doors cannot reach a medium question.
+
+  **A fixture that exists to state solidity implements `Medium` as
+  `VoxelMedium::NOTHING` unconditionally, both halves, and never as a function of
+  its own solidity.** Those fixtures compute solidity from a geometric rule whose
+  negation *is* the air, so "the air is the medium" is a one-line change that reads
+  as insight and would put a resistance under dozens of collision assertions whose
+  whole content is where a box stops.
+
+  **Which half the suite actually protects was measured, and it is the opposite of
+  what it looks like.** Make the air resistant and **46** pre-existing tests redden
+  across twelve files — every walk, every fall, every jump arc, the replay poses and
+  a golden frame. Make the air buoyant and **one** reddens, and
+  `player_collision.rs` does not move at all: nearly every jump in the suite is
+  asked *from the ground*, where `on_ground || buoyant` is already true, so
+  buoyancy has almost no reach into collision. Counting how often a file mentions
+  `jump` predicts the wrong answer here; only running it gives the right one.
+  **So the rule is unconditional over both halves precisely because the buoyant
+  half is the thin one** — a single `player_ground` test is the whole reporter, and
+  it is what a later refactor must not delete.
 
 - **Content is published through a second `ArcSwap` beside the snapshot**, carrying
   a serial that increments on every accepted candidate. A re-mesh batch carries its

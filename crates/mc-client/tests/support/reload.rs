@@ -152,6 +152,8 @@ pub struct Declaration {
     drawn: Option<bool>,
     occludes: Option<bool>,
     targetable: Option<bool>,
+    swimmable: Option<bool>,
+    move_resistance: Option<f32>,
 }
 
 impl Declaration {
@@ -176,6 +178,8 @@ impl Declaration {
             drawn: None,
             occludes: None,
             targetable: None,
+            swimmable: None,
+            move_resistance: None,
         }
     }
 
@@ -249,6 +253,28 @@ impl Declaration {
         self
     }
 
+    /// The same declaration, stating whether a player can hold itself up in the
+    /// block's volume.
+    #[must_use]
+    pub const fn swimmable(mut self, swimmable: bool) -> Self {
+        self.swimmable = Some(swimmable);
+        self
+    }
+
+    /// The same declaration, stating how much the block's volume slows what moves
+    /// through it.
+    ///
+    /// **Never stated beside `solid = true` where a scenario is about what the
+    /// resistance does**, because a solid block's volume is one a box never
+    /// overlaps — collision stops the walk first. Scenarios here are about what a
+    /// reload *records* and *marks*, which is why the two appear together below at
+    /// all.
+    #[must_use]
+    pub const fn move_resistance(mut self, move_resistance: f32) -> Self {
+        self.move_resistance = Some(move_resistance);
+        self
+    }
+
     /// The declaration as a Luau chunk returning a table.
     #[must_use]
     pub fn text(&self) -> String {
@@ -302,6 +328,16 @@ impl Declaration {
         }
         if let Some(targetable) = self.targetable {
             stated.push_str(&format!("\ttargetable = {targetable},\n"));
+        }
+        if let Some(swimmable) = self.swimmable {
+            stated.push_str(&format!("\tswimmable = {swimmable},\n"));
+        }
+        if let Some(move_resistance) = self.move_resistance {
+            // Debug rather than Display, so a whole number reaches the file as
+            // `3.0` rather than `3`. Both are numbers the loader accepts, and a
+            // fixture that means "a number" should not silently become one that
+            // means "an integer" for the values that happen to be round.
+            stated.push_str(&format!("\tmove_resistance = {move_resistance:?},\n"));
         }
         stated
     }

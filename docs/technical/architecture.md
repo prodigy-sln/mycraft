@@ -552,16 +552,27 @@ no sub-boxes.
 world, below `y = 0` and every negative coordinate all answer `false` — so a caller has nothing to
 handle and nothing to swallow.
 
-**Two narrow traits over one type, never one trait with two methods.** Content declares "does this
-stop a player" and "may a swing find this" independently, and the nine sites that read `Solidity`
-mean collision by it. A single trait carrying both would hand every one of those sites a question it
-must never ask, and a collision test could then exercise aiming by accident.
+**Narrow traits where the consumers differ.** `Solidity` and `Targetable` are two traits because
+collision reads one at nine sites and the walk a swing travels reads the other, and neither set may
+reach the other's question — a single trait carrying both would hand every one of those sites a
+question it must never ask, and a collision test could then exercise aiming by accident. Where one
+site reads two properties of one question, they travel in one value: `Medium` returns
+`VoxelMedium { swimmable, resistance }`, because splitting it would segregate nothing —
+`advance_player` reads both, one line apart, from one fold over one box — while admitting a fixture
+that states one and inherits the other. The composite `Traversal: Solidity + Medium` is where the
+physics' exclusion of `Targetable` is stated.
 
 `ResolvedVoxels::resolve(volume: &dyn BlockVolume, registry: &BlockRegistry) ->
-Result<Self, RegistryError>` builds **two** one-bit-per-voxel grids once, over the volume's declared
-extent, resolving every name it finds through the registry — each bit read from its own declared
-field, never derived from the other. The second grid costs 1 048 576 voxels × 1 bit = **+128 KiB**
-once, at world scale. It takes a `BlockVolume` rather than
+Result<Self, RegistryError>` builds **three** per-voxel arrays once, over the volume's declared
+extent, resolving every name it finds through the registry — each answer read from its own declared
+field, never derived from another. Two are one bit wide, and each costs
+1 048 576 voxels × 1 bit = **+128 KiB** once, at world scale. The third is an **index** into a table
+of the distinct `(swimmable, move_resistance)` answers the *registry* declares, and its width is
+chosen once at resolve from `{1, 2, 4, 8, 16, 32}` — a power of two that divides 64, so a read stays
+one shift and one mask, with a floor of one bit. The shipped registry declares at most two distinct
+media between all its blocks, so that index is one bit and the same 128 KiB again, against a table of
+a handful of entries. The width is a property of **content**: any number of blocks sharing one answer
+costs nothing, a third distinct answer takes it to 2 bits, and a fifth to 4. It takes a `BlockVolume` rather than
 `&ReplayWorld` concretely, because the only way to state "an invented block whose definition
 disagrees with its name" is a volume the replay world is merely one implementor of — `ReplayWorld`
 implements it, and a test fixture can too. This keeps solidity a bounds test and a bit test with no
@@ -571,12 +582,14 @@ replaces.
 `BlockVolume::block_at` returns `Option<Contents<&BlockName>>`, and the two negative answers stay
 separate all the way down: the `Option` says the volume reaches this position, and the `Contents`
 says whether anything is in it (`technical/world-format.md`). `ResolvedVoxels::resolve` then answers
-`false` for both, in both views — a position the volume does not reach and a cell holding nothing
-are alike neither solid nor targetable — and this is the one place in the codebase where the two
-readings genuinely **coincide in outcome**. That is worth naming rather than leaving implicit: no assertion on the resolved bitset,
+"nothing" for both, in all three views — a position the volume does not reach and a cell holding
+nothing are alike neither solid nor targetable, and both are `VoxelMedium::NOTHING` — and this is the
+one place in the codebase where those readings genuinely **coincide in outcome**. The coincidence is
+now three-way. That is worth naming rather than leaving implicit: no assertion on the resolved view,
 and no independent overlap oracle, can tell a defect that confuses them apart from correct code
 here. Everywhere else the split is observable; on this path it is held by the arms being written
-separately and by review.
+separately and by review — **and that applies to the medium arm too**, which is worth saying out loud
+because it is the newest of the three and the least exercised.
 
 **The simulation cannot exist before the world does.**
 `mc_sim::replay::simulation_for(world: &ReplayWorld, registry: Arc<BlockRegistry>, content:
@@ -741,20 +754,37 @@ where a bespoke test double used to stand in.
 ```rust
 // crates/mc-sim/src/world/mod.rs — no `pub`, visible in this module and its
 // descendants (mc_sim::world::action) and nowhere else in the crate.
-fn write(&mut self, at: WorldPos, block: &BlockName) -> Result<(), WorldError> {
-    let declared = self.registry.resolve(block)?;         // resolved once, before any write
-    let (solid, targetable) = (declared.is_solid, declared.targetable);
-    self.blocks.set_block(at, block, &self.registry)?;    // the store
-    self.resolved.set(at, solid, targetable);             // both resolved views, together
+fn write(&mut self, at: WorldPos, contents: Contents<&BlockName>) -> Result<(), WorldError> {
+    let answers = match contents {                        // settled once, before any write
+        Contents::Empty => VoxelAnswers::NOTHING,         // emptying needs no registry at all
+        Contents::Holds(block) => {
+            let declared = self.registry.resolve(block)?;
+            VoxelAnswers {
+                solid: declared.is_solid,
+                targetable: declared.targetable,
+                medium: self.resolved.medium_index_of(declared),  // minted by the table that holds it
+            }
+        }
+    };
+    // ... the store, from the same `contents` ...
+    self.resolved.set(at, answers);                       // all three resolved views, together
     self.mark_dirty(at);                                  // remesh bookkeeping, see below
     Ok(())
 }
 ```
 
-The block store and the two bitsets cannot fall out of step because there is exactly one function
-that can write any of them, and it writes them together or not at all. **`set` takes both answers in
-one call for that reason**: a caller able to write one without the other is the disagreement the type
-exists to make unspellable.
+The block store and the three resolved views cannot fall out of step because there is exactly one
+function that can write any of them, and it writes them together or not at all. **`set` takes every
+answer in one call for that reason**: a caller able to write one without the others is the
+disagreement the type exists to make unspellable. It takes them as one `VoxelAnswers` whose fields
+are named at the call site, so a call still says which answer is which.
+
+**The medium is the one of the three that is a minted index rather than a value, and that is what
+keeps `set` total.** Every `bool` is writable, but a medium *value* is not: writing one means finding
+it in a table built at resolve time, and `set` is `pub`. Handed a value no registry produced, an
+implementation could only fall back silently, panic on a write path, or widen the packing under an
+edit — so `MediumIndex` has no public constructor and the table's owner mints every legal value.
+Unspellable rather than checked, which is the same standard a re-mesh batch is held to.
 
 **This is what makes what a swing can find follow an edit rather than only a load.** A targetability
 view built when the world was loaded and never written again answers every question about a

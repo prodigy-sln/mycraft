@@ -60,9 +60,9 @@ see [script-limits.md](script-limits.md) for the budget and the memory cap, and
 declaration calls nothing the engine provides: it returns a table and that is
 all. There is no `mycraft.*` binding to use here.
 
-## The nine fields
+## The eleven fields
 
-Three are required and six are optional.
+Three are required and eight are optional.
 
 | Field | Type | Required | Absent means | Bound |
 |---|---|---|---|---|
@@ -75,12 +75,21 @@ Three are required and six are optional.
 | `drawn` | boolean | no | **whatever you wrote for `solid`** | — |
 | `occludes` | boolean | no | **whatever you wrote for `solid`** | — |
 | `targetable` | boolean | no | **whatever you wrote for `solid`** | — |
+| `swimmable` | boolean | no | `false` | — |
+| `move_resistance` | number | no | `0.0` | not less than zero, and at most `3.4e38` |
 
-The last three are the only fields whose default is not a constant. Every other
-absence means the same thing in every declaration; these three mean whatever the
-*same* declaration said about `solid`. That is what lets a declaration written
-before they existed go on meaning exactly what it meant — one field used to
-answer all four questions at once.
+`drawn`, `occludes` and `targetable` are the only fields whose default is not a
+constant. Every other absence means the same thing in every declaration; those
+three mean whatever the *same* declaration said about `solid`. That is what lets a
+declaration written before they existed go on meaning exactly what it meant — one
+field used to answer all four questions at once.
+
+**The two medium fields are not among them, and deliberately not.** No field has
+ever answered whether a volume can be swum in or how much it slows you, so a
+default derived from `solid` would invent a claim you never made — and it would
+make every solid block in the game a wall you can float inside. `swimmable` absent
+is `false` and `move_resistance` absent is `0.0`, on a solid block and a non-solid
+one alike.
 
 ```luau
 return {
@@ -95,6 +104,9 @@ return {
 	drawn = true,                  -- optional, absent means whatever `solid` says
 	occludes = true,               -- optional, absent means whatever `solid` says
 	targetable = true,             -- optional, absent means whatever `solid` says
+
+	swimmable = false,             -- optional, absent means false
+	move_resistance = 0.0,         -- optional, absent means 0.0
 }
 ```
 
@@ -126,8 +138,15 @@ return {
 - **`targetable`** — can a swing find this block. Absent means whatever you wrote
   for `solid`. Whether the block then yields to that swing is `breakable`; this
   field decides only whether the swing arrives.
+- **`swimmable`** — can a player hold itself up inside this block's volume.
+  Absent means **`false`**, a constant. This is what makes a volume something to
+  swim in rather than something to fall through; a block that says nothing is
+  something you fall through.
+- **`move_resistance`** — how much this block's volume slows what moves through
+  it. Absent means **`0.0`**, which is exactly "unaffected". See "Declaring a
+  medium", below, for the scale and what it is refused for.
 
-**The six optional fields are independent of one another.** A block may declare
+**The eight optional fields are independent of one another.** A block may declare
 `breakable = false` *and* a `breaks_into`; the residue is simply never reached,
 and it is still there the day you make the block breakable again by editing one
 line. The same holds across the three seeing fields: `drawn = true` on a
@@ -157,7 +176,7 @@ quoted in full under "Reading a refusal", below.
 **A field the loader does not recognise is refused, not ignored.** A misspelled
 `replacable` is a word anybody types once, and a loader that read the keys it
 knows and never asked what else was there could not tell a typo from an absence.
-The refusal names the field you wrote **and all nine you may write**, because a
+The refusal names the field you wrote **and all eleven you may write**, because a
 name is only recognisable as a typo once you can see what it was nearly —
 `drawnn` beside `drawn` explains itself where `drawnn` alone does not.
 
@@ -429,7 +448,7 @@ A `blocks/amber.luau` declaring `slid = true` where it meant `solid` is refused
 like this:
 
 ```
-mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`
 ```
 
 The parts read outermost first, separated by `: ` — the stage that failed, then
@@ -440,7 +459,7 @@ short — `drawnn` for `drawn`, which is the typo the newest field on the list
 invites:
 
 ```
-mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `drawnn`: `drawnn` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `drawnn`: `drawnn` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`
 ```
 
 A field that exists but holds the wrong kind of value is refused differently, and
@@ -643,6 +662,88 @@ declaration, and from nothing else. No name is treated as implicitly invisible,
 implicitly transparent or implicitly unaimable-at — not `base:water`, and not
 whatever you call yours.
 
+## Declaring a medium
+
+Two fields say what a block's volume is to something moving *through* it, as
+opposed to what it looks like or whether it stops you. Together they are what
+makes a volume a **medium** rather than an absence.
+
+**`swimmable`** says a player can hold itself up in the volume. **Absent means
+`false`.**
+
+**`move_resistance`** says how much the volume slows what moves through it.
+**Absent means `0.0`.** The scale is a divisor: a speed through the volume is
+divided by `1 + move_resistance`, so
+
+| You write | What happens to a movement through it |
+|---|---|
+| `0.0`, or nothing at all | unaffected — the speed it has in air |
+| `1.0` | half speed |
+| `3.0` | a quarter speed |
+| `9.0` | a tenth speed |
+
+It is the first **number** a declaration may state, and it is checked rather than
+coerced. A value is refused, naming `move_resistance`, when it is:
+
+- **less than zero** — `move_resistance = -1` is refused with
+  `` `move_resistance` may not be less than zero ``. There is nothing below
+  "unaffected" for a declaration to mean, and a negative divisor would make the
+  volume a place that speeds you up.
+- **not a finite number** — `move_resistance = 0/0` and `move_resistance = 1/0`
+  are both expressions Luau will evaluate for you, and both are refused with
+  `` `move_resistance` must be a finite number ``.
+- **larger than the engine can keep** — refused with the same sentence, because
+  that is what it becomes. **The ceiling is `3.4e38`**, the largest finite value
+  at the width the tick divides by; a declaration past it is an infinity by the
+  time the engine holds it, and handing the physics an infinity nobody wrote is
+  the silent coercion this field refuses everywhere else. Measured against the
+  shipped loader: `1e30` and `3.4e38` register; `3.5e38` and `1e40` are refused,
+  naming `move_resistance` and saying it must be a finite number.
+
+  There is no *policy* ceiling — nothing here decides that some resistance is
+  too much to mean. `1e30` is a block nothing can walk through and it registers.
+  The only ceiling is the one the retained width imposes, and it is stated
+  rather than left for you to discover.
+- **not a number at all** — `move_resistance = true` is refused with
+  `` `move_resistance` must be a number, but is a boolean ``, and
+  `move_resistance = "1.0"` with `` …but is a string ``. Text that looks like a
+  number is never parsed; see "Optional means you may leave it out", above, for
+  why nothing on a declaration is coerced.
+
+Write the number either way Luau writes one: `move_resistance = 4` and
+`move_resistance = 4.5` are both accepted, and `4` registers as `4.0`.
+
+**The two are independent in both directions.** A volume may resist without being
+one you can swim in, and one you can swim in need not resist at all — nothing is
+derived from the other, so a block that states one has said *nothing* about the
+other.
+
+### A worked example: a resistant block that is not swimmable
+
+`content/example/blocks/tar.luau`:
+
+```luau
+-- Tar. You wade through it at a quarter speed and you sink: it slows you down
+-- without holding you up, which is the half of a medium `swimmable` is not.
+return {
+	name = "example:tar",
+	texture = "example:tar",
+	solid = false,
+
+	drawn = true,                  -- non-solid, so this would otherwise default to false
+	occludes = false,              -- you can see what is behind it
+	targetable = true,             -- a swing finds it
+
+	move_resistance = 3.0,         -- a quarter of your speed in air
+	-- `swimmable` is not stated, so it is `false`: no jump lifts you here
+}
+```
+
+Drop into a pool of it and you fall to the bottom four times more slowly than you
+fall through air, and holding jump does nothing. Declare `swimmable = true`
+alongside and the same pool becomes something you can swim up out of, at the same
+reduced speed — which is what `base:water` does.
+
 ## A complete example
 
 A mod called `example` shipping two blocks: an ore that breaks into ash, and the
@@ -715,18 +816,18 @@ goes inert: the swing passes through and breaks what is behind, which is exactly
 what water did before it declared anything.
 
 What it *does* change is every save in existence, and that is the lesson for your
-own content: **`breakable` is one of the six fields a save folds into a block's
-recorded behaviour**, alongside `name`, `solid`, `replaceable`, `breaks_into` and
-`targetable`. Edit any of them and every existing world holding that block will
+own content: **`breakable` is one of the eight fields a save folds into a block's
+recorded behaviour**, alongside `name`, `solid`, `replaceable`, `breaks_into`,
+`targetable`, `swimmable` and `move_resistance`. Edit any of them and every existing world holding that block will
 name it on the terminal at its next launch.
 
 **Two different things produce that line, and telling them apart is the whole of
 reading it.** A declaration you edited names the blocks *you* touched. An engine
 build that added a field to the behaviour fold names **every block in the save**,
 once, because the old record and the new one are folded over different field lists
-and are not comparable at all. This build did the second: `targetable` joined the
-fold, so the first launch of any world saved before it reports all four base
-blocks together —
+and are not comparable at all. This build did the second: `swimmable` and
+`move_resistance` joined the fold, so the first launch of any world saved before
+it reports all four base blocks together —
 
 ```
 mycraft: `base:dirt`, `base:grass`, `base:stone`, `base:water` no longer behave as they did when this world was saved, and it was loaded anyway
@@ -740,6 +841,15 @@ left to notice. Editing `texture` instead moves the *appearance* fold, which is
 never reported. See `docs/technical/world-format.md` for the two folds and
 `docs/modding/hot-reload.md` for the offline edit-and-relaunch loop.
 
+**One-shot means once per move, and the fold has now grown twice running.** The
+build before this one added `targetable`; this one adds the two medium fields. So
+a world that already crossed the first move, and was quit normally afterwards, is
+told a second time on its first launch here — the same line, naming the same four
+blocks, for a different growth of the same list. Nothing has gone wrong and there
+is nothing to fix: the two records were folded over different lists and no reading
+of them could say the blocks are unchanged. Expect one report per fold growth your
+players cross, not one report ever.
+
 `base:grass` is the only one stating a table, and it is the block the table form
 exists for: six facings and six keys, five of them its own and one shared with
 `base:dirt`. The other three state one string, so all six faces of each hold the
@@ -752,7 +862,7 @@ called and a key is what it is drawn from.
 ## What is not here yet
 
 Per-cell state, callbacks and components. Worldgen in script. Reading a second
-content root. And `extends`, in every form — a declaration states its own nine
+content root. And `extends`, in every form — a declaration states its own eleven
 fields and inherits nothing.
 
 **Declarations now reload while the game is running.** Save a file in `blocks/` and

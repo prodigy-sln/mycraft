@@ -154,11 +154,13 @@ loads and does nothing.
 | `replaceable` | **yes**, in behaviour: whether a placement builds straight through it |
 | `breakable` | **yes**, in behaviour: whether it can be broken at all |
 | `breaks_into` | **yes**, in behaviour: what the cell holds afterwards |
+| `swimmable` | **yes**, in behaviour, on the next tick: whether holding jump lifts a player inside it. Nothing is re-meshed for it |
+| `move_resistance` | **yes**, in behaviour, on the next tick: how much the block's volume slows what moves through it. Nothing is re-meshed for it |
 
 **What decides a re-mesh is `drawn`, `occludes` and the six keys — and nothing
-else.** Editing `solid`, `targetable`, `replaceable`, `breakable` or `breaks_into`
-changes what the world *does* without changing what it looks like, so no section
-is built again.
+else.** Editing `solid`, `targetable`, `replaceable`, `breakable`, `breaks_into`,
+`swimmable` or `move_resistance` changes what the world *does* without changing
+what it looks like, so no section is built again.
 
 **Editing `solid` alone still redraws, and it is worth knowing why**, because the
 answer changes the moment you write one more line. `drawn` and `occludes` default
@@ -172,6 +174,21 @@ that missed something.
 **A reload that changes only `targetable` is accepted and re-meshes nothing.**
 Your swing starts or stops finding the block on the very next tick; the picture on
 screen never flickers, because nothing about it changed.
+
+**The same holds for `swimmable` and `move_resistance`, and it is the fastest
+loop on this page.** Both take effect on the next tick, and neither rebuilds a
+section — so you can retune how a liquid feels while standing in it. Raise
+`move_resistance` and save, and the next step you take through the block is
+slower; take a `swimmable = true` away and the jump you were holding stops
+lifting you from that tick on, wherever you happen to be. Nothing about the world
+redraws for either, because there is nothing to redraw: a volume that stopped
+holding you up looks exactly like one that still does.
+
+**A `move_resistance` the loader would refuse refuses the whole reload**, exactly
+as any other bad field does — the file and the field are named, nothing is half
+applied, and the game goes on serving the content it was already serving until
+you fix it and save again. So a mistyped number costs you a refusal you can read
+rather than a sea that quietly stopped being one.
 
 ### Editing `texture` changes what you see
 
@@ -396,7 +413,7 @@ are the launch refusals** — same loader, same words — under the reload's own
 sentence. This one is `solid` typed as `slid`:
 
 ```
-mycraft: the content root could not be taken up: the content root could not be read: the content root's blocks could not be read: content/base/blocks/stone.luau, block `base:stone`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`
+mycraft: the content root could not be taken up: the content root could not be read: the content root's blocks could not be read: content/base/blocks/stone.luau, block `base:stone`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`
 ```
 
 The fields it lists are the whole set a declaration may state, which makes this the one

@@ -31,7 +31,12 @@ impl DefinitionOrigin {
 /// in, because a duplicate name must be reported against both the place that
 /// declared it first and the place that declared it again — which needs the
 /// first origin still to be known when the second arrives.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// **Not [`Eq`]**, because [`move_resistance`](Self::move_resistance) is an
+/// `f32`. That is a deliberate cost of letting a declaration state a number:
+/// `PartialEq` is what every comparison in the engine uses, and a definition was
+/// never a map key or a set member.
+#[derive(Debug, Clone, PartialEq)]
 pub struct BlockDefinition {
     pub name: BlockName,
     /// The key each of its six faces draws from.
@@ -97,6 +102,23 @@ pub struct BlockDefinition {
     /// then yields to that swing is [`breakable`](Self::breakable): this field
     /// decides only whether the swing arrives.
     pub targetable: bool,
+    /// Whether a player can hold itself up in this block's volume.
+    ///
+    /// What makes a volume something to swim in rather than something to fall
+    /// through. Absent in a declaration means `false`, a **constant** and not
+    /// whatever that declaration says about [`is_solid`](Self::is_solid): no
+    /// single bit ever answered this question, so deriving it would invent a
+    /// claim no author made — and would make every solid block in existence
+    /// swimmable.
+    pub swimmable: bool,
+    /// How much this block's volume slows what moves through it.
+    ///
+    /// Finite and not less than zero; `0.0` is exactly "unaffected", and the
+    /// speed through the volume is divided by `1 + move_resistance`. Independent
+    /// of [`swimmable`](Self::swimmable) in both directions — a volume may resist
+    /// without being one a player can swim in, and the other way about. Absent in
+    /// a declaration means `0.0`, a constant for the same reason.
+    pub move_resistance: f32,
     pub origin: DefinitionOrigin,
 }
 

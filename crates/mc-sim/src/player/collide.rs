@@ -27,7 +27,7 @@ use std::cmp::Ordering;
 
 use glam::Vec3;
 
-use crate::player::{BlockPos, Solidity};
+use crate::player::{BlockPos, Medium, Solidity, VoxelMedium};
 
 /// How far the player's box reaches from the feet centre on x and z, in blocks.
 const HALF_WIDTH: f32 = 0.3;
@@ -221,6 +221,30 @@ impl Axis {
 #[must_use]
 pub fn on_ground(feet: Vec3, world: &dyn Solidity) -> bool {
     overlaps(Aabb::around(feet).lowered(CONTACT_DEPTH), world)
+}
+
+/// The medium acting on the box standing at `feet`: the greatest resistance
+/// among the cells it overlaps, and whether any of them is swimmable.
+///
+/// Built from the same [`Aabb::around`] and [`voxels`] the collision resolution
+/// is, so the box's shape and the half-open `[v, v + 1)` rule are stated once
+/// and read here rather than restated.
+///
+/// **It takes a [`Medium`] and never a [`crate::player::Traversal`], and that is
+/// a decision rather than an accident.** With only this door it cannot call
+/// [`on_ground`] or [`overlaps`], so the tempting shortcut — lower the box the
+/// way ground contact does, and ask about the block underfoot — is unspellable
+/// here. A block resists what moves through its volume and nothing else, so a
+/// player standing on a resistant floor overlaps only the air above it and is
+/// not slowed at all; reaching the block below would be a different rule.
+///
+/// A cell holding no block, and every cell outside the world, contributes
+/// [`VoxelMedium::NOTHING`] — the identity of the fold — so a box overlapping
+/// nothing at all answers it too.
+pub(crate) fn medium_around(feet: Vec3, world: &dyn Medium) -> VoxelMedium {
+    voxels(Aabb::around(feet))
+        .map(|at| world.medium_at(at))
+        .fold(VoxelMedium::NOTHING, VoxelMedium::with)
 }
 
 /// Whether the player's own box stands in the voxel `at`.

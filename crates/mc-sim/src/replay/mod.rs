@@ -17,6 +17,8 @@
 
 pub mod contract;
 pub mod height;
+mod medium;
+mod packed;
 pub mod patch;
 pub mod prepare;
 pub mod resolved;
@@ -29,9 +31,10 @@ pub use crate::camera::CameraPose;
 /// describes lives and mc-world may not depend on mc-sim. It is re-exported from
 /// the path it was declared at so its committed consumers keep compiling.
 pub use mc_world::world::Extent;
+pub use medium::MediumIndex;
 pub use patch::{SpliceError, remesh, splice};
 pub use prepare::{PrepareError, SectionQuads, mesh_all};
-pub use resolved::{BlockVolume, ResolvedVoxels};
+pub use resolved::{BlockVolume, ResolvedVoxels, VoxelAnswers};
 pub use script::{SCRIPT_TICKS, TickError, TickIndex, scripted_intent};
 pub use spawn::{SpawnError, simulation_for, spawn};
 pub use world::{ReplayWorld, WorldGenError};

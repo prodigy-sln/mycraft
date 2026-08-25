@@ -133,6 +133,11 @@ pub fn declared(name: &str, is_solid: bool) -> Result<BlockDefinition, Box<dyn E
         drawn: is_solid,
         occludes: is_solid,
         targetable: is_solid,
+        // Constants, never derived from this fixture's own solidity: nothing
+        // has ever answered these two, so a derived medium would make the air
+        // swimmable and no assertion in this file could see it.
+        swimmable: false,
+        move_resistance: 0.0,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
     })
 }

@@ -48,6 +48,8 @@ pub fn definition(
         drawn: true,
         occludes: true,
         targetable: true,
+        swimmable: false,
+        move_resistance: 0.0,
         origin: DefinitionOrigin::new(origin),
     })
 }

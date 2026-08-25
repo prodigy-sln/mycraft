@@ -39,6 +39,7 @@ use mc_core::block::{BlockDefinition, DefinitionOrigin};
 use mc_core::id::BlockName;
 use mc_script::{FieldNames, ScriptHost, ScriptTable, ScriptValue};
 
+mod number;
 mod texture;
 
 /// The key a declaration names itself by.
@@ -59,6 +60,10 @@ const DRAWN_FIELD: &str = "drawn";
 const OCCLUDES_FIELD: &str = "occludes";
 /// The key a declaration states being aimable at in.
 const TARGETABLE_FIELD: &str = "targetable";
+/// The key a declaration states being something a player can swim in.
+const SWIMMABLE_FIELD: &str = "swimmable";
+/// The key a declaration states how much its volume slows movement in.
+const MOVE_RESISTANCE_FIELD: &str = "move_resistance";
 
 /// Every field name a declaration may state, in the order the documentation
 /// introduces them.
@@ -71,7 +76,7 @@ const TARGETABLE_FIELD: &str = "targetable";
 /// `docs/modding/README.md`. Growing it means editing all three, and the guard
 /// sweeps every page under `docs/modding/` rather than a named one, so a page
 /// missed is a page reported.
-const RECOGNISED_FIELDS: [&str; 9] = [
+const RECOGNISED_FIELDS: [&str; 11] = [
     NAME_FIELD,
     TEXTURE_FIELD,
     SOLID_FIELD,
@@ -81,6 +86,8 @@ const RECOGNISED_FIELDS: [&str; 9] = [
     DRAWN_FIELD,
     OCCLUDES_FIELD,
     TARGETABLE_FIELD,
+    SWIMMABLE_FIELD,
+    MOVE_RESISTANCE_FIELD,
 ];
 
 /// How many field names the loader will read out of one declaration.
@@ -121,6 +128,18 @@ const REPLACEABLE_BY_DEFAULT: bool = false;
 /// content carry.
 const BREAKABLE_BY_DEFAULT: bool = true;
 
+/// What a declaration means by saying nothing about being swimmable.
+///
+/// A **constant**, never [`defaulting_to_solidity`]; that function says why.
+const SWIMMABLE_BY_DEFAULT: bool = false;
+
+/// What a declaration means by saying nothing about resisting movement.
+///
+/// A constant for the reason [`SWIMMABLE_BY_DEFAULT`] is one, and what the scale
+/// already spells "unaffected": the tick divides by `1 + resistance`, so a
+/// declaration saying nothing divides by one and moves as it always did.
+const MOVE_RESISTANCE_BY_DEFAULT: f32 = 0.0;
+
 /// Checks a declaration table and turns it into a definition attributed to
 /// `origin`.
 pub(crate) fn checked_declaration(
@@ -159,20 +178,14 @@ fn check(
     let name = declared_text(host.read_field(declaration, NAME_FIELD), NAME_FIELD)?;
     let textures = texture::declared_textures(host, declaration)?;
     let is_solid = required_boolean(host.read_field(declaration, SOLID_FIELD), SOLID_FIELD)?;
-    let replaceable = optional_boolean(
-        host.read_field(declaration, REPLACEABLE_FIELD),
-        REPLACEABLE_FIELD,
-        REPLACEABLE_BY_DEFAULT,
-    )?;
-    let breakable = optional_boolean(
-        host.read_field(declaration, BREAKABLE_FIELD),
-        BREAKABLE_FIELD,
-        BREAKABLE_BY_DEFAULT,
-    )?;
+    let replaceable = defaulting_to(host, declaration, REPLACEABLE_FIELD, REPLACEABLE_BY_DEFAULT)?;
+    let breakable = defaulting_to(host, declaration, BREAKABLE_FIELD, BREAKABLE_BY_DEFAULT)?;
     let breaks_into = optional_residue(host.read_field(declaration, BREAKS_INTO_FIELD))?;
     let drawn = defaulting_to_solidity(host, declaration, DRAWN_FIELD, is_solid)?;
     let occludes = defaulting_to_solidity(host, declaration, OCCLUDES_FIELD, is_solid)?;
     let targetable = defaulting_to_solidity(host, declaration, TARGETABLE_FIELD, is_solid)?;
+    let swimmable = defaulting_to(host, declaration, SWIMMABLE_FIELD, SWIMMABLE_BY_DEFAULT)?;
+    let move_resistance = declared_resistance(host, declaration)?;
     Ok(BlockDefinition {
         name: BlockName::parse(&name).map_err(|error| FieldFault::invalid(NAME_FIELD, &error))?,
         textures,
@@ -183,8 +196,46 @@ fn check(
         drawn,
         occludes,
         targetable,
+        swimmable,
+        move_resistance,
         origin: origin.clone(),
     })
+}
+
+/// One of the fields whose absence means a constant, whatever else the same
+/// declaration says.
+///
+/// The counterpart of [`defaulting_to_solidity`], and the two sit together so
+/// that which rule a field follows is legible from the one line that reads it.
+/// This is the ordinary case: an absence that means the same thing in every
+/// declaration there will ever be.
+///
+/// **The two are deliberately not one function.** Same shape, one word apart, so
+/// merging them reads as tidying — and it would make `swimmable`'s absence mean
+/// `solid`, which is every solid block in the game turned into something a player
+/// can float inside. The rule is about content, not code: one bit used to answer
+/// `drawn`, `occludes` and `targetable`, and nothing ever answered `swimmable`.
+/// What reddens is one scenario over a **solid** fixture — a non-solid one agrees
+/// with both readings — so from this file the collapse looks free.
+fn defaulting_to(
+    host: &ScriptHost,
+    declaration: &ScriptTable,
+    field: &str,
+    absent: bool,
+) -> Result<bool, FieldFault> {
+    optional_boolean(host.read_field(declaration, field), field, absent)
+}
+
+/// How much a declaration says its volume slows what moves through it.
+///
+/// Its absence means a **constant** and not [`defaulting_to_solidity`]; see
+/// [`defaulting_to`] for why that distinction is load-bearing.
+fn declared_resistance(host: &ScriptHost, declaration: &ScriptTable) -> Result<f32, FieldFault> {
+    number::optional_number_at_least_zero(
+        host.read_field(declaration, MOVE_RESISTANCE_FIELD),
+        MOVE_RESISTANCE_FIELD,
+        MOVE_RESISTANCE_BY_DEFAULT,
+    )
 }
 
 /// One of the three fields whose absence means whatever the same declaration

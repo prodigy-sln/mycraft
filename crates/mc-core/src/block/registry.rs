@@ -33,6 +33,17 @@ impl BlockRegistry {
         self.definitions.len()
     }
 
+    /// Every registered definition, in registration order.
+    ///
+    /// **What a registry declared, rather than what any world happens to
+    /// hold.** A consumer deriving a per-voxel table from block properties needs
+    /// every answer that is *writable* to be in that table before the first
+    /// write, not only the answers a world already contains — so it asks here
+    /// and never walks a world.
+    pub fn definitions(&self) -> impl Iterator<Item = &BlockDefinition> {
+        self.definitions.iter()
+    }
+
     /// Every texture key the registered definitions declare.
     ///
     /// **A pure function of what content declared, and the answer to "which keys

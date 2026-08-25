@@ -452,6 +452,53 @@ fn six_keys() -> Result<FaceTextures, Box<dyn Error>> {
     Ok(FaceTextures::stating(keys))
 }
 
+/// The filler the section is made of: solid to nothing, seen by nothing, and
+/// not something a swing can find.
+///
+/// # Errors
+///
+/// Returns an error if its id or its texture key is not a namespaced id.
+fn the_filler(origin: &DefinitionOrigin) -> Result<BlockDefinition, Box<dyn Error>> {
+    Ok(BlockDefinition {
+        name: BlockName::parse(VOID)?,
+        textures: FaceTextures::uniform(TextureKey::parse(VOID)?),
+        is_solid: false,
+        replaceable: false,
+        breakable: true,
+        breaks_into: None,
+        drawn: false,
+        occludes: false,
+        targetable: false,
+        swimmable: false,
+        move_resistance: 0.0,
+        origin: origin.clone(),
+    })
+}
+
+/// The one block this fixture is about: solid, seen, and stating a distinct
+/// texture key against each of its six facings.
+///
+/// # Errors
+///
+/// Returns an error if its id does not parse, or for the reasons [`six_keys`]
+/// gives.
+fn the_banded_block(origin: &DefinitionOrigin) -> Result<BlockDefinition, Box<dyn Error>> {
+    Ok(BlockDefinition {
+        name: BlockName::parse(BANDED)?,
+        textures: six_keys()?,
+        is_solid: true,
+        replaceable: false,
+        breakable: true,
+        breaks_into: None,
+        drawn: true,
+        occludes: true,
+        targetable: true,
+        swimmable: false,
+        move_resistance: 0.0,
+        origin: origin.clone(),
+    })
+}
+
 /// A registry declaring the banded block solid and the filler non-solid.
 ///
 /// # Errors
@@ -460,32 +507,7 @@ fn six_keys() -> Result<FaceTextures, Box<dyn Error>> {
 /// the batch.
 fn registry() -> Result<BlockRegistry, Box<dyn Error>> {
     let origin = DefinitionOrigin::new("the per-face axis fixture");
-    let declared = vec![
-        Ok(BlockDefinition {
-            name: BlockName::parse(VOID)?,
-            textures: FaceTextures::uniform(TextureKey::parse(VOID)?),
-            is_solid: false,
-            replaceable: false,
-            breakable: true,
-            breaks_into: None,
-            drawn: false,
-            occludes: false,
-            targetable: false,
-            origin: origin.clone(),
-        }),
-        Ok(BlockDefinition {
-            name: BlockName::parse(BANDED)?,
-            textures: six_keys()?,
-            is_solid: true,
-            replaceable: false,
-            breakable: true,
-            breaks_into: None,
-            drawn: true,
-            occludes: true,
-            targetable: true,
-            origin: origin.clone(),
-        }),
-    ];
+    let declared = vec![Ok(the_filler(&origin)?), Ok(the_banded_block(&origin)?)];
     let mut registry = BlockRegistry::new();
     registry.apply(&InMemoryDefinitionSource::new(origin, declared))?;
     Ok(registry)

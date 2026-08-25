@@ -32,7 +32,9 @@
 use glam::Vec3;
 use mc_render::camera::projection_for;
 use mc_render::surface::SurfaceSize;
-use mc_sim::player::{BlockPos, MovementIntent, PlayerState, Solidity, advance_player};
+use mc_sim::player::{
+    BlockPos, Medium, MovementIntent, PlayerState, Solidity, VoxelMedium, advance_player,
+};
 
 /// The frame the declared lens is asked about: the size every committed golden
 /// is captured at, and the aspect the replay declares.
@@ -60,6 +62,15 @@ const FLOOR: i32 = 63;
 impl Solidity for WalledFloor {
     fn is_solid(&self, at: BlockPos) -> bool {
         at.y <= FLOOR || at.x >= WALL
+    }
+}
+
+/// [`VoxelMedium::NOTHING`] unconditionally, both halves, and never derived from
+/// this fixture's own solidity — the rule stated at length on
+/// `crates/mc-sim/tests/support/solidity.rs`'s own implementation.
+impl Medium for WalledFloor {
+    fn medium_at(&self, _: BlockPos) -> VoxelMedium {
+        VoxelMedium::NOTHING
     }
 }
 

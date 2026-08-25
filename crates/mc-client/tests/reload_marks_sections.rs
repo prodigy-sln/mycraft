@@ -109,6 +109,14 @@ const ZIRCON_FILE: &str = "zircon.luau";
 const NORTHS_OWN_KEY: &str = "base:zircon_north";
 const A_DIFFERENT_NORTH: &str = "base:zircon_north_reworked";
 
+/// The resistance the medium scenarios below give stone.
+///
+/// Any value above zero would do — these scenarios are about what a reload draws
+/// again, not about what the number does to a walk — so it is a plain one stated
+/// against stone's silence, and stone stays solid so that nothing here is also a
+/// solidity edit.
+const A_RESISTANCE_WORTH_DECLARING: f32 = 3.0;
+
 #[test]
 fn a_candidate_touching_neither_solidity_nor_a_texture_key_leaves_no_section_to_mesh() -> TestResult
 {
@@ -335,6 +343,94 @@ fn a_candidate_taking_stones_targetability_away_publishes_a_later_serial_and_mar
          beside the acceptance and the serial because a refused reload marks nothing either**, \
          and so does one that published no content at all: on its own, `NoSectionAtAll` is \
          satisfied by a reload that never happened"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_candidate_that_only_makes_stone_something_to_swim_in_marks_no_section() -> TestResult {
+    let mut client = a_client_over_the_shipped_world()?;
+    require_nothing_outstanding(&mut client)?;
+    let swimmable = shipped_restating_stone(&Declaration::of(STONE).swimmable(true))?;
+    let launched = serial_serving(&client)?.get();
+
+    let answered = client.adopt(candidate(swimmable.path())?);
+    let published = serial_reported(&answered);
+    let left_to_mesh = marked(&mut client);
+
+    assert_eq!(
+        (
+            adoption(answered),
+            run_of(launched, &[published]),
+            left_to_mesh
+        ),
+        (
+            accepted(DIRT),
+            Run::EachLaterThanTheLast,
+            Marking::NoSectionAtAll
+        ),
+        "whether a player can hold itself up in a block's volume decides what happens when they \
+         walk into it and changes not one pixel of it, so there is nothing to draw again. **The \
+         zero is asserted beside the acceptance and the serial because a refused reload marks \
+         nothing either**, and so does one that published no content at all: on its own, \
+         `NoSectionAtAll` is satisfied by a reload that never happened. The scenario below it on \
+         this same instrument is what says the harness can still mark the world"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_candidate_that_only_makes_stone_slow_what_moves_through_it_marks_no_section() -> TestResult {
+    let mut client = a_client_over_the_shipped_world()?;
+    require_nothing_outstanding(&mut client)?;
+    let resistant = shipped_restating_stone(
+        &Declaration::of(STONE).move_resistance(A_RESISTANCE_WORTH_DECLARING),
+    )?;
+    let launched = serial_serving(&client)?.get();
+
+    let answered = client.adopt(candidate(resistant.path())?);
+    let published = serial_reported(&answered);
+    let left_to_mesh = marked(&mut client);
+
+    assert_eq!(
+        (
+            adoption(answered),
+            run_of(launched, &[published]),
+            left_to_mesh
+        ),
+        (
+            accepted(DIRT),
+            Run::EachLaterThanTheLast,
+            Marking::NoSectionAtAll
+        ),
+        "how much a volume slows what moves through it is a number the physics divides by, and a \
+         still frame cannot show it — so an implementation that added either medium field to the \
+         geometry key rebuilds all 256 sections for an edit that changes no picture, which is what \
+         this reports. It is asserted separately from the buoyancy scenario above because a key \
+         that learned one of the two and not the other passes exactly one of them"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_same_harness_marks_every_section_for_a_candidate_that_only_stops_drawing_stone() -> TestResult
+{
+    let mut client = a_client_over_the_shipped_world()?;
+    require_nothing_outstanding(&mut client)?;
+    let invisible = shipped_restating_stone(&Declaration::of(STONE).drawn(false))?;
+
+    let answered = client.adopt(candidate(invisible.path())?);
+    let left_to_mesh = marked(&mut client);
+
+    assert_eq!(
+        (adoption(answered), left_to_mesh),
+        (accepted(DIRT), every_section_once()),
+        "the control the two medium scenarios above cannot supply for themselves. Each of them \
+         asserts an absence, and a reload path that came to mark nothing at all — or a harness \
+         whose drain stopped reporting — satisfies both forever. This is the same client, the same \
+         root and the same reading over the one field whose whole subject is the picture, so the \
+         discrimination is which of two answers the marking gives rather than whether it can give \
+         one"
     );
     Ok(())
 }

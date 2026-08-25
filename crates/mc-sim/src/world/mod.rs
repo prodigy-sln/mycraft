@@ -1,9 +1,10 @@
-//! The world a simulation owns: one type, three views of it, and one private
+//! The world a simulation owns: one type, four views of it, and one private
 //! write.
 //!
-//! A block store says what is where, one bitset says what stops the player and a
-//! second says what a swing can find, and the whole difficulty of an editable
-//! world is that they can fall out of step. Deriving them from the store would
+//! A block store says what is where, one bitset says what stops the player, a
+//! second says what a swing can find, and a third view says what medium each
+//! voxel's volume is, and the whole difficulty of an editable world is that they
+//! can fall out of step. Deriving them from the store would
 //! remove the problem outright — and was rejected for a reason worth restating
 //! here, because the alternative looks strictly simpler: the replay's overlap
 //! oracle judges the physics by re-reading the world's blocks and asking the
@@ -13,11 +14,13 @@
 //! chain*, so the one unscoped invariant the simulation has would be judging
 //! itself and would go green forever.
 //!
-//! **The two resolved views are two bits and not one, because content declares
-//! them separately.** A block may stop a player without a swing being able to
-//! find it, and may be findable while stopping nobody — the shipped water is the
+//! **The resolved views are separate because content declares them
+//! separately.** A block may stop a player without a swing being able to find
+//! it, and may be findable while stopping nobody — the shipped water is the
 //! second — so a single bit answering both would be a game rule the engine had
-//! written on content's behalf.
+//! written on content's behalf. The medium is a third such claim, and it is one
+//! view carrying two properties rather than two views, because one site reads
+//! both of them from one fold over one box.
 //!
 //! So the views are kept, and kept in step **structurally rather than by a
 //! calling convention**. This type owns the store, both resolved views and the
@@ -25,7 +28,7 @@
 //! write any of them**, and the accessors that read them hand out shared
 //! borrows, which cannot.
 //!
-//! **Two functions write any of them, and each settles both answers before it
+//! **Two functions write any of them, and each settles every answer before it
 //! writes anything.** `write` is one edit; `adopt` is the whole registry
 //! replaced by content read while the game was running. The dirty set is not one
 //! of the views and never was, which is why the marking functions beside them —
@@ -33,7 +36,8 @@
 //! This header used to claim exactly one writer, and hot reload falsified it.
 //! What has not changed is what the claim was ever about: neither writes one
 //! view without the others, and neither writes anything it has not already
-//! resolved. A caller that swapped the registry and left a bitset to a later
+//! resolved. The medium needed no new mechanism for that — it is a third answer
+//! the same one resolve settles. A caller that swapped the registry and left a bitset to a later
 //! refresh would reopen the disagreement, and the overlap oracle could not see
 //! it — that oracle re-reads the world through the registry and would be
 //! agreeing with itself.
@@ -59,9 +63,9 @@ use mc_world::column::{ChunkColumn, ColumnCoordinate};
 use mc_world::section::{Contents, Section};
 use mc_world::world::{Extent, VoxelWorld, WorldError, WorldPos};
 
-use crate::player::{BlockPos, Solidity, Targetable};
-use crate::replay::ResolvedVoxels;
+use crate::player::{BlockPos, Medium, Solidity, Targetable, VoxelMedium};
 use crate::replay::prepare::{PrepareError, SectionQuads, mesh_world};
+use crate::replay::{ResolvedVoxels, VoxelAnswers};
 
 use remesh::with_its_neighbours;
 
@@ -240,11 +244,15 @@ impl World {
 
     /// **The one place any view is written**, and there is no other.
     ///
-    /// Both answers are settled *before* either write, so a name the registry
-    /// does not know refuses without having changed anything — and the store and
-    /// both bitsets are then written from that one resolve. Deleting any of
-    /// those lines is the only way to make the views disagree with the store,
-    /// which is what makes a test that notices worth having.
+    /// Every answer is settled *before* any write, so a name the registry does
+    /// not know refuses without having changed anything — and the store and all
+    /// three views are then written from that one resolve. Deleting any of those
+    /// lines is the only way to make the views disagree with the store, which is
+    /// what makes a test that notices worth having.
+    ///
+    /// **The medium comes out of the same resolve as the other two**, minted
+    /// into an index by the view that will hold it, so there is no second read
+    /// of the registry for a third answer to arrive from and disagree over.
     ///
     /// **What a swing can find follows an edit, and that is settled here.** A
     /// view built when the world was loaded and never written again answers
@@ -252,9 +260,9 @@ impl World {
     /// about an edited one wrongly, and nothing that reads a cell it has just
     /// written can tell the two apart.
     ///
-    /// A cell being emptied settles both answers without a registry at all:
-    /// there is nothing there to stand on, nothing for a ray to stop at, and no
-    /// name to look up to find either out.
+    /// A cell being emptied settles every answer without a registry at all:
+    /// there is nothing there to stand on, nothing for a ray to stop at, no
+    /// medium to move through, and no name to look up to find any of it out.
     ///
     /// # Errors
     ///
@@ -262,18 +270,22 @@ impl World {
     /// being written, and [`WorldError::OutsideWorld`] or
     /// [`WorldError::Section`] if the store refuses the position.
     fn write(&mut self, at: WorldPos, contents: Contents<&BlockName>) -> Result<(), WorldError> {
-        let (solid, targetable) = match contents {
-            Contents::Empty => (false, false),
+        let answers = match contents {
+            Contents::Empty => VoxelAnswers::NOTHING,
             Contents::Holds(block) => {
                 let declared = self.registry.resolve(block)?;
-                (declared.is_solid, declared.targetable)
+                VoxelAnswers {
+                    solid: declared.is_solid,
+                    targetable: declared.targetable,
+                    medium: self.resolved.medium_index_of(declared),
+                }
             }
         };
         match contents {
             Contents::Empty => self.blocks.empty_at(at)?,
             Contents::Holds(block) => self.blocks.set_block(at, block, &self.registry)?,
         }
-        self.resolved.set(at, solid, targetable);
+        self.resolved.set(at, answers);
         self.mark_dirty(at);
         Ok(())
     }
@@ -281,17 +293,20 @@ impl World {
     /// **The other place any view is written**, and there is no third.
     ///
     /// Replaces the registry and everything it implies about the world's voxels
-    /// together. Both answers are settled first, exactly as
+    /// together. Every answer is settled first, exactly as
     /// [`write`](Self::write) settles them, so a registry that does not know a
-    /// name some cell holds refuses without having changed anything. Leaving
-    /// either view to a later refresh would reopen the disagreement this
-    /// module's header is about, and no oracle in the tree could see it.
+    /// name some cell holds refuses without having changed anything. Leaving any
+    /// view to a later refresh would reopen the disagreement this module's
+    /// header is about, and no oracle in the tree could see it.
     ///
-    /// **Both views are replaced wholesale rather than written bit by bit**, so
-    /// there is no arrangement of this function in which one is carried over
-    /// from the registry that has stopped serving. A reload that changed only
-    /// what a swing may find writes no cell of the world, so the replacement is
-    /// the only thing that can carry that answer to the walk.
+    /// **All three views are replaced wholesale rather than written bit by
+    /// bit**, so there is no arrangement of this function in which one is
+    /// carried over from the registry that has stopped serving. A reload that
+    /// changed only what a swing may find, or only what a volume does to
+    /// something moving through it, writes no cell of the world — so the
+    /// replacement is the only thing that can carry that answer to the tick.
+    /// The medium table is rebuilt with them, which is why a reload that changes
+    /// a `move_resistance` needs no mechanism of its own.
     ///
     /// # Errors
     ///
@@ -370,6 +385,16 @@ impl Solidity for World {
 impl Targetable for World {
     fn is_targetable(&self, at: BlockPos) -> bool {
         self.resolved.is_targetable(at)
+    }
+}
+
+/// What a volume does to something moving through it is the **third view**, and
+/// it is read from the resolved view for the same reason the other two are: the
+/// tick path has no name to look up, no registry to consult, and so no failure
+/// to swallow. It forwards to the resolved view and never to the registry.
+impl Medium for World {
+    fn medium_at(&self, at: BlockPos) -> VoxelMedium {
+        self.resolved.medium_at(at)
     }
 }
 
