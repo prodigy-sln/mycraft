@@ -91,8 +91,11 @@ the reason); downgrade only with explicit user confirmation.
    phase end and before validation and completion. Gate amendments are a
    project-level decision with a runtime budget — never a spec deliverable.
 6. **Artifacts have budgets.** `.prospect/scripts/sdd-artifact-lint.sh`
-   enforces caps (tasks 60 lines, one map line per test, registry entries
-   ≤50 words); overflow knowledge consolidates into `docs/`.
+   enforces caps (tasks 60 lines, one map line per test, ≤50 words on the
+   registry entry naming *this* spec). Earlier entries are append-only
+   history it does not judge — which is why the complete phase runs it
+   *after* the registry append, not before. Overflow knowledge consolidates
+   into `docs/`.
 7. **Out of Scope is binding.** Unspecced work is recorded, not built.
 8. **Phases resume from disk.** After any commit boundary `/clear` is safe;
    the resolver reconstructs state. `metrics.md` records per-phase
