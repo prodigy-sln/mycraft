@@ -13,14 +13,14 @@
 //! so putting it there would take it out of the denominator for no gain. What
 //! paints these lines needs a device and lives in `gpu/`.
 //!
-//! **The wall clock is confined to [`clock`] and injected from there.** The
-//! client reads no clock on the tick, the snapshot or the capture path, which is
-//! what makes a replay identical at 30 and 300 frames a second — and the one
-//! reading this overlay does need arrives through a port, so a test can drive
-//! ten frames twenty milliseconds apart without waiting two hundred
-//! milliseconds or trusting that it did.
+//! **No clock reaches this module.** A frame time arrives already measured, from
+//! the client's frame path, which reads [`mc_render::time::clock`](crate::time::clock)
+//! once a frame and spends the same interval into simulation ticks. So the rate
+//! shown here and the time the world spent are one reading rather than two that
+//! could disagree — and a test drives ten frames twenty milliseconds apart by
+//! handing over twenty milliseconds, without waiting two hundred and without
+//! trusting that it did.
 
-pub mod clock;
 mod state;
 
 pub use state::{DebugOverlay, OverlayReadout, readout_lines};

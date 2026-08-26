@@ -1,13 +1,16 @@
 //! The wall clock is confined to one file, and the scan that says so is asked
 //! whether it could have said otherwise.
 //!
-//! `src/app.rs` states that no wall clock is read anywhere in this client, and
-//! that is what makes a fixed replay the same run on a machine drawing 300 frames
-//! a second and on one managing 30. The debug overlay has to report a frame rate,
-//! which needs a clock. **The two are reconciled by confinement rather than by
-//! dropping either**: one file holds the port and its one adapter, every other
-//! path takes an interval through that port, and this is where "every other path"
-//! stops being a convention.
+//! The client reads elapsed time exactly once a frame, through one port, out of
+//! one file — and everything downstream of that single reading agrees by
+//! construction: the rate the debug overlay reports and the time the simulation
+//! spent are the same measurement, so a walk covers the same ground per second on
+//! a machine drawing 300 frames a second and on one managing 30. **A second clock
+//! is what would end that**, silently, with every scenario about where a walk ends
+//! still green — because each reading would be right and the two would disagree.
+//! One file holds the port and its one adapter, every other path takes elapsed
+//! time through that port, and this is where "every other path" stops being a
+//! convention.
 //!
 //! # An absence proves nothing on its own, and here it proves less than usual
 //!
@@ -60,7 +63,12 @@ type TestResult = Result<(), Box<dyn Error>>;
 
 /// The one production source that may name a wall clock, relative to the
 /// repository.
-const EXEMPT_FILE: &str = "crates/mc-render/src/overlay/clock.rs";
+///
+/// It sat under `overlay/` while the debug overlay was the only thing that read
+/// it. What the port actually answers is how long a frame took, which is what
+/// paces the simulation — so it is named and placed for that, and the *count* of
+/// exemptions, which is what this guard is about, is unchanged.
+const EXEMPT_FILE: &str = "crates/mc-render/src/time/clock.rs";
 
 /// One text guard: where it reads, what it passes over, and what it refuses to
 /// find.
@@ -80,8 +88,8 @@ struct Guard {
 ///
 /// Two roots because the confinement is one claim about two crates: the client is
 /// where a frame path would reach for elapsed time, and the renderer is where the
-/// overlay that legitimately needs it lives. The bare type names rather than
-/// their `std::time::` spelling, so an aliased import is caught too.
+/// one port that legitimately answers with it lives. The bare type names rather
+/// than their `std::time::` spelling, so an aliased import is caught too.
 const WALL_CLOCK_GUARD: Guard = Guard {
     roots: &["crates/mc-client/src", "crates/mc-render/src"],
     exempt: |path| path == EXEMPT_FILE,
@@ -129,17 +137,17 @@ fn verdict_over(root: &Path) -> Result<Verdict, Box<dyn Error>> {
 }
 
 #[test]
-fn no_production_source_of_the_client_or_the_renderer_reads_a_wall_clock_outside_the_overlays_own()
+fn no_production_source_of_the_client_or_the_renderer_reads_a_wall_clock_outside_the_ports_own()
 -> TestResult {
     assert_eq!(
         verdict_over(&repository_root()?)?,
         Verdict::NoProductionSourceReadsAWallClock,
-        "a replay is evidence only because the client reads no clock: one tick per rendered frame, \
-         so the same input leaves the same world behind at 30 frames a second and at 300. The \
-         overlay needs elapsed time and takes it through a port, from the one file that is allowed \
-         to know what a clock is — anything else naming one is a frame path, a tick or a capture \
-         that has started depending on how fast the machine it ran on was, and no test of a \
-         *result* can report that"
+        "the client reads elapsed time once a frame, through a port, out of the one file that is \
+         allowed to know what a clock is — and it is that single reading that makes the rate the \
+         overlay shows and the ground a walk covers two views of one measurement rather than two \
+         measurements free to drift apart. Anything else naming a clock is a second reading: a \
+         frame path, a tick or a capture that has started depending on how fast the machine it ran \
+         on was, each reading right on its own, and no test of a *result* can report that"
     );
     Ok(())
 }

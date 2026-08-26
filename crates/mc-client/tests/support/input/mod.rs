@@ -30,6 +30,8 @@
 // Each scenario binary links the whole harness and drives a subset of it.
 #![allow(dead_code)]
 
+/// The clock the client reads once a frame, moved by hand rather than waited on.
+mod clock;
 /// The platform the session asks for the pointer, recording what it was asked.
 mod platform;
 /// The world a driven tick resolves the player's motion against.
@@ -38,6 +40,7 @@ mod world;
 use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use mc_client::events::{dispatch_device_event, dispatch_key, dispatch_window_event};
 use mc_client::remesh::Remesher;
@@ -48,12 +51,14 @@ use mc_render::overlay::OverlayReadout;
 use mc_render::window::{CaptureState, Ending};
 use mc_sim::action::EditReport;
 use mc_sim::content::LoadedContent;
+use mc_sim::player::TICK_QUANTUM;
 use mc_sim::reload::{ContentReload, ReloadRefusal};
 use mc_sim::simulation::{Accepted, PublishedContent, SimSnapshot, Simulation};
 use mc_sim::world::RemeshWork;
 use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
 use winit::keyboard::KeyCode;
 
+use clock::DrivenClock;
 use platform::{PointerLog, RecordingPlatform};
 
 /// A client's dispatch, driven with no window and no adapter.
@@ -61,6 +66,14 @@ use platform::{PointerLog, RecordingPlatform};
 pub struct InputHarness {
     session: Session,
     log: PointerLog,
+    /// What this client's frame path reads, moved by hand before every frame.
+    ///
+    /// **The harness owns the clock, and the client owns what a reading buys.**
+    /// A frame here costs the elapsed time the scenario names, and how many ticks
+    /// that is worth is the client's answer travelling back out — a harness that
+    /// worked it out and asked for that many ticks would be agreeing with itself
+    /// about the very conversion these scenarios are written to watch.
+    clock: DrivenClock,
 }
 
 impl InputHarness {
@@ -75,6 +88,7 @@ impl InputHarness {
         Self {
             session: Session::new(Box::new(platform)),
             log,
+            clock: DrivenClock::default(),
         }
     }
 
@@ -99,6 +113,7 @@ impl InputHarness {
         Self {
             session: Session::bound(Box::new(platform), bindings),
             log,
+            clock: DrivenClock::default(),
         }
     }
 
@@ -332,14 +347,62 @@ impl InputHarness {
         self.session.overlay_readout()
     }
 
-    /// One tick step, and whatever it left published.
+    /// The frame rate this client's overlay is reporting, and nothing else it
+    /// publishes.
     ///
-    /// `None` when no world has been started: a tick step with nothing to
-    /// advance publishes nothing, which is a state the client is genuinely in
-    /// for the first frames of every run.
+    /// **A scalar rather than the readout, because of a guard next door.**
+    /// `tests/overlay_over_content.rs` refuses to let any suite that can record a
+    /// frame of this product name `OverlayReadout` — rasterised glyphs must not
+    /// reach a committed golden, and four files are exempt from that. A scenario
+    /// whose whole question is "does the rate on screen agree with the time the
+    /// world spent" needs one number rather than a readout, and taking it here
+    /// rather than there is what keeps the exemption list at four.
+    ///
+    /// Forwarded and never assembled, for the reason every other method here is
+    /// one call: what the overlay reports is the client's answer, and a harness
+    /// that worked the rate out from the intervals it had handed over would agree
+    /// with itself while the client reported nothing at all.
+    #[must_use]
+    pub fn overlay_frame_rate(&self) -> Option<f64> {
+        self.session.overlay_readout().map(|shown| shown.frame_rate)
+    }
+
+    /// One frame that took `took`, and both halves of what the client made of it:
+    /// what an action any of its ticks carried did to the world, and whatever the
+    /// simulation published.
+    ///
+    /// **This is the only way anything here advances the world**, and it hands
+    /// over elapsed time rather than a number of ticks. How many ticks a frame
+    /// buys is the whole question this harness exists to let a scenario ask, so a
+    /// harness that answered it would be answering itself.
+    pub fn frame(&mut self, took: Duration) -> (Option<EditReport>, Option<Arc<SimSnapshot>>) {
+        self.clock.move_on(took);
+        let edited = self.session.advance_frame(&self.clock);
+        (edited, self.session.latest())
+    }
+
+    /// What `frames` frames of `took` each leave published, in order.
+    ///
+    /// Shorter than `frames` exactly when some of them published nothing, so a
+    /// caller that expected a snapshot per frame can see that it did not get one
+    /// rather than reading a repeat of the last.
+    pub fn frames(&mut self, frames: u32, took: Duration) -> Vec<Arc<SimSnapshot>> {
+        (0..frames).filter_map(|_| self.frame(took).1).collect()
+    }
+
+    /// One frame that took exactly one tick quantum, and whatever it left
+    /// published.
+    ///
+    /// The common case: a scenario about what a key does wants one tick's worth
+    /// of motion and does not care how the time arrived. It is spelled as the
+    /// quantum rather than as a tick because a tick is not something this side of
+    /// the seam can ask for any more.
+    ///
+    /// `None` when no world has been started: a tick with nothing to advance
+    /// publishes nothing, which is a state the client is genuinely in for the
+    /// first frames of every run.
     pub fn tick(&mut self) -> Option<Arc<SimSnapshot>> {
-        self.session.tick();
-        self.session.latest()
+        self.frame(TICK_QUANTUM).1
     }
 
     /// What `ticks` tick steps publish, in order.
@@ -362,7 +425,7 @@ impl InputHarness {
     /// this harness worked out: what a click became is exactly the question the
     /// scenarios ask, so a harness that resolved it would answer itself.
     pub fn edit(&mut self) -> Option<EditReport> {
-        self.session.tick()
+        self.frame(TICK_QUANTUM).0
     }
 
     /// What `ticks` tick steps report, in the order they reported it.
@@ -383,7 +446,7 @@ impl InputHarness {
     /// either — asking for both would take two tick steps and compare a run
     /// against a different run. This is one step, reported whole.
     pub fn step(&mut self) -> (Option<EditReport>, Option<Arc<SimSnapshot>>) {
-        (self.session.tick(), self.session.latest())
+        self.frame(TICK_QUANTUM)
     }
 
     /// The captures the platform was asked for, in order.

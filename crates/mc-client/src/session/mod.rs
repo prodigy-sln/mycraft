@@ -27,9 +27,14 @@
 //! mouse vocabulary this file decides in is `vocabulary`'s**, for the opposite
 //! reason: a vocabulary is not a decision, and it needs nothing this type owns.
 
+mod pacing;
+mod pointer;
+mod quit;
 pub mod reload;
 mod vocabulary;
 
+pub use pointer::{PointerAsk, PointerPlatform};
+pub use quit::ending_after_saving;
 pub use vocabulary::{KeyKind, MouseButtonKind};
 
 use std::fmt;
@@ -37,10 +42,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use mc_core::id::BlockName;
-use mc_render::overlay::clock::OverlayClock;
 use mc_render::overlay::{DebugOverlay, OverlayReadout};
+use mc_render::time::clock::FrameClock;
 use mc_render::window::{
-    CaptureState, Ending, accepts_pointer_motion, capture_after_click, capture_after_escape,
+    CaptureState, accepts_pointer_motion, capture_after_click, capture_after_escape,
     first_capture_attempt, next_capture_attempt,
 };
 use mc_sim::action::{ActionIntent, EditReport, TickIntent};
@@ -50,33 +55,7 @@ use mc_sim::world::RemeshWork;
 use mc_world::persistence::SaveError;
 
 use crate::bindings::BoundAction;
-
-/// What the platform can be asked to do with the pointer.
-///
-/// One attempt at a time, deliberately: a port that took a capture and answered
-/// with the one it settled on would be walking the ladder, and the ladder is the
-/// decision this trait exists to keep out of the platform.
-pub trait PointerPlatform {
-    /// Asks for `capture` and reports whether the platform granted it.
-    ///
-    /// Never called with [`CaptureState::Uncaptured`] — that is the bottom of
-    /// the ladder, which is a state rather than something to ask a window for.
-    fn grab(&mut self, capture: CaptureState) -> bool;
-
-    /// Gives the pointer back to the desktop.
-    fn release(&mut self);
-
-    /// Shows or hides the cursor.
-    fn show_cursor(&mut self, visible: bool);
-}
-
-/// One thing a platform was asked for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PointerAsk {
-    Grab(CaptureState),
-    Release,
-    CursorVisible(bool),
-}
+use crate::session::pacing::FramePacing;
 
 /// The keys this client answers to, and what each of them asks for.
 ///
@@ -142,6 +121,15 @@ pub struct Session {
     /// visibility owned on the other side of the seam would be one no windowless
     /// test could reach.
     overlay: DebugOverlay,
+    /// How long the last frame took, and what of it is still owed to the
+    /// simulation.
+    ///
+    /// **It lives here because this is the only place a tick can be advanced
+    /// from**, and the frame path on the other side of the seam is the half no
+    /// test can construct. A pacing owned there would be a conversion between
+    /// two rates that nothing in this workspace could drive — which is exactly
+    /// how the ratio it replaces went unseen.
+    pacing: FramePacing,
     pointer: Box<dyn PointerPlatform>,
 }
 
@@ -176,6 +164,7 @@ impl Session {
             reload_report: None,
             bindings,
             overlay: DebugOverlay::default(),
+            pacing: FramePacing::default(),
             pointer,
         };
         session.hold(first_capture_attempt());
@@ -322,7 +311,15 @@ impl Session {
     /// advance.** This is the opposite of a held key, which survives until the
     /// world arrives, and it is the difference between input the player is still
     /// making and a request they made once.
-    pub fn tick(&mut self) -> Option<EditReport> {
+    ///
+    /// **Private, and that is the whole prevention for this module's own
+    /// defect.** The client used to advance one of these per rendered frame,
+    /// which made the world run at `frames_per_second / 60` times real speed —
+    /// correct by coincidence on a 60 Hz display and 2.4× too fast on a 144 Hz
+    /// one. The only advance anything outside this file can name is
+    /// [`advance_frame`](Self::advance_frame), which takes elapsed time; a
+    /// reversion to one tick per frame no longer compiles.
+    fn tick(&mut self) -> Option<EditReport> {
         let action = self.pending_action.take();
         let edited = self.advanced(action);
         // After the tick has been published, so a candidate is taken up between
@@ -412,16 +409,43 @@ impl Session {
         })
     }
 
-    /// Tells the overlay that a frame was drawn, so the next reading has a frame
-    /// time in it.
+    /// Times the frame that has just been drawn and advances the simulation by
+    /// however much of it there was, reporting what an action carried by any of
+    /// those ticks did to the world.
     ///
-    /// The clock arrives per call rather than being held here, which is what keeps
-    /// a session drivable without one: every scenario about what a key does, what
-    /// the world reaches, or what a replay ends at runs a whole session and never
-    /// names a clock, so no test of any of those waits on a scheduler. The one
-    /// caller that does have a clock is the object that draws frames.
-    pub fn record_frame_time(&mut self, clock: &impl OverlayClock) {
-        self.overlay.record_frame_time(clock);
+    /// **This is the client's whole frame door, and it takes elapsed time rather
+    /// than a number of ticks.** A frame does not buy a tick; a sixtieth of a
+    /// second does. That is what makes a walk cover the same ground per second at
+    /// 30 frames a second and at 300, and it is the one thing this door exists to
+    /// make unspellable otherwise.
+    ///
+    /// **One reading, not two.** The clock is read once and the interval it
+    /// yields goes to the overlay's ring *and* to the pacing, so the frame rate
+    /// on screen and the time the world spent are the same measurement rather
+    /// than two that could disagree.
+    ///
+    /// **At most one report, whatever the frame cost.** A tick takes the pending
+    /// action, so the ticks after the first in any one frame carry none — which
+    /// is the same reason a click that arrives during a stall digs one hole and
+    /// not fifteen.
+    ///
+    /// The clock arrives per call rather than being held here, which is what
+    /// keeps a session drivable by a clock a test owns: no scenario waits on a
+    /// scheduler, and the one caller with a system clock is the object that draws
+    /// frames.
+    ///
+    /// Deliberately not `#[must_use]` — the frame path advances the world to move
+    /// the player and ignores this, exactly as it ignores `Simulation::advance`'s
+    /// own answer.
+    pub fn advance_frame(&mut self, clock: &impl FrameClock) -> Option<EditReport> {
+        let took = self.pacing.timed(clock.now_elapsed());
+        self.overlay.record_frame(took);
+        // The whole frame's ticks before returning, and the *last* report that
+        // was one — which is at most one report, because the first of them took
+        // the pending action and the rest carry none.
+        (0..self.pacing.spend(took))
+            .filter_map(|_| self.tick())
+            .last()
     }
 
     /// Whatever the simulation published most recently, if there is one.
@@ -469,33 +493,6 @@ impl Session {
         }
         self.pointer.show_cursor(!held);
         self.capture = attempt;
-    }
-}
-
-/// The ending a run reports once whatever was being played has been saved.
-///
-/// **Only a run that ended by closing normally saves.** A device-lost run is not
-/// a clean quit, and treating it as one would let a broken frame path overwrite
-/// a good world. A failed save on a clean close becomes a failed ending naming
-/// the path and the reason; a save failure never masks an ending that was
-/// already a failure.
-///
-/// It lives here rather than in the simulation because it answers in the
-/// window's own vocabulary, and the simulation may not name the renderer.
-#[must_use]
-pub fn ending_after_saving(session: Option<&Session>, ending: Ending, save: &Path) -> Ending {
-    if !matches!(ending, Ending::Closed) {
-        return ending;
-    }
-    match session.map_or(Ok(()), |playing| playing.save(save)) {
-        Ok(()) => ending,
-        Err(refused) => Ending::failed_under(
-            &format!(
-                "the world could not be saved to {path}",
-                path = save.display()
-            ),
-            &refused,
-        ),
     }
 }
 

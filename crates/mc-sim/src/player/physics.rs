@@ -13,6 +13,8 @@
 //! which is what lets the same intents replay to the same state on a machine of
 //! any speed (`crates/mc-sim/CLAUDE.md`).
 
+use std::time::Duration;
+
 use glam::{Vec2, Vec3};
 
 use crate::player::collide;
@@ -20,10 +22,28 @@ use crate::player::{Look, MovementIntent, PlayerState, Traversal};
 
 /// How long one tick simulates, in seconds.
 ///
-/// Declared, never measured. The frame loop still drives ticks one to one, so a
-/// faster machine runs the world faster — a stated cost rather than a hidden
-/// one, and the day a pacing accumulator arrives it feeds this same fixed step.
+/// Declared, never measured — and what a driver spends *into* it is elapsed time
+/// rather than frames. A client's frame path reads its clock once a frame and
+/// spends whole quanta of [`TICK_QUANTUM`] out of the interval, so a walk covers
+/// the same ground per second whatever rate the frames arrive at.
 const TICK_DURATION: f32 = 1.0 / 60.0;
+
+/// The same quantum, in the units a frame path measures elapsed time in.
+///
+/// **One number, spelled twice, and the sibling test is what keeps them one.**
+/// The physics needs seconds as an `f32` to multiply a velocity by; a driver
+/// needs a [`Duration`] to subtract from an interval, because a driver
+/// accumulates and `f32` seconds accumulated over an hour lose the resolution a
+/// tick is measured at. Deriving either from the other at compile time is not
+/// available — neither `Duration::from_secs_f32` nor `Duration::as_secs_f32` is
+/// `const` — so they are declared side by side and asserted equal to within a
+/// nanosecond by `physics_test.rs`.
+///
+/// A sixtieth of a second is 16 666 666.67 nanoseconds, so this is the nearest
+/// nanosecond and sits a third of one above the exact quantum. Over a full hour
+/// of play that is 0.07 ms of simulated time — five orders of magnitude below one
+/// tick.
+pub const TICK_QUANTUM: Duration = Duration::from_nanos(16_666_667);
 
 /// How fast a walk carries the player, in blocks per second.
 const WALK_SPEED: f32 = 4.5;
@@ -264,3 +284,7 @@ fn settled(velocity: Vec3, on_ground: bool, stopped_vertically: bool) -> Vec3 {
         velocity
     }
 }
+
+#[cfg(test)]
+#[path = "physics_test.rs"]
+mod tests;

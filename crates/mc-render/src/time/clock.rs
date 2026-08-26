@@ -7,9 +7,25 @@
 //! first use for that reason alone — the "no abstraction before three uses" rule
 //! governs reuse-driven generalization and explicitly exempts boundaries like
 //! this one. What it buys here is concrete rather than architectural: a frame
-//! rate no test can drive is a readout no test can grade, so a suite that wanted
-//! to know what ten frames twenty milliseconds apart read would otherwise have
-//! to sleep for two hundred milliseconds and hope the scheduler agreed.
+//! rate no test can drive is a readout no test can grade, and a *pacing* no test
+//! can drive is a movement speed no test can grade — which is the defect this
+//! port was renamed for. A suite that wanted to know where a walk ends after a
+//! second of frames arriving 144 to the second would otherwise have to wait a
+//! second and hope the scheduler agreed.
+//!
+//! # It is the frame's clock, not the overlay's
+//!
+//! It used to be named for the debug overlay, which was its first consumer and
+//! for a while its only one. What it actually answers is how long the last frame
+//! took, and *that* is what paces the simulation: the client spends whole tick
+//! quanta out of the interval this port reports, so a walk covers the same ground
+//! per second of elapsed time whatever rate the frames arrive at. A port is named
+//! for its capability (`standards/global/code-quality.md` §3), and a reader
+//! asking "what paces the simulation?" would not have looked under an overlay.
+//!
+//! It sits in `time/` rather than under `overlay/` for the same reason: the
+//! renderer does not simulate, and a port carrying pacing must not read as
+//! belonging to the subsystem that merely displays a number derived from it.
 //!
 //! # The port and the adapter share one file, on purpose
 //!
@@ -33,7 +49,7 @@
 use std::time::{Duration, Instant};
 
 /// How much time has passed, as whoever is being asked measures it.
-pub trait OverlayClock {
+pub trait FrameClock {
     /// How long since the moment this clock measures from.
     ///
     /// Monotonic: a later call never answers with less than an earlier one, and
@@ -47,11 +63,11 @@ pub trait OverlayClock {
 /// [`Instant`] rather than [`std::time::SystemTime`]: a frame time is an
 /// interval, and a clock a user can set backwards would report a negative one.
 #[derive(Debug)]
-pub struct SystemOverlayClock {
+pub struct SystemFrameClock {
     started: Instant,
 }
 
-impl SystemOverlayClock {
+impl SystemFrameClock {
     /// A clock measuring from now.
     ///
     /// Named for what it does rather than `new`, because the moment it captures
@@ -65,7 +81,7 @@ impl SystemOverlayClock {
     }
 }
 
-impl OverlayClock for SystemOverlayClock {
+impl FrameClock for SystemFrameClock {
     fn now_elapsed(&self) -> Duration {
         self.started.elapsed()
     }

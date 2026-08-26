@@ -22,18 +22,24 @@
 //!
 //! # The frame readings do not wait for the world
 //!
-//! They come from the overlay's own clock rather than from the simulation, so
-//! they are exactly as available before the world lands as after — which is the
-//! point of an instrument for diagnosing a client that is taking too long to
-//! start.
+//! They are the interval the frame path measured rather than anything the
+//! simulation published, so they are exactly as available before the world lands
+//! as after — which is the point of an instrument for diagnosing a client that is
+//! taking too long to start.
+//!
+//! # The interval arrives measured, and that is what keeps the two readings honest
+//!
+//! This module holds no clock and reads none. The client's frame path reads one
+//! once a frame, and hands the same interval here *and* to the pacing that spends
+//! it into simulation ticks. A second reading taken here could let the rate on
+//! screen say 144 while the world spent a different amount of time; there is no
+//! second reading to take.
 
 use std::collections::VecDeque;
 use std::time::Duration;
 
 use glam::Vec3;
 use mc_world::column::{ColumnCoordinate, column_containing};
-
-use crate::overlay::clock::OverlayClock;
 
 /// How many milliseconds a second holds.
 const MILLIS_PER_SECOND: f64 = 1000.0;
@@ -79,17 +85,12 @@ pub struct DebugOverlay {
     visible: bool,
     /// How long each of the last frames took, bounded at
     /// [`FRAMES_REMEMBERED`] — which is where the reason for bounding it is.
-    frames: VecDeque<Duration>,
-    /// What the clock read when the previous frame was timed, or nothing before
-    /// any frame has been.
     ///
-    /// The port answers with time elapsed rather than with an interval, so the
-    /// interval is the difference between two readings and something has to hold
-    /// the earlier one. **One reading is not a frame time**, which is why the
-    /// first one contributes nothing to the ring above: the interval it would
-    /// have to be measured against is the moment the clock started, which is not
-    /// when the previous frame was drawn.
-    previous: Option<Duration>,
+    /// **Every entry is an interval somebody else measured.** Holding the
+    /// previous clock reading here is what this type used to do, and it is what
+    /// made the overlay the thing that knew when the last frame was — a fact the
+    /// pacing needs too, and one that must not exist twice.
+    frames: VecDeque<Duration>,
 }
 
 impl DebugOverlay {
@@ -109,18 +110,14 @@ impl DebugOverlay {
         self.visible = !self.visible;
     }
 
-    /// Times the frame that has just been drawn, by asking `clock` how long it
-    /// has been since the previous one.
+    /// Remembers that the frame just drawn `took` this long.
     ///
-    /// A subtraction that saturates rather than one that could go negative: the
-    /// port's answer is monotonic, so a later reading below an earlier one is a
-    /// broken clock rather than a frame that took less than no time, and a
-    /// zero-length frame is the closest true thing to say about it.
-    pub fn record_frame_time(&mut self, clock: &impl OverlayClock) {
-        let reading = clock.now_elapsed();
-        if let Some(previous) = self.previous.replace(reading) {
-            self.remember(reading.saturating_sub(previous));
-        }
+    /// The interval arrives measured. What produced it is the frame path's one
+    /// reading of the clock, which is the same interval the simulation is paced
+    /// from — so there is nothing here that could disagree with the world about
+    /// how long a second is.
+    pub fn record_frame(&mut self, took: Duration) {
+        self.remember(took);
     }
 
     /// Adds `took` to the ring, dropping the oldest frame time once it is full.

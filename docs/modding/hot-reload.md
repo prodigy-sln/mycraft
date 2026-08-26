@@ -105,6 +105,19 @@ serving** and one line is printed on the terminal you started the game from. Fix
 file, save again, and the next candidate is taken up. Nothing accumulates: a refused
 candidate leaves nothing behind.
 
+**You get the verdict whatever your frame rate.** Whether the answer is a swap or a
+refusal, it reaches you on a machine drawing 200 frames a second and on one struggling
+at 15. That is worth stating because it was briefly untrue: for one build the game
+advanced the world once per drawn frame, and when that was fixed so a slow frame
+advances several ticks at once, a verdict produced by one of those ticks could be
+overwritten by the quiet ticks after it before anything showed it to you. On a slow
+machine your edit would go live with the screen never catching up, or be refused with
+nothing printed at all — and the refusal for a content root that cannot be watched is
+said **once**, so that one was lost outright rather than repeated. If you ever saved a
+file, saw nothing happen and could not tell whether the game had read it, that build is
+the likely reason. It is fixed: a tick with nothing to say now leaves the last answer
+standing instead of erasing it.
+
 ## What survives a reload
 
 Everything that is not a declaration:

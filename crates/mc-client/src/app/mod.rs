@@ -1,24 +1,27 @@
 //! The frame path: acquire a texture from the surface, record one frame into it,
-//! present it, advance one tick.
+//! present it, and advance the world by however long the frame took.
 //!
 //! **One frame is one call.** The world, the HUD content declared over it, and
 //! the debug overlay over that, are ordered by the renderer and not here — so a
 //! frame test that composes through that same call is exercising the path the
 //! window takes, rather than a second one built to resemble it.
 //!
-//! **One tick per rendered frame, never elapsed time**, which is what makes the
-//! replay the same run on a machine that draws it at 300 frames a second and on
-//! one that manages 30.
+//! **A frame advances the world by the time it took, never by one tick.** This
+//! file used to do the opposite, and it is what made a walk cover 4.5 blocks a
+//! second on a 60 Hz display and 10.8 on a 144 Hz one: a tick is a declared
+//! sixtieth of a second, and delivering one per presented frame runs the world at
+//! the display's rate divided by sixty. What is handed over below is an elapsed
+//! reading; how many ticks it buys is the core's answer, and there is no longer
+//! anything here that could name a per-tick advance.
 //!
-//! **The one wall clock this client reads is the debug overlay's, and it is read
-//! nowhere else.** That is a narrower claim than the one this file used to make,
-//! and the narrowing is deliberate rather than a concession: an overlay reporting
-//! a frame rate has to read a clock, so the property worth having is not that no
-//! clock exists but that no clock reaches the tick, the snapshot or the capture
-//! path. Nothing above spends it, nothing derives an intent from it, and the
-//! reading it produces travels one way — into a readout that is painted and
-//! discarded. A confinement scan holds that mechanically, with the adapter's own
-//! file as its only exemption.
+//! **The one wall clock this client reads is handed to the core once a frame, and
+//! is read nowhere else.** That is a narrower claim than the one this file used to
+//! make, and the narrowing is deliberate rather than a concession: pacing a frame
+//! needs elapsed time, so the property worth having is not that no clock exists
+//! but that exactly one reading a frame is taken and everything derived from it
+//! agrees. The rate the overlay reports and the time the simulation spent are that
+//! same reading. A confinement scan holds the clock to one file mechanically, with
+//! the adapter's own as its only exemption.
 //!
 //! Every decision below is somebody else's. Whether a size is drawable, whether a
 //! failed acquire is recovered from or fatal, which surface format is configured
@@ -35,13 +38,13 @@ use mc_render::camera::{camera_view, waiting_view};
 use mc_render::geometry::scene::SceneGeometry;
 use mc_render::gpu::{FrameError, FrameRenderer, FrameSnapshot, RecordTarget, TerrainTextures};
 use mc_render::hud::{HudFrame, held_swatch};
-use mc_render::overlay::clock::SystemOverlayClock;
 use mc_render::pass::TerrainPassConfig;
 use mc_render::snapshot::{ScenePhase, TerrainSnapshot};
 use mc_render::surface::{
     FrameAction, ResizeAction, SurfaceErrorKind, SurfaceSize, resize_action, surface_error_action,
 };
 use mc_render::texture::sampler::TERRAIN_SAMPLER;
+use mc_render::time::clock::SystemFrameClock;
 use mc_render::window::{Ending, rendered};
 use mc_sim::reload::watching_shipped_content;
 
@@ -95,11 +98,16 @@ pub struct App {
     /// opened.
     ///
     /// **Owned here rather than by the session**, which is what keeps a session
-    /// drivable with no clock at all: every scenario about what a key does or
-    /// where a replay ends runs one and never names a clock, so none of them waits
-    /// on a scheduler or depends on how fast the machine ran them. Reading it is
-    /// the frame path's business, and the frame path is here.
-    overlay_clock: SystemOverlayClock,
+    /// drivable by a clock a test owns: every scenario about what a key does or
+    /// where a walk ends hands over its own elapsed readings, so none of them
+    /// waits on a scheduler or depends on how fast the machine ran them. Reading
+    /// it is the frame path's business, and the frame path is here.
+    ///
+    /// It measures from the moment this was built, so the first frame's interval
+    /// is the time the client took to get from a configured surface to a presented
+    /// frame — which is genuinely what that frame cost, and is bounded by the
+    /// core's catch-up limit like any other stall.
+    frame_clock: SystemFrameClock,
     size: SurfaceSize,
     /// The worker that turns an edit into a scene, once there is a world to
     /// edit. `None` until the preparation lands, exactly as the simulation is.
@@ -159,7 +167,7 @@ impl App {
             phase: ScenePhase::Preparing,
             nothing: empty_scene(),
             hud: empty_hud()?,
-            overlay_clock: SystemOverlayClock::started_now(),
+            frame_clock: SystemFrameClock::started_now(),
             size,
             remesher: None,
             reported: None,
@@ -269,16 +277,18 @@ impl App {
         let view = acquired
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        // Here rather than in `redraw`, because this is the first point at which a
-        // frame is certainly being drawn: every skip, reconfigure and fatal path
-        // above has already returned. A frame time accumulated for frames nobody
-        // drew would be the one reading on this overlay that is not about frames.
-        // Before the draw, so the readout it asks for is this frame's.
-        session.record_frame_time(&self.overlay_clock);
         self.draw(&view, session);
         self.gpu.queue.present(acquired);
-        session.tick();
-        // After the tick, because the tick is what crosses the reload boundary.
+        // Here rather than in `redraw`, because this is the first point at which a
+        // frame is certainly drawn: every skip, reconfigure and fatal path above
+        // has already returned, and elapsed time attributed to a frame nobody drew
+        // would advance the world for a frame that never happened.
+        //
+        // After the present, so the interval measured spans a whole frame's work.
+        // The readout drawn above is therefore the previous frame's reading, which
+        // is what a mean over sixty frames is anyway.
+        session.advance_frame(&self.frame_clock);
+        // After the ticks, because a tick is what crosses the reload boundary.
         if let Err(refused) = self.take_up_reloaded_content(session) {
             return Some(Ending::failed_under(
                 "the reloaded content could not be drawn",

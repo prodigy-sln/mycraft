@@ -89,8 +89,8 @@ impl Session {
     /// displaying and placing the block it held before, with the simulation
     /// perfectly correct about which one it should be.
     ///
-    /// `None` when there is no world yet, exactly as [`tick`](Session::tick) has
-    /// nothing to advance then.
+    /// `None` when there is no world yet, exactly as a tick step has nothing to
+    /// advance then.
     ///
     /// # Errors
     ///
@@ -128,23 +128,34 @@ impl Session {
     /// so a candidate is taken up between two ticks and never during one. There
     /// is nothing to do while the world is still generating: a swap *is* a tick
     /// boundary, and there is no boundary until a simulation exists.
+    ///
+    /// **A boundary with nothing to say leaves the last answer standing, and that
+    /// is load-bearing rather than tidy.** A frame spends as many ticks as its
+    /// elapsed time buys, and the tick that answers is followed by ticks that
+    /// answer `Nothing` — so writing `None` here would destroy an acceptance
+    /// before [`take_reload_report`](Session::take_reload_report) ran, on any
+    /// machine drawing slower than two ticks a frame. Nothing goes stale by being
+    /// kept: the frame path takes the report in every frame that advanced a tick
+    /// at all, so what stands here was produced by the frame reading it.
     pub(super) fn cross_reload_boundary(&mut self) {
         let Some((reload, simulation)) = self.reload.as_mut().zip(self.simulation.as_mut()) else {
             return;
         };
-        self.reload_report = match reload.at_tick_boundary(simulation) {
-            ReloadStep::Nothing => None,
-            ReloadStep::Refused(refused) => Some(ReloadReport::Refused(rendered(&refused))),
+        match reload.at_tick_boundary(simulation) {
+            ReloadStep::Nothing => {}
+            ReloadStep::Refused(refused) => {
+                self.reload_report = Some(ReloadReport::Refused(rendered(&refused)));
+            }
             ReloadStep::Accepted(accepted) => {
                 self.holding = Some(accepted.holding.clone());
                 let content = simulation.content();
-                Some(ReloadReport::Accepted {
+                self.reload_report = Some(ReloadReport::Accepted {
                     layers: Unuploaded::of(ContentView::of(&content.resolved).into_resolution()),
                     clearing: accepted.clearing,
                     content,
-                })
+                });
             }
-        };
+        }
     }
 
     /// Collects whatever the re-mesh worker has finished, handing a discarded

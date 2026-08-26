@@ -19,8 +19,8 @@
 //!   column on the other side of the origin, one whole column away from where
 //!   the player is standing.
 //!
-//! A frame time is the interval between two readings of the overlay's clock, and
-//! a frame rate is how many such intervals fit in a second:
+//! A frame time is an interval the frame path measured, and a frame rate is how
+//! many such intervals fit in a second:
 //!
 //! - ten frames [`ONE_FIFTIETH`] apart read a mean interval of **20 ms**, and
 //!   `1000 / 20` = **50** frames a second.
@@ -29,16 +29,16 @@
 //!
 //! Both expectations are computed from the driven interval in this file rather
 //! than written down, so a run of the code under test cannot be where they came
-//! from. The mean is the interval whatever the ring's length is and whether or
-//! not the first reading contributes an interval of its own, so neither number
-//! moves with a decision this suite is not about.
+//! from. The mean is the interval whatever the ring's length is, so neither
+//! number moves with a decision this suite is not about.
 //!
-//! # The clock is driven, not waited on
+//! # The intervals are handed over, not waited for
 //!
-//! [`DrivenClock`] is a [`Duration`] this file owns, advanced by hand. It names
-//! no system clock at all — a fake that had to read one would be measuring the
-//! machine this suite runs on rather than the arithmetic under test, and would be
-//! the flaky test that discipline exists to prevent.
+//! Nothing here reads a clock, because the overlay no longer holds one: the
+//! frame path measures an interval once and hands the same one here and to the
+//! pacing that spends it. A suite that had to read a clock would be measuring the
+//! machine it runs on rather than the arithmetic under test, and would be the
+//! flaky test that discipline exists to prevent.
 //!
 //! # One limitation of the position fixture, stated because a green run cannot
 //!
@@ -50,37 +50,11 @@
 //! them do. Recorded rather than closed: the fixture is the scenario's, and
 //! widening it would be inventing a scenario inside a phase.
 
-use std::cell::Cell;
 use std::time::Duration;
 
 use glam::Vec3;
 
-use crate::overlay::clock::OverlayClock;
-
 use super::{DebugOverlay, readout_lines};
-
-/// A clock the caller moves.
-///
-/// Interior mutability because the port answers through `&self` — a clock is
-/// something you read, not something reading changes — while a test has to be
-/// able to move it between two readings.
-#[derive(Debug, Default)]
-struct DrivenClock {
-    elapsed: Cell<Duration>,
-}
-
-impl DrivenClock {
-    /// Moves this clock forward by `by`.
-    fn advance(&self, by: Duration) {
-        self.elapsed.set(self.elapsed.get() + by);
-    }
-}
-
-impl OverlayClock for DrivenClock {
-    fn now_elapsed(&self) -> Duration {
-        self.elapsed.get()
-    }
-}
 
 /// How many milliseconds a second holds, named rather than spelled so the two
 /// derivations below read as the arithmetic they are.
@@ -127,17 +101,14 @@ const COLUMN_LABEL: &str = "column  ";
 const FRAME_RATE_LABEL: &str = "frame rate  ";
 const FRAME_TIME_LABEL: &str = "frame time  ";
 
-/// An overlay that has drawn `frames` frames, each `apart` after the one before.
+/// An overlay that has drawn `frames` frames, each of which took `apart`.
 ///
-/// The clock starts at zero and is advanced before every reading, so what the
-/// overlay is handed is exactly `frames` readings spaced by `apart` and nothing
-/// else — no wall clock, no scheduler, and no sleeping.
+/// What the overlay is handed is exactly `frames` intervals of `apart` and
+/// nothing else — no wall clock, no scheduler, and no sleeping.
 fn drawing(frames: u32, apart: Duration) -> DebugOverlay {
-    let clock = DrivenClock::default();
     let mut overlay = DebugOverlay::default();
     for _ in 0..frames {
-        clock.advance(apart);
-        overlay.record_frame_time(&clock);
+        overlay.record_frame(apart);
     }
     overlay
 }

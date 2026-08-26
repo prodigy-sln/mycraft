@@ -17,6 +17,7 @@ pub mod pass;
 pub mod snapshot;
 pub mod surface;
 pub mod texture;
+pub mod time;
 pub mod window;
 
 #[cfg(feature = "gpu")]

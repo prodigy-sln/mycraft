@@ -18,7 +18,7 @@ use crate::camera::CameraPose;
 
 pub use input::{InputState, PlayerAction};
 pub use look::Look;
-pub use physics::advance_player;
+pub use physics::{TICK_QUANTUM, advance_player};
 
 /// Where the player's own box stands, for the one caller outside the physics
 /// that needs to know: a placement refuses a cell the player is standing in.

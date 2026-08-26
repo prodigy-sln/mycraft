@@ -1240,10 +1240,15 @@ The harness supplies the capture path only. The scene-side half of golden testin
 seed, a declared sequence of inputs and a fixed tick count, which together are what make a real
 frame's inputs byte-identical every run — belongs to the crate that owns a world and a player, and
 lives in the terrain replay: a seeded 4×4-column world, a 120-tick **intent script** read by tick
-index, a spawn derived from that world, and **one tick per rendered frame, once the world is ready,
-with no wall clock anywhere in the path**. Advancing by frames rather than by elapsed time removes
-the nondeterminism instead of isolating it; the cost is that the walk's speed varies with refresh
-rate, which a scripted demo can afford.
+index, a spawn derived from that world, and **a declared number of ticks driven by hand, with no wall
+clock anywhere in the path**. The capture harness advances the replay itself rather than drawing
+frames, so a golden's inputs are byte-identical every run whatever the machine does.
+
+The *client* no longer advances one tick per rendered frame — that was PRO-971's defect, and the
+frame path now spends elapsed time into ticks (`architecture.md` §"Pacing the frame"). The two are
+reconciled by where the clock is: it is the client's, injected through a port, and it does not exist
+on the capture path at all. `TICK_DURATION` keeps its meaning unchanged, which is what the pacing
+feeds.
 
 The camera used to be a free function of the tick index — an orbit with nowhere to accumulate into,
 so tick 60 could be asked for directly. It is now the camera the simulation *publishes*, derived
@@ -4109,3 +4114,47 @@ count is the suite and not the prefix a fail-fast run stopped at.
   **275 of 275 green**: the count falls back to 1, the scan calls the client well wired, and the
   const idiom has been abandoned. rustfmt cannot reach this and no assertion can. It is recorded
   rather than papered over, because it is the one hole here that has no instrument at all.
+
+### A sweep that asks whether a consumer is correctly paced does not ask what writes what it reads
+
+**This is the most transferable thing the pacing fix produced, and it is a rule about sweeps rather
+than about clocks.** Changing how often something runs is never a local change: it changes the
+*ratio* between a producer and every consumer downstream of it. The sibling sweep that accompanied
+that fix surveyed `take_up_reloaded_content` — the consumer — asked whether it was correctly paced,
+found that it was, and closed. It never asked the other question, and the other question is where
+the defect was: **what writes the field this consumer reads, and how often does that now happen?**
+`cross_reload_boundary` wrote the reload report unconditionally, mapping "nothing changed" to
+`None`. Correct while a frame was one tick. Destructive the moment a frame was two, because the
+tick that answered was followed by ticks that answered nothing, and each of those cleared the
+answer.
+
+The actionable form, for any change to a cadence:
+
+> **Enumerate every effect the newly-repeated code reaches and classify each one as idempotent
+> under repetition or not — the whole list, written down, not the conclusion.** A reader can tell
+> a complete audit from a lucky one only by the list. `architecture.md` §"Pacing the frame" carries
+> the table that audit produced: twelve of its thirteen rows were already safe, and the thirteenth
+> shipped past a validation pass that had been reading the right file.
+
+Two properties of that defect are worth keeping, because they are what let it survive:
+
+- **The implement phase reasoned about this exact hazard correctly for one of the two things a tick
+  emits and did not carry the reasoning to the other.** `advance_frame`'s own doc comment argues
+  that collapsing edit reports with `.last()` is lossless and says nothing about the reload report
+  four lines away. From the inside, an unsystematic audit looks exactly like a systematic one that
+  happened to start somewhere sensible.
+- **No scenario could have caught it, because every one of them drove a one-tick frame.** A regime
+  change needs a fixture in the new regime.
+  `crates/mc-client/tests/reload_survives_a_multi_tick_frame.rs` holds both producer arms through a
+  three-tick frame, and it is the only thing in the suite that reddens when the repair is reverted.
+
+**That fixture's own bounds are the same trap one level in.** It sleeps out the window an attempt
+may take, reads with a single multi-tick frame, then crosses ordinary boundaries looking for a
+straggler. Its verdict is enumerated — the multi-tick frame saw it; a later boundary saw it, so the
+build was still running and the reading says nothing either way; or nobody saw it — and that third
+arm *is the defect's own name*. So a straggler window merely as long as an attempt may take turns a
+slow machine into a report of the very defect the fixture exists to deny, silently and under the
+good arm's opposite. It is denominated in the bound a run *expecting* an attempt is given, four
+times the attempt's own, for that reason and no other. `reload_watch/runs.rs` states the rule that a
+run's window must exceed what an attempt may take; a constant that violates a rule written six lines
+above it is what a reviewer, not a suite, is for.

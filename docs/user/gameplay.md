@@ -250,6 +250,16 @@ part of the HUD accepts a click.
 - A jump clears a one-block rise but not a two-block one — there is no automatic step-up yet, so a
   two-block ledge has to be jumped onto directly or walked around.
 - Falling speeds up the longer you fall, up to a maximum speed, same as it would look intuitively.
+- **Your speed is the same whatever your monitor is.** Walking, jumping and falling are measured in
+  seconds, not in frames, so a 144 Hz or 240 Hz display shows the same motion more smoothly rather
+  than faster, and a machine struggling at 20 frames a second runs the world at the same speed —
+  jerkier, but not in slow motion. (This was not always true. A build shipped in which the world ran
+  at your refresh rate divided by 60, so a 144 Hz monitor made you move nearly two and a half times
+  too fast; a player described it as warping around with super speed. If you played that build, this
+  is what changed.)
+- A very long freeze — a laptop lid closed, the game paused under a debugger — does not get replayed
+  when you come back. At most a quarter of a second of the missed time is caught up on; the rest is
+  simply gone, which is the right answer, because you were not playing.
 - Looking straight up or straight down is capped a few degrees short of vertical, so the view can't
   flip upside down.
 - The generated terrain is finite and there is nothing beneath it. Walk off the edge and you fall,

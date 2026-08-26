@@ -16,12 +16,17 @@ everything authoritative. `mc-render` reads what it publishes and never the othe
   type free of interior mutability: a `Mutex` or `AtomicU32` field reopens that hole silently, with
   every existing test green. Why the guard lives in the *shape* of these types, and which test
   pins it by compiling, is documented at that test in `tests/publication.rs`.
-- **No wall clock.** The replay advances one tick per rendered frame, once the world is ready —
-  the spawn is derived from the world, so there is no simulation to tick while the preparation
-  worker is still generating one, and the frames before it lands draw the clear colour and advance
-  nothing. Nothing here reads a clock,
-  and nothing may start to without a recorded decision — a wall clock is the easiest way to make a
+- **No wall clock.** A tick is a declared quantum of simulated time and nothing here reads a clock;
+  nothing may start to without a recorded decision, because a wall clock is the easiest way to make a
   golden frame unreproducible.
+
+  **What drives the ticks is the driver's business, and it is no longer one per frame.** The client
+  reads elapsed time once a frame and spends whole `TICK_QUANTUM`s out of it, bounded at fifteen
+  (`docs/technical/architecture.md` §"Pacing the frame"); the capture harness advances by hand.
+  Both feed this same fixed step, which is exactly what `physics.rs` anticipated when it recorded
+  the ratio as a stated cost. The world is still only advanced once it is ready — the spawn is
+  derived from the world, so there is no simulation to tick while the preparation worker is still
+  generating one, and the frames before it lands draw the clear colour and change nothing.
 
   **Hot reload needed one and the rule held. This is that recorded decision.** A
   filesystem watcher has to wait out a settling window — an editor writes a file in

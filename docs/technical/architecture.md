@@ -419,19 +419,28 @@ root and the only crate that resolves both.**
   form of it is a cloneable `Arc<ArcSwap<SimSnapshot>>` handle, deliberately
   not built while the only reader is the owner, and a two-way door precisely
   because `latest` and `SimSnapshot` did not change shape.
-- **One tick per rendered frame, once the world is ready.** The spawn is
-  derived from the world, and the world is generated on the preparation
-  worker several frames after the window opens, so there is no simulation to
-  advance until it lands. `App::present` keeps a `session.tick()` call at the
-  same statement position it always advanced a tick from; what moved is the
-  call's *body* — the `Option<Simulation>` guard, the drain and the advance
-  now live inside `Session::tick` (`crates/mc-client/src/session.rs`, §"The
-  client input dispatch" below), not in the frame path, so the guard is
+- **A frame advances the world by the time it took, once the world is ready.**
+  The spawn is derived from the world, and the world is generated on the
+  preparation worker several frames after the window opens, so there is no
+  simulation to advance until it lands. `App::present` calls
+  `Session::advance_frame(&clock)` once per presented frame; the
+  `Option<Simulation>` guard, the drain and the advance live inside
+  `Session`'s private per-tick step (`crates/mc-client/src/session/mod.rs`,
+  §"The client input dispatch" below), not in the frame path, so the guard is
   reachable by a test that opens no window. Before the world lands the frame
-  is the clear colour and no tick passes — a player advanced during
+  is the clear colour and no tick changes anything — a player advanced during
   preparation would spend the load falling. Pending input is drained inside
   that same guard and nowhere else, so a frame that draws nothing leaves the
   accumulated motion where it is rather than discarding it.
+
+  **This used to be one tick per rendered frame, and that was the defect
+  PRO-971 fixed.** A tick is a declared sixtieth of a second, so delivering one
+  per presented frame ran the world at `frames_per_second / 60` times real
+  speed: right by coincidence on a 60 Hz display and 2.4× fast on a 144 Hz one,
+  which a player reported as warping around with super speed. The ratio was not
+  a regression — `mc-sim` recorded it as a stated cost of a scripted replay with
+  no player in it, and it became a movement defect the moment player control
+  landed. The conversion that was missing is §"Pacing the frame" below.
 - `mc-render` defines the type it consumes, `TerrainSnapshot { tick,
   camera, scene }`, and **never names `mc-sim` in any dependency of any
   kind**. It depends on `mc-world` for the mesher's `Quad` and on
@@ -605,8 +614,9 @@ the variant that carries a refused `SpawnError` across the crate boundary. Becau
 opens, `collect_preparation` hands the constructed `Simulation` to `Session::attach_simulation` once
 the scene reaches `ScenePhase::Ready` — the phase lives in `App`, the simulation lives in `Session`,
 and the invariant that one is `Some` exactly when the other is `Ready` is held jointly by that one
-function rather than structurally by either type alone. `App::present`'s tick advances only once the
-world has landed — one tick per rendered frame, once the world is ready, not before.
+function rather than structurally by either type alone. `App::present`'s advance does something only once the
+world has landed — however many ticks the frame's elapsed time buys, once the world is ready, not
+before (§"Pacing the frame").
 
 **The spawn is derived, not declared.** The player starts three blocks above column (32, 32)'s own
 surface height, facing 225° toward the scene's landmark pillar. The shipped generator answers
@@ -1201,7 +1211,7 @@ an edge between workspace crates.
 | TOML directory reader | `mc-world/src/content/hud_toml_source.rs` | `toml` is confined to `src/content/` by `mc-world`'s own dependency-graph invariant, and this is the one file MVP 2's swap deletes. |
 | Rectangle derivation, two-pass ordering, clipping, colour decode, held-block resolution | `mc-render/src/hud/` — **outside** `src/gpu/` | Pure functions, so ADR-013 counts them. |
 | Screen-space pipeline and `hud.wgsl` | `mc-render/src/gpu/hud.rs` | Needs a device. |
-| Overlay state, readout, clock port | `mc-render/src/overlay/` — **outside** `src/gpu/` | Counted by the gate. In `mc-client` it would be invisible to coverage entirely. |
+| Overlay state and readout | `mc-render/src/overlay/` — **outside** `src/gpu/` | Counted by the gate. In `mc-client` it would be invisible to coverage entirely. |
 | egui painting | `mc-render/src/gpu/overlay.rs` | Needs a device, and is the egui adapter (ADR-017). |
 | Toggle binding, held-block reader, launch refusal | `mc-client/src/{bindings.rs, session.rs, startup.rs, app.rs}` | Composition root. |
 
@@ -1335,20 +1345,149 @@ server — binds the client identically. The overlay guarantee then becomes
 load-bearing in the way the engine-contributor story originally intended, and
 the "no content-load-failure screen" position expires with it.
 
-**The wall clock is confined, not admitted.** `mc-render/src/overlay/clock.rs`
-holds the `OverlayClock` port and its one `SystemOverlayClock` adapter, and is
+**The wall clock is confined, not admitted.** `mc-render/src/time/clock.rs`
+holds the `FrameClock` port and its one `SystemFrameClock` adapter, and is
 the single file exempted from a scan asserting that no other production
 source under `crates/mc-client/src` or `crates/mc-render/src` names `Instant`
-or `SystemTime`. That is what keeps a replay identical at 30 and 300 fps while
-the overlay still shows a frame rate, and the injectable port is what makes
-"ten frames 20 ms apart" a test at all — a frame rate no test can drive is a
-readout no test can grade.
+or `SystemTime`. The injectable port is what makes "ten frames 20 ms apart" a
+test at all — a frame rate no test can drive is a readout no test can grade,
+and a pacing no test can drive is a movement speed no test can grade.
 
-`app.rs`'s header used to claim "no wall clock is read anywhere in this
-client". One now is, so the claim was **narrowed to the true one**: no clock
-reaches the tick, the snapshot or the capture path. A stale absolute in the
-very file a scan is about would be the worst place in the workspace to leave
-one.
+**The port was named and placed for the overlay and is neither any more.** It
+was `OverlayClock` in `overlay/clock.rs` while the debug overlay was its only
+consumer; what it answers is how long a frame took, which is what paces the
+simulation, and `code-quality.md` §3 names a port for its capability. A reader
+asking "what paces the simulation?" would not have looked under an overlay, and
+`mc-render`'s own boundary rule says that crate does not simulate. The number of
+exemptions in the confinement scan is unchanged at one — that count, not the
+path, is what the guard is about — and the port and its adapter stay in one file
+because splitting them would need a second.
+
+`app/mod.rs`'s header used to claim "no wall clock is read anywhere in this
+client". One now is, so the claim was **narrowed to the true one**: exactly one
+reading is taken per frame, and everything derived from it agrees. A stale
+absolute in the very file a scan is about would be the worst place in the
+workspace to leave one.
+
+### Pacing the frame
+
+**A frame does not buy a tick; a sixtieth of a second does.** `App::present`
+hands `Session::advance_frame` the `SystemFrameClock` it has held since the
+window opened. The session reads it **once**, derives this frame's interval,
+and gives that one interval to two consumers: the overlay's ring, which shows
+it as a frame rate, and the pacing, which spends whole tick quanta out of it.
+
+**One reading, not two, is the whole argument for reusing the port.** Timing a
+frame and pacing a frame want the same interval. Taking it twice would let the
+overlay report 144 fps while the simulation spent some other amount of time —
+both readings individually right, and no assertion about either alone able to
+say so. Taking it once makes that unspellable, and it *removes* a public door
+rather than adding one: `Session::record_frame_time` is gone, and
+`DebugOverlay::record_frame` now takes a `Duration` instead of a clock.
+
+**The pacing state is not called an accumulator.** `session/mod.rs` already uses
+that word for the *input* accumulator, and two meanings four lines apart is a
+file nobody can read. What `session/pacing.rs` holds is the previous clock
+reading and the **unspent** frame time; the operation is *spending whole
+quanta*. `mc_sim::player::TICK_QUANTUM` is the quantum as a `Duration`, declared
+beside the `TICK_DURATION` seconds the physics multiplies by, with a sibling
+unit test holding the two within a nanosecond of each other — neither
+`Duration::from_secs_f32` nor `as_secs_f32` is `const`, so they cannot be
+derived from one another at compile time.
+
+**Nanoseconds, not seconds, and that is what makes the equalities exact.** The
+unspent time is a `Duration`, so nothing is lost at a frame boundary: the ticks
+a stretch of elapsed time buys are `floor(total / quantum)` however the stretch
+was cut into frames. Two runs delivering the same total therefore leave the
+player at bit-identical coordinates, which is why the regression suite asserts
+equality rather than a tolerance.
+
+**Whole quanta are spent by subtraction, never by division, and that is the one
+line here a rewrite is most likely to "simplify".** `unspent / TICK_QUANTUM`
+looks like the same answer and is not: `Duration` division goes through floating
+point, and exactly three quanta comes back as `2.999 999 999 999 999 6`, which
+floors to **two**. A frame that had bought three ticks would spend two and carry
+the third, so a tick is lost every frame — this defect at a smaller amplitude and
+far harder to notice, because the world would merely run a little slow rather
+than absurdly fast. `session/pacing.rs` loops on `checked_sub` instead, which is
+exact by construction and saturates at the bottom rather than being able to go
+negative.
+
+**A pathological gap is clamped to 15 quanta — 250 ms — before the time is
+carried, and the surplus is discarded.** The bound is derived from the floor
+rather than the ceiling: ten frames a second is the slowest rate at which a game
+is arguably being played rather than hung, that is a 100 ms interval, and a bound
+below it would make a slow machine lose simulated time systematically — this
+defect with the sign flipped and harder to notice. 2.5× headroom over that floor.
+Discarding rather than carrying is what stops a lid closed for an hour from being
+replayed on resume. **When `mc-server` grows a tick loop this does not transfer**:
+a server paces from its own clock and a client's stall must not stall the world
+(invariant 4).
+
+**The per-tick step is private, and that is the prevention.** `Session::tick` is
+private to `session/mod.rs`, so a frame path spending one tick per frame no
+longer compiles. `crates/mc-client/tests/frame_path_pacing.rs` adds a structural
+scan over `crates/mc-client/src` — enumerated verdict, positive control, vacuity
+refusal — for the day somebody makes the step public again. **That scan is the
+weakest of the guards and it is a knowingly accepted residual hole**: a scan
+reads text, and text is not execution. The one harness that runs the real frame
+path, `tests/shipped_binary.rs`, cannot be pointed here — the surface takes
+wgpu's default `Fifo` present mode, so the child's frame rate *is* the display
+refresh, and a broken client's `f · T` ticks equal a fixed one's `60 · T` exactly
+when `f` is 60. Such a test would be green on the commonest configuration there
+is, red headless for an unrelated reason, and discriminating only above 60 Hz;
+flaky by hardware reads as evidence while being none. If the client ever grows a
+player-facing reason of its own to report simulated time or position on a stream,
+that reading becomes available and this hole is worth revisiting. **The size of the
+hole is measured rather than estimated: deleting the wiring outright —
+`session.advance_frame(&self.frame_clock)` out of `App::present` — leaves 383 of
+383 tests green.** What stands in its place is three things and not one of them
+is an assertion: the private per-tick step, so the one-tick-per-frame shape does
+not compile; the scan; and the single clock reading, which makes an overlay
+disagreeing with the pacing unspellable rather than untested.
+
+**The harness drives the same door.** `InputHarness::frame(took)` moves a
+`DrivenClock` the suite owns and calls `advance_frame`; `tick()` is one frame of
+exactly one quantum. So every scenario in `crates/mc-client/tests/` now reaches
+the simulation through the door the product uses, rather than through a per-tick
+call no shipped path takes — which was the third of this defect's three detection
+holes.
+
+**A per-tick effect a frame reads once must survive the ticks after it — this is
+the rule a future change here must not break.** A tick and a frame stopped being
+the same cadence, so anything a tick *writes* and the frame path *reads once*
+now has up to fourteen further ticks between the two. Every such effect has to be
+idempotent under repetition, and the ways they are differ:
+
+| Effect | How it survives |
+|---|---|
+| The pending action | `take()`n by the first tick; the rest carry none |
+| Pointer look delta | drained by `take_intent`; the rest see zero |
+| Held keys | kept deliberately — a held key *is* asking for every tick |
+| The edit report | at most one is non-`None`, so the frame collapses with `.last()` |
+| The world edit | gated on an action, so at most one a frame |
+| The reload's `pending` / `in_flight` / `reported` | a flag set-and-cleared, a handle taken once, a dedupe that latest-wins |
+| The watch's change queue | drained per call, and `pending` accumulates what it drained |
+| The world's sections needing a re-mesh | accumulates rather than latest-wins |
+| The block the client holds | latest-wins, and a swap is the only thing that writes it |
+| The reload report | a boundary with nothing to say **leaves the last answer standing** |
+
+The last row was a Blocker found in validation, and it is the one worth reading
+twice. `cross_reload_boundary` wrote the field unconditionally, mapping "nothing
+changed" to `None` — correct while a frame was one tick and destructive the
+moment it was two. Below thirty frames a second an accepted candidate swapped the
+simulation's content while `App::take_up_reloaded_content` saw nothing: layers
+never uploaded, `Remesher::retire` never called, the HUD stale, the author never
+told — the state `app/reload.rs`'s own header declares must end the run, reached
+in silence. A refusal was lost the same way, and the unwatchable-root refusal
+doubly so, because the shipped watch reports that one *once*.
+
+**"No news" is not "the news was withdrawn."** Keeping the last answer costs
+nothing, because the frame path takes the report in every frame that advanced a
+tick at all — `App::present`'s earlier returns skip the advance and the read
+together — so what stands in the field was always produced by the frame reading
+it. `crates/mc-client/tests/reload_survives_a_multi_tick_frame.rs` holds both
+producer arms through a three-tick frame.
 
 Four smaller shapes, each load-bearing:
 
@@ -2363,7 +2502,7 @@ structure, not by convention:
 - **The client's frame path names no HUD drawing other than the one
   `record_frame` call site**, and **no production source under
   `crates/mc-client/src` or `crates/mc-render/src` names `Instant` or
-  `SystemTime`** except `mc-render/src/overlay/clock.rs`. Both scans carry a
+  `SystemTime`** except `mc-render/src/time/clock.rs`. Both scans carry a
   positive control and a reads-zero-files refusal, and both were **verified
   non-vacuous on day one**: the needles appeared in zero production sources
   before the feature landed, so neither guard was born red and tuned around a
