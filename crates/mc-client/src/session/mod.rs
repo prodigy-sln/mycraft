@@ -30,6 +30,7 @@
 mod pacing;
 mod pointer;
 mod quit;
+mod regime;
 pub mod reload;
 mod vocabulary;
 
@@ -56,6 +57,7 @@ use mc_world::persistence::SaveError;
 
 use crate::bindings::BoundAction;
 use crate::session::pacing::FramePacing;
+use crate::session::regime::PointerRegime;
 
 /// The keys this client answers to, and what each of them asks for.
 ///
@@ -75,6 +77,8 @@ pub struct Session {
     /// what was asked for — pointer motion is admitted against this, so a
     /// refused grab must not leave the client believing it has the cursor.
     capture: CaptureState,
+    /// Movements, or screen positions to be differenced. Measured, never set.
+    regime: PointerRegime,
     /// The simulation, once there is a world to place the player in. `None`
     /// while the preparation worker is still generating one — the spawn is
     /// derived from the world, so no tick can be advanced before it lands.
@@ -157,6 +161,7 @@ impl Session {
         let mut session = Self {
             input: InputState::default(),
             capture: CaptureState::Uncaptured,
+            regime: PointerRegime::default(),
             simulation: None,
             holding: None,
             pending_action: None,
@@ -200,20 +205,26 @@ impl Session {
         }
     }
 
-    /// Raw pointer motion in device counts.
+    /// Raw pointer motion: a movement on some pointers, a position on others.
     ///
     /// Admitted against the capture the platform actually granted, never the one
     /// that was asked for: a refused grab leaves the cursor the desktop's, and
     /// turning the camera with it would be the game reading input it was not
     /// given — and holding the turn ready for the player when they came back.
     ///
-    /// The narrowing to `f32` loses nothing a pointer can report, and the
-    /// accumulator is `f32` because the angle it becomes is.
+    /// **Which of the two it is gets asked here, on the path and never beside
+    /// it** (`regime`), so a sample spent settling that is worth no turn at all;
+    /// and a pointer the game does not hold leaves nothing behind to measure
+    /// from, which stops the cursor's journey across the desktop arriving as one
+    /// turn when the player clicks back in.
     pub fn on_pointer_motion(&mut self, raw_x: f64, raw_y: f64) {
         if !accepts_pointer_motion(self.capture) {
+            self.regime.forget_position();
             return;
         }
-        self.input.look(raw_x as f32, raw_y as f32);
+        if let Some((counts_x, counts_y)) = self.regime.counts_of(raw_x, raw_y) {
+            self.input.look(counts_x as f32, counts_y as f32);
+        }
     }
 
     /// A mouse button going down, which is how the player takes the cursor back
@@ -264,9 +275,10 @@ impl Session {
         }
     }
 
-    /// Drops every key the player was holding when the window went away.
+    /// Drops every key held when the window went away, and the pointer's position.
     pub const fn on_input_cleared(&mut self) {
         self.input.clear_held();
+        self.regime.forget_position();
     }
 
     /// The world landed and there is something to advance, with `holding` as the
@@ -505,6 +517,7 @@ impl fmt::Debug for Session {
             .debug_struct("Session")
             .field("input", &self.input)
             .field("capture", &self.capture)
+            .field("regime", &self.regime)
             .field("pending_action", &self.pending_action)
             .field("overlay", &self.overlay)
             .field("simulation", &self.simulation)

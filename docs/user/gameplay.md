@@ -273,6 +273,32 @@ system won't grant the tightest capture mode, the game falls back to a looser on
 rather than refusing to run. Escape always gives the cursor back so you can interact with other
 windows; clicking back in the game window always takes it again.
 
+## Mouse look over Remote Desktop, and other pointers that report a position
+
+**Mouse look works over a Remote Desktop session, and you do not have to switch anything on.** The
+game works out for itself which kind of mouse it is being given and adjusts. This covers any pointer
+that reports *where it is* rather than *how far it moved* — a Remote Desktop session is the common
+case, and drawing tablets, touchscreens and some virtual machines behave the same way.
+
+If you played a build before this one over Remote Desktop, what you saw was the camera snapping and
+spinning: a single twitch of the mouse threw the view through several complete revolutions, and the
+game was effectively unplayable that way. That is what is fixed.
+
+Two things worth knowing:
+
+- **It may feel somewhat faster than a mouse plugged into the machine itself** — on the session this
+  was measured against, about 15-20% faster. How far off it is depends on the size of the remote
+  display: a very wide one turns more slowly than a local mouse, a small one more quickly. Sweeping
+  the pointer right across the remote screen turns you about two thirds of the way round.
+- **There is no sensitivity setting yet.** Nothing on this page or in a file will change how fast
+  looking around feels. If it feels wrong to you, the honest instruction is to *say so* — that is
+  genuinely the only thing that changes it, and a report of how it felt and on what size of display
+  is what a setting would be built from.
+
+Switching between the two — resuming a Remote Desktop session at the machine itself, or connecting to
+a running game from elsewhere — is handled while the game is running. It takes two mouse movements
+before the change is believed, so nothing lurches when you swap.
+
 ## Saving and resuming
 
 Closing the game normally saves the world you were playing in and where you were standing in it.

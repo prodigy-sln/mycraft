@@ -729,6 +729,143 @@ true rationale and no working alarm. The scenario suite and the two source scans
 `docs/technical/testing.md` are the working alarm, unaffected either way. No ADR is amended by this
 deferral.
 
+### The pointer regime: when `MouseMotion`'s "delta" is not a delta
+
+`winit` documents `DeviceEvent::MouseMotion`'s delta as a change in physical position. On Windows it
+is not always one, and the client believed the contract on the one platform where the library breaks
+it. `winit-0.30.13/src/platform_impl/windows/event_loop.rs:2569` guards its relative raw-input branch
+with `util::has_flag(mouse.usFlags as u32, MOUSE_MOVE_RELATIVE)`, where `has_flag(bitset, flag)` is
+`bitset & flag == flag` and `MOUSE_MOVE_RELATIVE` is **`0`**. `usFlags & 0 == 0` is true for every
+packet, so the guard that was meant to admit only relative motion admits all of it, and
+`MOUSE_MOVE_ABSOLUTE` (`= 1`) is consulted nowhere in the crate. A physical mouse sets the relative
+bit and the defect is invisible; Remote Desktop's virtual mouse sets `MOUSE_MOVE_ABSOLUTE`, where
+`lLastX/lLastY` are screen positions normalised to `0..65535` over the display. One recorded packet,
+`x = 22348`, spent as a device count is **49.2 radians of turn — 7.8 revolutions from a single
+event**. The same class reaches tablets, touchscreens and some VM guest drivers. Repairing it
+upstream is correct at the source and is a tracked issue of its own, not carried here.
+
+`events.rs`'s forward stays an unconditional forward, deciding nothing; the decision is `Session`'s
+and lives in `src/session/regime.rs`, consulted by `on_pointer_motion` **on the path** between the
+dispatch and the accumulator. Two guards force that placement — `tests/winit_boundary.rs` fails the
+build if a second file under `src/` names the library **in code**, doc comments stripped first
+(`winit_boundary.rs:58-67`), which is why `regime.rs` may and does explain the library's defect in
+prose; and `tests/seam_boundaries.rs` fails it if a decision arrives in `events.rs` — and one
+property is bought by it: deleting the consultation restores the raw forward, so it cannot be
+removed quietly. **Measured, not argued**: deleting the consultation by hand and running
+`cargo nextest run -p mc-client --no-fail-fast` reddens **exactly these eleven tests and nothing
+else** —
+
+- `a_relative_pointer_stream_is_untouched::a_lone_screen_position_does_not_stop_the_delta_after_it_being_spent`
+- `an_absolute_pointer_stream_is_spent_as_travel::` `the_first_screen_position_of_a_session_turns_the_camera_by_nothing`,
+  `a_second_screen_position_turns_the_camera_by_the_travel_between_them`,
+  `each_further_screen_position_turns_the_camera_by_the_travel_since_the_last`,
+  `the_recorded_remote_desktop_session_turns_the_camera_by_the_travel_it_recorded`,
+  `the_same_travel_in_either_axis_turns_the_camera_by_the_same_angle`
+- `the_pointer_regime_changes_under_a_playing_client::` `two_ordinary_deltas_hand_the_stream_back_to_the_relative_reading`,
+  `one_ordinary_delta_between_screen_positions_is_spent_on_nothing`,
+  `screen_positions_arriving_while_the_cursor_is_free_leave_the_camera_alone`,
+  `taking_the_pointer_back_turns_only_by_the_travel_since_it_came_back`,
+  `losing_the_window_turns_only_by_the_travel_since_it_came_back`
+
+Three pointer tests stay green —
+`a_relative_pointer_stream_is_untouched::two_samples_turn_the_camera_as_far_as_one_sample_of_their_sum`,
+`::a_sample_with_a_negative_component_turns_the_camera_the_way_its_sign_names` and
+`the_pointer_regime_changes_under_a_playing_client::losing_the_window_leaves_an_ordinary_delta_spent_whole`
+— and the reason is that all three assert the relative path is *unchanged*, which is exactly what
+deleting the consultation restores. **A named list is what makes this reproducible on any tree**: a
+total count is a statement about how many tests `mc-client` happened to hold that day, and the first
+spec to add one turns it into a discrepancy a reader cannot attribute to their tree, their
+invocation or a defect. This list was last read at `a33f1a3`.
+
+Contrast the residual hole recorded under "Pacing the frame", where the whole wiring could be
+deleted with 383 of 383 green.
+
+**A sample is *position-shaped*** iff `0 ≤ x ≤ 65535`, `0 ≤ y ≤ 65535`, and `x ≥ 1000 ∨ y ≥ 1000`.
+The threshold is the probe's own reading threshold: 584 of 584 recorded samples clear it, the
+smallest `|x|` at 21 093. **One component suffices and both are deliberately not required** — the
+smallest `|y|` in the same recording is **35**, so the stricter-looking rule would have failed on the
+very run the threshold was derived from.
+
+| state | sample | look emitted | next state |
+|---|---|---|---|
+| Relative, nothing pending | position-shaped | none | Relative, pending = sample |
+| Relative, pending | position-shaped | `(sample − pending) × scale` | Absolute, anchor = sample |
+| Relative, any pending | not position-shaped | sample unchanged | Relative, nothing pending |
+| Absolute, anchor | position-shaped | `(sample − anchor) × scale` | Absolute, anchor = sample |
+| Absolute, nothing pending | not position-shaped | none | Absolute, pending = sample |
+| Absolute, pending | not position-shaped | sample unchanged | Relative, nothing pending |
+| Absolute, pending | position-shaped | `(sample − anchor) × scale` | Absolute, anchor = sample |
+| either, cursor not held | anything | none | anchor forgotten, regime kept |
+| either, window lost focus | (no sample is delivered) | none | anchor forgotten, regime kept |
+
+Three properties come out of that table, and each is what a scenario buys: no first-sample snap in
+either direction, so the packet that produces today's 49-radian spin produces nothing at all;
+two-sample corroboration both ways, so one freak report cannot flip the regime and the sample that
+*decides* a change is spent as the kind the new regime says it is; and the anchor forgotten while the
+cursor is the desktop's, which is what stops the pointer's journey across the desktop — between an
+Escape and the click that comes back — arriving as one enormous turn.
+
+**The last two rows are one property reached by two routes, and the second was missed at
+implementation and found at validation.** They are not interchangeable. The cursor-not-held row is
+guarded on the *capture state* and is reached by a sample: Escape hands the cursor to the desktop,
+the window keeps focus, motion keeps arriving, and the first sample admitted against a refused
+capture is what clears the anchor on its way past. The lost-focus row can never be reached that way,
+because **while the window is not foreground no sample is delivered at all** — `winit` registers raw
+input with `RIDEV_DEVNOTIFY` and without `RIDEV_INPUTSINK` (`DeviceEvents::WhenFocused`, its default,
+which nothing in this workspace overrides) — and the capture state, the only thing the first route is
+guarded on, does not change when focus does. So `Session::on_input_cleared` forgets the position too,
+on the `LoopAction::ClearInput` branch the focus event already travelled.
+
+Left to the capture route alone the anchor survived the player's entire time in another window and
+was differenced against wherever the pointer turned up on their return. Measured on the committed
+recording: an anchor at `x = 34475` meeting `x = 65477` is `31002 × 1920/65536 = 908.26` counts,
+**1.998 radians of yaw from a single event**, and up to 2.376 of pitch for a full-height move — the
+same class of turn the fallback exists to remove, arriving at the moment the player alt-tabs back in.
+**A future change may not make forgetting the position conditional on the capture state again.**
+
+**The scale is a declared calibration and is written down as assumed, not as correct.**
+`counts_x = units_x × 1920/65536`, `counts_y = units_y × 1080/65536`: the absolute range is *declared*
+to span a nominal 1920 × 1080, and the conversion is per axis because the range is normalised per
+axis — paired `MouseMotion`/`CursorMoved` samples in the recording give 39.26 units per pixel
+horizontally and 71.94 vertically, so differencing the raw stream into one sensitivity would leave the
+vertical axis **1.83× as fast** as the horizontal. Checked against the run rather than asserted, the
+nominal yields 1.150 counts per pixel across and 1.185 down — the axes agree to 3.1% — on a session
+those same constants measure at **about 1669 × 911**, where the whole thing therefore runs **15-19%
+faster** than a one-count-per-pixel mouse. A nominal is wrong by the ratio of the real display to
+1920 × 1080: half speed on a 3840-wide display, half again as fast on a 1280-wide one. A
+player-facing sensitivity setting is what makes the choice stop mattering, and is tracked separately.
+
+The alternative — one `PointerPlatform` method returning the extent the absolute range actually
+spans, answered in production from `primary_monitor()` — **was declined, and not on testability.**
+The conversion is a pure function of the extent either way, and both routes share the same
+unreachable step of whether production passes the real extent. What separates them is a value nobody
+in this project has measured: **what `primary_monitor()` returns inside a Remote Desktop session — the
+remote session's extent or the host machine's.** Staking the scale on an unmeasured platform
+behaviour is the exact mistake this defect already taught: reading the Win32 contract was right about
+the packet shape and would have been wrong about `CursorMoved`, and only a probe run by a human told
+them apart. A nominal's error is bounded, deterministic, reproducible on any machine and diagnosable
+from this page. The exact route's error, if that call answers with the host's display, is silent and
+machine-dependent. **Measuring what `primary_monitor()` reports over Remote Desktop is what would
+reopen this, and it needs a human on Remote Desktop.**
+
+**A plausibility clamp on the differenced step was considered and rejected on the data.** It would
+have swallowed the regime-change artefact for free, but the recording says no: its largest consecutive
+steps are 32 085 units over a 604 ms gap and 16 913 over 390 ms — legitimate movement across intervals
+where no event was delivered — while the largest step at the stream's ordinary 15 ms cadence is 6 868.
+A bound loose enough to admit the first is useless against the artefact; one tight enough to catch the
+artefact deletes real turns on any machine that drops frames. The hysteresis handles the regime change
+instead, with no threshold to tune.
+
+**What a future change may not break:** the two-sample corroboration in *either* direction, and the
+rule that a deciding sample is never spent as the regime it is leaving. Both are what stop a single
+malformed packet costing the player their view.
+
+**What no windowless test can reach here**, stated so it is not rediscovered: `winit` producing an
+absolute packet at all. Nothing in the workspace can make one, which is why a 312-sample excerpt of
+the real recording is committed under `crates/mc-client/tests/fixtures/rdp_pointer/` and replayed
+through the shipped dispatch. Whether the calibration *feels* right is a manual acceptance check over
+Remote Desktop (`docs/technical/testing.md`).
+
 Three `pub` entries in `events.rs` — `dispatch_window_event`, `dispatch_device_event`, `dispatch_key`
 — are what both the window adapter and a test cross to reach `Session`. Break-and-place (PRO-854)
 adds a new event to this same dispatch; the seam it needs is already in place.

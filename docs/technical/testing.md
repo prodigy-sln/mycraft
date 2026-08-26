@@ -1755,6 +1755,77 @@ does not turn while the cursor is free) are retired from this table: they are no
 `pointer_motion_arriving_while_the_cursor_is_free_leaves_the_camera_alone` in
 `crates/mc-client/tests/{input_dispatch,pointer_dispatch}.rs`.
 
+### Manual acceptance — mouse look over Remote Desktop, which is a *seventh* check
+
+**Run this one over Remote Desktop, deliberately, and it is the only check on this page that is.**
+It does not replace checks 3, 5 and 6 above and does not license running them remotely — those are
+about pointer *capture* and a remote session sits exactly where the thing under test lives. This one
+is about what the client does with the numbers a captured remote pointer reports, and the physical
+machine cannot produce them.
+
+The paragraph above records that **PRO-882 filed runaway look over RDP on a build that behaves
+correctly at the machine**. That is no longer an unexplained instrument problem: it was a real defect
+in the client, diagnosed by a probe run by a human over a live session and fixed. `winit` guards its
+relative raw-input path with a flag whose value is `0`, so absolute packets — screen positions
+normalised to `0..65535` — reached the camera as device counts, one of them worth 7.8 revolutions
+(`docs/technical/architecture.md`, "The pointer regime"). The warning at the top of the table stands
+for a different reason than it was written for: a remote layer supplies a confinement the client never
+asked for, which is still true and still contaminates checks 3, 5 and 6.
+
+| # | Check | Observed |
+|---|-------|----------|
+| 7 | **Mouse look over Remote Desktop turns rather than spins, and at a comparable rate to a local mouse.** Connect over RDP, click into the window, and sweep the pointer: the camera turns by the distance the pointer moved, both axes at the same rate, with no snap on the first movement and none when Escape is pressed and a click takes the cursor back. | not since PRO-962 |
+
+**What this check is worth, and its one weakness.** The calibration is a *declared nominal* of
+1920 × 1080 and is 15-19% fast on the one session anybody has measured, so "comparable rate" is a
+judgement rather than a threshold, and the honest outcome of feeling it is too fast is a note saying
+so and on what size of display — that is what a sensitivity setting would be built from. Whether the
+turn is *correct* is not this check's job: the recorded run is committed at
+`crates/mc-client/tests/fixtures/rdp_pointer/phase_b_cursor_grabbed.txt` and replayed through the
+shipped dispatch, and that is the automated evidence. This check exists for the two things the replay
+cannot see — whether `winit` still produces absolute packets on a future version, and whether the
+result feels playable.
+
+**A third way a tolerance goes wrong, which the replay's own comparison did and which
+`standards/global/testing.md` §2 does not name.** §2 warns about a tolerance loosened until green, and
+about an over-tight assertion inviting somebody to break correct code to green it. This one was
+neither: derived from both directions, documented, and **measuring the wrong quantity — the resolution
+of the comparison rather than the error of the subject.** It compared the two cameras with
+`Vec3::angle_between`, which is `acos(dot)`; for two nearly parallel `f32` unit vectors the dot is
+`1 − d²/2`, so at `d = 3e-5` it is `1 − 4.5e-10`, rounds to exactly `1.0`, and comes back a flat zero.
+That instrument cannot resolve below about `5e-4` rad, so a tolerance of `1e-3` sat a factor of two
+above the *instrument's* noise floor while its own comment claimed thirty above the *arithmetic's*.
+
+**The two derivations are indistinguishable in review** — the source reads like a correct one, cites
+real numbers, and is right about every step except which quantity it bounds. What told them apart was
+setting the threshold to `0.0` and reading what came back: a deviation reported as exactly `0` from
+311 separate `f32` additions is not a result, it is an instrument at rest. The repair is a **chord
+between the two unit facings**, linear in the angle and readable down to the components' own
+precision. What establishes the chord measures the subject rather than itself is an offline
+re-measurement of the same fixture — the two accumulations really do differ, by **`3.6e-7` rad of
+yaw** and `3.0e-8` of pitch, against an `f32` step of about `1e-6` at the published target. What sets
+that step is the *magnitude of the coordinates*, not the distance from the origin: the eye sits at
+`(8.5, 11.62, 8.5)`, which is 16.7 units out but has every component in `[8, 16)`, where one `f32`
+step is `2^-23 × 8 = 9.5e-7`. Stating it as a distance would be the same error this section is about
+— a number that is right while describing the wrong quantity — and it matters, because the step
+doubles the moment any component reaches 16. The largest is not the eye's `11.62`: the compared
+observable is built from the eye *and* the target, and the target is the eye plus a unit direction,
+so its `y` reaches `12.62`. That is **3.38 blocks of headroom**, and **four** blocks of extra spawn
+height is the smallest whole number that crosses — `12.62 + 3 = 15.62` does not, `12.62 + 4 = 16.62`
+does, and past 16 the floor becomes `1.9e-6`. The observable
+zero is therefore a fact about what the published pose can represent, the floor is named, and the
+tolerance sits 500× above it. It is deliberately **not** tightened to bit equality even though this
+fixture would pass it: exact comparison would also have been the *consistent* choice against this
+suite's other camera assertions, and it fails against a correct implementation the day a fixture
+spawns further out.
+
+**The excerpt is phase B and that is the load-bearing part of the fixture.** The probe ran two
+phases; phase A does not grab the cursor and its `CursorMoved` data is healthy, phase B grabs it and
+delivered **no `CursorMoved` at all**. The shipped client holds the cursor for the whole time a player
+is playing, so phase A's data — which is *accurate*, and would have endorsed a repair that derives
+look from the cursor position — describes a world the product does not inhabit. A screen validated on
+one output has not been validated on another.
+
 ### The headless client-input harness
 
 `crates/mc-client/tests/support/input/` drives the client's real input dispatch —

@@ -139,8 +139,9 @@ impl ApplicationHandler for Client {
         }
     }
 
-    /// Raw pointer motion, which is relative and arrives whatever the cursor is
-    /// doing — including while it is the desktop's.
+    /// Raw pointer motion, which is a movement on some pointers and a screen
+    /// position on others, and arrives whatever the cursor is doing — but only
+    /// while this window has focus.
     fn device_event(&mut self, _: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
         if let Some(session) = self.session.as_mut() {
             dispatch_device_event(session, &event);
@@ -268,8 +269,14 @@ pub fn dispatch_window_event(session: &mut Session, event: &WindowEvent) -> Loop
     action
 }
 
-/// Raw pointer motion, which is relative and arrives whatever the cursor is
-/// doing — including while it is the desktop's.
+/// Raw pointer motion, which is a movement on some pointers and a screen
+/// position on others — `Session` decides which, and `session/regime.rs` says
+/// why the library's own word for it cannot be taken.
+///
+/// It arrives whatever the cursor is doing, including while it is the desktop's,
+/// but **only while this window has focus**: raw input is registered without
+/// `RIDEV_INPUTSINK`, so a window in the background is told nothing at all. What
+/// the session must therefore do about a lost window is on `on_input_cleared`.
 ///
 /// The window's own cursor-moved event carries a *position*, which stops at the
 /// edge of the screen and so cannot express a turn that keeps going.

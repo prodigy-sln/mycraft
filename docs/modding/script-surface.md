@@ -96,3 +96,21 @@ The refusal happens at the assignment, so a chunk that replaces a global and
 then calls it never reaches the call at all. If you want to observe the refusal
 without losing the rest of the chunk, wrap it: `pcall(function() print = f end)`
 returns `false`, and the `print` that follows still reaches the host.
+
+## Player input reaches no scripted surface at all
+
+**Stated rather than left silent, because an absence nobody wrote down is
+indistinguishable from a name you have not found yet.** Nothing a player does
+with the keyboard, the mouse or any other pointer is visible to a chunk, and
+there is no hook to declare, no callback to register and no value to read. That
+covers key presses, mouse buttons, cursor capture, and pointer motion of every
+kind — including the *shape* of the pointer stream, which the client now decides
+for itself so that a Remote Desktop or tablet pointer reporting screen positions
+looks around correctly (`docs/technical/architecture.md`, "The pointer regime").
+That decision, its calibration and its state are engine-side and have no scripted
+surface either.
+
+The binding table — which key means which action — is likewise the client's and is
+not declarable. A mod cannot rebind a key, read one, or ask what the player is
+holding down.
+
