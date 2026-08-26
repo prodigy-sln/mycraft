@@ -39,7 +39,7 @@ and the five PNG filter types are undone below by hand.
 What it prints, per texture: the distinct texel colours and how many, the mean in
 linear light and the mean over stored bytes and how far apart those two stand,
 the furthest texel from the linear mean, and the share of texels within delta-E
-10 of it. Then every pairwise distance between the seven, and the three generated
+10 of it. Then every pairwise distance between the eight, and the three generated
 means the art replaces.
 
 **Read the output as a dated observation, never as a contract.** It was taken at

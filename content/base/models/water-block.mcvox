@@ -1,0 +1,349 @@
+# A water block: sparse speckle over one blue.
+schema = 1
+name   = "base:water"
+scale  = 16
+size   = [16, 16, 16]
+origin = [8, 0, 8]
+slice  = "y"
+
+[palette]
+"w" = "base:water"
+"W" = "base:water_dark"
+"l" = "base:water_light"
+
+[[layers]]
+y = 0
+grid = """
+wwwwwwwwwwwwwwww
+WwlWwwwllwwwwwwW
+wwwwwwwwwwwwwlww
+wwwwwwwwwwwwwwww
+wwwwwwwwwwWwwwww
+wwWwwwwwwwwwwwww
+WwwwwWwwwwlwlwwW
+wwwwwwwwwwwwwwWw
+wwwwwwwlWwwwwwww
+wwlwwwwwwwwwwwww
+wwwwwwWwlwwwwlww
+WWwwWwlwwwwwlwwW
+wwWwwwwwwwwwlwww
+wWwwwwwwwwWwwlww
+wwlwwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+"""
+
+[[layers]]
+y = 1
+grid = """
+wwwwwwwwwwwwwwlw
+wwwWWwwwwwwwwwww
+wwWwwwwwwwWwwwwl
+wwwWwwwwwwwwwwww
+wwwlwwwwwwwwwWww
+wwwwwwwwwwwwwwlW
+wwwwwwwwlwwwwwww
+Wwwwwwwwwlwwwwww
+wwwwwwwwwwwwwwww
+wwwwwwwwwWwwwwwl
+wwwwllwwWwwwwwww
+wwwwwwwwwWwwwwww
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+wwwwwlwwwwlwwwww
+wWWwwwwlwwwwwwww
+"""
+
+[[layers]]
+y = 2
+grid = """
+wWwwwwwlwwwwwwww
+wwwlwwwlwlwwwwww
+wlwlwwwWwwwwwwww
+wwwwwwwwwlwwwwwl
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwwlwww
+wwwwwwwwwwwwwwWw
+wwwlwwwwlwwwwwww
+wwwwlwwwwwlwwwww
+wwwwlwwwwwwwwwww
+wwwwwlwwwwwwwwww
+wwwwwwwwwwwwwwww
+lwwwwwwWwwwwwwwW
+wwwwwwwwWwwwwwww
+wwwwwwwWwwwwlwWw
+"""
+
+[[layers]]
+y = 3
+grid = """
+wwwwwwwwwwwlwwWw
+wwwwwwwwwWwlwwww
+lwwwwwwwwwwwwwWw
+wwwWlwwwwwwwwWww
+wwwwwwwwwlwwwwww
+wwwwwwwwWwwwwwww
+Wwwwlwwwwwwwwwlw
+wwwlwwwlwWwwwwww
+wwwwwwwwwwlwwwww
+lwwwWwwwwwwwwwwW
+wwwwwwwwwwwWwwww
+wwwwwwwWwwwlwwwl
+wwlwwwwwlwwwwwww
+Wwwwwwwwwwwwwwww
+wwwwwwwWwwwwwwww
+wwwwwwWwwwwwwllw
+"""
+
+[[layers]]
+y = 4
+grid = """
+wwwwwwwwwwwwwwww
+wwwwlwwwlwwwwwww
+wwwwwwwwwwwwwwlw
+wwwwlwwwwwwwwwlw
+wwwwwwwwwwwwwwwl
+wwwwwWwwwwwwwwww
+wwwwlwwWwwllwwww
+lwwwwwWwWwwwwwww
+wwwwwwwwwlwwwwww
+wwwwwWwwlwwwwwww
+wWwwwwwwwwwwwlww
+wwwWwwwwwwwWwwlw
+wwwwwwWwlwwwwwww
+wwWwwwlwwwwwwwww
+lwwwwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+"""
+
+[[layers]]
+y = 5
+grid = """
+wwwwwwwwWwwwwWww
+wwwwwwwwwwwwwwWw
+wwwwwwwwwwwWwwww
+wwwwwwlwwwwlWwww
+WwwwwwwwwwwwwwwW
+wwwwwwwwwwwlwwww
+wwlwwwwwwwlWwwww
+wwwwwwwwwwlwwwWw
+wwwwWwwwwwwwwwww
+wwwwwwwwwwwwwwww
+wwwwwlwwwwwwwwww
+wwwlwwWwwwwwwwwW
+wwwwlwWwwwwwwwww
+wwwwwwwwwwwwwwww
+wwwwWwwwwwwlwWww
+wwwlwwwwwwwwwWww
+"""
+
+[[layers]]
+y = 6
+grid = """
+wWlwlwwwwwwwwwww
+wwwwwWwwwwwwllww
+wwwwwwwwwwwlwwWw
+wwwWwwwWwwwlwwWw
+wwwwwwwwwwwwwwww
+wlwlwWwwwwwwwwWw
+wwwwwwwwwwWwwwwl
+wwwwwwwwwWwwwwww
+wwwwwwwwWwwwwwww
+wwwlwwwwlwwwwwww
+wWwwwwWwwwwwwwww
+WwwwwwwwwwWwwwwl
+lwwWwwwwwwwwwwww
+wwlwwwwwwwwwwwwW
+wwwwwWwwwwwWwwww
+wwwwlwwwwwwwwwww
+"""
+
+[[layers]]
+y = 7
+grid = """
+wwwwwwwwwwwWwwww
+wwlwwwwwwwwwwwww
+wwwwwwWwwwwwwwww
+wwwwWwwwwlwwwwww
+wwwwwwwwwwwlwwww
+wwwwwlwlwwwwwlwl
+wwwwwwwwlwwwwwww
+wwwwwwwwwwwwwwww
+wwlwwwwwwwwwwwww
+wwwwllwwwWwwWwww
+wwwwwWwwwwwwwwww
+wwwwwwlwwwwwwwww
+wwwwwwwwwwwwwwww
+wlwwwwwwwwwwwwww
+wwwwWwllwwwwwwww
+wwwwwwwwwwwwwwww
+"""
+
+[[layers]]
+y = 8
+grid = """
+wWwwwwwwwwwwwwww
+wwwWWwwwwWlwwwww
+wwwwwwwwwwwwwwww
+wwwwwwWwlwwwwwww
+wwwwwwwwwwwwwwww
+wwwwwwwwwWwwwwwW
+wwwwwwwwwwwwwwww
+wwwwwlwwlwwwwwwl
+wlwWwwwwwwwwwwww
+wwwwwWwwwwwwwwww
+wwwwwwwwwwwwwwww
+lwwwwwwWwwwwwwww
+wwwwwwwwwwwlwwWw
+wwwWwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+"""
+
+[[layers]]
+y = 9
+grid = """
+wwwwwwWwwwwwwwww
+wwwwwwwllwwwwWww
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+wwwwwwwwlwwwwwlw
+wwwwWwwwwwwwwwww
+wwwwlwwwwWwwwwww
+wWwwwwwwlwwwwwww
+WwwwwwwwwwwwWwwl
+wWwwwwwwwwwwwwwl
+wwwwwwwwwwwwwwww
+wwWwwwwwwwwwwwww
+wwlwwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+wwwwwwwwwwWwwwlw
+"""
+
+[[layers]]
+y = 10
+grid = """
+wwwwwwwwwwwwWwww
+wwwwlwwwwwwwwwww
+wlwwwwwwwwwwwwww
+lwwwwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+wwwwlwwWwwwwwwlw
+wwwwwwwwwwwwwwww
+wwwwwwwwlwwwwwwl
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+wwlwwlwwwwwwwwwW
+wwwwwwwwwWWwwwWw
+wwwwWwwwwwwwwwww
+wwwwwwwwwWwwwwww
+wwwwwwwwwwwwwwww
+"""
+
+[[layers]]
+y = 11
+grid = """
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwWwlww
+wwwlwwwwwwwwwwwW
+wwwwwWwwwwwWwwww
+wwwwwwwwwlwwlwlw
+wwwwwwlwwwwwwwww
+wwWwwwwWwwwwwwlw
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwwwlwl
+wwwwwwwlwwWwlWwl
+lwwwwwwwWwwwwwww
+llWwlwWwlwwwwwww
+wwwwwwwwwwwwwWww
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+wwwwwwwwwWlwwwww
+"""
+
+[[layers]]
+y = 12
+grid = """
+wwwwwwwwwwwwwWww
+wwwwwwwwwlwwwwww
+wWllwwwwlwwwwWlW
+lwwwWwwwwwWwllww
+wwwwwlwwwlwwwwww
+wwWwwwwwwwwwwwwl
+wwwwlwwwwWWWwWww
+wWwwwwwwwwlwwwww
+wwwlWllwwwwwlwww
+wwWwwwwwwwwwwwwW
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwwlwww
+wwwwwwwWlwwWwwww
+wwwwwwwwwwwwWwww
+wwwwwwlwwwlwwWww
+"""
+
+[[layers]]
+y = 13
+grid = """
+wwwwwwwwwwwwwwww
+wwwlwwlwwwwwwwlw
+wwlwwwwlwwwwwwlw
+wwwWwwwlwwwwwwww
+WwwwwwwWwwlwwwww
+wwwwwwwWwwwwwWWw
+wwwwwlwwwwwwwwww
+wwwwwwwwwwwwwwww
+wlwwwWwWwwwwwwlw
+wwwwwwwwwWwwwWww
+wwwwwwwwwwwwWwww
+wwWwwwwwwwwwwlww
+wwwwwwwwwwwwwwww
+wwwwwwwwWwwwwwww
+wwwwwwwWwwwwwwww
+wwwWwwwwwwwwwWww
+"""
+
+[[layers]]
+y = 14
+grid = """
+wwWwwwwwwwwwwWww
+wwlwwwwwwlwwwwww
+Wlwwwwwwwwwwwwww
+Wwwwwwwwwwwwwwwl
+wwwlwwwwwwlwwlww
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwwlwww
+wwwwwwwWwwwwwwww
+wwwwwwwwwwwwwwww
+wwwwwwwwwwwwwwww
+wWwWwwwwwwwwWwww
+wwlwwwwwwwwwwwww
+wwwwwwwwwwwwwWww
+wwwwwlwwWwlwwWww
+wwwwwwwwwwwlwwww
+"""
+
+[[layers]]
+y = 15
+grid = """
+wwwwwwwwwwwwwwww
+WwwwwwwwwwwwwwlW
+wwwwwwwwwwwWwwww
+wwwlwwwwwwwwwwww
+wwwWWwwwwwWwwwww
+wwlwwwwWwwWwwwww
+WwwwwwwwwwwwwwwW
+wwwwwwwwwwlwwwww
+wwwwwwwwwwwWwwww
+wwWwwwwwwwwwwwww
+wwWwWwwlwwwwwlww
+WwwwwwwwwWwwwwwW
+wwWwlwwwlwwwwwww
+wwWlwwwwWwwwlwww
+wwwwwwwwwwwwWwww
+wwwwwwwwwwwwwwww
+"""
+

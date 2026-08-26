@@ -1356,7 +1356,7 @@ predict what the probes compute. **Route 3 is the one that establishes the colou
 rather than merely consistent**, because it agrees with them having been written from the
 specification instead. It reproduces every figure of route 1 to the last printed decimal.
 
-**An expectation read from the palette beats a committed triple.** Measured across all seven shipped
+**An expectation read from the palette beats a committed triple.** Measured across all eight shipped
 images, every distinct texel colour is byte-identical to a material declared in
 `content/base/materials/` — a face bakes its material colour **unshaded**. So the test asking what
 `base:stone`'s image is made of names the three *materials* `stone-block.mcvox` is built from and
@@ -4131,6 +4131,106 @@ So, for any probe whose expectation is computed by calling into the product:
 - **Do not conclude "only a golden sees this" from a mutation that moved the
   oracle.** That conclusion was available and wrong, and the narrowed run is what
   refused it.
+
+### An oracle can be right and useless, and this is the sharpest instance
+
+The section above is about an oracle that *moves with* the draw. This one is
+about the same oracle standing perfectly still and reporting nothing, and it is
+worse, because there is no mutation that exposes it and the suite reads as
+healthy from every angle.
+
+`base:water` was a **declared** texture key with no **baked** image. Every link
+behaved as designed: the block declared the key, the manifest stated no entry for
+it, the build baked what the manifest named, the launch called the set current,
+and `mip.rs` filled the layer from `placeholder_texels`. So the sea drew a
+checkerboard of two magentas — `(140,38,131)` and `(160,58,151)`, only ΔE 7.21
+apart — over 9.58% to 21.57% of every frame, for three days, and **1 300 passing
+tests reported nothing** — not because any of them was wrong, but because of
+what they were each about:
+
+1. **The colour oracle asked the wrong question and got a true answer.**
+   `support/art.rs::drawn_texels` answers `covering(key)` **or else**
+   `placeholder_texels(key)`. Every colour assertion in the client suite routes
+   through it, so the probes, the replay oracle, the landmark comparisons and the
+   sea reading all asked *"does water draw what an uncovered key should draw"* and
+   were truthfully told **yes**. The tolerance in
+   `the_sea_the_camera_sees_is_the_water_layer.rs` was even derived from the
+   checkerboard's own spread and asserted a guard on it — a careful reading,
+   correctly bracketed, about a world the product should not have been in.
+2. **The goldens are minted from the renderer they grade.** The checkerboard was
+   the committed reference image, so `terrain_goldens` compared a frame of the
+   defect against a photograph of the defect and matched.
+3. **The layer test asserts water has a *layer*, not that it has an *image*.**
+   `launch_texture_layers.rs` is about layer assignment and is right about it.
+4. **The gate checks the set is *current*, never that it is *complete*.**
+   `sdd-gate.ps1` runs `voxforge build` and stage 7 refuses a committed image.
+   Both are about the set matching its own manifest. Nothing compared the
+   manifest's keys against the keys the block declarations name.
+
+**A closed loop with no outside reference anywhere in it.** The expectation came
+from the generator, the frame came from the renderer, the golden came from the
+renderer, and the gate compared the set to the manifest that produced it. Every
+edge of that graph is sound; the graph has no edge leaving it. That is what
+"right and useless" means, and it is why the rules under §2 about a *fixture*
+supplying a value in a form no caller uses do not catch it — nothing here is a
+fixture, and nothing here is wrong.
+
+#### A guard that passes because the defect is conspicuous
+
+The sharpest single artefact behind all of this is one test file's header, and
+what it does is worse than describing the defect.
+`crates/mc-client/tests/the_sea_the_camera_sees_is_the_water_layer.rs` **built a
+tolerance around the defect and asserted a guard on that tolerance.**
+`require_nothing_else_is_that_colour` checked that nothing else in the frame sat
+within ΔE 8 of the stand-in's mean, and passed, because the stand-in is magenta
+and magenta is far from everything. Prose **and** a passing guard, both accurate,
+neither able to act.
+
+**That is a category worth naming, because the mechanism is a design property
+working backwards.** The stand-in is deterministic, distinguishable and never
+lifelike *by design* — that is the whole point of it, and it is what let a human
+spot the sea in one glance. It is also exactly what made the guard trivially
+satisfiable. **The property that makes a missing texture obvious to a person is
+the property that makes it invisible to a suite**, because a suite asks "can I
+tell these two colours apart" and a conspicuous wrong answer says yes, loudly.
+
+So the tell is a discrimination guard whose margin is *comfortable*. A guard
+holding at ΔE 62 where it needs ΔE 8 is not eight times safer than one holding at
+ΔE 26; it is a guard that has stopped being about the subject and started being
+about how far the wrong answer happens to sit. **Ask what the guard would say if
+the value under it were replaced by something plausible rather than something
+wrong** — here, a blue that belongs in the same palette as the ground it meets
+brought the nearest wrong answer from ΔE 62.40 down to 25.34, and the guard has
+been doing real work only since.
+
+**It was found by a human looking at the picture.** The second time in this
+project that the largest visible defect in a rendering spec was found that way.
+
+**What closes it is a reading with a reference the renderer did not produce.**
+Three now exist, and they are worth distinguishing because only the first is
+general:
+
+- `the_shipped_set_covers_every_key_it_declares.rs` compares the keys the block
+  declarations name against the keys the built index records — two lists neither
+  of which the renderer produces. This is the one that generalises: **a key set
+  and an art set are two artefacts that no code joins, and the gap between them
+  had no keeper.**
+- `the_sea_draws_its_baked_art.rs` takes `covering(key)` and **refuses the
+  absence** rather than falling back, and compares the decoded image against the
+  `#rrggbb` a person wrote in `content/base/materials/`. A palette a human typed
+  is the outside reference.
+- `no_committed_golden_shows_the_stand_in.rs` decodes the committed reference
+  images and counts three colours nothing in the shipped art may produce. It
+  renders nothing, which is the point: it is the only instrument that can judge a
+  golden without going through the renderer the golden came from.
+
+**A gate stage would have been the wrong remedy and was refused.** An uncovered
+key is correct by design for a mod — it is a mod author's first block, and
+`voxel-models.md` documents the stand-in as designed behaviour. What is stricter
+is the rule the *base game* holds itself to, because its job is to prove the
+contract is complete (`content/CLAUDE.md`). That is a claim about one root, which
+a test in `mc-client`'s suite can make and a gate stage over arbitrary roots
+cannot.
 
 ### The entry door's mutation tables, including the ones that did not bite
 

@@ -775,10 +775,17 @@ back is the byte the texture generator produced. `Rgba8Unorm` would skip the
 decode and every frame would come back lighter than any declared mean colour —
 plausible-looking, and wrong in the same invisible direction everywhere.
 
-MVP 1 ships procedurally generated placeholder textures whose colours are
-deliberately implausible (teal stone, tan grass). They are not to be "corrected"
-per block: a per-key colour table in Rust is a block definition in Rust, which
-invariant 1 forbids. Real textures arrive as content, not as a patch.
+The generator that produces those texels is still here and is still the fallback
+for a key nothing has baked, and its colours are deliberately implausible (teal
+stone, tan grass). They are not to be "corrected" per block: a per-key colour
+table in Rust is a block definition in Rust, which invariant 1 forbids.
+
+**Every key the base game declares now draws baked art instead**, and it arrived
+as content rather than as a patch — eight images baked by
+`voxforge build content/base/textures.toml` from models and materials under
+`content/base/`. Seven landed on 2026-08-19; `base:water` landed on 2026-08-26,
+three days late, and what it drew in the meantime is recorded in
+`technical/testing.md` under "An oracle can be right and useless".
 
 ### Appended, never renumbered: what a layer index costs across a reload
 
@@ -1570,6 +1577,72 @@ as well: no predicted sample straddles the sea's edge at the new poses, so the
 remedy that section prescribes had nothing to apply to. **A green pre-mint suite
 across a moved camera is evidence those tolerances are honest**, not evidence they
 were never asked anything.
+
+#### 2026-08-26, the spec that gave the sea art — and why the revision held at `r3`
+
+**All four directories re-shot in place, `SCENE_REVISION` unmoved.** The same
+shape as 2026-08-19 and the opposite of the two bumps between: *art* changed and
+the scene contract did not.
+
+**What every one of the four was a photograph of.** `base:water` was a declared
+texture key with no baked image, so its layer was filled from the generated
+stand-in and the sea drew a checkerboard of two magentas — `(140,38,131)` and
+`(160,58,151)`, only ΔE 7.21 apart and ΔE 70 from black, the darker of which
+reads as near-black against a lit sky. Counting those two values and the
+`(150,49,141)` they minify to — the colour observed in the blobs, one off the
+pair's arithmetic mean `(150,48,141)`, which occurs 42 times and gives 61 380 —
+verbatim, in the committed `r3` blobs: **77 987 pixels at tick 0 and in the HUD
+capture, 165 232 at tick 59, 191 792 at tick 119** — and counting the trilinear
+blends between them as well, **88 280 at tick 0 and in the HUD capture, 174 744
+at tick 59, 198 828 at tick 119**, which is 9.58 % to 21.57 % of the frame.
+Every committed reference image showed it, which is exactly why
+`terrain_goldens` could not: it compared a frame of the defect against a
+photograph of the defect and matched. The detection gap is recorded in
+`technical/testing.md` under "An oracle can be right and useless".
+
+**Why the revision held, and it is not the same argument as "the pixels barely
+moved".** Layers are assigned positionally over the keys the *block declarations*
+name, lexicographically. `base:water` was **already** one of those eight keys and
+**already** sorted last, so baking an image for it adds no key and moves no index
+— which is the whole difference from 2026-08-19's four-keys-to-eight change, where
+every index after `base:dirt` renumbered and a layer index rides inside every
+packed vertex. No spawn, physics or camera-path input moved either, which is what
+forced `r1`→`r2` and `r2`→`r3`. Bumping for an art edit would redefine the
+revision as "something visible changed" and oblige a bump for every future art
+edit, which is the reading the ids exist not to carry.
+
+**The extent of the sea did not change, and that was measured rather than
+assumed.** The reading is a set comparison rather than a count: the pixels that
+**differ** between the old committed blobs and the new ones, against the pixels
+the old blobs drew from the stand-in — every colour in the RGB box the two
+checkerboard values span, `(140, 38, 131)` through `(160, 58, 151)`, which
+contains the minified mean and every blend between them. In all four captures the
+two sets coincide in **both** directions: no changed pixel lies outside the old
+stand-in region, and no stand-in pixel was left alone. The totals are **88 280,
+88 280, 174 744 and 198 828**, t000 and the HUD capture agreeing exactly. What
+changed is the colour of the sea and not one pixel of where it is. Being
+*position*-identical rather than merely equal in count is what rules a renumbered
+layer out outright rather than by inference: a wrong layer index draws water on
+different surfaces, so it would have put changed pixels outside the old magenta
+region, and there are none.
+
+**What was verified before the mint, in the order this section prescribes:**
+`terrain_probes`, `replay_oracle` and `hud_prediction` selected together with
+`the_sea_the_camera_sees_is_the_water_layer` — **22 tests run, 22 passed**, a bare
+count and so a complete run. Then the mint, naming only the two golden binaries —
+3 passed. Then the set re-verified with the opt-in **unset** and `golden_mismatch`
+selected — **4 passed** — and `golden_inventory` — **3 passed**. Four files
+modified, no directory added or removed, and the provenance sidecars
+byte-identical: one adapter, backend and driver across both sets.
+
+**The sea reading's tolerance was re-derived and did not have to move.**
+`the_sea_the_camera_sees_is_the_water_layer.rs` judges a pixel against the water
+layer's own mean at ΔE 8. Both ends of its bracket moved that day — the layer's
+own texel spread from ΔE 3.71 to **3.16**, and the nearest wrong answer from
+`base:stone` at ΔE 62.40 to **25.34**, because a blue that belongs in the same
+palette as the ground it meets stands nearer to it than a deliberately
+implausible magenta did. 8 was inside both brackets. **That it still stands is a
+measurement and not an omission**, which is why the file's header now says so.
 
 ## What golden-frame verification cannot see
 

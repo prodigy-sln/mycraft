@@ -52,16 +52,27 @@ models under `content/base/models/`:
   picture and two blocks use it, which is why a grass block never sits on ground
   of a slightly different colour.
 - **Stone** is grey with lighter and darker grain scattered through it.
+- **Water** is a mid blue with a sparse scatter of one slightly darker and one
+  slightly lighter tone through it — far quieter than stone's grain, because a
+  sea surface is the smoothest thing in the game and a busy speckle would read
+  as gravel. **Until this build it looked like a checkerboard of magenta and
+  near-black**: the sea was drawn, but nobody had baked a picture for it, so it
+  fell back to the stand-in described at the end of this section. Those two
+  colours are water's own — both are magenta, and the darker one is dark enough
+  to read as black against a lit sky; a different block's stand-in would be a
+  different pair. If you played a build between the 23rd and the 26th of August
+  2026, that is what you saw and it was not your installation.
 
 Stand close to a face and you see the individual texels with hard edges between
 them — that is deliberate, not a missing filter. Look at a hillside in the
 distance and it stays still as you move instead of crawling and sparkling.
 
-**You can see the sea.** Water is drawn now, where before it was a hole in the
-world you walked through and could not see. A new world starts you on the shore
-facing it, so the water is in front of you from the first frame — and it fills
-more of the view as you walk toward it, from roughly a tenth of the screen at the
-start to about a third partway down the beach.
+**You can see the sea, and as of this build it is blue.** Water is drawn, where
+two builds ago it was a hole in the world you walked through and could not see. A
+new world starts you on the shore facing it, so the water is in front of you from
+the first frame — and it fills more of the view as you walk toward it, from
+roughly a tenth of the screen at the start to about a third partway down the
+beach.
 
 What you see is the **surface and the edges only**. Water does not draw the
 insides of itself, so a body of it looks like one sheet rather than a stack of
@@ -107,9 +118,17 @@ save opens" below says why, and why the launch after it is quiet.
 
 **A block whose art nobody has drawn still works.** If you install a mod that
 declares a block and ships no picture for it, that block draws a generated
-stand-in — a two-colour pattern derived from the texture's name, deterministic
-and unmistakably not real art — and the game runs. The terminal says so on
-startup, so a stand-in never reads as something you did wrong.
+stand-in — a two-colour checkerboard derived from the texture's name,
+deterministic and unmistakably not real art — and the game runs.
+
+**The terminal explains the stand-in, but it never tells you a block is using
+one.** The line it prints at every launch says stand-ins exist and mean nothing
+is wrong; it does not name the block or the texture. So **seeing the
+checkerboard on screen is the only way to find out**, which is how the base
+game's own sea went three days as a magenta grid. If a surface comes up in a
+loud two-colour check, the mod that declares it has not shipped a picture for
+that texture — that is a missing file on the mod's side, not something you did
+wrong and not something to reinstall over.
 
 ## An older save opens, and is told about once for each change it crosses
 

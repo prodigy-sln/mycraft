@@ -1,0 +1,6 @@
+# Eight bytes down per channel, and the step is narrower than any other in this
+# set on purpose: the tone spread tracks how rough the surface is — stone ±29,
+# dirt ±18, grass ±11 — and open water is the smoothest thing the base game
+# ships. `grass_dark.toml` states the rule this follows.
+name  = "base:water_dark"
+color = "#447196"

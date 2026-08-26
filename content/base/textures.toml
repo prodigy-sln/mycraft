@@ -57,3 +57,13 @@ face  = "left"
 key   = "base:stone"
 model = "models/stone-block.mcvox"
 face  = "front"
+
+# Water is baked from the top, which is the face a player sees: the sea has a
+# surface and no interior, because `occludes = false` leaves the faces between
+# two water blocks culled by the engine's own rule that a block draws no face
+# against its own kind. The other five faces of the model exist so that the block
+# is a block; none of them is baked.
+[[texture]]
+key   = "base:water"
+model = "models/water-block.mcvox"
+face  = "top"

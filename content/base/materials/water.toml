@@ -1,0 +1,6 @@
+# The sea's base tone. H 207°, S 52%, V 62% — the same register as the terrain
+# bases, whose values span 49–66% and whose two chromatic ones sit at S 50% and
+# 53% (stone is grey, at S 0%), so a shoreline reads as one palette rather than
+# as two.
+name  = "base:water"
+color = "#4c799e"

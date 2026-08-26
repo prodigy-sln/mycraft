@@ -36,7 +36,14 @@ use common::texture::GREY;
 /// scenario's own: without it a manifest that came to state nothing would
 /// satisfy every assertion below, since each is derived from whatever the
 /// manifest happens to hold.
-const ENTRIES_THE_SHIPPED_MANIFEST_STATES: usize = 7;
+///
+/// **It is maintained by hand and that is the design.** Seven until 2026-08-26,
+/// eight since `base:water` was baked. A number derived from the manifest would
+/// agree with a manifest that had quietly lost an entry, which is the failure
+/// this exists to make loud — so a spec that adds or removes a `[[texture]]`
+/// table edits this line and says so, and the three tests below go red until it
+/// does.
+const ENTRIES_THE_SHIPPED_MANIFEST_STATES: usize = 8;
 
 /// The key the grass model's underside is baked to.
 const DIRT_KEY: &str = "base:dirt";
@@ -73,7 +80,7 @@ fn spelled(path: &Path) -> String {
 }
 
 #[test]
-fn a_manifest_of_seven_entries_writes_seven_images_each_named_for_its_key() -> TestResult {
+fn every_entry_the_shipped_manifest_states_writes_one_image_named_for_its_key() -> TestResult {
     let root = Root::shipped()?;
     let keys = keys_stated(&root.manifest())?;
     let mut owed: Vec<String> = keys.iter().map(|key| image_named(key)).collect();
@@ -86,8 +93,8 @@ fn a_manifest_of_seven_entries_writes_seven_images_each_named_for_its_key() -> T
         (ExitCode::Success, ENTRIES_THE_SHIPPED_MANIFEST_STATES, owed),
         "one image per entry, each named for the key its entry states. The names on the right are \
          derived from the manifest's own keys by the rule a key's image name follows — a colon \
-         becomes two underscores — rather than listed beside it, so a manifest that gains an \
-         eighth entry stays graded. What is stated outright is the count, because every other \
+         becomes two underscores — rather than listed beside it, so a manifest that gains a \
+         ninth entry stays graded. What is stated outright is the count, because every other \
          assertion here is derived from the manifest and would pass for one holding nothing. \
          stderr said: {err}",
         err = made.err
@@ -96,7 +103,7 @@ fn a_manifest_of_seven_entries_writes_seven_images_each_named_for_its_key() -> T
 }
 
 #[test]
-fn a_manifest_of_seven_entries_writes_one_index_naming_all_seven_keys() -> TestResult {
+fn the_build_writes_one_index_naming_every_key_the_shipped_manifest_states() -> TestResult {
     let root = Root::shipped()?;
     let mut owed = keys_stated(&root.manifest())?;
     owed.sort();

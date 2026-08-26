@@ -1,0 +1,5 @@
+# Eight bytes up per channel, the mirror of `water_dark`. Symmetric about the
+# base so the mean of a sparse speckle stays the base tone, which is the colour
+# a minified sea face converges to.
+name  = "base:water_light"
+color = "#5481a6"

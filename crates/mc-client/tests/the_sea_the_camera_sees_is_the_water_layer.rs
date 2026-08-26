@@ -27,20 +27,28 @@
 //!
 //! # Where the tolerance comes from, in both directions
 //!
-//! Measured, and the first half of it is the more surprising: **`base:water` is
-//! not one of the seven keys the shipped manifest bakes**, so the layer it draws
-//! from is the generated stand-in, and the colour below is that generator's.
-//! Every one of its 256 texels sits within **ΔE 3.71** of the layer's linear-light
-//! mean — a checkerboard one step either side of it — so a magnified face shows a
-//! colour at most that far off and a minified one converges on the mean.
+//! Measured, and **re-measured on 2026-08-26 when `base:water` was baked**. Both
+//! halves of the bracket moved that day and the tolerance did not have to: the
+//! layer this reads is now the shipped image rather than the generated stand-in,
+//! and its 256 texels sit within **ΔE 3.16** of the layer's linear-light mean —
+//! one base tone at 87.9% and two accents eight bytes either side of it — so a
+//! magnified face shows a colour at most that far off and a minified one
+//! converges on the mean.
 //!
-//! The nearest *wrong* answer is `base:stone` at **ΔE 62.40**, then `base:dirt`
-//! at 71.49, the sky at 79.38, the four grass sides at 79.11 to 79.98 and
-//! `base:grass_top` at 114.77. So the tolerance sits anywhere in
-//! (3.71 + the sRGB round trip, 62.40), and it is **8** — twice the texel spread
-//! and 54 ΔE clear of every other thing one of these pixels could be showing.
-//! Not loosened until green; the guard below asserts the lower half of that
-//! bracket rather than leaving it to this comment.
+//! The nearest *wrong* answer is `base:stone` at **ΔE 25.34**, then the sky at
+//! 31.97, `base:dirt` at 51.30, the four grass sides at 51.54 to 51.87 and
+//! `base:grass_top` at 71.85. So the tolerance sits anywhere in
+//! (3.16 + the sRGB round trip, 25.34), and it is **8** — over twice the texel
+//! spread and 17 ΔE clear of every other thing one of these pixels could be
+//! showing. Not loosened until green; the guard below asserts the lower half of
+//! that bracket rather than leaving it to this comment.
+//!
+//! **The upper half narrowed from ΔE 62.40 to 25.34 and that is the art
+//! arriving, not the reading weakening.** The stand-in was magenta, which is
+//! implausible on purpose and therefore far from everything; a blue that belongs
+//! in the same palette as the ground it meets stands nearer to it. 8 was inside
+//! both brackets, which is why it still stands — a fact worth stating, because
+//! the alternative reading is that nobody checked.
 //!
 //! **What this reading cannot tell you.** It cannot tell one water texel from
 //! another, and it would not notice the layer being reflected or shuffled. What
@@ -78,10 +86,16 @@ const WATER: &str = "base:water";
 
 /// How far a pixel may sit from the water layer's own mean, in ΔE.
 ///
-/// Derived from both directions in this module's header: twice the ΔE 3.71 that
-/// is the furthest any texel of that layer stands from its mean, and far below
-/// the ΔE 62.40 that separates it from the nearest thing one of these pixels
-/// could be confused with.
+/// Derived from both directions in this module's header: over twice the ΔE 3.16
+/// that is the furthest any texel of that layer stands from its mean, and well
+/// below the ΔE 25.34 that separates it from `base:stone`, the nearest wrong
+/// answer one of these pixels could be showing.
+///
+/// **The ceiling is 25.34, not the 62.40 the magenta stand-in used to buy.**
+/// Whoever widens this is eating into 17 ΔE of headroom, not 54: at 30 the guard
+/// accepts a frame drawing stone where the sea should be and passes silently.
+/// That narrowing is the whole subject of "a guard holding at ΔE 62 where it
+/// needs ΔE 8" in `docs/technical/testing.md` — this is the constant it is about.
 const SHOWS_THE_LAYER: f64 = 8.0;
 
 /// Everything else one of these pixels could be showing, as a texture key, plus

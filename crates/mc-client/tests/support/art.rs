@@ -52,13 +52,21 @@ use super::probe::{distance, uniform};
 
 /// How far apart the two means of one shipped texture may stand.
 ///
-/// **Measured, not chosen.** Over the seven images the shipped manifest bakes
-/// the widest separation is ΔE 2.38, on `base:grass_side_north` and `_south`.
-/// Three is the next whole number above it, which leaves this a check on the
-/// transfer function rather than a restatement of a measurement: a decode
+/// **Measured, not chosen.** Over the **eight** images the shipped manifest
+/// bakes the widest separation is ΔE 2.38, on `base:grass_side_north` and
+/// `_south`. Three is the next whole number above it, which leaves this a check
+/// on the transfer function rather than a restatement of a measurement: a decode
 /// applied in the wrong direction puts the two tens of ΔE apart, and a decode
 /// that is simply absent puts them at zero — which this does not catch, and
 /// which [`drawn_colors`] having more than one colour does.
+///
+/// **Re-measured over eight when `base:water` was baked, and the figure did not
+/// move.** It could not have gone down and it did not go up: water's two means
+/// are byte-identical, ΔE 0.00, because 87.9% of its texels are one colour and
+/// the two accents are symmetric about it, so its flat average lands on the base
+/// tone in both arithmetics. The count in this sentence is not decoration — a
+/// tolerance whose stated derivation no longer describes the set it was derived
+/// from is a number nobody can re-check, however right it still happens to be.
 pub const MEANS_AGREE_WITHIN: f64 = 3.0;
 
 /// The texels supplied for `key`, and the generated texture where none were.
@@ -169,7 +177,7 @@ pub fn means_agree(key: &TextureKey, supplied: &SuppliedTexels) -> Result<f64, B
     if apart > MEANS_AGREE_WITHIN {
         return Err(format!(
             "`{key}`'s linear-light mean and its stored-byte mean stand ΔE {apart:.2} apart, past \
-             the ΔE {MEANS_AGREE_WITHIN} the seven shipped images were measured to hold. The two \
+             the ΔE {MEANS_AGREE_WITHIN} the eight shipped images were measured to hold. The two \
              are computed by different arithmetic — one through the sRGB transfer function and one \
              by integer averaging — so a separation this wide is a transfer function running the \
              wrong way rather than a texture that happens to be unusual, and every colour this \
@@ -243,7 +251,7 @@ fn coordinates(width: u32, height: u32) -> impl Iterator<Item = (u32, u32)> {
 /// The colours the named materials declare, ascending.
 ///
 /// **A palette a person wrote, sharing nothing with a decoded PNG.** A face
-/// bakes its material colour *unshaded* — measured across all seven shipped
+/// bakes its material colour *unshaded* — measured across all eight shipped
 /// images, every distinct texel colour is byte-identical to a declared material
 /// — so what a texture is made of can be stated as a list of material *names*
 /// and read out of `content/base/materials/`, rather than snapshotted as RGB

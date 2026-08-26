@@ -37,31 +37,56 @@ The `.mcvox` file **is** the source of truth for a model's art. It is what the
 tools read, what the repository tracks, and what a change to the art is made
 against.
 
-`content/base/models/generators/` holds three Python scripts — `gen_grass.py`,
-`gen_stone.py` and `assemble_grass.py` — which produced the two shipped block
-models. They are **provenance, not a build step**. Nothing in the build, the
-gate or the client runs them; `cargo build` and the quality gate never invoke
-Python, and a contributor never needs it installed. Each script's own header
-says the same thing.
+`content/base/models/generators/` holds the scripts that produced the shipped
+block models — `gen_grass.py` and `assemble_grass.py` for `grass-block.mcvox`,
+`gen_stone.py` for `stone-block.mcvox`, and `gen_water.py` for
+`water-block.mcvox` — beside two more that only read and measure. They are
+**provenance, not a build step**. Nothing in the build, the gate or the client
+runs them; `cargo build` and the quality gate never invoke Python, and a
+contributor never needs it installed. Each script's own header says the same
+thing.
 
 **A model citing a generator says where the file came from. It does not claim
 that re-running the generator would reproduce it** — that direction is not a
-claim of any kind. Two of the three scripts do not run as they stand, and this
-is deliberate: `assemble_grass.py` names an absolute path from the machine it
-ran on and reads an intermediate that was never committed, and `gen_stone.py`
+claim of any kind. Two of the four do not run as they stand, and this is
+deliberate: `assemble_grass.py` names an absolute path from the machine it ran
+on and reads an intermediate that was never committed, and `gen_stone.py`
 writes a file name the repository does not use. Repairing them would invite
 exactly the belief the headers exist to remove.
+
+`gen_water.py` is the exception in the other direction — it writes the very file
+the repository tracks — and its own header says why that is still not licence to
+re-run it: changing the density constant would silently change the art under a
+manifest that would go on folding to a new value and calling every checkout
+stale.
 
 They are kept for what cannot be recovered from the pixels. The five
 hand-authored courses in `assemble_grass.py` — the sod shadow and three lone
 blades at deliberately different depths — are design intent recorded nowhere
 else. The model carries the result and not the reasoning.
 
-For the record, because it is the measurement that settled the question: **both
-shipped models were reproduced from these generators byte for byte**, once,
-under a temporary repository root, before this documentation was written. That
-is what a standing test would have re-proved, and it is why there is none — the
-scripts are frozen and the models are committed, so nothing can change the
+**Water's palette is the other piece of reasoning the pixels do not carry.**
+`base:water` is `#4c799e`; `base:water_dark` and `base:water_light` sit exactly
+eight bytes below and above it on every channel. Among the four terrain blocks
+stone is the only other one whose accents step uniformly, and it steps 29 — the
+step tracks how rough the surface is, and open water is the smoothest thing the
+base game ships. (Dirt's and grass's accents step by a different amount on each
+channel; `grass_dark.toml` states the rule underneath all of them, and
+`water_light.toml` says why water's two are symmetric about the base.)
+Saturation and value were read off the two chromatic terrain bases: water's
+S 52 % and V 62 % each sit between dirt's (S 50 %, V 55 %) and grass's (S 53 %,
+V 66 %), so a shoreline reads as one palette rather than as two. **The hue was
+not read off anything** — 207° was approved by a person, because "water is
+blue" is not a judgement a measurement settles, and it is one hex character to
+reverse.
+
+For the record, because it is the measurement that settled the question: **every
+shipped block model has been reproduced from its generator byte for byte.**
+Grass and stone were reproduced once, under a temporary repository root, before
+this documentation was written; `water-block.mcvox` was re-derived from
+`gen_water.py`'s own arithmetic on 2026-08-26, the day the sea's art was baked.
+That is what a standing test would have re-proved, and it is why there is none —
+the scripts are frozen and the models are committed, so nothing can change the
 answer.
 
 **To change a shipped block's art, edit the `.mcvox` file.** Do not attempt to
@@ -351,12 +376,28 @@ voxforge build content/base/textures.toml
 ```
 
 **The client now judges a set at every launch, and refuses to start on
-one that is missing or out of date.** What it does not do yet is *draw*
-from it — the faces you bake are checked, named and then not painted, and
-the pictures on screen are still the generated placeholder textures. So a
-set you build today is a set the client will hold you to and not yet one
-you can see. [The set at launch](#the-set-at-launch) is what it checks,
-what each refusal says, and how to clear it.
+one that is missing or out of date.** It also *draws* from it: a key your
+set covers is painted with the image you baked for it, and a key it does
+not cover falls back to a generated stand-in — a flat two-tone
+checkerboard whose colour pair is derived from the key's own name, which
+is what a first block looks like before you have baked anything. So the
+set you build today is both a set the client holds you to and the
+pictures you see.
+[The set at launch](#the-set-at-launch) is what it checks, what each
+refusal says, and how to clear it, and
+[Two things a missing texture can mean](#two-things-a-missing-texture-can-mean)
+is why the stand-in exists rather than an error.
+
+**A checkerboard on screen means that key is not in your manifest.** It is
+not a broken image and not a launch failure — it is the one thing the
+client cannot tell you about, because a block declaring a key nothing has
+baked is a legitimate state and the launch is designed to proceed. The
+base game shipped a sea drawing exactly that for three days. The colour
+pair is the key's own, so it is the flat two-tone checkerboard and not any
+particular colour that is the tell: `base:water` comes up magenta, but
+`mymod:ore` comes up whatever its name hashes to. If a face draws one, the
+key it draws is missing an entry in your `textures.toml`; add one and
+re-run `voxforge build`.
 
 **A built set is not committed.** It is deterministic and free to
 reproduce, so the repository carries the models and the manifest and
@@ -909,6 +950,25 @@ time works.
 That separation is deliberate and it is held by a test. If the two ever
 came to say the same thing, somebody who forgot to run a build would go
 looking for a declaration they never wrote.
+
+**What a stand-in looks like, so you can recognise one on sight.** It is a
+sixteen-by-sixteen checkerboard of two colours a byte-hash of the key
+itself picks — deliberately implausible, so no stand-in is ever mistaken
+for art somebody drew. `base:water` generates a magenta pair,
+`(160, 58, 151)` against `(140, 38, 131)`; a different key generates a
+different pair. Far enough from the camera the two average into one flat
+colour and the checkerboard disappears, so a distant surface reads as a
+solid implausible colour rather than as a grid.
+
+**Nothing will tell you about it, and that is the design.** The launch is
+correct, the set is current, the block is drawn, and no refusal is owed —
+so the only instrument that reports a stand-in is your own eye. The base
+game shipped a magenta sea for three days for exactly that reason, past
+1 300 passing tests: the key was declared in `water.luau`, the manifest
+had no entry for it, and every layer of the chain behaved as designed. If
+you ship a content root and want the stricter rule the base game holds
+itself to, compare the keys your `blocks/*.luau` declare against the `key`
+lines of your built `textures/index.txt` — they should be the same list.
 
 ## Refusals
 
