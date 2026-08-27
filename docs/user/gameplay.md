@@ -81,15 +81,23 @@ show through, which is what makes it read as water rather than as a lid.
 
 **You can swim in it.** Walk off the shore and you no longer drop to the lakebed
 like a stone — the sea slows everything that moves through it, so you sink into
-it gently and land softly. Hold jump while you are in the water and you rise
-instead of staying put, reaching the surface from the deepest part of the sea in
-about a third of a second, and then floating there for as long as you keep
-holding. Let go and you sink back down, slowly, and come to rest on the lakebed.
+it gently and land softly. Sinking through the deepest part of the sea takes
+about **two seconds**, settling at roughly a block a second. Hold jump while you
+are in the water and you rise instead of staying put: from standing on the
+deepest lakebed you clear the first water voxel in **half a second** and break
+the surface after **about a second**, and then float there for as long as you
+keep holding. Let go and you sink back down and come to rest on the lakebed.
 
-Swimming is **slower than walking** — a little over a third of your speed on
-land — so crossing open water takes longer than crossing the same distance of
+Swimming is **slower than walking** — **two thirds** of your speed on land — so
+crossing open water takes a little longer than crossing the same distance of
 beach. That is the sea having its own rules rather than being a hole in the
 world with a surface painted on it, which is what it was before this build.
+
+**The sea used to be treacle, and this build is the repair.** Sinking through it
+took six and a half seconds and swimming moved you at a little over a third of a
+walk, which read as a swamp rather than as water. What changed is the water's own
+declaration — the numbers live in `content/base/blocks/water.luau`, not in the
+engine — so a mod may declare a liquid that carries you at any rates it likes.
 
 **You can now aim at water, and swinging at it does nothing.** The crosshair used
 to look straight through water and find whatever solid block was behind it, so a
@@ -112,9 +120,9 @@ What the unbreakable declaration also changes is your save — though this build
 changes it more bluntly than that. Water's own declaration moved, and so did the
 way the game records what *any* block does, so a world saved before this build
 reports all four blocks on the terminal rather than water alone. That happens
-once for this change — and if you already met that line at the last build, you
-meet it again here, because this is a second change of the same kind. "An older
-save opens" below says why, and why the launch after it is quiet.
+once for this change — and if you already met that line at either of the last two
+builds, you meet it again here, because this is the third change of the same
+kind. "An older save opens" below says why, and why the launch after it is quiet.
 
 **A block whose art nobody has drawn still works.** If you install a mod that
 declares a block and ships no picture for it, that block draws a generated
@@ -133,15 +141,16 @@ wrong and not something to reinstall over.
 ## An older save opens, and is told about once for each change it crosses
 
 A save records what each block *was* when it was written: what it looked like,
-and what it did. The game has changed those records at three different builds so
-far — the looks record once, and the behaviour record twice — and a save crosses
-every one of them written after it was.
+and what it did. The game has changed those records at four different builds so
+far — the looks record once, and the behaviour record three times — and a save
+crosses every one of them written after it was.
 
 **"Once" here means once per change, not once ever**, and that is the part worth
 having straight before you read the rest. Each change is reported on the first
-launch that crosses it and never again, so a save old enough to cross two of them
-is told twice: once now, and once more the next time the record moves. Nothing is
-wrong when that happens, and there is nothing to fix.
+launch that crosses it and never again, so a save old enough to cross all three
+behaviour changes is told three times, on three separate launches: once now, and
+once more each time the record moves again. Nothing is wrong when that happens,
+and there is nothing to fix.
 
 **The looks record moved when the game got real art.** Grass, dirt and stone
 draw pictures now where they drew generated stand-ins before, and grass draws six
@@ -151,21 +160,22 @@ message after every art change is what teaches people that a message means
 nothing. The world opens as normal: your terrain, your edits and where you were
 standing all come back exactly as you left them.
 
-**The behaviour record has moved twice, and this build is the second.** It moved
-first when blocks could say whether a swing can find them, and again now that
-they can say what their volume does to you — whether you can swim in it, and how
-much it slows you down. Both are part of what a block *is*, so a world saved
-before either one opens with one line naming **all four** of the game's blocks —
-not because all four were changed by anybody, but because the old record and the
-new one are not comparable, and the honest answer is to say so rather than to
-guess block by block.
+**The behaviour record has moved three times, and this build is the third.** It
+moved first when blocks could say whether a swing can find them; again when they
+could say what their volume does to you — whether you can swim in it, and how
+much it slows you down; and now that they can say **how fast that volume carries
+you upward** when you hold jump inside it. All three are part of what a block
+*is*, so a world saved before any of them opens with one line naming **all four**
+of the game's blocks — not because all four were changed by anybody, but because
+the old record and the new one are not comparable, and the honest answer is to
+say so rather than to guess block by block.
 
 **Each move is reported once, so this build reports again to a save that already
-paid for the last one.** If you played on the previous build, met that line, and
-quit normally, your save was rewritten under the record of the day — and it is
-still older than the record this build keeps, so you are told once more. That is
-not the same notice repeating. It is a second change being reported for the first
-time, and it costs you the same single line.
+paid for the last two.** If you played on either previous build, met that line,
+and quit normally, your save was rewritten under the record of the day — and it
+is still older than the record this build keeps, so you are told once more. That
+is not the same notice repeating. It is a third change being reported for the
+first time, and it costs you the same single line.
 
 Quit normally again and the save is rewritten under the new record; the next
 launch says nothing, until the day the record moves again. From then on that line
@@ -349,15 +359,16 @@ differently:
 
 **A world you saved before one of these builds reports every one of its blocks at
 once**, and that is expected rather than a sign anything is wrong. The game has
-three times changed how it records what a block is: once for what a block looks
-like, and twice for what it does — the second of those being this build, which
-gave blocks a volume you can swim in. Across any of them the old record and the
-new one are not comparable, so the honest answer is that they all moved. Which
-ones you crossed decides what you see: the looks change is the case nothing is
-said about, and each behaviour change is one line naming every block, once, on
-the first launch that crosses it and never again. **A save old enough to cross
-both behaviour changes is told once for each**, which is why a line you have seen
-before can come back after a clean quit.
+four times changed how it records what a block is: once for what a block looks
+like, and three times for what it does — the most recent being this build, which
+let water decide how fast it carries you upward. Across any of them the old
+record and the new one are not comparable, so the honest answer is that they all
+moved. Which ones you crossed decides what you see: the looks change is the case
+nothing is said about, and each behaviour change is one line naming every block,
+once, on the first launch that crosses it and never again. **A save old enough to
+cross all three behaviour changes is told once for each — three lines, on three
+separate launches**, which is why a line you have seen before can come back after
+a clean quit.
 
 A save that loads can still put you somewhere that stopped being standable while the
 game was off. That is answered rather than refused, and "Coming back to a save never

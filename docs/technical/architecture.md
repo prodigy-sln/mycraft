@@ -548,7 +548,7 @@ no sub-boxes.
 | Tick duration | 1/60 s | declared, never measured — no wall clock in `mc-sim` |
 | Walk speed | 4.5 blocks/s | 0.075 blocks/tick |
 | Gravity | 30.0 blocks/s² | 0.5 blocks/s per tick |
-| Jump speed | 9.0 blocks/s | apex 1.275 blocks at tick 17 under the semi-implicit integrator; floor again at tick 35 |
+| Jump speed | 9.0 blocks/s | apex 1.275 blocks at tick 17 under the semi-implicit integrator; floor again at tick 35. **From ground contact only** — a jump the medium alone admits leaves at that volume's declared `swim_ascent` instead, and no engine constant governs it |
 | Terminal fall speed | 48.0 blocks/s | 0.8 blocks/tick — under one block, which is what keeps per-axis resolution exact |
 | Player box | 0.6 × 1.8 × 0.6 blocks | ±0.3 in x/z from the feet centre |
 | Eye height | 1.62 blocks above the feet | — |
@@ -565,23 +565,39 @@ handle and nothing to swallow.
 collision reads one at nine sites and the walk a swing travels reads the other, and neither set may
 reach the other's question — a single trait carrying both would hand every one of those sites a
 question it must never ask, and a collision test could then exercise aiming by accident. Where one
-site reads two properties of one question, they travel in one value: `Medium` returns
-`VoxelMedium { swimmable, resistance }`, because splitting it would segregate nothing —
-`advance_player` reads both, one line apart, from one fold over one box — while admitting a fixture
-that states one and inherits the other. The composite `Traversal: Solidity + Medium` is where the
-physics' exclusion of `Targetable` is stated.
+site reads several properties of one question, they travel in one value: `Medium` returns
+`VoxelMedium { swimmable, resistance, swim_ascent }`, because splitting it would segregate nothing —
+`advance_player` reads them within a line or two of each other, from one fold over one box — while
+admitting a fixture that states one and inherits another. The composite `Traversal: Solidity +
+Medium` is where the physics' exclusion of `Targetable` is stated.
 
 `ResolvedVoxels::resolve(volume: &dyn BlockVolume, registry: &BlockRegistry) ->
 Result<Self, RegistryError>` builds **three** per-voxel arrays once, over the volume's declared
 extent, resolving every name it finds through the registry — each answer read from its own declared
 field, never derived from another. Two are one bit wide, and each costs
 1 048 576 voxels × 1 bit = **+128 KiB** once, at world scale. The third is an **index** into a table
-of the distinct `(swimmable, move_resistance)` answers the *registry* declares, and its width is
+of the distinct `(swimmable, move_resistance, swim_ascent)` answers the *registry* declares, and its
+width is
 chosen once at resolve from `{1, 2, 4, 8, 16, 32}` — a power of two that divides 64, so a read stays
 one shift and one mask, with a floor of one bit. The shipped registry declares at most two distinct
 media between all its blocks, so that index is one bit and the same 128 KiB again, against a table of
 a handful of entries. The width is a property of **content**: any number of blocks sharing one answer
-costs nothing, a third distinct answer takes it to 2 bits, and a fifth to 4. It takes a `BlockVolume` rather than
+costs nothing, a third distinct answer takes it to 2 bits, and a fifth to 4.
+
+**The ascent joined that key and the width did not move, which is a property of one masking arm
+rather than a coincidence.** Its default and its fold identity disagree — a declaration stating no
+`swim_ascent` means the player's own jump speed, so that an existing swimmable block behaves as it
+did, while an empty cell must contribute `0.0` or it would lift a swimmer through nothing. Every
+other medium property has `default == identity` and folds away silently. So `declared_by`
+(`crates/mc-sim/src/replay/medium.rs`) masks the ascent of a **non-swimmable** definition to `0.0`,
+and every ordinary block goes on resolving to exactly the medium it resolved to before. Without that
+arm each of them mints `{not swimmable, no resistance, 9.0}` as a table entry of its own, the shipped
+index doubles to 2 bits, and the world pays **+128 KiB** for an answer no block ever uses. A future
+change must keep the mask at that one door: applying it inside the fold gives identical physics and
+spends the doubling anyway, and applying it in the loader destroys the author's declared number,
+which the registry is required to report whether or not the same declaration states a buoyancy.
+
+It takes a `BlockVolume` rather than
 `&ReplayWorld` concretely, because the only way to state "an invented block whose definition
 disagrees with its name" is a volume the replay world is merely one implementor of — `ReplayWorld`
 implements it, and a test fixture can too. This keeps solidity a bounds test and a bit test with no

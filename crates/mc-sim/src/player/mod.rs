@@ -116,14 +116,14 @@ pub trait Targetable {
 
 /// What a voxel's volume does to something moving through it.
 ///
-/// Two independent declarations in one value, because a caller that could read
-/// one without the other is the disagreement this type exists to make
+/// Three independent declarations in one value, because a caller that could
+/// read one without the others is the disagreement this type exists to make
 /// unspellable — the same reason [`crate::replay::ResolvedVoxels::set`] writes
 /// every answer at once.
 ///
 /// **No [`Default`], deliberately**: `..Default::default()` would make
 /// inheriting a field invisible again, and the scenarios that separate a
-/// resistant block from a buoyant one depend on a fixture stating both.
+/// resistant block from a buoyant one depend on a fixture stating all three.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VoxelMedium {
     /// Whether a player can hold itself up in this volume.
@@ -131,38 +131,59 @@ pub struct VoxelMedium {
     /// How much this volume slows what moves through it: a speed through it is
     /// divided by `1 + resistance`. Finite and not less than zero.
     pub resistance: f32,
+    /// How fast this volume launches a swimmer that asks to rise, in blocks per
+    /// second, before gravity and resistance take their bite. Finite and not
+    /// less than zero.
+    ///
+    /// **`0.0` here is not what an absent declaration field means, and it is the
+    /// one medium property where those two disagree.** A declaration that states
+    /// no ascent means the player's own jump speed, because that is what keeps
+    /// an existing swimmable block behaving as it did; `0.0` is what an *empty
+    /// cell* contributes, because it is the identity of [`with`](Self::with)'s
+    /// join and a cell holding no block must lift nobody. Both values are right
+    /// for their own job, and reconciling them is
+    /// [`declared_by`](crate::replay)'s masking arm rather than anything here.
+    pub swim_ascent: f32,
 }
 
 impl VoxelMedium {
     /// What a cell with no block in it answers, and what everything outside the
-    /// world answers: neither buoyant nor resistant. The identity of
-    /// [`with`](Self::with).
+    /// world answers: neither buoyant, nor resistant, nor lifting. The identity
+    /// of [`with`](Self::with) on all three.
     pub const NOTHING: Self = Self {
         swimmable: false,
         resistance: 0.0,
+        swim_ascent: 0.0,
     };
 
     /// The medium of two overlapped cells taken together: buoyant if either is,
-    /// and the greater of the two resistances.
+    /// the greater of the two resistances, and the greater of the two ascents.
+    ///
+    /// One lattice join per property — `||` and `max` are both commutative,
+    /// associative and idempotent, each with the value [`NOTHING`](Self::NOTHING)
+    /// carries as its identity — so a box overlapping any number of cells folds
+    /// to the same medium in any order, and an empty cell drops out of the fold
+    /// rather than diluting it.
     #[must_use]
     pub fn with(self, other: Self) -> Self {
         Self {
             swimmable: self.swimmable || other.swimmable,
             resistance: self.resistance.max(other.resistance),
+            swim_ascent: self.swim_ascent.max(other.swim_ascent),
         }
     }
 }
 
 /// What medium a voxel is.
 ///
-/// **One trait with one method returning both answers**, where [`Solidity`] and
+/// **One trait with one method returning every answer**, where [`Solidity`] and
 /// [`Targetable`] are two traits — and the difference is which hazard is live.
 /// Those two are read by different code that must not reach each other's
-/// question. Both of these are read by [`physics::advance_player`] alone, one
-/// line apart, folded over one box at one instant, so segregating them would
-/// separate nothing. The live hazard here is the opposite one: a fixture
-/// stating one property and inheriting the other, which no assertion inside the
-/// physics can see.
+/// question. All of these are read by [`physics::advance_player`] alone, within
+/// a line or two of each other, folded over one box at one instant, so
+/// segregating them would separate nothing. The live hazard here is the
+/// opposite one: a fixture stating one property and inheriting another, which
+/// no assertion inside the physics can see.
 ///
 /// **Total**, by the same construction as [`Solidity`] and [`Targetable`]:
 /// every position has an answer, and everything outside the loaded world

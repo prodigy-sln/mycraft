@@ -60,9 +60,9 @@ see [script-limits.md](script-limits.md) for the budget and the memory cap, and
 declaration calls nothing the engine provides: it returns a table and that is
 all. There is no `mycraft.*` binding to use here.
 
-## The eleven fields
+## The twelve fields
 
-Three are required and eight are optional.
+Three are required and nine are optional.
 
 | Field | Type | Required | Absent means | Bound |
 |---|---|---|---|---|
@@ -77,6 +77,7 @@ Three are required and eight are optional.
 | `targetable` | boolean | no | **whatever you wrote for `solid`** | — |
 | `swimmable` | boolean | no | `false` | — |
 | `move_resistance` | number | no | `0.0` | not less than zero, and at most `3.4e38` |
+| `swim_ascent` | number | no | `9.0` | not less than zero, and at most `3.4e38` |
 
 `drawn`, `occludes` and `targetable` are the only fields whose default is not a
 constant. Every other absence means the same thing in every declaration; those
@@ -84,12 +85,12 @@ three mean whatever the *same* declaration said about `solid`. That is what lets
 declaration written before they existed go on meaning exactly what it meant — one
 field used to answer all four questions at once.
 
-**The two medium fields are not among them, and deliberately not.** No field has
-ever answered whether a volume can be swum in or how much it slows you, so a
-default derived from `solid` would invent a claim you never made — and it would
-make every solid block in the game a wall you can float inside. `swimmable` absent
-is `false` and `move_resistance` absent is `0.0`, on a solid block and a non-solid
-one alike.
+**The three medium fields are not among them, and deliberately not.** No field has
+ever answered whether a volume can be swum in, how much it slows you or how fast
+it lifts you, so a default derived from `solid` would invent a claim you never
+made — and it would make every solid block in the game a wall you can float
+inside. `swimmable` absent is `false`, `move_resistance` absent is `0.0` and
+`swim_ascent` absent is `9.0`, on a solid block and a non-solid one alike.
 
 ```luau
 return {
@@ -107,6 +108,7 @@ return {
 
 	swimmable = false,             -- optional, absent means false
 	move_resistance = 0.0,         -- optional, absent means 0.0
+	swim_ascent = 9.0,             -- optional, absent means 9.0
 }
 ```
 
@@ -145,8 +147,12 @@ return {
 - **`move_resistance`** — how much this block's volume slows what moves through
   it. Absent means **`0.0`**, which is exactly "unaffected". See "Declaring a
   medium", below, for the scale and what it is refused for.
+- **`swim_ascent`** — how fast this block's volume lifts a swimmer who holds
+  jump. Absent means **`9.0`**, the speed your own jump leaves the ground at, so
+  a declaration written before this field existed lifts exactly as it did. See
+  "Declaring a medium", below, for what you can predict from the number.
 
-**The eight optional fields are independent of one another.** A block may declare
+**The nine optional fields are independent of one another.** A block may declare
 `breakable = false` *and* a `breaks_into`; the residue is simply never reached,
 and it is still there the day you make the block breakable again by editing one
 line. The same holds across the three seeing fields: `drawn = true` on a
@@ -176,7 +182,7 @@ quoted in full under "Reading a refusal", below.
 **A field the loader does not recognise is refused, not ignored.** A misspelled
 `replacable` is a word anybody types once, and a loader that read the keys it
 knows and never asked what else was there could not tell a typo from an absence.
-The refusal names the field you wrote **and all eleven you may write**, because a
+The refusal names the field you wrote **and all twelve you may write**, because a
 name is only recognisable as a typo once you can see what it was nearly —
 `drawnn` beside `drawn` explains itself where `drawnn` alone does not.
 
@@ -448,7 +454,7 @@ A `blocks/amber.luau` declaring `slid = true` where it meant `solid` is refused
 like this:
 
 ```
-mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`
 ```
 
 The parts read outermost first, separated by `: ` — the stage that failed, then
@@ -459,7 +465,7 @@ short — `drawnn` for `drawn`, which is the typo the newest field on the list
 invites:
 
 ```
-mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `drawnn`: `drawnn` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `drawnn`: `drawnn` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`
 ```
 
 A field that exists but holds the wrong kind of value is refused differently, and
@@ -664,7 +670,7 @@ whatever you call yours.
 
 ## Declaring a medium
 
-Two fields say what a block's volume is to something moving *through* it, as
+Three fields say what a block's volume is to something moving *through* it, as
 opposed to what it looks like or whether it stops you. Together they are what
 makes a volume a **medium** rather than an absence.
 
@@ -713,10 +719,82 @@ coerced. A value is refused, naming `move_resistance`, when it is:
 Write the number either way Luau writes one: `move_resistance = 4` and
 `move_resistance = 4.5` are both accepted, and `4` registers as `4.0`.
 
-**The two are independent in both directions.** A volume may resist without being
-one you can swim in, and one you can swim in need not resist at all — nothing is
-derived from the other, so a block that states one has said *nothing* about the
-other.
+**`swim_ascent`** says how fast the volume lifts a swimmer holding jump.
+**Absent means `9.0`**, the speed your own jump leaves the ground at — so a
+declaration written before this field existed lifts exactly as it always did.
+
+It is read by the same rules as `move_resistance`: the same floor, the same
+`3.4e38` ceiling, the same four refusals, and both of Luau's ways of writing a
+number, so `swim_ascent = 4` registers as `4.0`. Each refusal names
+`swim_ascent`:
+
+| You write | The refusal |
+|---|---|
+| `swim_ascent = -1` | `` `swim_ascent` may not be less than zero `` |
+| `swim_ascent = 0/0` | `` `swim_ascent` must be a finite number `` |
+| `swim_ascent = math.huge` | `` `swim_ascent` must be a finite number `` |
+| `swim_ascent = 1e40` | `` `swim_ascent` must be a finite number `` — past the width the engine keeps |
+| `swim_ascent = true` | `` `swim_ascent` must be a number, but is a boolean `` |
+| `swim_ascent = "3.5"` | `` `swim_ascent` must be a number, but is a string `` |
+
+**A stated `0` is not an absence.** `swim_ascent = 0.0` declares a volume you
+can be inside and cannot climb: holding jump does nothing whatever. That is a
+different claim from leaving the field out, which lifts you at `9.0`. It is the
+one field on a declaration where saying nothing and writing the smallest value
+you may write mean opposite things, so it is worth writing the `0.0` out on
+purpose rather than trusting a reader to see that you meant it.
+
+**The three are independent in every direction.** A volume may resist without
+being one you can swim in; one you can swim in need not resist at all; and a
+block may state a `swim_ascent` while saying nothing about `swimmable`, in
+which case the number is registered exactly as written and lifts nobody —
+because there is nobody it holds up. Nothing here is derived from anything
+else, so a block that states one of the three has said *nothing* about the
+other two.
+
+### What the numbers do, before you run them
+
+Both numbers are read **once per tick, and the tick is 60 Hz**. That is what
+makes them predictable rather than something to discover by swimming. A tick of
+a swimmer holding jump ends at
+
+```
+rise = (swim_ascent - 0.5) / (1 + move_resistance)
+```
+
+and a tick of a swimmer holding a movement key ends at
+
+```
+horizontal = 4.5 / (1 + move_resistance)
+```
+
+where `0.5` is what gravity takes in one tick at 60 Hz and `4.5` is the speed
+you walk on land. **The rise does not accumulate**: the ascent is re-applied
+from scratch every tick, so the first tick in the water is already the whole of
+it, and holding jump longer gets you there sooner rather than faster.
+
+**The number worth picking first is the ratio of the two**, because
+`move_resistance` divides both and cancels out of it completely:
+
+```
+rise / horizontal = (swim_ascent - 0.5) / 4.5
+```
+
+So `swim_ascent` alone decides whether your liquid climbs faster than it
+carries you along, whatever you do to the resistance afterwards — and it is the
+one thing about your medium's feel you cannot read off the field table.
+
+| `swim_ascent` | rise / horizontal | What it feels like |
+|---|---|---|
+| `9.0`, or nothing at all | 1.89 | you climb nearly twice as fast as you swim along |
+| `5.0` | 1.00 | up and along at the same speed |
+| `3.5` | 0.67 | you swim along half again as fast as you climb |
+| `0.5` | 0.00 | you hold your depth: jump exactly cancels one tick of gravity |
+| `0.0` | −0.11 | jump buys you nothing at all and you sink anyway |
+
+Pick the ratio from `swim_ascent`, then pick `move_resistance` for how fast the
+whole thing happens. They are independent in exactly that way, which is why
+they are two fields.
 
 ### A worked example: a resistant block that is not swimmable
 
@@ -743,6 +821,40 @@ Drop into a pool of it and you fall to the bottom four times more slowly than yo
 fall through air, and holding jump does nothing. Declare `swimmable = true`
 alongside and the same pool becomes something you can swim up out of, at the same
 reduced speed — which is what `base:water` does.
+
+### A worked example: a liquid you swim along faster than you climb
+
+`content/example/blocks/brine.luau`. Every field it needs is stated; drop the
+file into a content root and it loads.
+
+```luau
+-- Brine. Denser than water: it carries you along well and lets you climb out
+-- slowly, which is the pairing `swim_ascent` exists to let you write.
+return {
+	name = "example:brine",
+	texture = "example:brine",
+	solid = false,                 -- required, and `false` is what makes it a volume
+	                               -- you enter rather than a wall you stop at
+
+	drawn = true,                  -- non-solid, so this would otherwise default to false
+	occludes = false,              -- you can see what is behind it
+	targetable = false,            -- a swing passes straight through
+
+	swimmable = true,              -- you can hold yourself up in it
+	move_resistance = 0.5,         -- two thirds of your speed in air
+	swim_ascent = 3.5,             -- ratio (3.5 - 0.5) / 4.5 = 0.67
+}
+```
+
+What that declaration is worth, before you load it: holding a movement key
+carries you along at `4.5 / 1.5` = **3.0 blocks per second**, two thirds of your
+walking speed, and holding jump lifts you at `(3.5 - 0.5) / 1.5` = **2.0 blocks
+per second**. You swim along half again as fast as you climb, and a four-block
+pool takes two seconds to rise out of.
+
+Change `move_resistance` to `0.0` and both numbers rise together — `4.5` along
+and `3.0` up — and the ratio is still `0.67`. That is the cancellation above,
+and it is why you tune the two fields for different things.
 
 ## A complete example
 
@@ -862,7 +974,7 @@ called and a key is what it is drawn from.
 ## What is not here yet
 
 Per-cell state, callbacks and components. Worldgen in script. Reading a second
-content root. And `extends`, in every form — a declaration states its own eleven
+content root. And `extends`, in every form — a declaration states its own twelve
 fields and inherits nothing.
 
 **Declarations now reload while the game is running.** Save a file in `blocks/` and

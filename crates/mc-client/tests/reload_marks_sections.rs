@@ -117,6 +117,15 @@ const A_DIFFERENT_NORTH: &str = "base:zircon_north_reworked";
 /// solidity edit.
 const A_RESISTANCE_WORTH_DECLARING: f32 = 3.0;
 
+/// The ascent the medium scenario below gives stone.
+///
+/// **Not `9.0`**, which is what the loader supplies to a declaration that says
+/// nothing: a candidate stating the default differs from the serving root in
+/// nothing at all, and would leave the reading below green against a marking rule
+/// that had learned the field. Stone stays solid and stays silent about
+/// swimmability, so nothing here is also a solidity or a buoyancy edit.
+const AN_ASCENT_WORTH_DECLARING: f32 = 4.0;
+
 #[test]
 fn a_candidate_touching_neither_solidity_nor_a_texture_key_leaves_no_section_to_mesh() -> TestResult
 {
@@ -413,6 +422,42 @@ fn a_candidate_that_only_makes_stone_slow_what_moves_through_it_marks_no_section
 }
 
 #[test]
+fn a_candidate_that_only_changes_how_fast_a_block_carries_a_swimmer_marks_no_section() -> TestResult
+{
+    let mut client = a_client_over_the_shipped_world()?;
+    require_nothing_outstanding(&mut client)?;
+    let lifting =
+        shipped_restating_stone(&Declaration::of(STONE).swim_ascent(AN_ASCENT_WORTH_DECLARING))?;
+    let launched = serial_serving(&client)?.get();
+
+    let answered = client.adopt(candidate(lifting.path())?);
+    let published = serial_reported(&answered);
+    let left_to_mesh = marked(&mut client);
+
+    assert_eq!(
+        (
+            adoption(answered),
+            run_of(launched, &[published]),
+            left_to_mesh
+        ),
+        (
+            accepted(DIRT),
+            Run::EachLaterThanTheLast,
+            Marking::NoSectionAtAll
+        ),
+        "how fast a volume carries a swimmer upward is a number the physics launches at, and a \
+         still frame cannot show it — so an implementation that added the ascent to the geometry \
+         key rebuilds all 256 sections every time an author retunes a rate nobody can see, and the \
+         author reads the flicker as the reload having found something. It is asserted separately \
+         from the two medium scenarios above because a key that learned one medium field and not \
+         another passes exactly the scenarios about the ones it did not learn. **The serial and \
+         the acceptance are asserted beside the zero because a refused reload marks nothing \
+         either**, and so does one that published no content at all"
+    );
+    Ok(())
+}
+
+#[test]
 fn the_same_harness_marks_every_section_for_a_candidate_that_only_stops_drawing_stone() -> TestResult
 {
     let mut client = a_client_over_the_shipped_world()?;
@@ -425,9 +470,9 @@ fn the_same_harness_marks_every_section_for_a_candidate_that_only_stops_drawing_
     assert_eq!(
         (adoption(answered), left_to_mesh),
         (accepted(DIRT), every_section_once()),
-        "the control the two medium scenarios above cannot supply for themselves. Each of them \
+        "the control the three medium scenarios above cannot supply for themselves. Each of them \
          asserts an absence, and a reload path that came to mark nothing at all — or a harness \
-         whose drain stopped reporting — satisfies both forever. This is the same client, the same \
+         whose drain stopped reporting — satisfies all three forever. This is the same client, the same \
          root and the same reading over the one field whose whole subject is the picture, so the \
          discrimination is which of two answers the marking gives rather than whether it can give \
          one"

@@ -193,6 +193,48 @@ fn the_committed_goldens_are_exactly_the_directories_the_current_revision_declar
     Ok(())
 }
 
+/// The revision the frames this build supersedes were shot under.
+///
+/// **Written out rather than derived, and it is the one constant here that has
+/// to be.** Every other reading in this file asks whether the committed set
+/// agrees with whatever revision the library currently names, which is a
+/// question a set that never moved answers just as happily as one that did. This
+/// asks the other question — whether the set moved *off* the revision whose
+/// frames were shot under a contract this build changes — and a derived name
+/// could only ever be the current one, which is the collision rather than the
+/// check.
+const SUPERSEDED_REVISION: &str = "r3";
+
+#[test]
+fn the_committed_goldens_carry_none_of_the_names_the_superseded_frames_were_shot_under()
+-> TestResult {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens");
+    let mut committed = entries_of(&root)?;
+    let mut declared = declared_capture_ids(SCENE_REVISION)?;
+    let superseded = declared_capture_ids(SUPERSEDED_REVISION)?;
+    committed.sort();
+    declared.sort();
+    let stale: Vec<&String> = committed
+        .iter()
+        .filter(|name| superseded.contains(name))
+        .collect();
+
+    assert_eq!(
+        (committed.clone(), stale.len()),
+        (declared, 0),
+        "the physics the scripted walk runs under is declared by content, and this build \
+         changes it — so the committed frames describe a contract the current one is not, and \
+         every capture directory has to be renamed off `{SUPERSEDED_REVISION}`. Both halves \
+         are asserted together because neither carries the other: a set left on the old \
+         revision satisfies nothing, and an *emptied* `goldens/` would satisfy 'none of them \
+         are stale' forever. `{}` holds {committed:?} and {} of those are still \
+         `{SUPERSEDED_REVISION}` names",
+        root.display(),
+        stale.len()
+    );
+    Ok(())
+}
+
 /// Everything `directory` holds, by name. A directory that is not there holds
 /// nothing — which is a state the assertion is entitled to report rather than
 /// an error that hides what was expected.

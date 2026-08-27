@@ -306,7 +306,15 @@ impl World {
     /// something moving through it, writes no cell of the world — so the
     /// replacement is the only thing that can carry that answer to the tick.
     /// The medium table is rebuilt with them, which is why a reload that changes
-    /// a `move_resistance` needs no mechanism of its own.
+    /// a `move_resistance` — or a `swim_ascent` — needs no mechanism of its own.
+    ///
+    /// **The whole volume is re-resolved, so a medium property added later is
+    /// carried by this without being named here.** The ascent arrived that way:
+    /// nothing in this function knew about it, and a reload retuning it took
+    /// effect on the next tick regardless, masking included, because the table
+    /// is rebuilt rather than patched. That is the property to preserve — a
+    /// resolve narrowed to the cells whose *block* changed would leave a retuned
+    /// property serving its old value wherever the name stayed put.
     ///
     /// # Errors
     ///

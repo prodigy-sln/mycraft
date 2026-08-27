@@ -155,6 +155,26 @@ enum Recorded {
     NotNamed,
 }
 
+/// The six keys `keys` names, parsed, in the order it names them.
+///
+/// # Errors
+///
+/// Returns an error if a key is not a namespaced id, or if six of them did not
+/// arrive — which is unreachable from a `[&str; 6]` and is answered rather than
+/// unwrapped because this crate denies panicking conversions at its root.
+fn six_keys(keys: [&str; 6]) -> Result<[TextureKey; 6], Box<dyn Error>> {
+    let mut parsed = Vec::with_capacity(keys.len());
+    for key in keys {
+        parsed.push(TextureKey::parse(key)?);
+    }
+    Ok(parsed.try_into().map_err(|wrong: Vec<TextureKey>| {
+        format!(
+            "six facings need six keys, and this fixture assembled {count}",
+            count = wrong.len()
+        )
+    })?)
+}
+
 /// A registry holding [`PINNED`] alone, its six facings holding `keys`.
 ///
 /// # Errors
@@ -162,19 +182,9 @@ enum Recorded {
 /// Returns an error if a name or a key is not a namespaced id, or if the registry
 /// refuses the batch.
 fn registry_texturing(keys: [&str; 6]) -> Result<BlockRegistry, Box<dyn Error>> {
-    let mut parsed = Vec::with_capacity(keys.len());
-    for key in keys {
-        parsed.push(TextureKey::parse(key)?);
-    }
-    let stated: [TextureKey; 6] = parsed.try_into().map_err(|wrong: Vec<TextureKey>| {
-        format!(
-            "six facings need six keys, and this fixture assembled {count}",
-            count = wrong.len()
-        )
-    })?;
     let declared = vec![Ok(BlockDefinition {
         name: BlockName::parse(PINNED)?,
-        textures: FaceTextures::stating(stated),
+        textures: FaceTextures::stating(six_keys(keys)?),
         is_solid: true,
         replaceable: false,
         breakable: true,
@@ -184,6 +194,7 @@ fn registry_texturing(keys: [&str; 6]) -> Result<BlockRegistry, Box<dyn Error>> 
         targetable: true,
         swimmable: false,
         move_resistance: 0.0,
+        swim_ascent: 9.0,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
     })];
     let mut registry = BlockRegistry::new();

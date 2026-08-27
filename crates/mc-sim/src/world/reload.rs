@@ -65,7 +65,8 @@ pub(crate) fn adopt_candidate(
 /// Binary, and the marking it drives is all-or-nothing: whether a block is
 /// drawn, whether it hides what stands behind it, the keys the six faces draw
 /// from, or the set of names. `solid`, `targetable`, `replaceable`, `breakable`,
-/// `breaks_into`, `swimmable` and `move_resistance` change no geometry.
+/// `breaks_into`, `swimmable`, `move_resistance` and `swim_ascent` change no
+/// geometry.
 /// Narrowing this to the sections that hold a changed name marks about 82 of 256
 /// in the shipped world and fails the spec's stated bound, so it is a spec change
 /// rather than an optimisation.
@@ -91,13 +92,22 @@ fn changes_geometry(serving: &BlockRegistry, candidate: &BlockRegistry) -> bool 
 /// **`targetable` is not among them either.** What a swing can find is not
 /// something a section could show.
 ///
-/// **Nor are `swimmable` and `move_resistance`, and they are the case worth
-/// stating.** Both change what a volume does to whatever moves through it, and
-/// neither changes one pixel of it: water that stopped holding you up looks
-/// exactly like water that still does. Adding either here would rebuild all 256
+/// **Nor are `swimmable`, `move_resistance` and `swim_ascent`, and they are the
+/// case worth stating.** All three change what a volume does to whatever moves
+/// through it, and none of them changes one pixel of it: water that stopped
+/// holding you up, or that lifts you at half the pace, looks exactly like water
+/// that still does neither. Adding any of them here would rebuild all 256
 /// sections every time a mod author retuned a number nobody can see — and the
 /// author would read the world flicker as the reload having found something,
 /// which is the opposite of what it would mean.
+///
+/// **They are excluded by not being in this map, and never by a clause that
+/// names them.** A predicate listing the fields that do *not* mark is a
+/// hand-maintained list against a growing type: the day a fourth medium property
+/// is declared it marks the world by default, silently, and nothing reddens.
+/// Keyed positively on the three that decide what is drawn, a new property is
+/// outside the comparison the moment it exists, and it is
+/// `reload_marks_sections.rs` that reddens if one is ever added here.
 ///
 /// **All six keys and not one.** A block whose `north` alone was re-pointed is a
 /// block that draws differently, and comparing a single key would leave such a

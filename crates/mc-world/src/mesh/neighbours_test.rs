@@ -84,6 +84,7 @@ fn registry_of_the_six() -> Result<BlockRegistry, Box<dyn Error>> {
             targetable: true,
             swimmable: false,
             move_resistance: 0.0,
+            swim_ascent: 9.0,
             origin: DefinitionOrigin::new(GUARD_ORIGIN),
         }));
     }

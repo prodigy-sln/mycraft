@@ -230,6 +230,7 @@ fn definition(name: &str, is_solid: bool) -> Result<BlockDefinition, NamespacedI
         targetable: is_solid,
         swimmable: false,
         move_resistance: 0.0,
+        swim_ascent: 9.0,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
     })
 }

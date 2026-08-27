@@ -8,10 +8,13 @@
 //! *constant* default, so a fixture stating nothing pins one value. These carry a
 //! **derived** one, so a fixture stating nothing pins whatever `solid` says — and
 //! a loader that resolved all three to `false` unconditionally satisfies every
-//! non-solid fixture in the workspace by construction. Measured with
+//! non-solid fixture in the workspace by construction. The property that argues
+//! it, re-checkable with
 //! `grep -rn "BlockDefinition {" --include=*.rs crates/ | grep -v "pub struct"`:
-//! 22 constructions, 21 of them in fixtures, none of which states any of the
-//! three.
+//! **no fixture construction in the workspace states any of the three.** A count
+//! was written here once and it rotted — the population grows with every fixture
+//! and every field — while the universal is the half the argument rests on and
+//! the half that stays true.
 //!
 //! # Which fixture can fail, and which cannot
 //!

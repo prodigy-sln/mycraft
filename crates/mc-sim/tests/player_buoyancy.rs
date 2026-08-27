@@ -13,7 +13,10 @@
 //! swimmable is asked the same question it has always been asked, and the test
 //! for it compares a tick that asked to jump against an identical tick that did
 //! not — which reports a second launch path even where the fall it competes with
-//! happens to end at the same height.
+//! happens to end at the same height. **That comparison begins from a fall and
+//! not from rest**, because from rest the two ticks it compares are the same
+//! tick under any wrongful launch that sets the vertical speed to zero, and the
+//! pair moves together for the wrong reason.
 //!
 //! Every expected figure is arithmetic over the declared constants — the jump
 //! speed, the gravity and the tick duration — written as the arithmetic rather
@@ -59,6 +62,12 @@ const ONE_TICK_OF_RISE: f32 = (JUMP_SPEED - GRAVITY * TICK_DURATION) * TICK_DURA
 /// How far one tick of an unpowered fall carries the feet downward, in blocks.
 const ONE_TICK_OF_FALL: f32 = -GRAVITY * TICK_DURATION * TICK_DURATION;
 
+/// How fast the comparison below begins its fall, in blocks per second.
+///
+/// Any speed a tick of gravity does not wipe out would do; this is the one the
+/// suite's other mid-air readings use.
+const FALLING_SPEED: f32 = -2.0;
+
 /// A player at rest with nothing holding it up, at [`FEET`].
 fn adrift() -> PlayerState {
     PlayerState {
@@ -74,6 +83,22 @@ fn adrift() -> PlayerState {
 fn standing() -> PlayerState {
     PlayerState {
         on_ground: true,
+        ..adrift()
+    }
+}
+
+/// A player already falling, with nothing holding it up.
+///
+/// **A comparison between a tick that asked to jump and one that did not says
+/// nothing while the two begin at rest**: a launch that wrongly set the vertical
+/// velocity to zero and a refusal that left it at zero are the same tick, and
+/// both fall by exactly gravity's bite. Starting the fall gives the two
+/// something to disagree about — the refusal keeps the speed it came in with and
+/// the wrongful launch throws it away — so a jump honoured where none is owed
+/// ends the tick higher rather than level.
+fn falling() -> PlayerState {
+    PlayerState {
+        velocity: Vec3::new(0.0, FALLING_SPEED, 0.0),
         ..adrift()
     }
 }
@@ -177,7 +202,7 @@ fn asking_for_no_jump_inside_a_swimmable_block_still_sinks() -> TestResult {
 #[test]
 fn a_jump_asked_for_in_midair_outside_any_swimmable_block_changes_nothing_about_the_tick()
 -> TestResult {
-    let start = adrift();
+    let start = falling();
 
     let lifted = (
         a_jump_lifts(&swum(BUOYANT)?, start)?,
@@ -190,7 +215,9 @@ fn a_jump_asked_for_in_midair_outside_any_swimmable_block_changes_nothing_about_
         "a jump off the ground and clear of any swimmable block is refused exactly as it is \
          today. Read against the control beside it rather than as an absence: the first reading \
          is a block a jump is honoured in and the second is empty air, so an implementation \
-         honouring neither and one honouring both each land somewhere other than {lifted:?}"
+         honouring neither and one honouring both each land somewhere other than {lifted:?}. The \
+         fall the pair begins from is what lets the second reading move at all — from rest, a \
+         launch that set the speed to zero and a refusal that left it there are one tick"
     );
     Ok(())
 }

@@ -89,6 +89,7 @@ fn foreign_registry() -> Result<BlockRegistry, Box<dyn Error>> {
         targetable: true,
         swimmable: false,
         move_resistance: 0.0,
+        swim_ascent: 9.0,
         origin: origin.clone(),
     };
     let mut registry = BlockRegistry::new();

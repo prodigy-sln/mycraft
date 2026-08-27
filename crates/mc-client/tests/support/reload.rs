@@ -154,6 +154,7 @@ pub struct Declaration {
     targetable: Option<bool>,
     swimmable: Option<bool>,
     move_resistance: Option<f32>,
+    swim_ascent: Option<f32>,
 }
 
 impl Declaration {
@@ -180,6 +181,7 @@ impl Declaration {
             targetable: None,
             swimmable: None,
             move_resistance: None,
+            swim_ascent: None,
         }
     }
 
@@ -275,6 +277,20 @@ impl Declaration {
         self
     }
 
+    /// The same declaration, stating how fast the block's volume carries a
+    /// swimmer who asks to rise.
+    ///
+    /// Stated independently of `swimmable`, exactly as the loader reads it: what
+    /// a volume holding nobody up does with a declared ascent is decided where a
+    /// definition becomes a medium, and never here. Scenarios in this suite are
+    /// about what a reload *records* and *marks*, neither of which asks whether
+    /// anybody could swim in the block.
+    #[must_use]
+    pub const fn swim_ascent(mut self, swim_ascent: f32) -> Self {
+        self.swim_ascent = Some(swim_ascent);
+        self
+    }
+
     /// The declaration as a Luau chunk returning a table.
     #[must_use]
     pub fn text(&self) -> String {
@@ -338,6 +354,10 @@ impl Declaration {
             // fixture that means "a number" should not silently become one that
             // means "an integer" for the values that happen to be round.
             stated.push_str(&format!("\tmove_resistance = {move_resistance:?},\n"));
+        }
+        if let Some(swim_ascent) = self.swim_ascent {
+            // Debug for the reason the line above gives.
+            stated.push_str(&format!("\tswim_ascent = {swim_ascent:?},\n"));
         }
         stated
     }

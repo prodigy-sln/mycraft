@@ -1,13 +1,14 @@
 //! The distinct media a registry declares, and the index a voxel carries into
 //! them.
 //!
-//! **Indexing the pair is the whole of the saving.** What a voxel is, as far as a
-//! medium is concerned, takes very few values — the shipped content declares four
-//! blocks answering at most two media between them — so a table of the distinct
-//! answers and one narrow index per voxel costs a fraction of what either
-//! property stored densely would. A `swimmable` bitset beside a resistance view
-//! costs twice as much before it answers anything general, and a dense `f32`
-//! costs thirty times as much.
+//! **Indexing the whole answer is the whole of the saving.** What a voxel is, as
+//! far as a medium is concerned, takes very few values — the shipped content
+//! declares four blocks answering at most two media between them — so a table of
+//! the distinct answers and one narrow index per voxel costs a fraction of what
+//! any of the properties stored densely would. A `swimmable` bitset beside a
+//! resistance view costs twice as much before it answers anything general, and a
+//! dense `f32` costs thirty times as much — twice over, now that a medium
+//! carries two of them.
 //!
 //! **The table is built from the registry and never from a world's contents.**
 //! A block the world does not hold yet must already have an index, because a
@@ -16,9 +17,11 @@
 //! thing the write path must not do. Every writable answer is present before any
 //! write, so the table never grows.
 //!
-//! Nothing here reads a block *name*. Both halves of a medium come from the two
-//! fields that declare them, which is invariant 1 in the one place no
-//! declaration could override.
+//! Nothing here reads a block *name*. Every answer a medium carries comes from
+//! the field that declares it, which is invariant 1 in the one place no
+//! declaration could override — the single exception being the ascent of a
+//! volume that holds nobody up, which [`declared_by`] masks away for the reason
+//! recorded there.
 
 use mc_core::block::{BlockDefinition, BlockRegistry};
 
@@ -64,10 +67,11 @@ impl MediumTable {
     /// Every distinct medium `registry` declares, "nothing" first.
     ///
     /// A linear scan rather than a hash: the count is the number of distinct
-    /// `(swimmable, move_resistance)` answers content declares, which for the
-    /// shipped game is one and for any plausible registry is a handful. Hashing
-    /// an `f32` would also have to decide what to do about a value that is not
-    /// its own key.
+    /// `(swimmable, move_resistance, swim_ascent)` answers content declares —
+    /// as [`declared_by`] resolves them, so a non-swimmable definition's ascent
+    /// is already masked away and mints no entry — which for the shipped game is
+    /// one and for any plausible registry is a handful. Hashing an `f32` would
+    /// also have to decide what to do about a value that is not its own key.
     pub(super) fn of(registry: &BlockRegistry) -> Self {
         let mut media = vec![VoxelMedium::NOTHING];
         for stated in registry.definitions().map(declared_by) {
@@ -113,12 +117,37 @@ impl MediumTable {
 
 /// What `declared` says its volume does to something moving through it.
 ///
-/// Both halves read from their own field. A medium derived from `is_solid` would
+/// Every answer reads from its own field. A medium derived from `is_solid` would
 /// make every solid block in existence swimmable and would invent a claim no
 /// author made.
+///
+/// **The one exception is the ascent, and it is a mask rather than a
+/// derivation.** A definition that is not swimmable contributes an ascent of
+/// `0.0`, so a declaration's default of `9.0` cannot reach a swimmer through a
+/// neighbouring cell: a box overlapping water and an ordinary block would
+/// otherwise fold the block's unstated `9.0` over the water's declared rate and
+/// launch the swimmer at the very speed this property exists to replace. Both
+/// fields read here are declared, both belong to the medium, and the registry
+/// still reports each independently — this states nothing the physics does not
+/// already say, that a volume holding nobody up lifts nobody.
+///
+/// **It belongs here and in neither of the two places it could go instead.** Not
+/// in [`VoxelMedium::with`], which would give the same physics while leaving
+/// `{not swimmable, no resistance, 9.0}` in the table as a distinct entry for
+/// every ordinary block — the shipped index doubling from one bit to two, 128
+/// KiB over the world, and the width reading beside it is what reports that. Not
+/// in the loader either, which deletes this arm and looks strictly simpler: it
+/// loses the author's declared number permanently, and a registry must report a
+/// stated ascent whether or not the same declaration states a buoyancy, the two
+/// being independent in both directions.
 fn declared_by(declared: &BlockDefinition) -> VoxelMedium {
     VoxelMedium {
         swimmable: declared.swimmable,
         resistance: declared.move_resistance,
+        swim_ascent: if declared.swimmable {
+            declared.swim_ascent
+        } else {
+            0.0
+        },
     }
 }

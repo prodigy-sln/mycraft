@@ -776,6 +776,28 @@ to be taken from on the way there. Read a phase's scenarios for this shape
 before touching the constant they depend on: if a scenario's fixture requires
 a value the change is about to move past, mint it first.
 
+**It recurred at the very next move of the same constant, and that time it
+was seen coming.** `BEHAVIOUR_REVISION` went 3 → 4 when `swim_ascent` joined
+the behaviour list, and
+`crates/mc-world/tests/fixtures/world_saved_against_behaviour_revision_3.mcw`
+was minted and committed by the test author *before* the implementation
+landed — from a named tree, `6c2ed61`, which is the provenance that makes it
+evidence rather than a file. So the generalisation above is now load-bearing
+rather than retrospective: it was read, applied, and cost nothing, where
+finding it late costs the scenario permanently.
+
+**Why a second fixture was needed at all is the part worth carrying.** The
+revision-2 fixture still exists and still passes, but by this move it was
+stale in the behaviour record by *two* list growths — so a fold that appended
+the field and forgot the byte, and one that moved the byte and forgot the
+field, both disagree with it, and it reports the same names for either. **A
+fixture separates the *lists*; it cannot see the *byte*.** That was measured
+here rather than argued: holding `BEHAVIOUR_REVISION` at 3 with the new field
+on the list left **every** test over both fixtures green — including the
+revision-3 fixture minted for that exact move — and reddened only the two
+files that write the byte sequence out by hand. Buy a fixture for the list and
+a stating test for the byte; neither substitutes for the other.
+
 ### The derived-oracle rule: what coverage does not vouch for
 
 `benches/` code that a test reaches through `#[path]` is **outside the

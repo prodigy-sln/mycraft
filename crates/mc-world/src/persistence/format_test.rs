@@ -22,10 +22,12 @@
 //! # Why both halves, and what each of them has since been through
 //!
 //! A block records two hashes and the split is deliberate: what it is to stand
-//! on, and what it looks like. Both lists have now grown, one phase apart and for
-//! different reasons — the appearance half gained six texture keys where it had
-//! one, and then `drawn` and `occludes`; the behaviour half gained `targetable`.
-//! Each was **revised here by that phase's test author and by nobody else**.
+//! on, and what it looks like. Both lists have now grown, a phase apart each
+//! time and for different reasons — the appearance half gained six texture keys
+//! where it had one, and then `drawn` and `occludes`; the behaviour half gained
+//! `targetable`, then the two properties that make a volume a medium, and now
+//! the ascent that medium carries a swimmer at. Each was **revised here by that
+//! phase's test author and by nobody else**.
 //!
 //! What was bought by writing both halves before the fold moved crates is spent:
 //! neither list is the list it was, so neither guard can any longer say a value
@@ -118,18 +120,27 @@ const CRATE_DEPTH: usize = 2;
 ///
 /// **Two numbers and not one, and they stand apart.** The appearance list has
 /// grown twice — five texture keys, then `drawn` and `occludes` — against the
-/// behaviour list's twice, for `targetable` and then for the two medium fields,
-/// so the two bytes are two different numbers and a single shared constant could
-/// not state either. Each guard asserts its own, which is what lets one fold's
-/// byte fail to move while the other's does and be reported rather than
-/// absorbed.
+/// behaviour list's three times, for `targetable`, then for the two medium
+/// fields, and now for the ascent a medium carries a swimmer at. So the two
+/// bytes are two different numbers and a single shared constant could not state
+/// either. Each guard asserts its own, which is what lets one fold's byte fail
+/// to move while the other's does and be reported rather than absorbed.
 ///
-/// **The two are equal today and that is a coincidence of counting.** They
-/// reached three by different routes and for unrelated reasons, and a later
-/// change to either list moves one of them alone. Collapsing them into one
-/// constant on the strength of today's equality would make the next divergence
-/// invisible here, which is the one thing this file exists to report.
-const STATED_BEHAVIOUR_REVISION: u8 = 3;
+/// **They were equal until this move and that equality was a coincidence of
+/// counting**, which is exactly what it looked like: they reached three by
+/// different routes and for unrelated reasons, and this change moved one of them
+/// alone. Had they been collapsed into one constant on the strength of that
+/// equality, every save in existence would now report every block as retextured
+/// over a number no still frame can show.
+///
+/// **`STATED_APPEARANCE_REVISION` standing still is the assertion here, not an
+/// omission.** A fold that bumped both bytes together is invisible to every
+/// witness comparing one appearance hash to another — they move as a pair and go
+/// on agreeing. This constant and its twin in
+/// `tests/save_per_face_appearance.rs` are the only two things in the workspace
+/// that hold the appearance byte by hand, so they are what reddens when it
+/// moves.
+const STATED_BEHAVIOUR_REVISION: u8 = 4;
 const STATED_APPEARANCE_REVISION: u8 = 3;
 
 /// Where an FNV-1a 64 fold starts, and what it multiplies by.
@@ -165,8 +176,11 @@ fn every_shipped_blocks_recorded_behaviour_is_the_fold_an_independent_oracle_com
         recorded, stated,
         "what a save records as a block's declared behaviour is the format's stated field list \
          folded with FNV-1a-64, and this is that same fold arrived at without calling it. The \
-         pair being equal is what says the value did not move when the fold changed crates — a \
-         claim only a guard that existed before the move can make"
+         sequence stated here begins with the byte {STATED_BEHAVIOUR_REVISION} and ends with the \
+         four little-endian bytes of `swim_ascent`, so a fold that appended the ascent without \
+         moving the revision byte, moved the byte without appending the ascent, or inserted the \
+         ascent anywhere but last, each disagrees here — and none of the three is visible to any \
+         witness that compares one behaviour fold to another"
     );
     Ok(())
 }
@@ -256,7 +270,8 @@ fn stated_over(
 /// a file path, and folding it would make a save refuse to load from a second
 /// checkout.
 ///
-/// **`targetable`, then `swimmable`, then `move_resistance`, appended and never
+/// **`targetable`, then `swimmable`, then `move_resistance`, then `swim_ascent`,
+/// appended and never
 /// inserted**, because the canonical encoding writes a struct positionally: a
 /// field placed among the existing ones moves every byte after it, and every save
 /// in existence would then disagree for a reason nobody declared. `targetable` is
@@ -264,16 +279,23 @@ fn stated_over(
 /// `breakable = false` change what a break *does* — a block that becomes aimable
 /// is a different block to swing at, which is the question this list answers.
 ///
-/// **The two medium fields are on it for the same question answered about a
+/// **The three medium fields are on it for the same question answered about a
 /// volume rather than about a swing.** Whether a player can hold itself up in a
-/// block, and how much that block slows what moves through it, decide whether
-/// walking into it sinks you, floats you or barely slows you. Nothing about
-/// either is visible in a still frame, so neither has any business on the
-/// appearance list — and putting one there would leave every save in existence
-/// reporting its blocks as merely retextured over a change to what the world does
-/// to a player.
+/// block, how much that block slows what moves through it, and how fast it
+/// carries a swimmer who asks to rise, decide whether walking into it sinks you,
+/// floats you or barely slows you. Nothing about any of them is visible in a
+/// still frame, so none has any business on the appearance list — and putting one
+/// there would leave every save in existence reporting its blocks as merely
+/// retextured over a change to what the world does to a player.
 ///
-/// **`move_resistance` is written as bits and never as a decimal.** The canonical
+/// **`swim_ascent` is appended after `move_resistance` and is the last byte
+/// group of the record.** It is the third question this list asks about a volume
+/// rather than about a swing: how fast that volume carries a swimmer who asks to
+/// rise. A block whose water stopped lifting you at a swimmable pace is a
+/// different block to fall into and looks identical from every angle, so it
+/// belongs beside the other two and nowhere near the texture keys.
+///
+/// **Both numbers are written as bits and never as decimals.** The canonical
 /// encoding writes an `f32` as the four little-endian bytes of its bit pattern,
 /// so that is what is stated here; rendering the number and hashing the text would
 /// be a second encoding this file invented, agreeing with nothing.
@@ -293,6 +315,7 @@ fn stated_behaviour_bytes(definition: &BlockDefinition) -> Vec<u8> {
     push_flag(&mut stated, definition.targetable);
     push_flag(&mut stated, definition.swimmable);
     push_number(&mut stated, definition.move_resistance);
+    push_number(&mut stated, definition.swim_ascent);
     stated
 }
 

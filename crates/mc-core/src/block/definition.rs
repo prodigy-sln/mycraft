@@ -119,6 +119,19 @@ pub struct BlockDefinition {
     /// without being one a player can swim in, and the other way about. Absent in
     /// a declaration means `0.0`, a constant for the same reason.
     pub move_resistance: f32,
+    /// How fast this block's volume lifts a swimmer who asks to rise, in blocks
+    /// per second before gravity and before the volume's own resistance.
+    ///
+    /// Finite and not less than zero. Absent in a declaration means the speed
+    /// the player's own jump leaves the ground at, so a declaration that says
+    /// nothing lifts exactly as it always did — a constant, not whatever that
+    /// declaration says about [`is_solid`](Self::is_solid), for the reason
+    /// [`move_resistance`](Self::move_resistance) is one.
+    ///
+    /// Independent of [`swimmable`](Self::swimmable) here, in both directions:
+    /// this reports what was declared. Whether a volume that holds nobody up
+    /// lifts anybody is decided where a definition becomes a medium, not here.
+    pub swim_ascent: f32,
     pub origin: DefinitionOrigin,
 }
 

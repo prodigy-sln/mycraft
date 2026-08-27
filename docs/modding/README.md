@@ -180,7 +180,7 @@ when the process ends.
 in `blocks/amber.luau` — a typo for `solid` — and this is what you read:
 
 ```
-mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`
 ```
 
 Read it outermost first: what failed, then which file, then which block, then the

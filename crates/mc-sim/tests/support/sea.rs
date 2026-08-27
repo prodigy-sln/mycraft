@@ -2,13 +2,21 @@
 //! on, what the shipped water declares, and the same world resolved through a
 //! registry in which nothing is a medium at all.
 //!
-//! **No number here is water's declared resistance.** The value is derived at
-//! implementation from the built simulation and written in exactly one place —
-//! `content/base/blocks/water.luau` — so every threshold a scenario carries is
-//! arithmetic over the value read back out of the shipped registry. A literal
-//! here would be a second statement of it, and the two would agree right up
-//! until the day the declaration moved, which is the whole of what a derived
-//! threshold is for.
+//! **No number here is water's declared resistance.** The value is written in
+//! exactly one place — `content/base/blocks/water.luau` — so every quantity this
+//! module hands out is arithmetic over the value read back out of the shipped
+//! registry. A literal here would be a second statement of it, and the two would
+//! agree right up until the day the declaration moved.
+//!
+//! **What those derived quantities are is the whole of the claim, and it is
+//! narrower than it once was.** Everything below is a *watch* or a *settle* — how
+//! long a fall is followed before it is called lost, how long a sink is given
+//! before a sign test complains — and a watch that scales with the resistance is
+//! the correct watch. A derived **threshold** is a different thing: it moves with
+//! the value under test and can never report that it changed, which is exactly
+//! the evidence hole the shipped water's stated rates now close. **A watch length
+//! may be derived; a threshold may not.** The scenarios that assert those rates
+//! state their own absolute numbers and read nothing from here.
 //!
 //! **A player is never placed at a computed height.** Every fixture is dropped
 //! into open air over the column it is about and advanced under an intent that
@@ -40,8 +48,13 @@ use super::{
 /// specification's declared comparison epsilon.
 pub const EPSILON: f32 = 1e-4;
 
-/// The column FR-6.1-S6 takes its shore reading on, as the specification names
-/// it.
+/// The column every reading taken on dry land is taken on, as the specification
+/// names it.
+///
+/// Two live readings stand on it — the walk a submerged walk is compared
+/// against, and the jump that witnesses this suite's mirror of the physics
+/// constants — and both want the same thing of it: ground clear of the sea, so
+/// that nothing the medium does is in the answer.
 pub const SHORE_COLUMN: (u32, u32) = (63, 35);
 
 /// The floor of the topmost water voxel, and so the height a player's feet reach
@@ -58,9 +71,11 @@ pub const SEA_TOP_FACE: f32 = (SEA_LEVEL + 1) as f32;
 
 /// How deep the column every fixture here stands on has to be, in water voxels.
 ///
-/// Guarded rather than assumed, because FR-6.1-S4's budget is stated for a
-/// depth-two fixture — see [`sink_budget`] — and a shallower column would hold
-/// that budget to a fall it was never derived for.
+/// Guarded rather than assumed, because [`sink_budget`] is stated for a
+/// depth-two fixture and a shallower column would hold that budget to a fall it
+/// was never derived for. The specification states the same depth outright, and
+/// the scenario that says so asserts it against the world rather than leaning on
+/// this guard — a fixture refusing to be built is not a scenario reporting.
 const REQUIRED_DEPTH: u32 = 2;
 
 /// Where a settle begins: four blocks over the sea's own top face, in open air.
@@ -79,13 +94,26 @@ const THROUGH_OPEN_AIR: f32 = 120.0;
 /// What every registry built here is attributed to.
 const NO_MEDIUM_ORIGIN: &str = "the shipped declarations with every medium taken out";
 
-/// How long FR-6.1-S4 gives a player floating at the surface to return to the
+/// What a declaration saying nothing about a swim ascent means: the speed the
+/// player's own jump leaves the ground at.
+///
+/// Stated rather than carried over from the held definition, because that is
+/// what "every medium taken out" means for this field too — the value a block
+/// declaring no medium at all resolves to. Written out rather than read from the
+/// loader, so it disagrees with a default that moves.
+const NO_STATED_ASCENT: f32 = 9.0;
+
+/// How long a sign test gives a player floating at the surface to return to the
 /// lakebed of a column [`REQUIRED_DEPTH`] water voxels deep.
 ///
-/// The specification's own form. Sinking approaches a terminal
+/// **A budget derived from the value under test, and therefore not something any
+/// stated rate is asserted against.** Sinking approaches a terminal
 /// `GRAVITY · TICK_DURATION / resistance`, so a fall of `depth` blocks takes
-/// about `120 · depth · resistance` ticks, and the scenario states one and a
-/// half times it: `1.5 × 120 × 2` is the `360` below.
+/// about `120 · depth · resistance` ticks, and this is one and a half times it:
+/// `1.5 × 120 × 2` is the `360` below. What it says is that the sea is still
+/// crossable at whatever the declaration became — a sign, blind by construction
+/// to the figure itself. What the sea sinks *at* is stated absolutely, in a tick
+/// count no expression here reaches.
 #[must_use]
 pub fn sink_budget(resistance: f32) -> f32 {
     360.0 * resistance
@@ -175,7 +203,8 @@ impl Sea {
         Ok(rest.state)
     }
 
-    /// A player settled onto the dry shore FR-6.1-S6 compares against.
+    /// A player settled onto the dry shore a submerged reading is compared
+    /// against.
     ///
     /// # Errors
     ///
@@ -193,8 +222,8 @@ impl Sea {
     /// The same world, resolved through a registry in which no block is a medium
     /// at all.
     ///
-    /// **Built from the shipped declarations themselves**, with both medium
-    /// answers set to what a declaration stating neither of them means and every
+    /// **Built from the shipped declarations themselves**, with all three medium
+    /// answers set to what a declaration stating none of them means and every
     /// other field left exactly as content declared it. So the only difference
     /// between this view and [`Sea::voxels`] is the medium — where a second
     /// hand-written registry would also have to restate water's solidity, its
@@ -213,6 +242,7 @@ impl Sea {
                 Ok(BlockDefinition {
                     swimmable: false,
                     move_resistance: 0.0,
+                    swim_ascent: NO_STATED_ASCENT,
                     ..held.clone()
                 })
             })
@@ -326,17 +356,16 @@ pub fn deepest_sea_column(world: &ReplayWorld) -> Result<SeaColumn, Box<dyn Erro
         })
 }
 
-/// Refuses unless `column` is as deep as the budget FR-6.1-S4 states was derived
-/// for.
+/// Refuses unless `column` is as deep as [`sink_budget`] was derived for.
 fn require_depth(column: SeaColumn) -> Result<(), Box<dyn Error>> {
     if column.depth() == REQUIRED_DEPTH {
         return Ok(());
     }
     Err(format!(
-        "FR-6.1-S4's budget is one and a half times `120 × depth × resistance` with a depth of \
-         {REQUIRED_DEPTH}, and the deepest column of this world ({}, {}) stands {} water voxels \
-         deep. Holding a fall of one depth to a budget derived for another is not a slack \
-         assertion, it is a different one",
+        "the sink budget this module hands out is one and a half times `120 × depth × \
+         resistance` with a depth of {REQUIRED_DEPTH}, and the deepest column of this world \
+         ({}, {}) stands {} water voxels deep. Holding a fall of one depth to a budget derived \
+         for another is not a slack assertion, it is a different one",
         column.x,
         column.z,
         column.depth()

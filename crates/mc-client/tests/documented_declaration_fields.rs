@@ -96,6 +96,10 @@ const SWIMMABLE_FIELD: &str = "swimmable";
 /// through it.
 const MOVE_RESISTANCE_FIELD: &str = "move_resistance";
 
+/// The field a mod author states to say how fast their block's volume lifts a
+/// swimmer who asks to rise.
+const SWIM_ASCENT_FIELD: &str = "swim_ascent";
+
 /// What the guide says leaving `swimmable` out means, written in the page's own
 /// convention for a constant default.
 const A_MISSING_SWIMMABLE_MEANS: &str = "`false`";
@@ -106,6 +110,17 @@ const A_MISSING_SWIMMABLE_MEANS: &str = "`false`";
 /// integer a declaration may also write — the retained value is a fraction and
 /// the page says which.
 const A_MISSING_RESISTANCE_MEANS: &str = "`0.0`";
+
+/// What the guide says leaving `swim_ascent` out means.
+///
+/// **The one row in this table whose default is not the value an absent field
+/// resembles.** Every other constant default here is what a declaration saying
+/// nothing would have been given anyway — `false`, `0.0`, no residue — so a row
+/// stating it is a courtesy. This one is the player's own jump speed, which is
+/// neither zero nor derivable from anything else on the page, and an author left
+/// to guess it will guess `0.0` and write a still pool where they meant to leave
+/// the field out.
+const A_MISSING_ASCENT_MEANS: &str = "`9.0`";
 
 /// What the guide states bounds a resistance, whole.
 ///
@@ -166,6 +181,7 @@ struct WhatTheGuideTabulates {
     fields_in_order: Vec<String>,
     what_a_missing_swimmable_means: Option<String>,
     what_a_missing_resistance_means: Option<String>,
+    what_a_missing_ascent_means: Option<String>,
 }
 
 /// Every page under `directory`, at any depth.
@@ -375,6 +391,7 @@ fn what_the_guide_tabulates(directory: &Path) -> Result<WhatTheGuideTabulates, B
         fields_in_order: table.iter().map(|row| row.field.clone()).collect(),
         what_a_missing_swimmable_means: stated(SWIMMABLE_FIELD),
         what_a_missing_resistance_means: stated(MOVE_RESISTANCE_FIELD),
+        what_a_missing_ascent_means: stated(SWIM_ASCENT_FIELD),
     })
 }
 
@@ -451,15 +468,20 @@ fn the_guide_tabulates_every_field_with_the_value_its_absence_means() -> TestRes
             fields_in_order: every_field_the_guide_states(),
             what_a_missing_swimmable_means: Some(A_MISSING_SWIMMABLE_MEANS.to_owned()),
             what_a_missing_resistance_means: Some(A_MISSING_RESISTANCE_MEANS.to_owned()),
+            what_a_missing_ascent_means: Some(A_MISSING_ASCENT_MEANS.to_owned()),
         },
         "a mod author writing their first declaration reads this table rather than a refusal, \
          so a field that exists in the loader and not in the table is a field nobody will use — \
          and the value its absence means is half of what the row is for, because a field whose \
          default a reader has to guess is one they will state redundantly on every block to be \
-         safe. Both new rows state a **constant**: neither is `whatever you wrote for `solid``, \
+         safe. All three medium rows state a **constant**: none is `whatever you wrote for \
+         `solid``, \
          which is what the three rows above them say and what would make every solid block in \
          the game something a player can swim inside. The order is the guide's own and is \
-         compared whole, for the reason the quotation above is"
+         compared whole, for the reason the quotation above is. The ascent's row carries the \
+         constant that is hardest to guess and worst to guess wrong: it is the player's jump \
+         speed rather than the zero every other default on this page resembles, so a row that \
+         omits it teaches an author their liquid lifts nobody unless they say otherwise"
     );
     Ok(())
 }

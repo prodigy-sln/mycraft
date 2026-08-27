@@ -588,25 +588,54 @@ that changes for reasons having nothing to do with storage.
 
 | List | Fields, in order | Revision |
 |---|---|---|
-| Behaviour | revision byte, `name`, `is_solid`, `replaceable`, `breakable`, `breaks_into`, `targetable` | 2 |
+| Behaviour | revision byte, `name`, `is_solid`, `replaceable`, `breakable`, `breaks_into`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent` | 4 |
 | Appearance | revision byte, `name`, the six declared keys in `up`, `down`, `north`, `south`, `east`, `west` order, then `drawn`, `occludes` | 3 |
 
 **A new field is appended and never inserted**, which is why `targetable`
-sits after the residue and `drawn`/`occludes` sit after the keys rather
-than anywhere more readable. The canonical encoding writes a struct
-positionally, so a rename costs nothing and a field placed among the
-existing ones moves every byte after it — every save in existence would
-then disagree for a reason nobody declared, and the revision byte would be
-reporting a change larger than the one that was made.
+sits after the residue, the three medium fields sit after `targetable`,
+and `drawn`/`occludes` sit after the keys rather than anywhere more
+readable. The canonical encoding writes a struct positionally, so a rename
+costs nothing and a field placed among the existing ones moves every byte
+after it — every save in existence would then disagree for a reason nobody
+declared, and the revision byte would be reporting a change larger than
+the one that was made.
 
-**Which list each of the three joined, and why.** `targetable` is
-behaviour because it decides what a swing *does* to a world: it is what
-makes `breakable = false` reachable at all, so a block that becomes
-aimable is a different block to stand in front of. `drawn` and `occludes`
-are appearance because a block that stopped being drawn, or stopped hiding
-what stands behind it, is still the same block to stand on, to build
-through and to break — nothing about mutating the world changes, so
-nothing a player has to decide about changes either.
+**The two numbers are folded as bits and never as decimals.**
+`move_resistance` and `swim_ascent` are the only numbers on either list,
+and each is written as the four little-endian bytes of its `f32` bit
+pattern, at the width the physics reads it at. Rendering either as text
+and folding that would be a second encoding, agreeing with nothing else in
+the file. A declared `-0.0` is normalised to `0.0` by the reader, so two
+declarations meaning no resistance — or no lift — cannot fold apart over a
+sign bit no author wrote.
+
+**`swim_ascent` is folded as it was declared and is never masked against
+`swimmable`.** A block that is not swimmable contributes an ascent of
+`0.0` to the *medium table*, which is what keeps that table's index one
+bit wide — but that is a rule about what a volume does to a tick, and this
+is a record of what a block was **declared** to be. Two declarations
+differing only in an ascent are two different blocks to a save whether or
+not either lifts anybody today, because making one of them swimmable later
+must not silently resurrect a number the record never kept.
+
+**Which list each of the six joined, and why.** `targetable` is behaviour
+because it decides what a swing *does* to a world: it is what makes
+`breakable = false` reachable at all, so a block that becomes aimable is a
+different block to stand in front of. `swimmable`, `move_resistance` and
+`swim_ascent` are behaviour for that same question asked of a volume
+rather than of a swing — whether a player can hold itself up inside a
+block, how much it slows what moves through it, and how fast it carries a
+swimmer who asks to rise, decide whether walking into it drops you, floats
+you or barely delays you, and not one of the three is visible in a still
+frame. `drawn` and `occludes` are appearance because a block that stopped
+being drawn, or stopped hiding what stands behind it, is still the same
+block to stand on, to build through and to break — nothing about mutating
+the world changes, so nothing a player has to decide about changes either.
+
+**That test — "is it visible in a still frame?" — is the one that decides
+the list**, and it is the whole reason the medium fields are not beside
+the texture keys. Water that stopped holding you up looks exactly like
+water that still does.
 
 The **origin is in neither list**, and it is the field that would have
 broken everything: it is a label derived from the path a definition was
@@ -678,40 +707,46 @@ defect — every block's appearance really did change — and a retexture is
 in the arm that is neither reported nor refused, so nothing about opening
 an older world changed for either move.
 
-**The behaviour list is at revision 3, and each of its moves is the
-expensive kind.** It reached 2 when `targetable` joined it and 3 when
-`swimmable` and `move_resistance` did, and every block of every save
-written before a move reports as `changed` on its next load — so every
-player is told that the blocks they built with behave differently. That is
-survivable only because such a save loads and names them rather than being
-refused, and it is exactly why `drawn` and `occludes` are on the *other*
-list: routing a rendering field through this byte would buy that cost
-again for a change no player can act on.
+**The behaviour list is at revision 4, and each of its moves is the
+expensive kind.** It reached 2 when `targetable` joined it, 3 when
+`swimmable` and `move_resistance` did, and 4 when `swim_ascent` — how fast
+a volume carries a swimmer who asks to rise — was appended after them. Every
+block of every save written before a move reports as `changed` on its next
+load, so every player is told that the blocks they built with behave
+differently. That is survivable only because such a save loads and names
+them rather than being refused, and it is exactly why `drawn` and
+`occludes` are on the *other* list: routing a rendering field through this
+byte would buy that cost again for a change no player can act on.
 
-**The two bytes are both at 3 today, and that is a coincidence of
-counting.** Each list has grown twice, by different routes and for
-unrelated reasons, and the next change to either moves one of them alone.
-Everything the section above says about not unifying them stands unchanged
-— the equality is the least durable fact on this page, and a reader who
-reaches for it as evidence that one constant would do is reading a
-collision rather than an argument.
+**The two bytes were both at 3 and are no longer, which is the prediction
+this page made about itself coming true.** It used to say the equality was
+the least durable fact here and that the next change to either list would
+move one of them alone. That is exactly what happened: the behaviour list
+gained the ascent, the appearance list gained nothing, and the two bytes
+separated to 4 and 3. Everything the section above says about not unifying
+them stands unchanged — and a reader arriving today no longer has to take
+it on trust, because the arrangement has now been seen to do the thing a
+shared constant could not have done. Under one byte, every save in
+existence would this moment be reporting every block as **retextured** over
+a number no still frame can show.
 
-**The second behaviour move costs a player who already paid for the
-first.** A world saved after `targetable` joined the list, and quit
-normally so that its blocks were rewritten under revision 2, is told again
-on its first launch under revision 3. Nothing in either record can say the
-blocks are unchanged, because the two were folded over different field
-lists — so "told once" is once **per move** rather than once ever. That is
-the promise `docs/user/gameplay.md` makes to a player, and it is why that
-page states the count of moves rather than naming "this build".
+**The third behaviour move costs a player who already paid for the first
+two.** A world saved after `targetable` joined the list, and quit normally
+so that its blocks were rewritten under revision 2, was told again on its
+first launch under revision 3; rewritten under 3, it is told a third time
+under 4. Nothing in any pair of those records can say the blocks are
+unchanged, because each pair was folded over a different field list — so
+"told once" is once **per move** rather than once ever. That is the promise
+`docs/user/gameplay.md` makes to a player, and it is why that page states
+the count of moves rather than naming "this build".
 
 **What that costs the committed pre-Luau save, concretely.** It used to
 report `base:water` alone as changed — `content/base/blocks/water.luau`
 declares `breakable = false` — with its other three blocks retextured,
 which was the two-hash separation firing on a real content edit rather
 than on a fixture. Under revision 2 it reported **all four as changed and
-none as retextured**, and under revision 3 it goes on reporting exactly
-that, because a behaviour byte that moved outranks any per-block
+none as retextured**, and under revisions 3 and 4 it goes on reporting
+exactly that, because a behaviour byte that moved outranks any per-block
 comparison: the two records are not comparable across the move. The
 per-block signal is not lost so much as spent — it returns on the next
 save written under this revision.
@@ -719,13 +754,32 @@ save written under this revision.
 **A save written under revision 2 is a second fixture, and it is the one
 that separates the two lists.** `tests/fixtures/world_saved_against_behaviour_revision_2.mcw`
 was minted from the shipped declarations while the behaviour byte was
-still 2 and the appearance byte was already 3, so loading it under
-revision 3 reports **every block as behaving differently and not one as
+still 2 and the appearance byte was already 3, so loading it under a later
+revision reports **every block as behaving differently and not one as
 looking different**. The pre-Luau fixture cannot make that distinction:
 its appearance record predates the six keys, so both halves moved for it
 and either answer is consistent with a fold that put the medium fields on
-the wrong list. Neither fixture is ever regenerated — the day one is, it
-stops being evidence about anything.
+the wrong list.
+
+**A save written under revision 3 is the third, and it exists because the
+second one stopped being able to tell this move from the last one.** By the
+time the ascent was appended, `..._revision_2.mcw` was stale in the
+behaviour record by *two* list growths, so a fold that appended the ascent
+and forgot the revision byte — and a fold that moved the byte and forgot
+the ascent — both disagree with it, and it reports the same four names for
+either. `tests/fixtures/world_saved_against_behaviour_revision_3.mcw` was
+minted from `6c2ed61` against `content/base/` as that tree shipped it, and
+it is a save that agreed with the declarations **exactly**, right up until
+the ascent joined the list. **There is no second chance at minting one.**
+`BEHAVIOUR_REVISION` is a compile-time constant, so a save written at test
+runtime always carries whatever revision the tree it runs on is at; once
+the constant moved, no run could produce a revision-3 save again. The rule
+generalises: **the fixture for a move has to be minted before the move**,
+which means before the phase that needs it knows it will.
+
+No fixture is ever regenerated — the day one is, it stops being evidence
+about anything, because a save this suite wrote from the declarations under
+test would agree with them by construction and could not fail.
 
 A future change to what a block looks like moves the appearance byte again
 and no other; a future change to what a block *is* moves the behaviour
@@ -768,6 +822,19 @@ reliably a file that mentions `REVISION`, and the instrument was recorded
 here as though it were. Read the three files; do not re-derive the list
 from that grep.
 
+**That warning was already on this page when the move to 4 was planned, and
+the move named two of the three files anyway.** The enumeration above is
+where a reader learns that `save_declarations.rs` states its byte in a
+hand-written table and never spells the constant — and SPEC-030's `tasks.md`
+T15 and `spec.md` FR-7.1 still listed only `format_test.rs` and
+`save_per_face_appearance.rs`, because the same needle was reached for a
+second time. It was caught in review and repaired at `3d200c9`. **A warning
+is only as good as the path that reaches it.** Prose on a reference page is
+read by whoever opens the page; it is not read by whoever writes the task,
+and a warning that has to be found is one a task can be authored past. When
+this list next moves, copy the three file names *into* the task rather than
+citing this section from it.
+
 **The behaviour move to 3 was measured, and it reproduces the mirror image
 exactly.** Leaving `BEHAVIOUR_REVISION` at 2 while `swimmable` and
 `move_resistance` joined the list reddens exactly the same two
@@ -786,6 +853,22 @@ save-against-registry comparison reports `changed` under a correct byte and
 a wrong one alike. A fixture that tells the two *lists* apart is still
 blind to the *byte* — those are different questions, and only a test that
 writes the sequence out answers the second.
+
+**The behaviour move to 4 was measured and reproduces it a fourth time,
+including the part about the fixtures.** Leaving `BEHAVIOUR_REVISION` at 3
+while `swim_ascent` joined the list reddens exactly the same two
+behaviour-stating guards — `format_test.rs`'s behaviour half and
+`save_declarations.rs`'s pinned fold — at `1591 tests run: 1589 passed, 2
+failed, 1 skipped`, a bare count and so a complete run under
+`--no-fail-fast`. **Predicted at 2 and named before the run**, which is now
+the fourth consecutive time this prediction has held. Both appearance
+guards stayed green, and so did **every** test over both the revision-2 and
+the revision-3 fixtures — including the revision-3 one minted for this very
+move. That is the sharpest form of the lesson on this page: a fixture minted
+specifically to separate this move from the last one **still cannot see the
+byte**, because it separates *lists* and the byte is a different question.
+Buy a fixture for the list; buy a stating test for the byte; neither
+substitutes for the other.
 
 **The behaviour side has now been measured too, and it is the mirror
 image.** Leaving `BEHAVIOUR_REVISION` at 1 while `targetable` joined its

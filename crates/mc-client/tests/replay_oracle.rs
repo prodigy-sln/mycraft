@@ -44,20 +44,23 @@
 //! **Which tick is perturbed no longer selects anything, and that is a change
 //! rather than a detail.** The reason used to be that tick 0's horizon sat
 //! highest of the three — when the sky counts were 135 against tick 59's 32, a
-//! fourfold gap that genuinely picked a frame. Re-measured since the sea became
-//! something to swim in, which moved the poses at ticks 59 and 119 and left tick
-//! 0 where it was, they are **241 / 193 / 286** of 576, and tick 0 is still not
-//! the roomiest: tick 119 is. Measured at the same time, the 3° control finds
-//! **22 / 30 / 28** disagreements at the three ticks — an order of magnitude over
-//! the budget of 2 at every one of them, and near enough the same order at each.
+//! fourfold gap that genuinely picked a frame. Re-measured after the shipped
+//! water's declared rates moved, which moved the poses at ticks 59 and 119 and
+//! left tick 0 where it was, they are **241 / 190 / 232** of 576. Measured at the
+//! same time, the 3° control finds **22 / 30 / 25** disagreements at the three
+//! ticks — an order of magnitude over the budget of 2 at every one of them, and
+//! near enough the same order at each.
 //!
 //! So any of the three would serve, and tick 0 is kept because it is the opening
 //! frame and because keeping it leaves the control unchanged in every respect but
 //! the spawn. **The reason is recorded as no longer discriminating rather than
-//! repaired to a fresher number**, because a justification that sounds decisive
-//! over a margin of a few dozen samples is worse than one that admits it is
-//! arbitrary. That the figures have now moved twice under an unchanged
-//! conclusion is the case for having written it that way.
+//! repaired to a fresher number**, and this move is the case for having written
+//! it that way rather than a footnote to it. The criterion has now picked tick 0
+//! by a fourfold gap, then tick 119 (286 against tick 0's 241), and now tick 0
+//! again — by **nine samples of 576**. A justification that reverses itself
+//! twice over margins like that is worse than one that admits it is arbitrary,
+//! and the sentence that says so is the only part of this paragraph that has
+//! survived all three moves.
 
 mod support;
 
@@ -103,18 +106,20 @@ const DISAGREEMENT_BUDGET: usize = 2;
 /// cannot see, and **below the tightest of the judged frames**, or a correct
 /// march fails it.
 ///
-/// Re-measured after the sea became something to swim in, which moved the poses
-/// at ticks 59 and 119: the three frames are 58 % / 66 % / 50 % not sky and
-/// predict **335 / 383 / 290** of 576, so the tightest is 290 and 100 sits 2.9×
-/// under it. The coastal spawn's own figures, which these replace, were
-/// 58 % / 71 % / 55 % and 335 / 408 / 317, and the ones before that were 78 %
-/// and around 450.
+/// Re-measured after the shipped water's declared rates moved, which moved the
+/// poses at ticks 59 and 119: the three frames are 58 % / 67 % / 60 % not sky
+/// and predict **335 / 386 / 344** of 576, so the tightest is now tick 0's 335
+/// and 100 sits 3.35× under it. The figures these replace were 58 % / 66 % / 50 %
+/// and 335 / 383 / 290; before them 58 % / 71 % / 55 % and 335 / 408 / 317, and
+/// before those 78 % and around 450.
 ///
-/// **The conclusion has now survived two moves and the sentence supporting it
-/// has survived neither**, which is exactly why it is re-measured each time
+/// **The conclusion has now survived three moves and the sentence supporting it
+/// has survived none of them**, which is exactly why it is re-measured each time
 /// rather than left standing beside a value it no longer describes. Tick 0's
-/// share is unchanged across this move, and that is the reading's own provenance:
-/// the tick whose pose did not move reports the number it reported before.
+/// share is unchanged across this move and across the one before it, and that is
+/// the reading's own provenance: the tick whose pose did not move reports the
+/// number it reported before, which no figure copied off a fresh run could have
+/// demonstrated.
 const PREDICTION_FLOOR: usize = 100;
 
 /// How far below the camera the control's prediction is marched from.

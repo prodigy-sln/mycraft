@@ -44,7 +44,15 @@ use thiserror::Error;
 /// spawn from the world, so the trajectory *was* a function of the mesh
 /// contract. Content-declared physics is a third input, and it severs that
 /// chain.
-pub const SCENE_REVISION: &str = "r3";
+///
+/// **`r4` is the first bump taken *under* that sentence rather than the one that
+/// caused it** — `r3` is what falsified the old wording. SPEC-030 moved what the sea
+/// declares — a resistance of `0.5` where it was `1.6`, and an ascent of `3.5`
+/// where there was none — and the scripted walk wades that sea, so every pose
+/// after it enters the water moved while the mesh contract stood still. The
+/// four `r3` directories were shot under the old declaration and no frame under
+/// this one may be compared against them.
+pub const SCENE_REVISION: &str = "r4";
 
 /// The ticks of the replay that carry a committed golden.
 ///
@@ -61,19 +69,40 @@ pub const DECLARED_CAPTURE_TICKS: [u16; 3] = [0, 59, 119];
 /// is set once, so ticks 59 and 119 would assert the same rectangles against
 /// different terrain.
 ///
-/// **The reason tick 0 was chosen is no longer true.** It was the frame with the
-/// least terrain coverage — 77.91% against the mid-nineties — so the crosshair
-/// stood against the most sky, while the spawn was inland. Measured per pixel
-/// from the coast column the three read **57.11%, 71.05% and 55.00%**, so the
-/// least-covered frame is now **tick 119**, by 2.1 points. Crosshair contrast no
-/// longer selects tick 0 and no longer selects this tick at all.
+/// **The reason tick 0 was chosen is no longer true, and the criterion that
+/// replaced it does not decide either.** It was the frame with the least terrain
+/// coverage, so the crosshair stood against the most sky, while the spawn was
+/// inland.
 ///
-/// Tick 0 is kept anyway, and the honest reason is that there is no longer a
-/// measured one: the set has always been shot here, moving it would re-shoot a
-/// capture for no benefit anybody has demonstrated, and the HUD's own assertions
-/// pass against this frame. That is a reason to leave it alone rather than a
-/// reason to have picked it. **A later spec wanting maximum crosshair contrast
-/// should take tick 119 and say so**, rather than inheriting this one.
+/// **Measured per pixel against the declared clear colour, the ranking flips with
+/// the declared physics.** Each row is the share of the frame standing more than
+/// ΔE 10 from `CLEAR_COLOR_SRGB`, taken on that revision's own committed frames:
+///
+/// | revision | tick 0 | tick 59 | tick 119 | least covered |
+/// |---|---|---|---|---|
+/// | `r1` | 77.91% | 95.01% | 94.22% | tick 0, by 16.31 |
+/// | `r2` | 57.11% | 71.05% | 55.00% | tick 119, by 2.11 |
+/// | `r3` | 57.11% | 66.63% | 50.95% | tick 119, by 6.16 |
+/// | `r4` | 57.11% | 67.62% | 59.20% | tick 0, by 2.09 |
+///
+/// Tick 0 is byte-identical across all four because it is dry — the spawn is
+/// still falling and inland of the coast — while the two wet frames move whenever
+/// the sea's declaration does. **A margin of two points that reverses on a content
+/// edit is not a criterion**, and the selection has now reversed twice.
+///
+/// **The `r2` row stood in this comment through the `r3` bump without being
+/// re-measured.** PRO-957 moved both wet frames and left the figures, so the
+/// stated 2.1-point margin described a tree two revisions back while reading as
+/// current. Nothing reads a doc comment, so a stale figure here is reported by
+/// nothing at all — which is why every row above names the revision it was taken
+/// on.
+///
+/// Tick 0 is kept, and the honest reason is that there is no measured one: the
+/// set has always been shot here, moving it would re-shoot a capture for no
+/// benefit anybody has demonstrated, and the HUD's own assertions pass against
+/// this frame. That is a reason to leave it alone rather than a reason to have
+/// picked it. **A later spec wanting maximum crosshair contrast must measure at
+/// its own revision** rather than inheriting any row above.
 ///
 /// A set of its own rather than a second use of [`DECLARED_CAPTURE_TICKS`]: the
 /// two sets are shot through different calls — the terrain captures through

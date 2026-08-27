@@ -4,8 +4,8 @@
 //! registry knows what a block *registers as*, and cannot tell a field an author
 //! left out from one an author wrote the default into — `swimmable = false` on
 //! dirt registers exactly as dirt's silence does. The declaration files know what
-//! an author *wrote*, and know nothing about what the loader made of it. FR-6.1-S1
-//! states both halves — water declaring a medium, and the three solid blocks
+//! an author *wrote*, and know nothing about what the loader made of it. Both
+//! halves are claimed — water declaring a medium, and the three solid blocks
 //! declaring neither field — so both are read.
 //!
 //! **Each list is compared whole and in order**, never filtered and never looked
@@ -37,7 +37,7 @@ const DECLARATION_FILES: [(&str, &str); 4] = [
     (WATER, "water.luau"),
 ];
 
-/// The two field names FR-6.1-S1 is about.
+/// The two medium field names a declaration's own text is read for.
 const SWIMMABLE: &str = "swimmable";
 const MOVE_RESISTANCE: &str = "move_resistance";
 
@@ -174,7 +174,7 @@ fn only_the_sea_declaration_names_either_medium_field_at_all() -> TestResult {
             stating(STONE, States::NeitherField),
             stating(WATER, States::BothFields),
         ],
-        "FR-6.1-S1 says the ground blocks declare *neither* field, which the registry cannot \
+        "the ground blocks declare *neither* medium field, which the registry cannot \
          report: `swimmable = false` written into dirt registers exactly as dirt's silence does. \
          So the declarations are read as text. Water is the control that this reading can see a \
          field at all — without it, a scan that had come to find nothing anywhere would report \
@@ -183,50 +183,57 @@ fn only_the_sea_declaration_names_either_medium_field_at_all() -> TestResult {
     Ok(())
 }
 
-/// What the shipped `base:water` declares its `move_resistance` to be, written
-/// out a second time.
+/// What the shipped `base:water` is required to declare about the volume it
+/// fills, written out by hand.
 ///
-/// **A snapshot, deliberately not an oracle: it verifies nothing.** Every other
-/// reading of this value in the suite states its bound as arithmetic over the
-/// declaration, which is what stops a constant threshold caging a number
-/// `architecture.md` Decision 5 deliberately leaves free — and the price of that
-/// is that they all move with it, silently, whatever it becomes. A closed form
-/// over `r` cannot say which `r` was chosen. So this one is an independent copy,
-/// and deriving it from the registry would make it compare the value to itself
-/// and pass forever.
+/// **Stated rather than derived, and that is now the specification's own
+/// requirement rather than this file's caution.** Play has judged these numbers,
+/// so they are no longer values a scenario should leave free: the observable
+/// rates the game promises are stated absolutely, and these three are what
+/// produce them. Deriving any of them from the registry would compare a value to
+/// itself and pass forever.
 ///
-/// **The hole it closes was measured.** Changing the declaration from `1.6` to
-/// `2.0` — another value the admissible window admits — reddened exactly one test
-/// in 702, `terrain_goldens`, because the scripted walk wades through this sea.
-/// A commit that changes the number and re-mints the four golden directories in
-/// the same breath was therefore reported by nothing at all. This never looks at
-/// a golden.
-const SHIPPED_RESISTANCE: f32 = 1.6;
+/// **The hole this closes was measured.** Changing the resistance from `1.6` to
+/// `2.0` — another value the old admissible window admitted — reddened exactly
+/// one test in 702, `terrain_goldens`, because the scripted walk wades through
+/// this sea. A commit that changed the number and re-minted the four golden
+/// directories in the same breath was therefore reported by nothing at all.
+/// Nothing here looks at a golden.
+const SHIPPED_SWIMMABLE: bool = true;
+const SHIPPED_RESISTANCE: f32 = 0.5;
+const SHIPPED_ASCENT: f32 = 3.5;
 
 #[test]
-fn the_shipped_seas_declared_resistance_matches_the_committed_snapshot_of_it() -> TestResult {
-    let declared = sea::declared_resistance(&content_registry()?)?;
+fn the_shipped_water_declares_the_medium_the_stated_rates_are_derived_from() -> TestResult {
+    let registry = content_registry()?;
+    let declared = registry.resolve(&support::block_name(WATER)?)?;
 
     assert_eq!(
-        declared.to_bits(),
-        SHIPPED_RESISTANCE.to_bits(),
-        "the sea's declared `move_resistance` moved: it reads {declared} where this snapshot \
-         records {SHIPPED_RESISTANCE}. The number verifies nothing on its own — \
-         the scenarios in `the_shipped_sea_can_be_swum_in.rs` are what say the physics is right, \
-         and each of them scales with whatever is declared — so do not simply re-mint it. What a \
-         change owes is three things. **One**: re-run `architecture.md` Decision 5's derivation \
-         against the built simulation. {SHIPPED_RESISTANCE} is the geometric centre of the \
-         measured admissible window [0.16, 16.0] — the square root of 2.56, ten times clear of \
-         each end — so a new value needs a new window, not a new number. **Two**: re-shoot all \
-         four golden directories by the procedure in `docs/technical/rendering.md`, because the \
-         scripted walk wades through this sea and its poses move with this figure. **Three**: \
-         update the player-facing figures `spec.md`'s Notes records against it — swimming at \
-         38.5% of walking speed, a terminal sink of 0.3125 blocks per second, and 19 ticks to \
-         surface from the deepest lakebed. \
-         \n\nWhat this criterion optimises for is **scenario robustness, and it says nothing \
-         about how the sea feels**. A feel criterion was unavailable rather than declined: \
-         nobody has swum in it yet. It is the first number to revisit once somebody has, and \
-         that is a reason to change it deliberately rather than a reason to leave it alone"
+        (
+            declared.swimmable,
+            sea::declared_resistance(&registry)?.to_bits(),
+            declared.swim_ascent.to_bits()
+        ),
+        (
+            SHIPPED_SWIMMABLE,
+            SHIPPED_RESISTANCE.to_bits(),
+            SHIPPED_ASCENT.to_bits()
+        ),
+        "the sea's declared medium moved: it reads swimmable = {}, move_resistance = {}, \
+         swim_ascent = {} where the specification states {SHIPPED_SWIMMABLE}, \
+         {SHIPPED_RESISTANCE} and {SHIPPED_ASCENT}. Do not simply re-mint these. What a change \
+         owes is three things. **One**: re-derive the observable rates the game promises — a \
+         sink of `(1/60)·[60 − 2(1 − (2/3)^60)]` blocks in a second, a rise of \
+         `(swim_ascent − 0.5)/(1 + move_resistance)` blocks per second, and a swim of \
+         `4.5/(1 + move_resistance)` — and move the scenarios that state them. **Two**: \
+         re-shoot all four golden directories by the procedure in \
+         `docs/technical/rendering.md`, because the scripted walk wades through this sea and \
+         its poses move with these figures. **Three**: re-derive the player-facing figures in \
+         `docs/user/gameplay.md`, which state the sink, the swim fraction and how long \
+         reaching the surface takes",
+        declared.swimmable,
+        declared.move_resistance,
+        declared.swim_ascent
     );
     Ok(())
 }

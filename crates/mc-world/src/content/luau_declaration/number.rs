@@ -7,7 +7,9 @@
 //! value below the floor, a value that is not a finite number at all, and a
 //! value too large for the width the engine keeps. Every later number on a
 //! declaration inherits this vocabulary, which is why it is a module and not
-//! four lines inside a field's reader.
+//! four lines inside a field's reader. The fields that read one live here too,
+//! beside what their absence means, so that everything a stated number can be
+//! is in one file.
 //!
 //! # A child of [`super`] rather than a module beside it
 //!
@@ -17,15 +19,75 @@
 //! refusals a mod author reads are one vocabulary, and a second fault type here
 //! would be a second place for the modding guide and the program to disagree.
 
-use mc_script::ScriptValue;
+use mc_script::{ScriptHost, ScriptTable, ScriptValue};
 
-use super::FieldFault;
+use super::{FieldFault, MOVE_RESISTANCE_FIELD, SWIM_ASCENT_FIELD};
 
-/// A field a declaration may leave out, which has to be a number the engine can
-/// divide by whenever it is stated.
+/// What a declaration means by saying nothing about resisting movement.
 ///
-/// **The loader's first numeric reader**, so what it refuses and the words it
-/// refuses in are the vocabulary every later number on a declaration inherits.
+/// A constant for the reason [`super::SWIMMABLE_BY_DEFAULT`] is one, and what
+/// the scale already spells "unaffected": the tick divides by `1 + resistance`,
+/// so a declaration saying nothing divides by one and moves as it always did.
+const MOVE_RESISTANCE_BY_DEFAULT: f32 = 0.0;
+
+/// What a declaration means by saying nothing about lifting a swimmer.
+///
+/// A constant for the reason the one above is, and the same value the player's
+/// own jump leaves the ground at: a declaration written before this field
+/// existed lifts exactly as it always did.
+///
+/// **The one loader default that is not also its fold identity.** An empty cell
+/// contributes an ascent of `0.0`, because a cell holding nothing lifts nobody;
+/// a declaration saying nothing contributes `9.0`. The two are right for their
+/// own jobs and disagree, which is why a definition that is not swimmable has
+/// its ascent masked away where a definition becomes a medium — without that,
+/// an ordinary block sharing a voxel with water would fold its unstated `9.0`
+/// over the water's own number.
+const SWIM_ASCENT_BY_DEFAULT: f32 = 9.0;
+
+/// How much a declaration says its volume slows what moves through it.
+///
+/// Its absence means a **constant** and not `defaulting_to_solidity`; see
+/// [`super::defaulting_to`] for why that distinction is load-bearing.
+pub(super) fn declared_resistance(
+    host: &ScriptHost,
+    declaration: &ScriptTable,
+) -> Result<f32, FieldFault> {
+    optional_number_at_least_zero(
+        host.read_field(declaration, MOVE_RESISTANCE_FIELD),
+        MOVE_RESISTANCE_FIELD,
+        MOVE_RESISTANCE_BY_DEFAULT,
+    )
+}
+
+/// How fast a declaration says its volume lifts a swimmer who asks to rise.
+///
+/// Read through the same reader [`declared_resistance`] uses, and deliberately
+/// adds no vocabulary of its own: the four things that can be wrong with a
+/// stated number are settled in one place below, including the `-0.0 → 0.0`
+/// normalisation a save's fold depends on. Independent of `swimmable` here — a
+/// declaration stating one and not the other is registered as written, and what
+/// a volume that holds nobody up does with a declared ascent is decided where a
+/// definition becomes a medium.
+pub(super) fn declared_ascent(
+    host: &ScriptHost,
+    declaration: &ScriptTable,
+) -> Result<f32, FieldFault> {
+    optional_number_at_least_zero(
+        host.read_field(declaration, SWIM_ASCENT_FIELD),
+        SWIM_ASCENT_FIELD,
+        SWIM_ASCENT_BY_DEFAULT,
+    )
+}
+
+/// A field a declaration may leave out, which has to be a finite number no less
+/// than zero whenever it is stated.
+///
+/// **The loader's only numeric reader**, so what it refuses and the words it
+/// refuses in are the vocabulary every number on a declaration is read through.
+/// `move_resistance` wanted it first and `swim_ascent` reads through it
+/// unchanged: a second reader would be a second place for the modding guide and
+/// the program to disagree about what a number may be.
 /// Four things can be wrong with a stated number and each is a separate branch:
 /// the wrong kind of value, a value below the floor, a value that is not a finite
 /// number at all, and a value too large for the width the engine keeps.

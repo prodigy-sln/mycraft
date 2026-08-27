@@ -6,8 +6,16 @@
 //! bound a scenario carries is arithmetic over it and over the declared physics
 //! constants — so a value derived at implementation is *derived*, and a value
 //! copied into a test would have nothing left to check it against. The two
-//! constants a scenario states outright are the ones the specification states:
-//! the `120` ticks the rise is given and the `600` ticks the hold lasts.
+//! constants stated outright — the `120` ticks the rise is given and the `600`
+//! ticks the hold lasts — are this file's own watches.
+//!
+//! **What that buys, and what it costs, are now both worth saying.** Every
+//! reading here scales with whatever the declaration became, so these are *sign*
+//! tests: they say the shipped sea is still a sea a player can swim in, and they
+//! are blind by construction to the rates it swims at. The scenarios that pin
+//! those rates state absolute blocks and absolute ticks and read nothing from
+//! the registry. Neither file substitutes for the other, and a green run here is
+//! not evidence that a declared value is the one intended.
 //!
 //! **The three physics constants are mirrored here, and the mirror is
 //! witnessed.** [`TICK_DURATION`], [`GRAVITY`] and [`JUMP_SPEED`] are private to
@@ -53,16 +61,16 @@ const JUMP_SPEED: f32 = 9.0;
 /// How fast a walk carries the player, in blocks per second. Declared.
 const WALK_SPEED: f32 = 4.5;
 
-/// How long FR-6.1-S2 gives the rise from the lakebed to the surface.
+/// How long the rise from the lakebed to the surface is given, in ticks.
 const RISE_TICKS: u32 = 120;
 
-/// How long FR-6.1-S3 holds the jump for.
+/// How long the ten-second hold lasts, in ticks.
 const HOLD_TICKS: u32 = 600;
 
-/// Where FR-6.1-S5's fall into the sea begins.
+/// Where the fall into the sea begins.
 const FALL_FROM: f32 = 44.0;
 
-/// The height FR-6.1-S3 forbids every tick of the hold from reaching.
+/// The height every tick of the hold is forbidden from reaching.
 ///
 /// The specification's closed form, written over the declared constants rather
 /// than over the sixties they happen to produce, so that it moves on its own the
@@ -184,8 +192,8 @@ fn releasing_jump_at_the_surface_sinks_the_player_back_onto_the_lakebed_inside_i
     assert!(
         floating.position.y >= TOP_WATER_VOXEL,
         "the fixture: this scenario is about a player *floating at the surface*, and jump is \
-         released on tick {RISE_TICKS} because that is the tick by which FR-6.1-S2 requires it to \
-         be there. After {RISE_TICKS} ticks of held jump the feet are at {} rather than at or \
+         released on tick {RISE_TICKS} because that is the watch this file gives the rise. \
+         After {RISE_TICKS} ticks of held jump the feet are at {} rather than at or \
          above {TOP_WATER_VOXEL}, so what sinks below is not a player that was floating",
         floating.position.y
     );

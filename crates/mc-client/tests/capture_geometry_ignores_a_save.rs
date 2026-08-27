@@ -138,6 +138,7 @@ fn a_registry_holding_the_marker() -> Result<BlockRegistry, Box<dyn Error>> {
             targetable: true,
             swimmable: false,
             move_resistance: 0.0,
+            swim_ascent: 9.0,
             origin,
         })],
     ))?;

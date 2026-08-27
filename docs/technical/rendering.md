@@ -1258,7 +1258,11 @@ forced a re-shoot of exactly the frames being preserved.
 held block is set once, so ticks 59 and 119 would assert the same rectangles
 a third time against different terrain. Tick 0 is the frame with the least
 terrain coverage (77.91%, measured below), so the crosshair stands against
-the most sky.
+the most sky. **That ranking held at `r1` and has since reversed twice** — the
+two wet frames move whenever the sea's declaration does, and the margin is now
+around two points either way. `mc_render::capture::HUD_CAPTURE_TICKS` carries
+the measured figure for every revision; do not read the sentence above as
+current.
 
 **The three committed terrain goldens were not re-shot, and did not move.**
 They were minted against a terrain path an independent ray-marched oracle had
@@ -1355,6 +1359,19 @@ change to the mesh contract rather than to the renderer, bump
 `mc_render::capture::SCENE_REVISION` instead of overwriting: the ids carry the
 revision, so the set is *renamed*, the commit shows added and removed files, and
 the inventory test forces the previous set out rather than letting it linger.
+
+**A revision bump renames the set, and the rename is a deletion and a fresh mint
+— never a `git mv`.** Step 4 writes nothing for a capture that still *matches*
+its golden (`GoldenOutcome::GoldenUnchanged`), and it only ever looks for a
+golden under the current revision's id. So moving the old directories into the
+new names and minting leaves every unmoved frame carrying a provenance sidecar
+that names the **superseded** capture — an `r3` sidecar sitting inside an `r4`
+directory — and nothing reports it: `golden_inventory` reads directory names and
+the comparison reads pixels, so neither instrument looks at the sidecar. Delete
+the old directories first and let step 4 mint all of them through `on_missing`.
+Measured on the 2026-08-27 re-shoot below, where two of four frames were
+unchanged and both kept their `r3` sidecars until they were deleted and
+re-minted.
 
 ### Re-shoots on record
 
@@ -1644,6 +1661,41 @@ palette as the ground it meets stands nearer to it than a deliberately
 implausible magenta did. 8 was inside both brackets. **That it still stands is a
 measurement and not an omission**, which is why the file's header now says so.
 
+#### 2026-08-27, the spec that made the sea's rates content-declared
+
+**`r3` → `r4`, four directories deleted and four added.** The third bump, and the
+second whose cause is the declared physics rather than the mesh or the spawn.
+SPEC-030 moved what `content/base/blocks/water.luau` declares — `move_resistance`
+`1.6` → `0.5`, and a `swim_ascent` of `3.5` where the field did not exist — and
+the scripted walk wades that sea. **The world is unchanged**, so `scene_contract.rs`
+holds throughout, which is the second time the case `SCENE_REVISION`'s doc comment
+records as having no guard is the case that actually arrives.
+
+**Two of the four frames moved and two did not, and the split is the same one
+PRO-957 derived.** Read before the mint with the opt-in unset: tick 59 differed at
+**350 085** of 921 600 pixels, worst distance **73.923**, and tick 119 at
+**341 511**, worst distance **75.850**; tick 0 and the HUD capture matched. Tick 0
+is dry — the spawn is still falling and inland of the coast — and the HUD does not
+animate. Re-minted after deletion, both unchanged frames came back
+**byte-identical**, which git records as 100 % renames. That is an independent
+reading that the capture is deterministic across the change, and it is why the
+unmoved pair is a derivation rather than a coincidence.
+
+**What the mint's skip cost, measured.** The first attempt renamed the four
+directories with `git mv` and then minted. It passed every check in this
+section — the comparison, `golden_mismatch` and `golden_inventory` all green —
+while `player-walk-t000-r4` and `player-walk-hud-t000-r4` still held sidecars
+reading `"capture": "player-walk-t000-r3"`. Nothing in the suite reports that, and
+it is what the deletion rule added above exists to prevent.
+
+**Verified in the order this section prescribes**, on the tree carrying the
+retune: `terrain_probes`, `replay_oracle` and `hud_prediction` — **21 tests run,
+21 passed**. Then the mint, naming only the two golden binaries. Then the set
+re-verified with `MYCRAFT_UPDATE_GOLDENS` unset and `golden_mismatch` selected —
+**4 passed** — and `golden_inventory` — **4 passed**. The provenance sidecars are
+byte-identical apart from the capture id they name: the same adapter, backend and
+driver produced both sets.
+
 ## What golden-frame verification cannot see
 
 **This section is now about terrain, and no longer about the whole frame.**
@@ -1663,6 +1715,19 @@ and what remains unseen for both halves.
   at 1280×720 — plus one HUD capture at tick 0. Anything that appears only at
   another tick passes the whole suite untouched, and anything present at a
   sampled tick is baked into that tick's reference.
+- **What the scripted walk never does is invisible to the goldens, and that was
+  measured against a declared physics field.** Sampling ticks bounds *when* the
+  frames look; the replay's own inputs bound *what* they can ever exercise.
+  SPEC-030 moved both of water's rate fields and the two came out opposite:
+  `move_resistance` `0.5 → 0.6` reddens `terrain_goldens`, because the walk
+  wades the sea and a resistance changes where it is at tick 59 and 119, while
+  `swim_ascent` `3.5 → 4.0` leaves them **green** — the walk never holds jump
+  under water at any captured tick, so no frame has ever depended on the rate a
+  swimmer rises at. An ascent shipped without a scenario stating its rise in
+  absolute blocks would have been guarded by nothing whatsoever. **Read a
+  declared value against the replay's inputs before crediting a golden with
+  guarding it**: that a field reaches the physics the frames are shot through
+  does not mean the frames reach the field.
 - **Share-based probes are blind to sparse pixels by construction.** A coverage
   assertion with a 0.25% floor over a 1280×720 frame cannot be moved by a few
   hundred pixels spread across a replay. Measured while building SPEC-004: 231
@@ -1694,7 +1759,12 @@ design-time re-implementation of the heightmap that answered `surface_height(32,
 rather than 44.62 and a player three blocks lower on a hillside rising to 48 is
 looking *into* terrain rather than over it. The prediction was not stale, it was
 wrong by 30 and 20 points, and the figures above are what a future drift should
-be read against.
+be read against. **That drift has since happened, twice**, both times because
+content-declared physics moved the two wet frames while tick 0 stayed
+byte-identical: `57.11 / 71.05 / 55.00` at `r2`, `57.11 / 66.63 / 50.95` at `r3`
+and `57.11 / 67.62 / 59.20` at `r4`. `HUD_CAPTURE_TICKS`' own doc comment is
+where that table is kept current, and it carried the `r2` row through the `r3`
+bump unmeasured — a doc comment is read by nothing, so nothing reported it.
 
 Those figures are what a **coverage floor** would have been checked against, and
 this is why the player's camera has no coverage floor. A 15% floor against a

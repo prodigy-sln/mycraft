@@ -57,17 +57,50 @@ everything authoritative. `mc-render` reads what it publishes and never the othe
   test could then exercise aiming by accident.
 
   **`Medium` is one trait returning one value** — `VoxelMedium { swimmable,
-  resistance }` — because one site reads both of its properties, one line apart,
-  from one fold over one box. Splitting it would separate nothing and would let a
-  fixture state one property and inherit the other, which is the live hazard here
-  rather than the one above. The composite `Traversal: Solidity + Medium` names what
+  resistance, swim_ascent }` — because one site reads all of its properties,
+  within a line or two of each other, from one fold over one box. Splitting it
+  would separate nothing and would let a fixture state one property and inherit
+  another, which is the live hazard here rather than the one above.
+
+  **The ascent is the one property whose default and fold identity disagree**, and
+  the arm that reconciles them is load-bearing. An absent `swim_ascent` means the
+  player's own jump speed; an empty cell must contribute `0.0`. So `declared_by`
+  masks a **non-swimmable** definition's ascent to `0.0`, which is what keeps
+  every ordinary block resolving to the medium it already resolved to — and what
+  keeps the shipped index at one bit rather than two. Move that mask into the
+  fold and the physics is identical while the world pays 128 KiB; move it into
+  the loader and the author's declared number is gone before anything can report
+  it. The composite `Traversal: Solidity + Medium` names what
   **one tick of motion** may ask: `Targetable` is deliberately not among it, and
   `advance_player` is its only production door. Coercion only ever narrows, so the
   eight other `&dyn Solidity` doors cannot reach a medium question.
 
+  **Where the masking is guarded was measured, and one of the two scenarios
+  named as its falsifier does not falsify it.** Three mutations, workspace-wide
+  under `--no-fail-fast`, reverted by hand:
+
+  - Mask moved out of `declared_by` and into the fold → **2** redden, and they
+    are the resolved-index reading and the exactly-one-bit width. The *physics*
+    stays green, because that variant computes the same rise. So no behavioural
+    scenario can see this placement; only a reading of what a declaration
+    resolves to can.
+  - Mask removed entirely → **3** redden, the two above plus the swimmer beside
+    a non-lifting cell. The `≤ 2` ceiling assertion stays green under **both**,
+    which is what it is for and why it is not the guard for the one bit.
+  - `launched` handed the ascent instead of the whole medium → **4** redden, and
+    **neither of the two mid-air scenarios worded around exactly that
+    distinction is among them**. Both begin the tick at a vertical velocity of
+    `0.0`, where a masked ascent of `0.0` and the velocity being carried forward
+    are the same number, so both implementations agree. What reddens is the one
+    scenario that starts the tick *already falling* — plus the pre-existing
+    mid-air jump tests, and one of those had to be given a falling start for
+    this phase for the very same reason. **A fixture at rest cannot tell "keep
+    the velocity" from "take this zero" apart.** Anything asserting that a
+    volume lifts nobody must start the player moving.
+
   **A fixture that exists to state solidity implements `Medium` as
-  `VoxelMedium::NOTHING` unconditionally, both halves, and never as a function of
-  its own solidity.** Those fixtures compute solidity from a geometric rule whose
+  `VoxelMedium::NOTHING` unconditionally, every answer alike, and never as a
+  function of its own solidity.** Those fixtures compute solidity from a geometric rule whose
   negation *is* the air, so "the air is the medium" is a one-line change that reads
   as insight and would put a resistance under dozens of collision assertions whose
   whole content is where a box stops.

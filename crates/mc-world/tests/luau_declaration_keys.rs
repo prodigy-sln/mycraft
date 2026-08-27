@@ -69,7 +69,7 @@ use tempfile::TempDir;
 /// satisfied it exactly as a correct one did. [`fields_the_refusal_quotes`] reads
 /// the list out of the refusal instead, which makes a missing name, an extra name
 /// and a reordering three different failures.
-const RECOGNISED_FIELDS: [&str; 11] = [
+const RECOGNISED_FIELDS: [&str; 12] = [
     "name",
     "texture",
     "solid",
@@ -81,6 +81,7 @@ const RECOGNISED_FIELDS: [&str; 11] = [
     "targetable",
     "swimmable",
     "move_resistance",
+    "swim_ascent",
 ];
 
 /// A field name nobody recognises, and the shape of the mistake that produces
@@ -236,6 +237,20 @@ struct Quoted {
     fields_quoted_in_order: Vec<String>,
 }
 
+/// What the content root at `root` registered [`AMBER`] as, or the refusal that
+/// stopped it, rendered.
+///
+/// Total rather than fallible, for the reason every reading in
+/// `luau_declaration_medium.rs` is: this is the control saying a declaration
+/// using the whole contract loads, and a `?` on the refusal ends it before its
+/// comparison ever runs. A test that never reached its assertion has not shown
+/// it was checking the right thing — and here the failure it exists to report is
+/// precisely a refusal, so propagating one throws away the answer.
+fn registration_or_refusal(root: &Path) -> Result<String, String> {
+    let registry = registry_from(root).map_err(|refused| refused.to_string())?;
+    registered(&registry, AMBER).map_err(|missing| missing.to_string())
+}
+
 /// What repeated reads of one content root said about the fields it does not
 /// recognise.
 #[derive(Debug, PartialEq, Eq)]
@@ -305,14 +320,13 @@ fn a_declaration_stating_every_recognised_field_and_nothing_else_registers() -> 
             raw_field("targetable", "true"),
             raw_field("swimmable", "false"),
             raw_field("move_resistance", "0"),
+            raw_field("swim_ascent", "0"),
         ]),
     )?;
 
-    let registry = registry_from(&root)?;
-
     assert_eq!(
-        registered(&registry, AMBER)?,
-        format!("textured {QUARTZ}, solid true"),
+        registration_or_refusal(&root),
+        Ok(format!("textured {QUARTZ}, solid true")),
         "the control on the refusal next door, and the only thing standing between an \
          unrecognised-field check and a check that refuses everything. Every field here is one \
          the loader is documented to accept, so a declaration using the whole contract must \

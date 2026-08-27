@@ -169,11 +169,12 @@ loads and does nothing.
 | `breaks_into` | **yes**, in behaviour: what the cell holds afterwards |
 | `swimmable` | **yes**, in behaviour, on the next tick: whether holding jump lifts a player inside it. Nothing is re-meshed for it |
 | `move_resistance` | **yes**, in behaviour, on the next tick: how much the block's volume slows what moves through it. Nothing is re-meshed for it |
+| `swim_ascent` | **yes**, in behaviour, on the next tick: how fast the block's volume lifts a swimmer holding jump. Nothing is re-meshed for it |
 
 **What decides a re-mesh is `drawn`, `occludes` and the six keys — and nothing
 else.** Editing `solid`, `targetable`, `replaceable`, `breakable`, `breaks_into`,
-`swimmable` or `move_resistance` changes what the world *does* without changing
-what it looks like, so no section is built again.
+`swimmable`, `move_resistance` or `swim_ascent` changes what the world *does*
+without changing what it looks like, so no section is built again.
 
 **Editing `solid` alone still redraws, and it is worth knowing why**, because the
 answer changes the moment you write one more line. `drawn` and `occludes` default
@@ -188,16 +189,23 @@ that missed something.
 Your swing starts or stops finding the block on the very next tick; the picture on
 screen never flickers, because nothing about it changed.
 
-**The same holds for `swimmable` and `move_resistance`, and it is the fastest
-loop on this page.** Both take effect on the next tick, and neither rebuilds a
-section — so you can retune how a liquid feels while standing in it. Raise
-`move_resistance` and save, and the next step you take through the block is
-slower; take a `swimmable = true` away and the jump you were holding stops
-lifting you from that tick on, wherever you happen to be. Nothing about the world
-redraws for either, because there is nothing to redraw: a volume that stopped
-holding you up looks exactly like one that still does.
+**The same holds for all three medium fields, and it is the fastest loop on this
+page.** Each takes effect on the next tick and none rebuilds a section — so you
+can retune how a liquid feels while standing in it. Raise `move_resistance` and
+save, and the next step you take through the block is slower; lower
+`swim_ascent` and the jump you are already holding lifts you more slowly from
+that tick on; take a `swimmable = true` away and it stops lifting you at all,
+wherever you happen to be. Nothing about the world redraws for any of them,
+because there is nothing to redraw: a volume that stopped holding you up looks
+exactly like one that still does.
 
-**A `move_resistance` the loader would refuse refuses the whole reload**, exactly
+That is the loop worth using on `swim_ascent` in particular, because the ratio
+it sets — `(swim_ascent − 0.5) / 4.5`, which `move_resistance` cancels out of
+entirely — is a feel rather than a figure. Sit in your liquid, edit the one
+number, save, and hold jump again.
+
+**A `move_resistance` or a `swim_ascent` the loader would refuse refuses the
+whole reload**, exactly
 as any other bad field does — the file and the field are named, nothing is half
 applied, and the game goes on serving the content it was already serving until
 you fix it and save again. So a mistyped number costs you a refusal you can read
@@ -426,7 +434,7 @@ are the launch refusals** — same loader, same words — under the reload's own
 sentence. This one is `solid` typed as `slid`:
 
 ```
-mycraft: the content root could not be taken up: the content root could not be read: the content root's blocks could not be read: content/base/blocks/stone.luau, block `base:stone`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`
+mycraft: the content root could not be taken up: the content root could not be read: the content root's blocks could not be read: content/base/blocks/stone.luau, block `base:stone`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`
 ```
 
 The fields it lists are the whole set a declaration may state, which makes this the one

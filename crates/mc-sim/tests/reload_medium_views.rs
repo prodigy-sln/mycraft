@@ -104,12 +104,67 @@ const WALK_SPEED: f32 = 4.5;
 const RESISTANCE_SERVED: f32 = 1.0;
 const RESISTANCE_RELOADED: f32 = 3.0;
 
+/// The ascent every root above states, which is the value the loader supplies to
+/// a declaration that says nothing.
+///
+/// Written out rather than left absent, so that each root here states every
+/// medium field it has and none of them stands as a default beside two that were
+/// declared. The value is the loader's own, so stating it changes nothing about
+/// what those scenarios measure.
+const ASCENT_UNCHANGED: f32 = 9.0;
+
+/// What the water declares about carrying a swimmer upward before the reload and
+/// after it, and the resistance both sides of that scenario state.
+///
+/// The three are the specification's own fixture and are not free to be chosen
+/// for arithmetic convenience: `1 + 0.5` is not a power of two, so the readings
+/// below are compared against a tolerance rather than by bits.
+const RESISTANCE_UNDER_THE_ASCENT: f32 = 0.5;
+const ASCENT_SERVED: f32 = 3.5;
+const ASCENT_RELOADED: f32 = 1.5;
+
+/// How fast a held jump leaves the tick under each of those two declarations, in
+/// blocks per second.
+///
+/// A closed form and never a figure read off a run: a launch replaces the
+/// vertical velocity outright, gravity takes one tick's bite before the medium
+/// divides, so the tick ends at `(ascent − GRAVITY · TICK_DURATION) / (1 +
+/// resistance)`. With `GRAVITY = 30.0` and `TICK_DURATION = 1/60` that bite is
+/// `0.5`, giving `(3.5 − 0.5) / 1.5 = 2.0` and `(1.5 − 0.5) / 1.5 = 0.666667`.
+const RISE_SERVED: f32 = 2.0;
+const RISE_RELOADED: f32 = 0.6667;
+
+/// How far a measured rate may sit from the stated one, in blocks per second.
+///
+/// **A ceiling derived from both directions rather than a figure loosened until
+/// something passed.**
+///
+/// From below: `0.6667` is the specification's own rounding of `2/3`, and the
+/// value the arithmetic actually produces is `0.66666669` — `3.3e-5` away. The
+/// `f32` path contributes far less than that: `GRAVITY · TICK_DURATION` rounds to
+/// exactly `0.5`, both subtractions are exact, and the single division is
+/// correctly rounded, so one ulp near `0.667` is `6.0e-8`. The transcription
+/// dominates and the floor is `3.4e-5`. This sits a factor of three above it.
+///
+/// From above: the nearest wrong answer this has to reject is a rise that came
+/// out at `1.0` — what a tick gives if it applied the reloaded ascent and either
+/// skipped gravity's bite or skipped the medium's division — a gap of `0.333`,
+/// three thousand times this. Every other wrong answer in reach is further off: a
+/// stale view reports the served `2.0` twice, and one falling back on the
+/// loader's default ascent gives `5.667`.
+const TOLERANCE: f32 = 1e-4;
+
 #[test]
 fn a_reload_that_only_raises_a_resistance_slows_the_very_next_tick_of_a_walk() -> TestResult {
-    let mut simulation = swimming_in(&water_declaring(true, RESISTANCE_SERVED), STANDING_FEET)?;
+    let mut simulation = swimming_in(
+        &water_declaring(true, RESISTANCE_SERVED, ASCENT_UNCHANGED),
+        STANDING_FEET,
+    )?;
     let before = walked(&mut simulation);
-    let candidate =
-        shipped()?.restating(WATER_FILE, &water_declaring(true, RESISTANCE_RELOADED))?;
+    let candidate = shipped()?.restating(
+        WATER_FILE,
+        &water_declaring(true, RESISTANCE_RELOADED, ASCENT_UNCHANGED),
+    )?;
 
     let answered = adoption(mc_sim::reload::adopt_at_tick_boundary(
         &mut simulation,
@@ -138,8 +193,8 @@ fn a_reload_that_only_raises_a_resistance_slows_the_very_next_tick_of_a_walk() -
 #[test]
 fn a_reload_that_only_gives_a_block_buoyancy_lets_the_very_next_jump_off_the_ground_lift()
 -> TestResult {
-    let sunk = water_declaring(false, RESISTANCE_SERVED);
-    let buoyant = water_declaring(true, RESISTANCE_SERVED);
+    let sunk = water_declaring(false, RESISTANCE_SERVED, ASCENT_UNCHANGED);
+    let buoyant = water_declaring(true, RESISTANCE_SERVED, ASCENT_UNCHANGED);
 
     let lifts = (
         a_jump_lifts(&sunk, None)?,
@@ -162,8 +217,8 @@ fn a_reload_that_only_gives_a_block_buoyancy_lets_the_very_next_jump_off_the_gro
 #[test]
 fn a_reload_that_takes_a_blocks_buoyancy_away_stops_the_very_next_jump_off_the_ground_lifting()
 -> TestResult {
-    let buoyant = water_declaring(true, RESISTANCE_SERVED);
-    let sunk = water_declaring(false, RESISTANCE_SERVED);
+    let buoyant = water_declaring(true, RESISTANCE_SERVED, ASCENT_UNCHANGED);
+    let sunk = water_declaring(false, RESISTANCE_SERVED, ASCENT_UNCHANGED);
 
     let lifts = (
         a_jump_lifts(&buoyant, None)?,
@@ -184,6 +239,41 @@ fn a_reload_that_takes_a_blocks_buoyancy_away_stops_the_very_next_jump_off_the_g
     Ok(())
 }
 
+#[test]
+fn a_reload_that_only_lowers_a_swim_ascent_slows_the_very_next_held_jump() -> TestResult {
+    let mut simulation = swimming_in(
+        &water_declaring(true, RESISTANCE_UNDER_THE_ASCENT, ASCENT_SERVED),
+        ADRIFT_FEET,
+    )?;
+    let before = a_held_jump_ends_at(&mut simulation);
+    let candidate = shipped()?.restating(
+        WATER_FILE,
+        &water_declaring(true, RESISTANCE_UNDER_THE_ASCENT, ASCENT_RELOADED),
+    )?;
+
+    let answered = adoption(mc_sim::reload::adopt_at_tick_boundary(
+        &mut simulation,
+        candidate.candidate()?,
+    ));
+    require_admitted(&answered)?;
+    let after = a_held_jump_ends_at(&mut simulation);
+
+    assert!(
+        (before - RISE_SERVED).abs() <= TOLERANCE && (after - RISE_RELOADED).abs() <= TOLERANCE,
+        "an author lowered one number in one file and the very next tick of the held jump carries \
+         the swimmer more slowly: {RISE_SERVED} blocks per second before the swap and \
+         {RISE_RELOADED} after it, within {TOLERANCE}, and these ticks ended at {before} and \
+         {after}. No cell of the world was written and the world was not rebuilt, so the only \
+         thing that can carry the new number to the tick is the wholesale replacement the reload \
+         performs — one that kept what the old registry had resolved about the volume goes on \
+         launching at the old rate and reports {RISE_SERVED} twice. **Both readings, because \
+         either alone is satisfied by a failure**: the first says the fixture really was lifting \
+         the swimmer at the declared rate to begin with, so the second is a change rather than a \
+         volume that never carried anybody"
+    );
+    Ok(())
+}
+
 /// What `base:water` says when an author has stated its medium as given and left
 /// everything else exactly as the shipped declaration has it.
 ///
@@ -191,7 +281,12 @@ fn a_reload_that_takes_a_blocks_buoyancy_away_stops_the_very_next_jump_off_the_g
 /// reader can see the whole of what the author's root says — and so that the two
 /// roots a scenario compares differ in the one field it names and in nothing that
 /// fell back to a default.
-fn water_declaring(swimmable: bool, move_resistance: f32) -> String {
+///
+/// **Three medium arguments and not two with a default**, for the reason the
+/// whole-file restatement above exists: a builder that states one medium field
+/// and lets another stand would put two roots' difference somewhere the caller
+/// never wrote it.
+fn water_declaring(swimmable: bool, move_resistance: f32, swim_ascent: f32) -> String {
     [
         "return {".to_owned(),
         format!("\tname = \"{WATER}\","),
@@ -208,6 +303,7 @@ fn water_declaring(swimmable: bool, move_resistance: f32) -> String {
         // means "a number" should not become one that means "an integer" for the
         // values that happen to be round.
         format!("\tmove_resistance = {move_resistance:?},"),
+        format!("\tswim_ascent = {swim_ascent:?},"),
         "}".to_owned(),
         String::new(),
     ]
@@ -277,6 +373,20 @@ fn walked(simulation: &mut Simulation) -> f32 {
         action: None,
     });
     simulation.latest().player.velocity.x
+}
+
+/// The vertical velocity one tick of a held jump leaves the player at.
+///
+/// The velocity and not a difference of positions, for the reason the walk's own
+/// reading gives: a launch *sets* the velocity, so that is the quantity the
+/// declared ascent is about, and a displacement recovered as `end − start` agrees
+/// with it only near the origin.
+fn a_held_jump_ends_at(simulation: &mut Simulation) -> f32 {
+    simulation.advance(TickIntent {
+        movement: jumping(),
+        action: None,
+    });
+    simulation.latest().player.velocity.y
 }
 
 /// An intent that asks for a jump and nothing else.

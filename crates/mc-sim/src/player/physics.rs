@@ -9,6 +9,20 @@
 //! traces, and the continuous figure is a number no correct implementation of
 //! this model can produce.
 //!
+//! **A jump the medium alone admits leaves at what the medium declares**, not at
+//! the player's own jump speed: `launched` reads the volume's `swim_ascent`
+//! there, and the ground path is untouched. The same order applies to it — the
+//! declared ascent is launched, gravity bites, and only then does the resistance
+//! divide — so the rise a swimmer observes is `(ascent − g·dt) / (1 + r)` and
+//! never the declared number itself.
+//!
+//! **Both declared coefficients are therefore bound to this 60 Hz tick.** The
+//! gravity bite is one tick's worth whatever a tick is worth, so a declaration
+//! that rises at some rate here rises at another rate at another tick rate. The
+//! binding is stated rather than removed: taking the bite before the launch
+//! would make the rise rate-free, and the scenarios this feature is asserted
+//! against are worded on the order above.
+//!
 //! Nothing here reads a clock. A tick is a declared quantum of simulated time,
 //! which is what lets the same intents replay to the same state on a machine of
 //! any speed (`crates/mc-sim/CLAUDE.md`).
@@ -18,7 +32,7 @@ use std::time::Duration;
 use glam::{Vec2, Vec3};
 
 use crate::player::collide;
-use crate::player::{Look, MovementIntent, PlayerState, Traversal};
+use crate::player::{Look, MovementIntent, PlayerState, Traversal, VoxelMedium};
 
 /// How long one tick simulates, in seconds.
 ///
@@ -108,7 +122,7 @@ pub fn advance_player(
     let look = Look::of(&state).accumulate(intent);
     let walk = walk_velocity(intent, look.yaw);
     let velocity = slowed(
-        walk.with_y(fallen(launched(&state, intent, medium.swimmable))),
+        walk.with_y(fallen(launched(&state, intent, medium))),
         medium.resistance,
     );
     let displacement = bounded(velocity * TICK_DURATION);
@@ -211,19 +225,39 @@ fn bounded(displacement: Vec3) -> Vec3 {
 /// **One condition widened at the one site that already answers "may this tick
 /// launch", rather than a second launch path.** That is what keeps a jump asked
 /// for in mid-air outside any such medium reading as exactly the rule it read as
-/// before: `buoyant` is false there, and the expression is the one it was.
-/// Buoyancy is the only thing it adds — being swimmable resists nothing by
+/// before: the medium is not swimmable there, and the expression is the one it
+/// was. Buoyancy is the only thing it adds — being swimmable resists nothing by
 /// itself, and resisting nothing holds nobody up.
 ///
-/// Gravity takes its first bite from this before the position moves, so the
-/// declared jump speed is a value no caller ever observes — and that ordering is
-/// the whole reason the apex is 1.275 blocks rather than the 1.35 the continuous
-/// `v²/2g` gives.
-fn launched(state: &PlayerState, intent: &MovementIntent, buoyant: bool) -> f32 {
-    if intent.jump && (state.on_ground || buoyant) {
+/// **Ground beats medium, and what a medium launches at is the medium's own.**
+/// From ground contact the speed is [`JUMP_SPEED`] whether or not the box is
+/// submerged, because that is the player's own jump and the ground is what it
+/// pushes against. From buoyancy alone it is the volume's declared
+/// [`swim_ascent`](VoxelMedium::swim_ascent), which is what lets content set how
+/// fast water carries a swimmer without any engine constant moving.
+///
+/// **The whole medium is taken rather than the ascent alone**, and that is not a
+/// convenience. A non-swimmable volume's ascent is masked to `0.0` before it
+/// reaches here, so `{swimmable, 0.0}` and `{not swimmable, 0.0}` are the only
+/// two values this ever sees where the ascent is zero — and they must answer
+/// differently, one arresting a sink and the other leaving a mid-air jump
+/// changed by nothing. An ascent handed over on its own cannot tell them apart.
+///
+/// Gravity takes its first bite from whatever this returns before the position
+/// moves, so a declared launch speed is a value no caller ever observes — and
+/// that ordering is the whole reason a jump's apex is 1.275 blocks rather than
+/// the 1.35 the continuous `v²/2g` gives. It is also why a declared ascent is
+/// **bound to the 60 Hz tick**: the bite is one tick of gravity whatever the
+/// tick is worth, so the same declaration read at another rate rises at another
+/// speed.
+fn launched(state: &PlayerState, intent: &MovementIntent, medium: VoxelMedium) -> f32 {
+    if !(intent.jump && (state.on_ground || medium.swimmable)) {
+        return state.velocity.y;
+    }
+    if state.on_ground {
         JUMP_SPEED
     } else {
-        state.velocity.y
+        medium.swim_ascent
     }
 }
 

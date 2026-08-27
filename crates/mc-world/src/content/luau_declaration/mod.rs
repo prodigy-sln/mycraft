@@ -14,14 +14,18 @@
 //! `deny_unknown_fields` was TOML's, and a host that can read a named field but
 //! cannot ask what fields exist can never tell a typo from an absence.
 //!
-//! # What a `texture` may say is a module of its own
+//! # What a `texture` may say, and what a number may be, are modules of their own
 //!
 //! [`texture`] holds the reading of that one field and the refusals it raises:
 //! it is the field with two forms, one of which is a table with a shape of its
 //! own, and it is most of what a declaration can get wrong. A child module
 //! rather than a sibling because it constructs this module's own [`FieldFault`]
 //! — the refusals a mod author reads are one vocabulary, and a second one would
-//! be a second thing to keep in step with the modding guide.
+//! be a second thing to keep in step with the modding guide. [`number`] is the
+//! same arrangement for the other end of a declaration: it holds what a stated
+//! number may be, the four ways one can be wrong, and the two fields that read
+//! one, so that a third number added later inherits all of it by calling one
+//! function rather than by being remembered.
 //!
 //! # Nothing here runs the mod's code
 //!
@@ -64,6 +68,8 @@ const TARGETABLE_FIELD: &str = "targetable";
 const SWIMMABLE_FIELD: &str = "swimmable";
 /// The key a declaration states how much its volume slows movement in.
 const MOVE_RESISTANCE_FIELD: &str = "move_resistance";
+/// The key a declaration states how fast its volume lifts a swimmer in.
+const SWIM_ASCENT_FIELD: &str = "swim_ascent";
 
 /// Every field name a declaration may state, in the order the documentation
 /// introduces them.
@@ -76,7 +82,7 @@ const MOVE_RESISTANCE_FIELD: &str = "move_resistance";
 /// `docs/modding/README.md`. Growing it means editing all three, and the guard
 /// sweeps every page under `docs/modding/` rather than a named one, so a page
 /// missed is a page reported.
-const RECOGNISED_FIELDS: [&str; 11] = [
+const RECOGNISED_FIELDS: [&str; 12] = [
     NAME_FIELD,
     TEXTURE_FIELD,
     SOLID_FIELD,
@@ -88,6 +94,7 @@ const RECOGNISED_FIELDS: [&str; 11] = [
     TARGETABLE_FIELD,
     SWIMMABLE_FIELD,
     MOVE_RESISTANCE_FIELD,
+    SWIM_ASCENT_FIELD,
 ];
 
 /// How many field names the loader will read out of one declaration.
@@ -132,13 +139,6 @@ const BREAKABLE_BY_DEFAULT: bool = true;
 ///
 /// A **constant**, never [`defaulting_to_solidity`]; that function says why.
 const SWIMMABLE_BY_DEFAULT: bool = false;
-
-/// What a declaration means by saying nothing about resisting movement.
-///
-/// A constant for the reason [`SWIMMABLE_BY_DEFAULT`] is one, and what the scale
-/// already spells "unaffected": the tick divides by `1 + resistance`, so a
-/// declaration saying nothing divides by one and moves as it always did.
-const MOVE_RESISTANCE_BY_DEFAULT: f32 = 0.0;
 
 /// Checks a declaration table and turns it into a definition attributed to
 /// `origin`.
@@ -185,7 +185,8 @@ fn check(
     let occludes = defaulting_to_solidity(host, declaration, OCCLUDES_FIELD, is_solid)?;
     let targetable = defaulting_to_solidity(host, declaration, TARGETABLE_FIELD, is_solid)?;
     let swimmable = defaulting_to(host, declaration, SWIMMABLE_FIELD, SWIMMABLE_BY_DEFAULT)?;
-    let move_resistance = declared_resistance(host, declaration)?;
+    let move_resistance = number::declared_resistance(host, declaration)?;
+    let swim_ascent = number::declared_ascent(host, declaration)?;
     Ok(BlockDefinition {
         name: BlockName::parse(&name).map_err(|error| FieldFault::invalid(NAME_FIELD, &error))?,
         textures,
@@ -198,6 +199,7 @@ fn check(
         targetable,
         swimmable,
         move_resistance,
+        swim_ascent,
         origin: origin.clone(),
     })
 }
@@ -224,18 +226,6 @@ fn defaulting_to(
     absent: bool,
 ) -> Result<bool, FieldFault> {
     optional_boolean(host.read_field(declaration, field), field, absent)
-}
-
-/// How much a declaration says its volume slows what moves through it.
-///
-/// Its absence means a **constant** and not [`defaulting_to_solidity`]; see
-/// [`defaulting_to`] for why that distinction is load-bearing.
-fn declared_resistance(host: &ScriptHost, declaration: &ScriptTable) -> Result<f32, FieldFault> {
-    number::optional_number_at_least_zero(
-        host.read_field(declaration, MOVE_RESISTANCE_FIELD),
-        MOVE_RESISTANCE_FIELD,
-        MOVE_RESISTANCE_BY_DEFAULT,
-    )
 }
 
 /// One of the three fields whose absence means whatever the same declaration

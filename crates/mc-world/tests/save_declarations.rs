@@ -16,8 +16,9 @@
 //! declaration is for. The retexture test below is what makes the split
 //! observable; nothing else asserts it is real.
 //!
-//! The expected hash in the version-1 test is **derived by hand from the
-//! documented encoding and never taken from a run of the code under test**. That
+//! The pinned behaviour hash below is **derived by hand from the documented
+//! encoding and never taken from a run of the code under test**, and it has been
+//! re-derived that way at every version the list has reached. That
 //! requirement is what chose the hash function: a constant nobody can derive
 //! independently is a snapshot of whatever the writer did the day it was
 //! written, and it can never fail for the right reason afterwards.
@@ -66,21 +67,22 @@ const SECOND_TEXTURE: &str = "fixture:andesite_reworked";
 /// The block whose behaviour hash is pinned to a value derived by hand.
 const PINNED: &str = "fixture:stone";
 
-/// What version 3 of this format records for a block named `fixture:stone`
+/// What version 4 of this format records for a block named `fixture:stone`
 /// declared solid, not replaceable, breakable, breaking into nothing, aimable,
-/// not swimmable, and resisting nothing.
+/// not swimmable, resisting nothing, and saying nothing about how fast it would
+/// carry a swimmer.
 ///
 /// **Derived by hand from the documented encoding**, in a scratch computation
 /// sharing no code with the writer. The canonical input is the declared
 /// behaviour — an input-version byte, the name, the three flags, the absence of a
-/// residue, whether a swing can find the block, and last the two that say what
+/// residue, whether a swing can find the block, and last the three that say what
 /// its volume is to move through — encoded little-endian with variable-length
 /// lengths, which for values this small is one byte each. A number is the
 /// exception: it is written as the four bytes of its bit pattern, fixed width,
 /// least significant first.
 ///
 /// ```text
-///   03                          input version 3
+///   04                          input version 4
 ///   0d                          the name is 13 bytes long
 ///   66 69 78 74 75 72 65        f i x t u r e
 ///   3a                          :
@@ -92,11 +94,12 @@ const PINNED: &str = "fixture:stone";
 ///   01                          targetable
 ///   00                          not swimmable
 ///   00 00 00 00                 a resistance of 0.0, as its bits
+///   00 00 10 41                 an ascent of 9.0, as its bits
 /// ```
 ///
 /// Folded with FNV-1a 64 — start at `0xcbf2_9ce4_8422_2325`, and for each byte
 /// exclusive-or it in and multiply by `0x0000_0100_0000_01b3`, wrapping — those
-/// twenty-five bytes give the value below. The fold was checked against FNV's own
+/// twenty-nine bytes give the value below. The fold was checked against FNV's own
 /// published vectors (`""`, `"a"`, `"foobar"`) before it was pointed at this
 /// input.
 ///
@@ -107,24 +110,40 @@ const PINNED: &str = "fixture:stone";
 /// — and a fold that skipped a zero would agree with this only by dropping four
 /// bytes that are supposed to be there.
 ///
+/// **`00 00 10 41` is `9.0`, and the test's name still says this block neither
+/// floats nor slows — which reads as a contradiction and is not one.** An ascent
+/// is what a volume would carry a swimmer upward at *if* it were swimmable, and
+/// this one is not: the ascent is masked to `0.0` where a definition becomes a
+/// medium, so nothing this block does to a player turns on the number. `9.0` is
+/// here because it is what a declaration saying nothing about the field means —
+/// the same rule this fixture applies to breakability and a residue — and these
+/// registries are built in memory, so the loader's default never runs and the four
+/// bytes are the fixture's own literal. Setting it to `0.0` to match the name
+/// would state the fold *identity* where the loader's *default* belongs, and the
+/// disagreement between those two values is the whole of this feature's Decision
+/// 3.
+///
 /// **The `01` before them is the fixture's own doing and not a default the loader
 /// derived.** These registries are built in memory, so `defaulting_to_solidity`
 /// never runs: `common::registry_from` states `targetable: is_solid` for every
 /// block it builds and `registry_of` declares every block solid, which is what
 /// makes this byte a `01` rather than something a reader has to infer from a
-/// declaration file. The two after it are stated there as constants for the
+/// declaration file. The three after it are stated there as constants for the
 /// reason the same file records: nothing has ever answered them, so deriving one
 /// from solidity would make every solid fixture in the crate swimmable.
 ///
-/// **The re-derivation was checked against both values it succeeds before it was
-/// trusted.** The same scratch computation, run over the *nineteen*-byte version 1
-/// input, reproduces `0x5e9d_3089_5b2e_0d5f`, and over the *twenty*-byte version 2
-/// input reproduces `0xbee1_336f_0dc4_f79d` — the two constants this one
-/// supersedes, derived years apart by two other people. A method that lands on
-/// both old numbers for their own inputs is the method those numbers were derived
-/// by, which is a stronger thing to know than that the new number agrees with a
-/// run.
-const VERSION_3_BEHAVIOUR_OF_PINNED: u64 = 0x3e58_43bf_8f20_37bc;
+/// **The re-derivation was checked against all three values it succeeds before it
+/// was trusted.** The same scratch computation, run over the *nineteen*-byte
+/// version 1 input, reproduces `0x5e9d_3089_5b2e_0d5f`; over the *twenty*-byte
+/// version 2 input, `0xbee1_336f_0dc4_f79d`; and over the *twenty-five*-byte
+/// version 3 input, `0x3e58_43bf_8f20_37bc` — the three constants this one
+/// supersedes, derived on three separate occasions by three other people. A
+/// method that lands on every old number for its own input is the method those
+/// numbers were derived by, which is a stronger thing to know than that the new
+/// number agrees with a run. It was checked against FNV's own published vectors
+/// (`""`, `"a"`, `"foobar"`) first, and the run of the code under test was not
+/// consulted until after all four agreed.
+const VERSION_4_BEHAVIOUR_OF_PINNED: u64 = 0xb808_ebfd_74e6_f12a;
 
 /// A world holding a block the registry it is saved against does not declare,
 /// and the block that is missing from it.
@@ -256,16 +275,16 @@ fn a_solid_breakable_aimable_block_that_neither_floats_nor_slows_records_the_sta
 
     assert_eq!(
         required.blocks().first().map(|block| block.behaviour.get()),
-        Some(VERSION_3_BEHAVIOUR_OF_PINNED),
+        Some(VERSION_4_BEHAVIOUR_OF_PINNED),
         "this is what version 3 of the format means by that declaration, and the value is derived \
          from the documented encoding rather than read off a run — a number copied out of the \
          first green run records whatever the writer did that day and pins nothing. Recording \
          one value today and another tomorrow makes every save in existence report its blocks as \
          changed, which is the report this whole mechanism exists to make only when something \
-         really did change. The version byte moved because the list grew the two fields that say \
-         what a block's volume is to move through, and this is one of the places in the workspace \
-         that can see either happen — every other witness compares one fold to another and cannot \
-         see a leading byte that moved in both"
+         really did change. The version byte moved because the list grew the rate at which a \
+         volume carries a swimmer upward, and this is one of only three files in the workspace \
+         that can see either that or the byte happen — every other witness compares one fold to \
+         another and cannot see a leading byte that moved in both"
     );
     Ok(())
 }

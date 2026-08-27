@@ -107,6 +107,7 @@ fn hand_written_air() -> Result<BlockDefinition, Box<dyn Error>> {
         targetable: false,
         swimmable: false,
         move_resistance: 0.0,
+        swim_ascent: 9.0,
         origin: DefinitionOrigin::new("hand-written air"),
     })
 }
@@ -125,6 +126,7 @@ fn hand_written_stone() -> Result<BlockDefinition, Box<dyn Error>> {
         targetable: true,
         swimmable: false,
         move_resistance: 0.0,
+        swim_ascent: 9.0,
         origin: DefinitionOrigin::new("hand-written stone"),
     })
 }
@@ -144,6 +146,7 @@ fn hand_written_grass() -> Result<BlockDefinition, Box<dyn Error>> {
         targetable: true,
         swimmable: false,
         move_resistance: 0.0,
+        swim_ascent: 9.0,
         origin: DefinitionOrigin::new("hand-written grass"),
     })
 }

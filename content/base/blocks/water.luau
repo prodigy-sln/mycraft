@@ -20,29 +20,53 @@
 -- requiring it to be broken first, and `breaks_into` is left unstated, so water
 -- keeps the documented default
 --
--- `swimmable` and `move_resistance` are what make this a medium rather than an
--- absence, and they are separate claims: being able to hold yourself up in
--- something and being slowed by it are different properties, and a block may
--- declare either without the other. Together they are why a player sinks slowly
--- into the sea, rises by holding jump, and swims more slowly than it walks.
+-- `swimmable`, `move_resistance` and `swim_ascent` are what make this a medium
+-- rather than an absence, and they are three separate claims: being able to
+-- hold yourself up in something, being slowed by it, and how hard it lifts you
+-- while you hold jump are different properties, and a block may declare any of
+-- them without the others. Together they are why a player sinks slowly into the
+-- sea, rises by holding jump, and swims more slowly than it walks.
 --
--- The resistance is the **geometric centre of the window the six sea scenarios
--- admit**, measured against the built simulation rather than chosen: the deepest
--- lakebed must be surfaced within 120 ticks, which caps it at 16.0, and the sink
--- must land inside its budget, which floors it at 0.16. 1.6 stands a factor of
--- ten from each end, so no physics constant or scenario threshold moves the
--- shipped sea out of the window without moving it a long way.
+-- **All three are read once per tick, and the tick is 60 Hz.** The rates they
+-- produce are stated absolutely rather than left to be derived from them: a
+-- swimmer asking for nothing sinks `0.9667` blocks in the first second and
+-- approaches one block a second thereafter; holding jump raises it
+-- `(3.5 - 0.5) / (1 + 0.5)` = `2.0` blocks a second; a walk at full deflection
+-- carries it `4.5 / (1 + 0.5)` = `3.0` blocks a second, two thirds of its speed
+-- on land. The `0.5` is what gravity takes in one tick and the `4.5` is the
+-- walk — both engine constants this declaration cannot reach.
 --
--- **Exactly one test guards this number, and it is not one of the swimming
--- ones.** Measured rather than assumed: moving it to `2.0` — another value the
--- window admits — reddens `terrain_goldens` and nothing else, 701 of 702 still
--- green. Every sea scenario reads this value back out of the registry and states
--- its bound as arithmetic over it, which is what stops them caging a number they
--- are supposed to leave free — and the cost of that is that they move with it and
--- cannot see it change. What reports a changed value is the committed golden
--- frames, because the scripted walk wades through this sea. So a change here that
--- re-mints the goldens in the same breath is a change nothing in the suite
--- reports at all.
+-- **The resistance ties the sink to the swim; only the ascent separates the
+-- rise from either.** Their ratio `(swim_ascent - 0.5) / 4.5` is free of the
+-- resistance entirely — `0.67` here, so the sea climbs a little slower than it
+-- carries. That is the whole of what an ascent buys, and it is why the sink was
+-- repaired by dropping the resistance rather than by pushing the ascent: at the
+-- `1.6` this block used to declare, sinking through the deepest part of the sea
+-- took six and a half seconds and a swimmer moved at a little over a third of a
+-- walk, which is the complaint this declaration answers.
+--
+-- **These three numbers are guarded absolutely, and that is a repair rather
+-- than a standing property.** Every sea scenario used to read the resistance
+-- back out of the registry and state its bound as arithmetic over it, which is
+-- what stopped them caging a number they were supposed to leave free — and the
+-- cost was that they moved with it and could not see it change. Measured:
+-- moving it from `1.6` to `2.0` reddened `terrain_goldens` and nothing else,
+-- 701 of 702 still green, because the scripted walk wades through this sea. So
+-- a change that moved the number and re-minted the goldens in the same breath
+-- was a change nothing reported at all. What closes that now is a second's sink
+-- and a second's rise asserted in absolute blocks over absolute ticks, reading
+-- none of these three values back.
+--
+-- **Both halves of that were then measured, workspace-wide, and the ascent's
+-- half is the one that matters.** Moving the resistance to `0.6` reddens **five**
+-- — the declaration, the sink, the rise, the walk, and the goldens. Moving the
+-- ascent to `4.0` reddens **three** — the declaration, the rise, and the
+-- surfacing ceiling — **and the golden frames stay green**, because the scripted
+-- walk never holds jump under water at the three ticks they are shot at. So the
+-- guard that used to be the only one is *blind to this field*: an ascent shipped
+-- without a scenario stating its rise in blocks would have been guarded by
+-- nothing whatsoever. Each value also has its own sharp witness — the sink moves
+-- only with the resistance, the surfacing ceiling only with the ascent.
 return {
 	name = "base:water",
 	texture = "base:water",
@@ -53,5 +77,6 @@ return {
 	occludes = false,
 	targetable = true,
 	swimmable = true,
-	move_resistance = 1.6,
+	move_resistance = 0.5,
+	swim_ascent = 3.5,
 }

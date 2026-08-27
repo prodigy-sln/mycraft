@@ -40,6 +40,15 @@ use mc_world::world::WorldPos;
 /// definition has to say where it came from.
 const FIXTURE_ORIGIN: &str = "a solidity test's declared registry";
 
+/// How fast a volume lifts a swimmer when its declaration says nothing about it:
+/// the speed the player's own jump leaves the ground at.
+///
+/// Written out here rather than read from the loader, which keeps it a fixture's
+/// own statement rather than an agreement with whatever the value under test
+/// becomes. A fixture that means it says so with this name; a fixture whose
+/// scenario is about the ascent states its own number instead.
+pub const AN_UNSTATED_ASCENT: f32 = 9.0;
+
 /// A volume filled with one named block up to and including a declared height,
 /// and with another above it.
 ///
@@ -102,7 +111,8 @@ impl BlockVolume for NamedSlab {
 /// What a block declares about the questions this suite's fixtures ask of one:
 /// whether it stops a player, whether it is drawn, whether it hides what is
 /// behind it, whether a ray may stop at it, whether a player can hold itself up
-/// in its volume, and how much that volume slows what moves through it.
+/// in its volume, how much that volume slows what moves through it, and how fast
+/// it lifts a swimmer who asks to rise.
 ///
 /// **Separate answers, because a fixture that cannot state them separately
 /// cannot fail a rule that reads them all off solidity.** Written as a struct
@@ -121,16 +131,17 @@ pub struct Declaration {
     pub targetable: bool,
     pub swimmable: bool,
     pub move_resistance: f32,
+    pub swim_ascent: f32,
 }
 
 impl Declaration {
     /// What every fixture written before the four drawing-and-aiming answers
     /// were separable means: all four are the block's solidity.
     ///
-    /// **The medium is not among them.** Both medium answers are constants here
-    /// and are never derived from `solid`: a declaration whose buoyancy followed
-    /// its solidity would make either the air or every wall swimmable, and no
-    /// assertion written against a fixture can see its own fixture lying.
+    /// **The medium is not among them.** All three medium answers are constants
+    /// here and are never derived from `solid`: a declaration whose buoyancy
+    /// followed its solidity would make either the air or every wall swimmable,
+    /// and no assertion written against a fixture can see its own fixture lying.
     #[must_use]
     pub const fn like_solidity(solid: bool) -> Self {
         Self {
@@ -140,21 +151,29 @@ impl Declaration {
             targetable: solid,
             swimmable: false,
             move_resistance: 0.0,
+            swim_ascent: AN_UNSTATED_ASCENT,
         }
     }
 
     /// The same declaration, stating a medium: whether a player can hold itself
-    /// up in this block's volume, and how much that volume slows what moves
-    /// through it.
+    /// up in this block's volume, how much that volume slows what moves through
+    /// it, and how fast it lifts a swimmer who asks to rise.
     ///
-    /// **Both in one call**, never one at a time. The two are independent
-    /// declarations, and a builder that could state one and leave the other
-    /// standing is how a resistance nobody wrote arrives under a buoyancy
-    /// somebody did — which is the one thing the fixtures for a swimmable block
-    /// that resists nothing, and for a resistant block nobody can swim in, exist
-    /// to tell apart.
+    /// **All three in one call**, never some of them at a time, and never with a
+    /// defaulted argument. They are independent declarations, and a builder that
+    /// could state one and leave another standing is how a resistance nobody
+    /// wrote arrives under a buoyancy somebody did — which is the one thing the
+    /// fixtures for a swimmable block that resists nothing, and for a resistant
+    /// block nobody can swim in, exist to tell apart. A third field makes that
+    /// hazard wider rather than smaller, so the argument is required and a call
+    /// site that meant the loader's default says so in full.
     #[must_use]
-    pub const fn stating_a_medium(self, swimmable: bool, move_resistance: f32) -> Self {
+    pub const fn stating_a_medium(
+        self,
+        swimmable: bool,
+        move_resistance: f32,
+        swim_ascent: f32,
+    ) -> Self {
         Self {
             solid: self.solid,
             drawn: self.drawn,
@@ -162,6 +181,7 @@ impl Declaration {
             targetable: self.targetable,
             swimmable,
             move_resistance,
+            swim_ascent,
         }
     }
 }
@@ -180,6 +200,7 @@ pub const DRAWN_AND_AIMED_AT_ONLY: Declaration = Declaration {
     targetable: true,
     swimmable: false,
     move_resistance: 0.0,
+    swim_ascent: AN_UNSTATED_ASCENT,
 };
 
 /// A registry holding exactly `blocks`, each carrying the solidity declared
@@ -241,6 +262,7 @@ pub fn registry_of_declarations(
             // assertion written against such a fixture could see it.
             swimmable: states.swimmable,
             move_resistance: states.move_resistance,
+            swim_ascent: states.swim_ascent,
             origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
         }));
     }

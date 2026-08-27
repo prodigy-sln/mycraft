@@ -179,10 +179,11 @@ fn declared_registry() -> Result<BlockRegistry, Box<dyn Error>> {
                 occludes: is_solid,
                 targetable: is_solid,
                 // Constants, never derived from this fixture's own solidity: nothing
-                // has ever answered these two, so a derived medium would make the air
+                // has ever answered these three, so a derived medium would make the air
                 // swimmable and no assertion in this file could see it.
                 swimmable: false,
                 move_resistance: 0.0,
+                swim_ascent: 9.0,
                 origin: origin.clone(),
             })
         })

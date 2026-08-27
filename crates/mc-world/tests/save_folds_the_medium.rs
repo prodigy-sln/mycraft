@@ -1,17 +1,18 @@
-//! Which of a save's two records the two medium properties join, and what makes
+//! Which of a save's two records the three medium properties join, and what makes
 //! two declarations the same block to a save.
 //!
 //! A save records every block twice: what it is to stand on, and what it looks
 //! like. `save_folds_the_split_properties.rs` asks this question of `targetable`,
-//! `drawn` and `occludes`, and this file is the same question asked of the two
+//! `drawn` and `occludes`, and this file is the same question asked of the three
 //! properties that make a volume a medium. Whether a player can hold itself up in
-//! a block, and how much that block slows what moves through it, decide what
-//! happens when you walk into it and change not one pixel — so both belong with
-//! solidity and the drop, and neither belongs beside the texture keys.
+//! a block, how much that block slows what moves through it, and how fast it
+//! carries a swimmer who asks to rise, decide what happens when you walk into it
+//! and change not one pixel — so all three belong with solidity and the drop, and
+//! none belongs beside the texture keys.
 //!
-//! Putting either on the appearance list would report a change to what the world
-//! does to a player as an art edit, which is a report nobody is asked to act on;
-//! leaving either off both lists would report it as nothing at all.
+//! Putting any of them on the appearance list would report a change to what the
+//! world does to a player as an art edit, which is a report nobody is asked to act
+//! on; leaving one off both lists would report it as nothing at all.
 //!
 //! # Both halves of each record, compared as one value
 //!
@@ -84,6 +85,21 @@ const A_CELL: WorldPos = world_at(1, 1, 1);
 const SAYS_NOTHING_MORE: &[(&str, &str)] = &[];
 const SWIMMABLE: &[(&str, &str)] = &[("swimmable", "true")];
 const RESISTS: &[(&str, &str)] = &[("move_resistance", "4")];
+
+/// A root stating an ascent, and the value it states.
+///
+/// **Not the value an absent field means.** A declaration saying nothing about
+/// `swim_ascent` resolves to `9.0`, so a root stating `9.0` differs from a silent
+/// one in nothing at all and would make the reading below green against a fold
+/// that never learned the field. `4.0` is a value no default supplies, so the two
+/// roots really do differ in this one field's resolved value and in nothing else.
+///
+/// **Stated without `swimmable`, deliberately.** What a volume that holds nobody
+/// up does with a declared ascent is decided where a definition becomes a medium
+/// and not where a save records what was declared: a fold that masked the ascent
+/// against buoyancy here would record two blocks as one, and this is where that
+/// shows.
+const LIFTS_A_SWIMMER: &[(&str, &str)] = &[("swim_ascent", "4.0")];
 
 /// Three roots stating a resistance: two that mean `4.0` and one that means
 /// something else.
@@ -175,6 +191,32 @@ fn a_block_that_began_slowing_what_moves_through_it_records_a_different_behaviou
          the appearance half has to stand still. This is the half of the pair that a fold deriving \
          one medium field from the other cannot satisfy alongside the buoyancy reading above: the \
          two roots here differ in a number and say nothing whatever about swimming"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_block_that_began_carrying_a_swimmer_upward_records_a_different_behaviour_and_the_same_appearance()
+-> TestResult {
+    let says_nothing_more = declaring(SAYS_NOTHING_MORE)?;
+    let lifts = declaring(LIFTS_A_SWIMMER)?;
+
+    let records =
+        how_the_records_differ(&saved_against(&says_nothing_more)?, &saved_against(&lifts)?);
+
+    assert_eq!(
+        records,
+        Records::Folds {
+            behaviour_moved: true,
+            appearance_moved: false,
+        },
+        "how fast a volume carries a swimmer who asks to rise decides whether crossing it is \
+         swimming or drowning, and it is a change no still frame can show — so the behaviour half \
+         has to move and the appearance half has to stand still. **The two halves fail for \
+         different defects and that is why both are read here**: a fold that never learned the \
+         ascent leaves the first half false, and a fold that routed it through the appearance \
+         list — or that bumped the appearance revision alongside the behaviour one — leaves the \
+         second half true and tells every player in existence their world was retextured"
     );
     Ok(())
 }
