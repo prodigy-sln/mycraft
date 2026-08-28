@@ -60,9 +60,9 @@ see [script-limits.md](script-limits.md) for the budget and the memory cap, and
 declaration calls nothing the engine provides: it returns a table and that is
 all. There is no `mycraft.*` binding to use here.
 
-## The twelve fields
+## The thirteen fields
 
-Three are required and nine are optional.
+Three are required and ten are optional.
 
 | Field | Type | Required | Absent means | Bound |
 |---|---|---|---|---|
@@ -78,6 +78,7 @@ Three are required and nine are optional.
 | `swimmable` | boolean | no | `false` | — |
 | `move_resistance` | number | no | `0.0` | not less than zero, and at most `3.4e38` |
 | `swim_ascent` | number | no | `9.0` | not less than zero, and at most `3.4e38` |
+| `opacity` | number | no | `1.0` | not less than zero, and at most `1.0` |
 
 `drawn`, `occludes` and `targetable` are the only fields whose default is not a
 constant. Every other absence means the same thing in every declaration; those
@@ -109,6 +110,8 @@ return {
 	swimmable = false,             -- optional, absent means false
 	move_resistance = 0.0,         -- optional, absent means 0.0
 	swim_ascent = 9.0,             -- optional, absent means 9.0
+
+	opacity = 1.0,                 -- optional, absent means 1.0
 }
 ```
 
@@ -151,8 +154,15 @@ return {
   jump. Absent means **`9.0`**, the speed your own jump leaves the ground at, so
   a declaration written before this field existed lifts exactly as it did. See
   "Declaring a medium", below, for what you can predict from the number.
+- **`opacity`** — how much of the light reaching this block it stops. Absent
+  means **`1.0`**, a constant: all of it, which is what every block did before
+  the field existed. `0.0` stops none, both ends are inclusive, and a block that
+  states anything below `1.0` must also say it does not occlude. See "Seeing
+  through a block", below.
 
-**The nine optional fields are independent of one another.** A block may declare
+**The ten optional fields are independent of one another**, with one stated
+exception: a degree below `1.0` cannot stand beside occlusion, because those two
+ask for opposite things. That refusal is quoted under "Seeing through a block". A block may declare
 `breakable = false` *and* a `breaks_into`; the residue is simply never reached,
 and it is still there the day you make the block breakable again by editing one
 line. The same holds across the three seeing fields: `drawn = true` on a
@@ -182,7 +192,7 @@ quoted in full under "Reading a refusal", below.
 **A field the loader does not recognise is refused, not ignored.** A misspelled
 `replacable` is a word anybody types once, and a loader that read the keys it
 knows and never asked what else was there could not tell a typo from an absence.
-The refusal names the field you wrote **and all twelve you may write**, because a
+The refusal names the field you wrote **and all thirteen you may write**, because a
 name is only recognisable as a typo once you can see what it was nearly —
 `drawnn` beside `drawn` explains itself where `drawnn` alone does not.
 
@@ -454,7 +464,7 @@ A `blocks/amber.luau` declaring `slid = true` where it meant `solid` is refused
 like this:
 
 ```
-mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`, `opacity`
 ```
 
 The parts read outermost first, separated by `: ` — the stage that failed, then
@@ -465,7 +475,7 @@ short — `drawnn` for `drawn`, which is the typo the newest field on the list
 invites:
 
 ```
-mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `drawnn`: `drawnn` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `drawnn`: `drawnn` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`, `opacity`
 ```
 
 A field that exists but holds the wrong kind of value is refused differently, and
@@ -599,6 +609,82 @@ you can declare, see, walk through and break.
 before a block can refuse it, so a block declaring `targetable = false` is a block
 whose `breakable` never comes up, whatever it says. That is not a special case:
 it is the same two-claims-not-one shape as the rest of this section.
+
+## Seeing through a block
+
+`occludes = false` lets the engine *draw* what stands behind your block.
+`opacity` decides how much of it you actually see.
+
+It is a **degree**, and it runs the way its name does: `1.0` stops all the light
+and is what every block that says nothing means, `0.0` stops none, and anything
+between is a partial. Both ends are inclusive, so `opacity = 0.0` and
+`opacity = 1.0` are both declarations rather than mistakes.
+
+**A block at `1.0` draws opaque however its texture's alpha reads.** Whether a
+face is drawn blended at all is decided by this number and by nothing else, so an
+image with a soft edge in a block that never states `opacity` draws exactly as it
+always did. That is deliberate: what your block does to the light is something
+you write down and can change while the game runs, not something an art tool
+decides for you. Within a block that *does* state a degree below one, the
+texture's own alpha still varies across the face — the two multiply — so a
+stained-glass image works, one texel at a time.
+
+### A pane you can see through
+
+```luau
+return {
+  name = "example:glass",
+  texture = "example:glass",
+  solid = true,
+  occludes = false,
+  opacity = 0.4,
+}
+```
+
+Solid, so you cannot walk through it. Not occluding, so the faces behind it are
+built. `opacity = 0.4`, so six tenths of what is behind reaches your eye. Drop
+that to `0.05` and the pane is very nearly a window; raise it to `1.0` and you
+have an ordinary opaque block that happens to be spelled out.
+
+### The bound, and what a value past it says
+
+```
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `opacity`: `opacity` may not be more than one
+```
+
+Not clamped. `1.5` silently reduced to `1.0` is a block that draws correctly and
+teaches you your scale runs to a hundred, so you write `100` on the next block
+and meet the same wrong picture with no refusal to explain it. The floor is
+worded the same way — `` `opacity` may not be less than zero `` — because they
+are the two ends of one sentence. And a value that is not a number at all is
+refused for *that* rather than for a bound: `math.huge` is greater than `1.0`, so
+a ceiling checked first would send you looking for a smaller number when what you
+wrote has no smaller spelling.
+
+### You cannot pass light and hide what is behind you
+
+These two lines ask for opposite things, and the engine refuses rather than
+picking one:
+
+```
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `opacity`: `opacity` below one cannot be stated with `occludes = true`: a block light passes through cannot also hide what lies beyond it
+```
+
+`occludes = true` suppresses the face of whatever your block meets, so there is
+nothing left behind it to show through. Delete that line and the pane works.
+
+**And you can hit this without ever writing `occludes`.** It falls back to
+whatever you wrote for `solid`, so `solid = true` on its own already says your
+block hides what is behind it — which is why the refusal names the line that
+actually did it:
+
+```
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `opacity`: `opacity` below one cannot be stated with `occludes = true`, and this block occludes by stating `solid = true` and no `occludes`: a block light passes through cannot also hide what lies beyond it
+```
+
+The remedy is the opposite one: a line to **add**, not to delete. Write
+`occludes = false` beside your degree, as the pane above does. That is the whole
+difference between the two sentences, and it is why there are two.
 
 ## Replaceability is not derived from solidity
 
@@ -974,7 +1060,7 @@ called and a key is what it is drawn from.
 ## What is not here yet
 
 Per-cell state, callbacks and components. Worldgen in script. Reading a second
-content root. And `extends`, in every form — a declaration states its own twelve
+content root. And `extends`, in every form — a declaration states its own thirteen
 fields and inherits nothing.
 
 **Declarations now reload while the game is running.** Save a file in `blocks/` and

@@ -455,6 +455,50 @@ else {
         Write-StageHeader 'tests + coverage (llvm-cov nextest)'
         $covJson = Join-Path ([System.IO.Path]::GetTempPath()) "mycraft-cov-$([guid]::NewGuid()).json"
 
+        # Windows only, and it is why `os error 206` is not what you are reading.
+        #
+        # `llvm-cov export` is invoked with one `-object <path>` per test binary in
+        # the workspace. At 383 binaries that command line measured 32 883
+        # characters against `CreateProcess`'s hard limit of 32 767, and the stage
+        # failed with ERROR_FILENAME_EXCED_RANGE *after every test had passed* —
+        # a report-generation failure wearing the costume of a test failure.
+        #
+        # Only the repeated prefix matters. Under `target/` each argument carries
+        # `target\llvm-cov-target\debug\deps\` (34 chars); from a short absolute
+        # root it carries `C:\mcv\debug\deps\` (18). Measured on a throwaway crate
+        # rather than derived: cargo-llvm-cov emits the path absolute when the
+        # target directory sits outside the working directory, and 16 chars saved
+        # across 383 binaries is ~6 KB — about ninety more test binaries of room.
+        # The directory is named tersely on purpose; every character is multiplied
+        # by the binary count.
+        #
+        # **This is a reprieve, not a fix.** The limit returns at the rate this
+        # workspace adds test files, and the real remedy is an LLVM response file
+        # (`llvm-cov @args`), which is cargo-llvm-cov's to emit. When this fails
+        # again, that is the thing to ask for upstream — not a shorter directory.
+        # Tracked as **PRO-997**; the decision is ADR-031 in
+        # docs/technical/decisions.md.
+        #
+        # Two consequences worth knowing. Coverage artefacts now live **outside
+        # the repository**, so a cleaner that only knows about `target/` will miss
+        # several gigabytes. And nothing here changes on non-Windows, where the
+        # argument limit is orders of magnitude larger and `target/` stays put.
+        #
+        # The directory is namespaced per worktree. git-workflow.md §5 has more
+        # than one agent holding this tree at a time and the project uses
+        # `git worktree`; one fixed directory would let two concurrent runs write
+        # coverage artefacts into the same place — a percentage silently mixing
+        # two branches, or lock contention wearing an unrelated failure's costume.
+        # The key is the absolute repository root: stable across a run's stages
+        # and across runs, distinct per worktree, and — unlike a branch name —
+        # it does not move and leave the previous directory orphaned.
+        if ($IsWindows) {
+            $rootHash = [System.Security.Cryptography.SHA256]::HashData(
+                [System.Text.Encoding]::UTF8.GetBytes($RepoRoot.ToLowerInvariant()))
+            $slot = '{0:x2}{1:x2}' -f $rootHash[0], $rootHash[1]
+            $env:CARGO_LLVM_COV_TARGET_DIR = Join-Path $env:SystemDrive 'mcv' $slot
+        }
+
         # --no-tests=pass: an empty suite is a valid skeleton state. The coverage
         # threshold below is what catches "code exists but is untested".
         cargo llvm-cov nextest `

@@ -18,7 +18,7 @@ use std::error::Error;
 use std::sync::Arc;
 
 use mc_core::block::source::InMemoryDefinitionSource;
-use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin, Opacity};
 use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::persistence::{LaunchError, Launching};
@@ -93,6 +93,7 @@ pub fn registry_with_the_marker() -> Result<BlockRegistry, Box<dyn Error>> {
             swimmable: false,
             move_resistance: 0.0,
             swim_ascent: 9.0,
+            opacity: Opacity::OPAQUE,
             origin,
         })],
     ))?;

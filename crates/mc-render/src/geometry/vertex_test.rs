@@ -24,6 +24,7 @@
 
 use std::error::Error;
 
+use mc_core::block::Opacity;
 use mc_world::mesh::Facing;
 use mc_world::section::Axis;
 
@@ -44,22 +45,64 @@ const LAST_LOCAL_COORDINATE: u32 = 16;
 /// One past the last corner coordinate, which is what packing must refuse.
 const BEYOND_LAST_LOCAL_COORDINATE: u8 = 17;
 
+/// The last section index a scene holds, and the value the round trip below
+/// carries so that the field packed *above* it cannot move it unnoticed.
+///
+/// A field appended at the top of the used range is the one edit that can shift
+/// its neighbour without shifting anything else, and a section index of 7 —
+/// which is what this reading used to carry, and never asserted — comes back
+/// unchanged under a great many wrong shifts.
+const LAST_SECTION: u16 = 1023;
+
+/// The byte a declared half encodes to.
+///
+/// Derived rather than observed: `0.5 x 255` is `127.5`, which
+/// `Opacity::quantised` rounds half away from zero to 128.
+const A_HALF_ENCODES_TO: u8 = 128;
+
+/// The degree that byte carries back, written out as the arithmetic rather than
+/// taken from `Opacity::from_quantised`, which is one of the two halves under
+/// test here.
+///
+/// **The round trip is deliberately not the identity on this field.** A declared
+/// `0.5` comes back as `0.501960...`, because two hundred and fifty-six bytes
+/// cannot name every degree a declaration may state. A reading demanding the
+/// declared number back would be red against a correct packer, and its cheapest
+/// green would be to widen the field.
+const A_HALF_COMES_BACK_AS: f32 = A_HALF_ENCODES_TO as f32 / u8::MAX as f32;
+
 #[test]
-fn packing_and_unpacking_a_vertex_returns_its_position_facing_and_layer() -> TestResult {
+fn packing_and_unpacking_a_vertex_returns_every_field_it_went_in_with() -> TestResult {
     let vertex = Vertex {
         local: [16, 0, 15],
         facing: Facing::PosX,
         layer: 3,
-        section: 7,
+        section: LAST_SECTION,
+        opacity: Opacity::new(0.5).ok_or("a half is a degree of opacity")?,
     };
 
     let restored = PackedVertex::pack(&vertex)?.unpack();
 
     assert_eq!(
-        (restored.local, restored.facing, restored.layer),
-        ([16, 0, 15], Facing::PosX, 3),
-        "a packed vertex must come back carrying the position, facing and texture layer \
-         it went in with"
+        (
+            restored.local,
+            restored.facing,
+            restored.layer,
+            restored.section,
+            restored.opacity.get(),
+        ),
+        (
+            [16, 0, 15],
+            Facing::PosX,
+            3,
+            LAST_SECTION,
+            A_HALF_COMES_BACK_AS,
+        ),
+        "a packed vertex must come back carrying the position, facing, texture layer, section \
+         and degree of opacity it went in with. The last two are asserted together because they \
+         are neighbours in the word: a degree written into the section's bits leaves the section \
+         wrong, and a section overrunning its ten bits leaves the degree wrong, and neither is \
+         visible from the field that moved"
     );
     Ok(())
 }
@@ -71,6 +114,7 @@ fn a_packed_vertex_occupies_no_more_than_eight_bytes() -> TestResult {
         facing: Facing::PosZ,
         layer: 2,
         section: 5,
+        opacity: Opacity::OPAQUE,
     })?;
 
     assert!(
@@ -89,6 +133,7 @@ fn packing_a_corner_beyond_the_section_names_the_axis_and_the_value() -> TestRes
         facing: Facing::PosX,
         layer: 3,
         section: 7,
+        opacity: Opacity::OPAQUE,
     };
 
     let refusal = PackedVertex::pack(&beyond).err().ok_or(

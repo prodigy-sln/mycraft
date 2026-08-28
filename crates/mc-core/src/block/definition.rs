@@ -1,6 +1,7 @@
 //! What a block definition is, where it was declared, and the dense id a
 //! registry assigns it.
 
+use crate::block::Opacity;
 use crate::content::FaceTextures;
 use crate::id::BlockName;
 
@@ -132,6 +133,20 @@ pub struct BlockDefinition {
     /// this reports what was declared. Whether a volume that holds nobody up
     /// lifts anybody is decided where a definition becomes a medium, not here.
     pub swim_ascent: f32,
+    /// How much of the light reaching this block it stops.
+    ///
+    /// The one question it answers is how much of what lies beyond this block is
+    /// still seen through it, and it answers nothing else: whether any face is
+    /// emitted at all is [`drawn`](Self::drawn), and whether a neighbour's
+    /// meeting face is suppressed is [`occludes`](Self::occludes). A block may
+    /// be seen through without any of those three answers moving.
+    ///
+    /// Absent in a declaration means [`Opacity::OPAQUE`], a **constant** and not
+    /// whatever that declaration says about [`is_solid`](Self::is_solid): no
+    /// single bit ever answered this question, so deriving it would invent a
+    /// claim no author made — and would make every non-solid block in the game
+    /// invisible.
+    pub opacity: Opacity,
     pub origin: DefinitionOrigin,
 }
 

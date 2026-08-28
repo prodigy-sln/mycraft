@@ -29,7 +29,7 @@
 use std::error::Error;
 
 use mc_core::block::source::InMemoryDefinitionSource;
-use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin, Opacity};
 use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::replay::{BlockVolume, Extent};
@@ -263,6 +263,7 @@ pub fn registry_of_declarations(
             swimmable: states.swimmable,
             move_resistance: states.move_resistance,
             swim_ascent: states.swim_ascent,
+            opacity: Opacity::OPAQUE,
             origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
         }));
     }

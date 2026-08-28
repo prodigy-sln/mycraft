@@ -59,8 +59,44 @@ const HALFWAY_IN_LINEAR_LIGHT: u8 = 188;
 const HELD_GREEN: u8 = 64;
 const HELD_BLUE: u8 = 128;
 
-/// Block textures carry no transparency in this increment.
+/// A texel that stops all the light reaching it.
 const OPAQUE: u8 = 255;
+
+/// A texel that stops none of it.
+const CLEAR: u8 = 0;
+
+/// The stored byte four alphas of `0, 0, 255, 255` average to where they stand:
+/// `(0 + 0 + 255 + 255 + 2) >> 2`.
+///
+/// Derived from the rounding rule and not from a run — the `+ 2` is what rounds
+/// a half upward, and `510 / 4` is `127.5`.
+const A_HALF_SPLIT_AVERAGES_TO: u8 = 128;
+
+/// The floor the *colour* rule's answer for that same pair has to clear for the
+/// reading below to be discriminating at all.
+///
+/// Written from the scenario rather than from the transfer function. The colour
+/// rule's answer is computed on the spot by [`the_lit_answer`], out of this
+/// module's own transfer pair, so a pair that ever brought the two rules
+/// together reports itself here instead of leaving an assertion that names one
+/// number and can no longer tell it from the other.
+const THE_LIT_ANSWER_STANDS_ABOVE: u8 = 180;
+
+/// A colour held constant across the four texels of the alpha readings, so what
+/// they measure is the alpha channel and not a texel that happens to be right.
+///
+/// Three channels no two of which are equal, and a uniform colour averages to
+/// itself in either arithmetic — so a colour rule that leaked into the alpha
+/// channel, or an alpha rule that leaked into the colour channels, moves the
+/// answer.
+const HELD_COLOUR: [u8; 3] = [37, 158, 211];
+
+/// The four alphas a supplied image carries in [`alpha_cycle`], in the order it
+/// carries them.
+///
+/// Both bounds and two interior values, pairwise distinct: a level zero that
+/// rounded, clamped, sorted or filled the channel lands on a different list.
+const DECLARED_ALPHAS: [u8; 4] = [0, 64, 192, 255];
 
 /// A key the shipped manifest bakes, and one the spec names as unauthored.
 const AUTHORED: &str = "base:grass_top";
@@ -99,6 +135,86 @@ fn two_stored_zeroes_and_two_stored_maxima_reduce_to_stored_one_eight_eight() {
         level_one,
         vec![[HALFWAY_IN_LINEAR_LIGHT, HELD_GREEN, HELD_BLUE, OPAQUE]]
     );
+}
+
+#[test]
+fn two_clear_texels_and_two_opaque_ones_reduce_to_the_stored_mean_and_not_the_lit_one() {
+    // The colour is held across all four, so what varies is the alpha alone.
+    let [red, green, blue] = HELD_COLOUR;
+    let level_zero = [
+        [red, green, blue, CLEAR],
+        [red, green, blue, OPAQUE],
+        [red, green, blue, OPAQUE],
+        [red, green, blue, CLEAR],
+    ];
+
+    let level_one = reduced(&level_zero, 2);
+
+    let lit = the_lit_answer();
+    assert_eq!(
+        (level_one, lit > THE_LIT_ANSWER_STANDS_ABOVE),
+        (vec![[red, green, blue, A_HALF_SPLIT_AVERAGES_TO]], true),
+        "`Rgba8UnormSrgb` puts colour through the transfer function and alpha through nothing, so \
+         four alphas of 0, 0, 255 and 255 average where they stand to \
+         {A_HALF_SPLIT_AVERAGES_TO} and not to the {lit} the same four bytes give when they are \
+         decoded, averaged and re-encoded. The second element is what makes that a discrimination \
+         rather than a number: the lit answer has to stand above {THE_LIT_ANSWER_STANDS_ABOVE} for \
+         these two rules to be tellable apart at all"
+    );
+}
+
+/// What the *colour* rule answers for two clear texels and two opaque ones,
+/// through this module's own transfer pair.
+///
+/// Computed rather than quoted, because the number is only interesting as the
+/// answer this file's reading has to reject: a transfer pair that moved would
+/// move it, and a reading holding the old byte would go on rejecting a value
+/// nothing produces.
+fn the_lit_answer() -> u8 {
+    let total = to_linear(CLEAR) + to_linear(CLEAR) + to_linear(OPAQUE) + to_linear(OPAQUE);
+    to_stored(total * 0.25)
+}
+
+#[test]
+fn four_opaque_texels_reduce_to_one_that_is_still_opaque() {
+    let [red, green, blue] = HELD_COLOUR;
+    let level_zero = [[red, green, blue, OPAQUE]; 4];
+
+    let level_one = reduced(&level_zero, 2);
+
+    // The reading the pair above cannot give: both arithmetics answer 255 for a
+    // constant 255, so this is the one that says a level of ordinary opaque art
+    // does not fade as it is minified — which is what an alpha channel dropped,
+    // zeroed or scaled would do.
+    assert_eq!(level_one, vec![[red, green, blue, OPAQUE]]);
+}
+
+#[test]
+fn every_alpha_a_supplied_image_carries_reaches_level_zero_where_it_stood() -> TestResult {
+    let key = key(AUTHORED)?;
+    let art = alpha_cycle(TEXTURE_EDGE);
+    let supplied = SuppliedTexels::stating([(key.clone(), art.clone())]);
+
+    let levels = levels_for(&key, &supplied, TEXTURE_EDGE)?;
+
+    // Read out of the level rather than filtered against a held list, and
+    // compared whole and in order, so a dropped alpha, an extra one and a
+    // reordering are three distinct failures rather than one silence.
+    let carried: Vec<u8> = levels
+        .first()
+        .ok_or("a filled layer has no level zero")?
+        .iter()
+        .map(|[_, _, _, alpha]| *alpha)
+        .collect();
+    let declared: Vec<u8> = art.iter().map(|[_, _, _, alpha]| *alpha).collect();
+    assert_eq!(
+        carried, declared,
+        "level zero of the array is the image itself, so every alpha the image carries has to \
+         arrive at the texel it was drawn on. A chain that reduced level zero, normalised it, or \
+         filled the channel lands on a different list — and {DECLARED_ALPHAS:?} is chosen so that \
+         both bounds and two interior values would each have to survive"
+    );
+    Ok(())
 }
 
 #[test]
@@ -253,6 +369,19 @@ fn climbing(edge: u32) -> Vec<[u8; 4]> {
         .map(|index| {
             let step = (index % 256) as u8;
             [step, 255 - step, HELD_BLUE, OPAQUE]
+        })
+        .collect()
+}
+
+/// An `edge` x `edge` image carrying [`DECLARED_ALPHAS`] in cycle, over a colour
+/// that also climbs so that no two texels are equal.
+///
+fn alpha_cycle(edge: u32) -> Vec<[u8; 4]> {
+    (0..edge * edge)
+        .zip(DECLARED_ALPHAS.into_iter().cycle())
+        .map(|(index, alpha)| {
+            let step = (index % 256) as u8;
+            [step, 255 - step, HELD_BLUE, alpha]
         })
         .collect()
 }

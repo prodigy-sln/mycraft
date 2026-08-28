@@ -70,12 +70,14 @@
 //! forever.
 
 mod common;
+mod luau_common;
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
-use common::TestResult;
 use common::persistence::{answer_at, saved_requirements, world_at, world_holding};
+use common::{TestResult, content_root};
+use luau_common::{QUARTZ, declaration_of, raw_field, text_field};
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 use mc_world::content::LuauFileDefinitionSource;
@@ -200,7 +202,7 @@ fn that_save_is_refused_and_told_every_block_when_only_unchanged_blocks_are_acce
 }
 
 #[test]
-fn no_block_of_that_save_is_judged_to_look_different_while_every_one_of_them_behaves_differently()
+fn every_block_of_that_save_is_judged_to_look_different_as_well_as_to_behave_differently()
 -> TestResult {
     let recorded_then = requirements(&revision_3_save()?)?;
     let recorded_now = saved_today()?;
@@ -214,16 +216,19 @@ fn no_block_of_that_save_is_judged_to_look_different_while_every_one_of_them_beh
         moved,
         HELD_BY_THE_REVISION_3_SAVE
             .into_iter()
-            .map(|name| (name.to_owned(), true, false))
+            .map(|name| (name.to_owned(), true, true))
             .collect::<Vec<(String, bool, bool)>>(),
-        "the behaviour list grew one field and the appearance list grew nothing, so every one of \
-         these four blocks behaves differently and not one of them looks different — which is what \
-         makes crossing this build cost a player one report and not two. **The verdict cannot say \
-         this and the hashes can**: behaviour is asked first and answers alone, so an appearance \
-         byte bumped along with the behaviour one produces exactly the verdict a correct \
-         implementation produces, and this comparison against a save minted today is the only \
-         thing in the workspace that would report it. Every block is named in the answer rather \
-         than counted, so a fold that got one of the four wrong says which"
+        "**Both halves now, and the second half is new.** This save was written under behaviour \
+         revision 3 and appearance revision 3; the behaviour list had already grown an ascent past \
+         it, and the appearance list has now grown a degree of opacity — so every one of these four \
+         blocks both behaves differently and looks different to a save minted today. The reading is \
+         kept as a comparison against a fresh mint rather than as a claim about one list, because \
+         that is what would report an appearance byte bumped without the list growing and a list \
+         grown without the byte moving. It is the arm that must not be quietly repaired by widening: \
+         `no block looks different` was true of this fixture across two consecutive behaviour moves, \
+         and the moment it stops being true is the moment a reader has to be told which change made \
+         it stop. Every block is named in the answer rather than counted, so a fold that got one of \
+         the four wrong says which"
     );
     Ok(())
 }
@@ -344,4 +349,116 @@ fn shipped_registry() -> Result<BlockRegistry, Box<dyn Error>> {
     let mut registry = BlockRegistry::new();
     registry.apply(&LuauFileDefinitionSource::new(root))?;
     Ok(registry)
+}
+
+/// What one block of the save answered once it was loaded: its name, and the
+/// degree of light the registry says it stops.
+type Opaqueness = (String, u32);
+
+/// The degree of light a block stops where nothing has ever said otherwise.
+///
+/// Written out here rather than read from `Opacity::OPAQUE`, which is the value
+/// under test: an expectation taken from it agrees with whatever it becomes. Held
+/// by its bits for the reason `luau_declaration_opacity.rs` holds one — the
+/// record this save folds is folded by bits, and `-0.0 == 0.0` is true.
+const STOPPING_ALL_OF_IT: f32 = 1.0;
+
+/// A registry built by **reading declarations that state no degree**, holding
+/// the four names this save needs.
+///
+/// **Read through the Luau loader and never assembled from `BlockDefinition`
+/// literals**, and that is the difference between a reading and a tautology. A
+/// registry built in memory carries whatever `Opacity` the fixture typed, so an
+/// assertion that its blocks are opaque asserts the fixture — measured, and it is
+/// how the first version of the reading below came to have a falsifier that could
+/// not reach it: the loader's absent-field default was mutated and this test
+/// stayed green, because the loader never ran.
+///
+/// **Its own root and not `content/base`**, for the reason this file's reading
+/// states: phase 3 declares an opacity on the shipped sea, so a reading taken
+/// there would stop being about an all-opaque registry on the commit that needs
+/// it.
+///
+/// `occludes = false` is stated outright on all four. Without it, a solid block
+/// occludes by its own solidity, and a mutated default below one would make this
+/// root **refused** rather than opaque — which reddens the reading for the wrong
+/// reason and hides what it is watching for.
+fn registry_stating_no_degree(directory: &TempDir) -> Result<BlockRegistry, Box<dyn Error>> {
+    let declared: Vec<(&str, String)> = HELD_BY_THE_REVISION_3_SAVE
+        .iter()
+        .map(|name| {
+            (
+                *name,
+                declaration_of(&[
+                    text_field("name", name),
+                    text_field("texture", QUARTZ),
+                    raw_field("solid", "true"),
+                    raw_field("occludes", "false"),
+                ]),
+            )
+        })
+        .collect();
+    let files: Vec<(&str, String)> = declared
+        .into_iter()
+        .map(|(name, body)| (declaration_file_of(name), body))
+        .collect();
+    let root = content_root(directory, &files)?;
+    let mut registry = BlockRegistry::new();
+    registry.apply(&LuauFileDefinitionSource::new(root))?;
+    Ok(registry)
+}
+
+/// The file name a fixture declares `name` in: its bare half, which is unique
+/// across the four.
+fn declaration_file_of(name: &str) -> &'static str {
+    match name {
+        "base:dirt" => "dirt.luau",
+        "base:grass" => "grass.luau",
+        "base:stone" => "stone.luau",
+        _ => "water.luau",
+    }
+}
+
+/// The degree every block of the save is held at once it is loaded, in the order
+/// [`HELD_BY_THE_REVISION_3_SAVE`] names them.
+///
+/// # Errors
+///
+/// Returns an error if a name does not parse or the registry does not hold it.
+fn how_opaque_each_loaded_block_is() -> Result<Vec<Opaqueness>, Box<dyn Error>> {
+    let directory = TempDir::new()?;
+    let registry = registry_stating_no_degree(&directory)?;
+    persistence::load_world(&revision_3_save()?, &registry, Acceptance::ChangedBlocksToo)?;
+    let mut held = Vec::new();
+    for name in HELD_BY_THE_REVISION_3_SAVE {
+        let definition = registry.resolve(&BlockName::parse(name)?)?;
+        held.push((name.to_owned(), definition.opacity.get().to_bits()));
+    }
+    Ok(held)
+}
+
+#[test]
+fn a_world_saved_before_the_degree_existed_opens_with_every_block_stopping_all_the_light()
+-> TestResult {
+    let held = how_opaque_each_loaded_block_is()?;
+
+    assert_eq!(
+        held,
+        HELD_BY_THE_REVISION_3_SAVE
+            .into_iter()
+            .map(|name| (name.to_owned(), STOPPING_ALL_OF_IT.to_bits()))
+            .collect::<Vec<Opaqueness>>(),
+        "this file is the only genuinely pre-field save in the repository, and what a player who \
+         has one is owed is that it opens and looks the way it looked. Nothing in the save says \
+         anything about a degree — the field did not exist when it was written — so every block \
+         it holds takes the constant an unstated field means, and a default derived from \
+         anything at all would make some of these four invisible in a world somebody built. The          registry is built by **reading four declarations that state no degree**, so the loader's          own default is in the path — an assertion over `BlockDefinition` literals would be an          assertion about the fixture, and was. \
+         **The registry is one this test declares rather than the shipped one**, and that is not \
+         tidiness: phase 3 of this spec declares an opacity on the shipped sea, so a reading \
+         taken against `content/base` would stop being a reading of an all-opaque registry on \
+         the very commit that needs it, and would then be repaired by weakening it. Every block \
+         is named in the answer rather than counted, so a default that reached three of the four \
+         says which one it missed"
+    );
+    Ok(())
 }

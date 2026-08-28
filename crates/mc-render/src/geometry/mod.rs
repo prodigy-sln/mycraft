@@ -24,9 +24,11 @@
 //! and never the corner order here: re-winding would make the picture right
 //! while breaking the property that says it is right.
 
+pub mod image_basis;
 pub mod scene;
 pub mod vertex;
 
+use mc_core::block::Opacity;
 use mc_core::content::Face;
 use mc_core::id::{BlockName, TextureKey};
 use mc_world::mesh::{Facing, Quad};
@@ -74,132 +76,14 @@ pub const QUAD_INDEX_PATTERN: [u32; 6] = [0, 1, 2, 0, 2, 3];
 pub const PLANE_AXES: [[u32; 2]; 6] = [[1, 2], [1, 2], [0, 2], [0, 2], [0, 1], [0, 1]];
 
 /// Whether a face's image runs its own horizontal along the **secondary** of
-/// [`PLANE_AXES`]' pair rather than the primary, as `1` for exchanged.
+/// [`PLANE_AXES`]' pair rather than the primary, and whether either of its two
+/// coordinates runs against its axis rather than along it.
 ///
-/// One row per facing, same order. The two `X` facings are the exchanged ones:
-/// their plane pair is `(y, z)` with `y` primary, and an image standing on such
-/// a face has its horizontal along `z` and its vertical along `y`. Every other
-/// facing's pair already lists the horizontal first.
-///
-/// **Derived, not tabulated, and that is the whole of why this is right now.**
-/// The shader read [`PLANE_AXES`] alone for five increments and drew five of six
-/// faces wrong — east and west turned a quarter, north and south and the
-/// underside flipped, only the top correct — while three hand-written copies of
-/// that table agreed with each other exactly. A six-row table of conventions
-/// cannot be checked by reading it, so both of these come out of
-/// `image_basis`'s two lines of vector arithmetic.
-pub const IMAGE_SWAPS: [u32; 6] = image_swaps();
-
-/// Whether each of an image's two coordinates runs *against* its axis rather
-/// than along it, horizontal first, `1` for negated. Same row order.
-///
-/// **A sign is what an axis index cannot express**, and its absence is the other
-/// half of the same defect. An image's rows run downward while the world's
-/// vertical axis runs up, so every face with world up in it needs its vertical
-/// coordinate negated. And two faces looking at each other along one axis see
-/// their in-plane axes in opposite horizontal order, so one of each pair needs
-/// its horizontal negated too — without which north and south are forced to
-/// share a horizontal direction and one of them draws laterally reversed.
-pub const IMAGE_SIGNS: [[u32; 2]; 6] = image_signs();
-
-/// The world directions the image's right edge and its top edge run toward, for
-/// a viewer standing outside `facing` and looking at it.
-///
-/// **The convention, stated for all six facings rather than left to be inferred
-/// from a table's values.** A viewer outside a face looks along the face's
-/// inward direction with the world's up as their up, and the image's right is
-/// then forward crossed with up. That fixes four of the six rows outright.
-///
-/// **The two horizontal facings have no world up in them, so theirs is chosen**,
-/// and it is chosen to match what `voxforge` bakes rather than by preference:
-/// the top image's top edge runs toward `-z` and the bottom image's toward `+z`.
-/// Measured against `grass-block.mcvox`'s own outermost voxels, the shipped
-/// images agree with that convention texel for texel on all six faces.
-///
-/// **No test discriminates the two horizontal rows today** — a top or bottom
-/// texture has no world up in it, so every orientation of one looks equally
-/// plausible, and `base:grass_top`'s noise is near-uniform under rotation. **The
-/// bottom row was measured wrong and corrected on the strength of the bake
-/// rather than of any test**, which is the clearest case there is for not
-/// leaving a row to rest on nobody being able to see it. The first anisotropic
-/// top or bottom texture owes a scenario.
-const fn image_basis(facing: Facing) -> ([i32; 3], [i32; 3]) {
-    let normal = facing.step();
-    let forward = [-normal[0], -normal[1], -normal[2]];
-    let up = if normal[1] == 0 {
-        [0, 1, 0]
-    } else {
-        [0, 0, -normal[1]]
-    };
-    (cross(forward, up), up)
-}
-
-/// The cross product of two unit axis directions.
-const fn cross(one: [i32; 3], other: [i32; 3]) -> [i32; 3] {
-    [
-        one[1] * other[2] - one[2] * other[1],
-        one[2] * other[0] - one[0] * other[2],
-        one[0] * other[1] - one[1] * other[0],
-    ]
-}
-
-/// The axis index a unit `direction` lies along, and whether it points the
-/// negative way down it.
-const fn axis_of(direction: [i32; 3]) -> (u32, bool) {
-    if direction[0] != 0 {
-        (0, direction[0] < 0)
-    } else if direction[1] != 0 {
-        (1, direction[1] < 0)
-    } else {
-        (2, direction[2] < 0)
-    }
-}
-
-/// [`IMAGE_SWAPS`], computed per facing.
-///
-/// The six facings are named rather than walked, so the declaration order these
-/// rows depend on is visible in the source instead of implied by an index.
-const fn image_swaps() -> [u32; 6] {
-    [
-        image_swap(Facing::NegX),
-        image_swap(Facing::PosX),
-        image_swap(Facing::NegY),
-        image_swap(Facing::PosY),
-        image_swap(Facing::NegZ),
-        image_swap(Facing::PosZ),
-    ]
-}
-
-/// Whether `facing`'s image runs its horizontal along the secondary of its plane
-/// pair.
-const fn image_swap(facing: Facing) -> u32 {
-    let (right, _) = image_basis(facing);
-    let (horizontal, _) = axis_of(right);
-    let [_, secondary] = plane_axes_of(facing);
-    (horizontal == secondary) as u32
-}
-
-/// [`IMAGE_SIGNS`], computed per facing.
-const fn image_signs() -> [[u32; 2]; 6] {
-    [
-        image_sign(Facing::NegX),
-        image_sign(Facing::PosX),
-        image_sign(Facing::NegY),
-        image_sign(Facing::PosY),
-        image_sign(Facing::NegZ),
-        image_sign(Facing::PosZ),
-    ]
-}
-
-/// Whether each of `facing`'s image coordinates is negated.
-const fn image_sign(facing: Facing) -> [u32; 2] {
-    let (right, up) = image_basis(facing);
-    let (_, horizontal_is_negative) = axis_of(right);
-    let (_, up_is_negative) = axis_of(up);
-    // An image's rows run downward, so its vertical coordinate always runs
-    // against the direction its top edge points.
-    [horizontal_is_negative as u32, !up_is_negative as u32]
-}
+/// Both live in [`image_basis`], which is a separate question from where a
+/// quad's two extents go — and re-exported here because reusing one table for
+/// both is the defect that drew five of six faces wrong, so the two are reached
+/// by name from one place rather than by two paths a reader has to tell apart.
+pub use image_basis::{IMAGE_SIGNS, IMAGE_SWAPS};
 
 /// How many corners one quad has.
 const CORNERS_PER_QUAD: u32 = 4;
@@ -222,11 +106,19 @@ impl SectionOrigin {
 }
 
 /// One section's quads, as corners and the triangles over them.
+///
+/// The quads are ordered: those that stop all the light reaching them first,
+/// then those that pass some of it, each group in the order the mesher emitted
+/// it. That order is what lets one number — [`opaque_quad_count`] — say where
+/// both halves begin and end.
+///
+/// [`opaque_quad_count`]: Self::opaque_quad_count
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SectionGeometry {
     origin: SectionOrigin,
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
+    opaque_quads: usize,
 }
 
 impl SectionGeometry {
@@ -269,6 +161,16 @@ impl SectionGeometry {
         // error, and four corners per quad is a power of two anyway.
         self.vertices.len() >> 2
     }
+
+    /// How many of those quads stop all the light reaching them.
+    ///
+    /// They are the first ones, so this is both their count and the index the
+    /// rest begin at. The two terrain draws read fixed halves of one index
+    /// buffer and this is what the cull pass splits a section's quads by.
+    #[must_use]
+    pub const fn opaque_quad_count(&self) -> usize {
+        self.opaque_quads
+    }
 }
 
 /// Converts `quads` into the corners and triangles that draw them, in the
@@ -288,20 +190,21 @@ pub fn build_section_geometry(
     origin: SectionOrigin,
     resolution: &TextureResolution,
 ) -> Result<SectionGeometry, GeometryError> {
+    let Partitioned { quads, opaque } = opaque_first(quads, resolution)?;
     let mut vertices = Vec::with_capacity(quads.len() * CORNERS_PER_QUAD as usize);
     let mut indices = Vec::with_capacity(quads.len() * QUAD_INDEX_PATTERN.len());
     let mut first_corner: u32 = 0;
 
-    for quad in quads {
-        let layer = layer_for(quad, resolution)?;
-        for local in corners(quad)? {
+    for drawn in quads {
+        for local in corners(drawn.quad)? {
             vertices.push(Vertex {
                 local,
-                facing: quad.facing,
-                layer,
+                facing: drawn.quad.facing,
+                layer: drawn.layer,
                 // Assigned when the scene is assembled, which is the first point
                 // at which a section has an index.
                 section: 0,
+                opacity: drawn.opacity,
             });
         }
         indices.extend(QUAD_INDEX_PATTERN.map(|offset| first_corner + offset));
@@ -312,17 +215,87 @@ pub fn build_section_geometry(
         origin,
         vertices,
         indices,
+        opaque_quads: opaque,
     })
 }
 
-/// The array layer `quad`'s block draws with on the facing it points.
+/// One quad with everything its block's declaration says about drawing it.
+#[derive(Debug)]
+struct DrawnQuad<'a> {
+    quad: &'a Quad,
+    layer: u16,
+    opacity: Opacity,
+}
+
+/// A section's quads, resolved and ordered for the two terrain draws.
+#[derive(Debug)]
+struct Partitioned<'a> {
+    /// Opaque quads first, then the ones that pass light.
+    quads: Vec<DrawnQuad<'a>>,
+    /// How many of them are opaque.
+    opaque: usize,
+}
+
+/// `quads` resolved against `resolution`, opaque ones first.
+///
+/// **The declared degree alone decides the split** — a face is translucent iff
+/// its block declares an opacity below one. A texel's alpha modulates within the
+/// blended draw and never chooses the draw, which keeps the partition a function
+/// of a declared, greppable, hot-reloadable number rather than of art.
+///
+/// **This is where the partition lives and it may not move into the mesher.**
+/// `mc_world::mesh::sweep`'s own header forbids re-ordering its output — "the
+/// order is the loop nesting and never a sort" — and a partition is precisely
+/// that re-ordering. It would also hand the mesher a reason to read a rendering
+/// field, leaving `mc-world` owning half a draw-order decision.
+///
+/// `partition` preserves the input order inside each half, so what survives is
+/// the mesher's own order twice over rather than a comparator's answer.
+///
+/// # Errors
+///
+/// Returns [`GeometryError::UnresolvedTexture`] for the first quad whose block
+/// the resolution states nothing about.
+fn opaque_first<'a>(
+    quads: &'a [Quad],
+    resolution: &TextureResolution,
+) -> Result<Partitioned<'a>, GeometryError> {
+    let mut drawn = Vec::with_capacity(quads.len());
+    for quad in quads {
+        let (layer, opacity) = drawn_as(quad, resolution)?;
+        drawn.push(DrawnQuad {
+            quad,
+            layer,
+            opacity,
+        });
+    }
+    let (stopping, passing): (Vec<_>, Vec<_>) = drawn
+        .into_iter()
+        .partition(|drawn| !drawn.opacity.passes_light());
+    let opaque = stopping.len();
+    Ok(Partitioned {
+        quads: stopping.into_iter().chain(passing).collect(),
+        opaque,
+    })
+}
+
+/// The array layer `quad`'s block draws with on the facing it points, and the
+/// degree of light that block stops.
 ///
 /// The facing is carried into the compass vocabulary a declaration writes, and
-/// the key is read out of the declaration. Nothing here parses the block's name.
-fn layer_for(quad: &Quad, resolution: &TextureResolution) -> Result<u16, GeometryError> {
+/// both answers are read out of the same declaration in the same call. Nothing
+/// here parses the block's name.
+///
+/// **Both or neither**, which is what makes the one refusal below cover both:
+/// the resolution states a block's keys and its opacity in one row, so a block
+/// with a layer and no degree cannot occur — and a defaulted degree would put a
+/// face nobody resolved into a draw it was never declared for.
+fn drawn_as(quad: &Quad, resolution: &TextureResolution) -> Result<(u16, Opacity), GeometryError> {
     let face = quad.facing.face();
     let key = resolution.key_of(&quad.block, face);
-    key.and_then(|declared| resolution.layers().layer_of(declared))
+    let layer = key.and_then(|declared| resolution.layers().layer_of(declared));
+    layer
+        .zip(resolution.opacity_of(&quad.block))
         .ok_or_else(|| GeometryError::UnresolvedTexture {
             block: quad.block.clone(),
             face,
@@ -423,7 +396,7 @@ const fn placed(facing: Facing, at: FaceCoordinates) -> [u32; 3] {
 /// discriminant: an exhaustive match cannot read the wrong row for a facing
 /// nobody updated, and adding a seventh facing becomes a compile error here
 /// instead of a row silently missing from the table.
-const fn plane_axes_of(facing: Facing) -> [u32; 2] {
+pub(super) const fn plane_axes_of(facing: Facing) -> [u32; 2] {
     let [neg_x, pos_x, neg_y, pos_y, neg_z, pos_z] = PLANE_AXES;
     match facing {
         Facing::NegX => neg_x,

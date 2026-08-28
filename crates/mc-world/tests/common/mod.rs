@@ -35,7 +35,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use mc_core::block::source::InMemoryDefinitionSource;
-use mc_core::block::{BlockDefinition, BlockId, BlockRegistry, DefinitionOrigin};
+use mc_core::block::{BlockDefinition, BlockId, BlockRegistry, DefinitionOrigin, Opacity};
 use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, NamespacedIdError, TextureKey};
 use mc_world::section::{Contents, LocalPos, SECTION_SIZE, Section};
@@ -187,6 +187,7 @@ pub fn registry_from(
             swimmable: false,
             move_resistance: 0.0,
             swim_ascent: 9.0,
+            opacity: Opacity::OPAQUE,
             origin: DefinitionOrigin::new(origin),
         }));
     }

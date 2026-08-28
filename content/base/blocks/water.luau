@@ -67,6 +67,22 @@
 -- without a scenario stating its rise in blocks would have been guarded by
 -- nothing whatsoever. Each value also has its own sharp witness — the sink moves
 -- only with the resistance, the surfacing ceiling only with the ascent.
+--
+-- **`opacity = 0.5` is what makes the sea see-through, and it is a chosen
+-- number rather than a derived one.** Nothing about this world computes a half:
+-- it is the degree somebody picked for the sea to read as water — half the light
+-- reaching a surface of it goes on through, so the lakebed shows and the sea
+-- still reads as a body rather than as a pane. What the number *is* is
+-- **binding**: FR-4.3-S1 states `0.5` for a camera standing inside a translucent
+-- cell, so the scenario and this line have to agree and changing either one
+-- alone reddens a test. Binding is not derived, and the difference matters —
+-- deriving the content from a number a spec happens to state, and then calling
+-- the content derived, is circular.
+--
+-- `occludes = false` above was already saying the sea does not hide the lakebed,
+-- and it is what a mesher reads. This says how much of the light a *drawn* face
+-- of it stops, which is what a fragment reads, and the loader refuses the two
+-- together at `occludes = true` precisely because they would then disagree.
 return {
 	name = "base:water",
 	texture = "base:water",
@@ -79,4 +95,5 @@ return {
 	swimmable = true,
 	move_resistance = 0.5,
 	swim_ascent = 3.5,
+	opacity = 0.5,
 }

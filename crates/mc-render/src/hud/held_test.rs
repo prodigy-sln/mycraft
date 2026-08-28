@@ -60,6 +60,7 @@
 use std::error::Error;
 use std::sync::Arc;
 
+use mc_core::block::Opacity;
 use mc_core::content::{Face, FaceTextures};
 use mc_core::hud::source::InMemoryHudSource;
 use mc_core::hud::{DeclaredValue, HudLayout, HudOrigin, RawHudElement};
@@ -266,12 +267,21 @@ fn resolution() -> Result<TextureResolution, Box<dyn Error>> {
     }
     Ok(TextureResolution::stating(
         [
-            (BlockName::parse(BANDED)?, six_of(BANDED_KEYS)?),
+            (
+                BlockName::parse(BANDED)?,
+                six_of(BANDED_KEYS)?,
+                Opacity::OPAQUE,
+            ),
             (
                 BlockName::parse(RENAMED)?,
                 FaceTextures::uniform(TextureKey::parse(ITS_DECLARED_KEY)?),
+                Opacity::OPAQUE,
             ),
-            (BlockName::parse(UNSTOCKED)?, six_of(UNSTOCKED_KEYS)?),
+            (
+                BlockName::parse(UNSTOCKED)?,
+                six_of(UNSTOCKED_KEYS)?,
+                Opacity::OPAQUE,
+            ),
         ],
         TextureLayers::stated(layers),
     ))

@@ -134,6 +134,8 @@ mod entry;
 mod input;
 #[path = "support/launch_notices.rs"]
 mod launch_notices;
+#[path = "support/opacity_refusals.rs"]
+mod opacity_refusals;
 #[path = "support/per_facing_refusals.rs"]
 mod per_facing_refusals;
 #[path = "support/persistence.rs"]

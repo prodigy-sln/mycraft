@@ -770,16 +770,42 @@ the ascent — both disagree with it, and it reports the same four names for
 either. `tests/fixtures/world_saved_against_behaviour_revision_3.mcw` was
 minted from `6c2ed61` against `content/base/` as that tree shipped it, and
 it is a save that agreed with the declarations **exactly**, right up until
-the ascent joined the list. **There is no second chance at minting one.**
-`BEHAVIOUR_REVISION` is a compile-time constant, so a save written at test
-runtime always carries whatever revision the tree it runs on is at; once
-the constant moved, no run could produce a revision-3 save again. The rule
-generalises: **the fixture for a move has to be minted before the move**,
-which means before the phase that needs it knows it will.
+the ascent joined the list. `BEHAVIOUR_REVISION` is a compile-time constant,
+so a save written at test runtime always carries whatever revision the tree
+it runs on is at; once the constant moved, **no run on the current tree can
+produce a revision-3 save again**. Mint the fixture for a move before the
+move whenever you can — it is cheaper, and it is the only way that does not
+depend on remembering any of what follows.
 
-No fixture is ever regenerated — the day one is, it stops being evidence
-about anything, because a save this suite wrote from the declarations under
-test would agree with them by construction and could not fail.
+**This page used to say there was no second chance, and that was wrong in the
+direction that costs the most.** It is true of a *run* and false of a
+*repository*: the pre-move tree is still there, and a worktree at that commit
+mints the fixture exactly. The 2026-08-27 appearance-revision-3 fixture was
+minted that way, after the byte had already moved, because an order to mint
+crossed with the commit that moved it. **A page that tells a reader a
+recoverable thing is lost is worse than a page that says nothing**, because
+it is believed at the moment somebody needs it not to be.
+
+**What actually makes a fixture evidence is independence, not scarcity**, and
+that is what the rule below was always protecting. No fixture is ever
+regenerated **from the tree under test** — the day one is, it stops being
+evidence about anything, because a save this suite wrote from the
+declarations it is grading would agree with them by construction and could
+not fail. A save written by the *pre-move* writer is written by a different
+program from the post-move reader that grades it, and that property survives
+the move intact.
+
+Two things a reconstructed mint owes, both learned from doing it:
+
+- **Verify the property rather than asserting it.** Read both saves'
+  requirement records and state which halves match. The appearance-revision-3
+  fixture reports behaviour identical on all four blocks and appearance
+  different on all four; that reading is the provenance.
+- **Carry the provenance as a property, not as a commit sha**, where the sha
+  lives on a branch that squashes at merge. A save cannot evidence its own
+  revision — `input_version` is folded into a `DefinitionHash` and never
+  stored raw — so a sha a reader cannot check out proves nothing, while a
+  property they can re-derive from two trees proves the thing itself.
 
 A future change to what a block looks like moves the appearance byte again
 and no other; a future change to what a block *is* moves the behaviour

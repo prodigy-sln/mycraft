@@ -254,6 +254,47 @@ pub fn shipped_copy() -> Result<ContentRoot, Box<dyn Error>> {
     Ok(ContentRoot { directory })
 }
 
+/// The file the shipped sea is declared in.
+pub const SEA_DECLARATION: &str = "water.luau";
+
+/// The line the degree is written directly beneath, which is the field that puts
+/// water on screen at all.
+const DRAWN: &str = "\tdrawn = true,\n";
+
+/// The shipped content root copied with its sea declaring `degree`.
+///
+/// **The shipped declaration with one line added, read off disk rather than
+/// restated here.** What this builds is the shipped root as it stands *plus* the
+/// one field, so every reading over it is about the shipped world, the shipped
+/// art, the shipped physics and the shipped strata — and the day the shipped
+/// root declares the degree itself, the only difference left is the degree's
+/// value. A declaration written out in this module instead would drift from the
+/// shipped one silently, and a reading about "the sea" would be about a sea
+/// nobody ships.
+///
+/// # Errors
+///
+/// Returns an error if the shipped declaration cannot be read or no longer
+/// carries the line the degree is written beneath, or if the copy fails.
+pub fn shipped_with_the_sea_declaring(degree: f32) -> Result<ContentRoot, Box<dyn Error>> {
+    let at = content_root()?.join(BLOCK_DIRECTORY).join(SEA_DECLARATION);
+    let shipped = fs::read_to_string(&at)?;
+    if !shipped.contains(DRAWN) {
+        return Err(format!(
+            "`{}` no longer states `{}` on a line of its own, so this fixture has nowhere to write \
+             the degree it is about. It has to be added to the shipped declaration rather than to \
+             one written here, or every reading over it is about a sea nobody ships",
+            at.display(),
+            DRAWN.trim()
+        )
+        .into());
+    }
+    let stated = shipped.replace(DRAWN, &format!("{DRAWN}\topacity = {degree:?},\n"));
+    shipped_copy()?
+        .not_declaring_blocks(&[SEA_DECLARATION])?
+        .declaring_block(SEA_DECLARATION, &stated)
+}
+
 /// The shipped content root copied with the named HUD declarations removed.
 ///
 /// # Errors

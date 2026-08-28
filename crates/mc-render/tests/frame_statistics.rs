@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::sync::Arc;
 
+use mc_core::block::Opacity;
 use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_render::camera::{Projection, camera_view};
@@ -39,6 +40,23 @@ const OLDER_TICK: u32 = 12;
 /// How many sections the fixture scene holds.
 const SECTIONS: u32 = 1;
 
+/// How many indirect draws terrain costs: one for the opaque pass and one for
+/// the blended one, and never one for each section.
+///
+/// Stated here as well as in `terrain_offscreen.rs` because this is the second
+/// place the number is asserted, and it is the one that hides — it sits inside a
+/// composite tuple, so a search for the field beside its value walks past it.
+///
+/// **Written by hand and deliberately not imported from `mc_render::snapshot`.**
+/// It is a control, and being stated independently is the whole of its value: an
+/// assertion comparing a reported statistic against the very constant production
+/// computed it from agrees with itself and can never fail, whatever the frame did.
+/// That is the shape `build/validate.rs`'s own header warns about, and this
+/// project has already shipped a guard asserting a constant equalled a copy of
+/// itself. Importing it here to remove the duplication would leave two green
+/// tests watching nothing.
+const TERRAIN_DRAWS: u32 = 2;
+
 #[test]
 fn a_snapshot_older_than_the_one_just_rendered_is_rendered_and_reports_its_own_tick() -> TestResult
 {
@@ -59,7 +77,7 @@ fn a_snapshot_older_than_the_one_just_rendered_is_rendered_and_reports_its_own_t
             older.sections_submitted,
             older.terrain_draw_calls
         ),
-        (OLDER_TICK, SECTIONS, 1),
+        (OLDER_TICK, SECTIONS, TERRAIN_DRAWS),
         "the older snapshot is drawn like any other and reports its own tick, rather than \
          being refused or held back for a newer one"
     );
@@ -93,7 +111,11 @@ fn one_section_scene() -> Result<SceneGeometry, Box<dyn Error>> {
     // in this repository does and what a scene about frame counts needs no more
     // than.
     let resolution = TextureResolution::stating(
-        [(BlockName::parse(PROBE)?, FaceTextures::uniform(key.clone()))],
+        [(
+            BlockName::parse(PROBE)?,
+            FaceTextures::uniform(key.clone()),
+            Opacity::OPAQUE,
+        )],
         TextureLayers::resolve(&BTreeSet::from([key])),
     );
     let quad = Quad {

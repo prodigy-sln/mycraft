@@ -38,7 +38,7 @@ use std::error::Error;
 use std::sync::Arc;
 
 use mc_core::block::source::InMemoryDefinitionSource;
-use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin, RegistryError};
+use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin, Opacity, RegistryError};
 use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_world::world::{VoxelWorld, WorldPos};
@@ -145,6 +145,7 @@ fn declaring(names: &[&str]) -> Result<BlockRegistry, Box<dyn Error>> {
             swimmable: false,
             move_resistance: 0.0,
             swim_ascent: 9.0,
+            opacity: Opacity::OPAQUE,
             origin: origin.clone(),
         }));
     }

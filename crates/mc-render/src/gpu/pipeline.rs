@@ -1,10 +1,19 @@
-//! The two pipelines a terrain frame runs, and the bind groups they read.
+//! The three pipelines a terrain frame runs, and the bind groups they read.
 //!
 //! There is **one** render-pipeline builder and there is no second one. The
 //! offscreen path and the windowed path differ in the colour format their
 //! `TerrainPassConfig` carries and in nothing else, so a window and a golden
 //! frame are drawn by the same pass by construction rather than by two struct
 //! literals somebody keeps in step.
+//!
+//! **The two terrain draws are that same builder, parameterised.** A face that
+//! stops all the light is drawn by the opaque pipeline and one that passes some
+//! by the blended one, and the only things that differ are the colour target's
+//! blend and whether the draw writes depth. That difference lives in
+//! [`TerrainLayer`] here rather than in `TerrainPassConfig`, because
+//! `pass.rs` says the colour target is the only thing **a caller** may choose —
+//! and no caller chooses between these two, since both are always built from one
+//! config and both are recorded on every frame.
 //!
 //! Both shaders are compiled from source that the build script has already
 //! validated at the downlevel profile, so a shader that would not run on the
@@ -21,18 +30,35 @@ const TERRAIN_SOURCE: &str = include_str!("../../shaders/terrain.wgsl");
 /// The compute cull and compaction pass.
 const CULL_SOURCE: &str = include_str!("../../shaders/cull.wgsl");
 
+/// Which of the two terrain draws a pipeline is built for.
+///
+/// Private, and it never reaches `TerrainPassConfig`: this is not a choice a
+/// caller makes but a property of which half of the index buffer is being drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerrainLayer {
+    /// Faces that stop all the light reaching them. Blends nothing and writes
+    /// depth, exactly as the one terrain pipeline always did.
+    Opaque,
+    /// Faces that pass some of it. Blends source over destination and **does not
+    /// write depth**: two translucent faces must both be able to reach a pixel
+    /// the opaque pass left behind them, and a depth write would let whichever
+    /// the compaction happened to order first discard the other.
+    Translucent,
+}
+
 /// The pipelines and the bind groups they are recorded with.
 #[derive(Debug)]
 pub(super) struct Pipelines {
     pub(super) cull: wgpu::ComputePipeline,
     pub(super) terrain: wgpu::RenderPipeline,
+    pub(super) blended_terrain: wgpu::RenderPipeline,
     pub(super) cull_group: wgpu::BindGroup,
     pub(super) frame_group: wgpu::BindGroup,
     pub(super) texture_group: wgpu::BindGroup,
 }
 
 impl Pipelines {
-    /// Builds both pipelines against `buffers`.
+    /// Builds every pipeline against `buffers`.
     pub(super) fn new(
         device: &wgpu::Device,
         config: &TerrainPassConfig,
@@ -41,13 +67,11 @@ impl Pipelines {
         let cull_layout = cull_bindings(device);
         let frame_layout = frame_bindings(device);
         let texture_layout = texture_bindings(device);
+        let layouts = [Some(&frame_layout), Some(&texture_layout)];
         Self {
             cull: cull_pipeline(device, &cull_layout),
-            terrain: terrain_pipeline(
-                device,
-                config,
-                &[Some(&frame_layout), Some(&texture_layout)],
-            ),
+            terrain: terrain_pipeline(device, config, &layouts, TerrainLayer::Opaque),
+            blended_terrain: terrain_pipeline(device, config, &layouts, TerrainLayer::Translucent),
             cull_group: cull_group(device, &cull_layout, buffers),
             frame_group: frame_group(device, &frame_layout, buffers),
             texture_group: texture_group(device, &texture_layout, buffers),
@@ -229,26 +253,39 @@ fn cull_pipeline(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> wgpu:
     })
 }
 
-/// The render pipeline that draws terrain, in the one configuration both paths
-/// build.
+/// What a graphics debugger calls the pipeline that draws `drawing`.
+///
+/// Two names rather than one, because a frame that draws the wrong half is read
+/// off a capture by which pipeline issued which draw.
+const fn label_of(drawing: TerrainLayer) -> &'static str {
+    match drawing {
+        TerrainLayer::Opaque => "mycraft terrain",
+        TerrainLayer::Translucent => "mycraft terrain blended",
+    }
+}
+
+/// The render pipeline that draws one layer of terrain, in the one
+/// configuration both paths build.
 fn terrain_pipeline(
     device: &wgpu::Device,
     config: &TerrainPassConfig,
     layouts: &[Option<&wgpu::BindGroupLayout>],
+    drawing: TerrainLayer,
 ) -> wgpu::RenderPipeline {
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("mycraft terrain"),
         source: wgpu::ShaderSource::Wgsl(TERRAIN_SOURCE.into()),
     });
-    let targets = [Some(color_target(config))];
+    let label = label_of(drawing);
+    let targets = [Some(color_target(config, drawing))];
     let vertices = [Some(vertex_layout(config))];
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("mycraft terrain"),
+        label: Some(label),
         bind_group_layouts: layouts,
         ..wgpu::PipelineLayoutDescriptor::default()
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("mycraft terrain"),
+        label: Some(label),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &module,
@@ -257,7 +294,7 @@ fn terrain_pipeline(
             buffers: &vertices,
         },
         primitive: primitive(config),
-        depth_stencil: Some(depth_state(config)),
+        depth_stencil: Some(depth_state(config, drawing)),
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(fragment_state(&module, &targets)),
         multiview_mask: None,
@@ -266,10 +303,32 @@ fn terrain_pipeline(
 }
 
 /// The one colour target, in the format `config` declares.
-const fn color_target(config: &TerrainPassConfig) -> wgpu::ColorTargetState {
+///
+/// The blended layer's `BlendState` is the HUD pass's verbatim, which is the one
+/// blend this backend is already proven on. Its alpha component accumulates
+/// coverage rather than scaling by itself, so compositing twice onto one pixel
+/// leaves the attachment's own alpha meaning what it meant — which is what a
+/// surface that is presented rather than read back needs, and costs a read-back
+/// capture nothing.
+const fn color_target(config: &TerrainPassConfig, drawing: TerrainLayer) -> wgpu::ColorTargetState {
+    let blend = match drawing {
+        TerrainLayer::Opaque => None,
+        TerrainLayer::Translucent => Some(wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::SrcAlpha,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+        }),
+    };
     wgpu::ColorTargetState {
         format: color_format(config),
-        blend: None,
+        blend,
         write_mask: wgpu::ColorWrites::ALL,
     }
 }
@@ -322,10 +381,19 @@ const fn primitive(config: &TerrainPassConfig) -> wgpu::PrimitiveState {
 }
 
 /// How a fragment's depth is tested and written.
-fn depth_state(config: &TerrainPassConfig) -> wgpu::DepthStencilState {
+///
+/// **Both layers test; only the opaque one writes.** Testing is what keeps an
+/// opaque face in front of a translucent one from being drawn over — the blended
+/// draw runs second in the same pass and reads the depth the first wrote, so a
+/// hidden translucent face is discarded before it can blend into anything.
+/// Writing is what the blended layer must not do: a translucent face that wrote
+/// depth would discard whatever the compaction happened to order after it,
+/// including a second translucent face standing behind it that is exactly what
+/// a composition is made of.
+fn depth_state(config: &TerrainPassConfig, drawing: TerrainLayer) -> wgpu::DepthStencilState {
     wgpu::DepthStencilState {
         format: depth_format(config),
-        depth_write_enabled: Some(true),
+        depth_write_enabled: Some(matches!(drawing, TerrainLayer::Opaque)),
         depth_compare: Some(depth_compare(config)),
         stencil: wgpu::StencilState::default(),
         bias: wgpu::DepthBiasState::default(),

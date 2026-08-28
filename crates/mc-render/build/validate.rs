@@ -5,19 +5,26 @@
 //! are found here, at build time, rather than at the first draw — which is the
 //! whole reason a build script exists in this crate at all.
 //!
-//! # One file, two includers
+//! # One validator, two includers
 //!
 //! `build.rs` includes this file with `#[path]`, and so does
 //! `tests/shader_validation.rs`. There is therefore one validator and not a
 //! validator plus a test double that agrees with it: the tests exercise the
 //! exact code the build runs. Nothing here may reach into the crate being built,
-//! because a build script cannot depend on its own package — which is why the
-//! winding pattern below is a second copy rather than an import, and why the
-//! test that includes this file also asserts the two copies are equal.
+//! because a build script cannot depend on its own package — which is why every
+//! value checked below is a second copy rather than an import, and why the test
+//! that includes this file also asserts the two copies are equal.
 //!
-//! # Three checks nothing else can make
+//! The copies themselves live in `validate_tables`, reached by the same
+//! `#[path]` mechanism so that both includers still include exactly one thing.
+//! **What that split buys is that adding a value to compare and adding a
+//! comparison are two different edits in two different files**, which is the
+//! seam this file's own history argues for: five of six faces drew wrong while
+//! three hand-written copies of one table agreed with each other exactly.
 //!
-//! Beyond "does it compile", the validator enforces three facts the design rests
+//! # Five checks nothing else can make
+//!
+//! Beyond "does it compile", the validator enforces five facts the design rests
 //! on and that no unit test on either side of the CPU/GPU line can see:
 //!
 //! - **The storage-binding budget.** The weakest adapter in the declared
@@ -33,6 +40,34 @@
 //!   runs *across* the face rather than along it — which leaves the face's mean
 //!   colour untouched, so no probe over a captured frame reports it and a golden
 //!   minted from that renderer records it as ground truth.
+//! - **The packed vertex's bit layout.** A field read a bit out of place decodes
+//!   every corner in the world to a plausible wrong coordinate, texture, section
+//!   or degree — each of which leaves a frame that looks like a frame.
+//! - **The section record's field list.** Both shaders declare the struct the
+//!   section table is read through and neither can check it for itself. A field
+//!   inserted, removed or exchanged with its neighbour compiles perfectly and
+//!   reads every later field out of the wrong four bytes.
+//!
+//! # What these checks cannot see, measured
+//!
+//! **Every check here compares a shader against `validate_tables`' copy, and
+//! nothing here compares either against the type it stands for.** Measured, not
+//! cautioned: moving `vertex.rs`'s own `OPACITY_SHIFT` by one — this file and
+//! both shaders untouched — leaves the build **green**, because the two copies go
+//! on agreeing with each other about a number neither reads.
+//!
+//! **Seven tests redden, and six of them need a device.** The seventh is
+//! `tests/shader_validation.rs`'s
+//! `the_validators_vertex_layout_is_checked_against_the_bits_packing_actually_writes`,
+//! and it is **the only thing standing here**: the sole device-free witness that
+//! the packed layout is the one `Vertex` writes. Before it was written there was
+//! none. Delete it and this file goes on passing while the packing walks away.
+//!
+//! So the division of labour is: **this file catches the two shaders drifting
+//! from each other; the agreement tests catch either drifting from the code**, by
+//! packing through `PackedVertex` and `SceneGeometry` rather than against a third
+//! constant. A check added here without its agreement test is a copy agreeing
+//! with itself.
 //!
 //! Validation runs at `Capabilities::empty()`, the downlevel profile, rather
 //! than at naga's defaults: a shader using a capability the declared hardware
@@ -48,119 +83,17 @@ use naga::SourceLocation;
 use naga::valid::{Capabilities, ValidationFlags, Validator};
 use thiserror::Error;
 
-/// The six indices four corners are drawn as.
+/// Every value the shaders are checked against, each a second copy of one
+/// `mc-render` owns.
 ///
-/// The build script's own copy of `mc_render::geometry::QUAD_INDEX_PATTERN`.
-/// `tests/shader_validation.rs` includes this file and asserts the two are
-/// equal, which is the only thing making the shader check below mean anything —
-/// an agreement test against a private copy agrees with itself.
-pub const QUAD_INDEX_PATTERN: [u32; 6] = [0, 1, 2, 0, 2, 3];
+/// Re-exported rather than reached through the module, so the checks below and
+/// the agreement test in `tests/shader_validation.rs` name them by one path.
+#[path = "validate_tables.rs"]
+mod validate_tables;
 
-/// Which two components of a corner's local position a face's plane coordinates
-/// are written into, one row per facing.
-///
-/// The build script's own copy of `mc_render::geometry::PLANE_AXES`, held for
-/// the same reason and closed by the same test. A shader whose copy has drifted
-/// runs a texture *across* a face instead of along it: the face's mean colour is
-/// unchanged, so no probe over a captured frame can see it, and a golden minted
-/// from that renderer records the drift as ground truth.
-///
-/// **This is the geometry's table and not an image basis.** It says where a
-/// quad's two extents go, which is a different question from where an image's
-/// own left-to-right and top-to-bottom run — and reusing it for the second was
-/// the defect that drew five of six faces wrong. That question is
-/// [`IMAGE_SWAPS`] and [`IMAGE_SIGNS`].
-pub const PLANE_AXES: [[u32; 2]; 6] = [[1, 2], [1, 2], [0, 2], [0, 2], [0, 1], [0, 1]];
-
-/// Whether a face's image runs its horizontal along the **secondary** of
-/// [`PLANE_AXES`]' pair rather than the primary, `1` for exchanged.
-///
-/// The build script cannot depend on the crate it builds, so this is its own
-/// answer to `mc_render::geometry::IMAGE_SWAPS`. **Derived rather than
-/// tabulated**, for the reason the geometry builder's own comment gives: a
-/// six-row table of conventions cannot be checked by reading it, and this
-/// project shipped one whose three hand-written copies agreed and were wrong.
-pub const IMAGE_SWAPS: [u32; 6] = [
-    image_swap([-1, 0, 0], [1, 2]),
-    image_swap([1, 0, 0], [1, 2]),
-    image_swap([0, -1, 0], [0, 2]),
-    image_swap([0, 1, 0], [0, 2]),
-    image_swap([0, 0, -1], [0, 1]),
-    image_swap([0, 0, 1], [0, 1]),
-];
-
-/// Whether each of an image's two coordinates runs against its axis rather than
-/// along it, horizontal first, `1` for negated. Same row order.
-pub const IMAGE_SIGNS: [[u32; 2]; 6] = [
-    image_sign([-1, 0, 0]),
-    image_sign([1, 0, 0]),
-    image_sign([0, -1, 0]),
-    image_sign([0, 1, 0]),
-    image_sign([0, 0, -1]),
-    image_sign([0, 0, 1]),
-];
-
-/// The world directions a face's image runs its right edge and its top edge
-/// toward, for a viewer standing outside it.
-///
-/// A viewer outside a face looks along its inward direction with the world's up
-/// as their up, and the image's right edge is then forward crossed with up. The
-/// two horizontal faces have no world up in them, so theirs is chosen to match
-/// what `voxforge` bakes: the top image's top edge runs toward `-z`, the bottom
-/// image's toward `+z`.
-///
-/// The six outward normals are written at the call sites above and are the only
-/// hand-written input here. A normal says which way a face points and nothing
-/// about how an image sits on it, so there is no convention in one to get wrong.
-const fn image_basis(normal: [i32; 3]) -> ([i32; 3], [i32; 3]) {
-    let forward = [-normal[0], -normal[1], -normal[2]];
-    let up = if normal[1] == 0 {
-        [0, 1, 0]
-    } else {
-        [0, 0, -normal[1]]
-    };
-    (cross(forward, up), up)
-}
-
-/// Whether the face with this `normal` and this plane `pair` runs its image's
-/// horizontal along the pair's secondary.
-const fn image_swap(normal: [i32; 3], pair: [u32; 2]) -> u32 {
-    let (right, _) = image_basis(normal);
-    let (horizontal, _) = axis_of(right);
-    let [_, secondary] = pair;
-    (horizontal == secondary) as u32
-}
-
-/// Whether each of this face's image coordinates is negated.
-const fn image_sign(normal: [i32; 3]) -> [u32; 2] {
-    let (right, up) = image_basis(normal);
-    let (_, horizontal_is_negative) = axis_of(right);
-    let (_, up_is_negative) = axis_of(up);
-    // An image's rows run downward, so its vertical coordinate always runs
-    // against the direction its top edge points.
-    [horizontal_is_negative as u32, !up_is_negative as u32]
-}
-
-/// The cross product of two unit axis directions.
-const fn cross(one: [i32; 3], other: [i32; 3]) -> [i32; 3] {
-    [
-        one[1] * other[2] - one[2] * other[1],
-        one[2] * other[0] - one[0] * other[2],
-        one[0] * other[1] - one[1] * other[0],
-    ]
-}
-
-/// The axis index a unit `direction` lies along, and whether it points the
-/// negative way down it.
-const fn axis_of(direction: [i32; 3]) -> (u32, bool) {
-    if direction[0] != 0 {
-        (0, direction[0] < 0)
-    } else if direction[1] != 0 {
-        (1, direction[1] < 0)
-    } else {
-        (2, direction[2] < 0)
-    }
-}
+pub use validate_tables::{
+    IMAGE_SIGNS, IMAGE_SWAPS, PLANE_AXES, QUAD_INDEX_PATTERN, SECTION_RECORD, VERTEX_LAYOUT,
+};
 
 /// How many storage buffers one shader stage may bind.
 const STORAGE_BUDGET: usize = 4;
@@ -189,6 +122,9 @@ const IMAGE_SWAPS_DECLARATION: &str = "const IMAGE_SWAPS";
 
 /// How the image-sign table's declaration begins.
 const IMAGE_SIGNS_DECLARATION: &str = "const IMAGE_SIGNS";
+
+/// How the section record's declaration begins, in both shaders.
+const SECTION_RECORD_DECLARATION: &str = "struct Section {";
 
 /// Why the shipped shaders are not acceptable.
 #[derive(Debug, Error)]
@@ -247,6 +183,29 @@ pub enum ShaderError {
         file: String,
         found: Vec<u32>,
         expected: Vec<u32>,
+    },
+    #[error(
+        "{file}: `{field}` is declared as {found:?} where the packed vertex puts it at \
+         {expected}; a field read a bit out of place decodes every corner in the world to a \
+         plausible wrong coordinate, texture, section or degree, and every one of those leaves \
+         a frame that looks like a frame"
+    )]
+    VertexLayoutMismatch {
+        file: String,
+        field: String,
+        found: Option<u32>,
+        expected: u32,
+    },
+    #[error(
+        "{file}: the section record is declared as {found:?} where the scene writes \
+         {expected:?}; a record whose fields have slid by one reads a coordinate as a quad \
+         count, and one short of a field reads every section's box out of the next section's \
+         origin"
+    )]
+    SectionRecordMismatch {
+        file: String,
+        found: Vec<String>,
+        expected: Vec<String>,
     },
 }
 
@@ -331,6 +290,12 @@ fn validate_source(file: &str, source: &str) -> Result<(), ShaderError> {
         .map_err(|error| invalid(file, error.location(source), &error))?;
 
     check_storage_budget(file, &module, &analysis)?;
+    // The tables a shader *reads* come before the layouts it merely *declares*,
+    // so a shader whose winding or whose plane pair has drifted is reported as
+    // that rather than as whichever fault is noticed first. The two below are
+    // the ones a stage can hold without using — the terrain stage declares the
+    // whole section record and reads only the origin out of it — so they are
+    // the least specific thing to report and go last.
     if file == CULL_SHADER {
         check_index_pattern(file, source)?;
     }
@@ -342,6 +307,12 @@ fn validate_source(file: &str, source: &str) -> Result<(), ShaderError> {
         check_image_basis(file, source, IMAGE_SWAPS_DECLARATION, IMAGE_SWAPS.to_vec())?;
         let signs: Vec<u32> = IMAGE_SIGNS.into_iter().flatten().collect();
         check_image_basis(file, source, IMAGE_SIGNS_DECLARATION, signs)?;
+        check_vertex_layout(file, source)?;
+    }
+    // Both shaders declare the section record and read the same buffer through
+    // it, so both are checked against the one layout the scene writes.
+    if file == CULL_SHADER || file == TERRAIN_SHADER {
+        check_section_record(file, source)?;
     }
     Ok(())
 }
@@ -447,6 +418,87 @@ fn check_image_basis(
         found,
         expected,
     })
+}
+
+/// Fails unless every field of the packed vertex sits where the geometry builder
+/// puts it.
+///
+/// Each shift and width is a named scalar constant the decode itself reads, so
+/// this compares the numbers the shader actually uses rather than a comment
+/// beside them — which is what the three-hand-written-copies defect turned on.
+fn check_vertex_layout(file: &str, source: &str) -> Result<(), ShaderError> {
+    for (declaration, expected) in VERTEX_LAYOUT {
+        let found = declared_scalar(source, declaration);
+        if found != Some(expected) {
+            return Err(ShaderError::VertexLayoutMismatch {
+                file: file.to_owned(),
+                field: declaration.to_owned(),
+                found,
+                expected,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Fails unless the shader's section record is the one the scene writes, field
+/// for field and type for type.
+///
+/// Names as well as types, because the two failures differ: a field renamed is a
+/// shader that no longer compiles, but a field **inserted, removed or exchanged
+/// with its neighbour** compiles perfectly and reads every later field out of the
+/// wrong four bytes. The order is what carries the offsets, so the comparison is
+/// over the whole list in order rather than over its membership.
+fn check_section_record(file: &str, source: &str) -> Result<(), ShaderError> {
+    let found = declared_fields(source, SECTION_RECORD_DECLARATION);
+    let expected: Vec<String> = SECTION_RECORD
+        .iter()
+        .map(|(name, scalar)| format!("{name}: {scalar}"))
+        .collect();
+    if found == expected {
+        return Ok(());
+    }
+    Err(ShaderError::SectionRecordMismatch {
+        file: file.to_owned(),
+        found,
+        expected,
+    })
+}
+
+/// The value of a `const NAME: u32 = <literal>u;` declaration, or `None` where
+/// the shader has no such declaration or it has outgrown that shape.
+///
+/// Blunt in the same way [`declared_values`] is, and for the same reason: a
+/// declaration this cannot read reports as absent, which is a refusal rather
+/// than a pass.
+fn declared_scalar(source: &str, declaration: &str) -> Option<u32> {
+    let (_, after_name) = source.split_once(declaration)?;
+    let (_, after_equals) = after_name.split_once('=')?;
+    let (value, _) = after_equals.split_once(';')?;
+    value.trim().trim_end_matches('u').parse().ok()
+}
+
+/// The `name: type` of every field of a struct declaration, in order.
+///
+/// Comment lines inside the struct are skipped, so a field may be explained
+/// where it is declared without the explanation reading as a field.
+fn declared_fields(source: &str, declaration: &str) -> Vec<String> {
+    let Some((_, body)) = source.split_once(declaration) else {
+        return Vec::new();
+    };
+    let Some((body, _)) = body.split_once('}') else {
+        return Vec::new();
+    };
+    body.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("//"))
+        .map(|line| {
+            line.trim_end_matches(',')
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect()
 }
 
 /// The values `declaration` names in the source, or nothing when it names none.

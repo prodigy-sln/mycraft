@@ -192,7 +192,7 @@ fn that_save_is_refused_and_told_every_block_when_only_unchanged_blocks_are_acce
 }
 
 #[test]
-fn no_block_of_that_save_is_judged_to_look_different_while_every_one_of_them_behaves_differently()
+fn every_block_of_that_save_is_judged_to_look_different_as_well_as_to_behave_differently()
 -> TestResult {
     let recorded_then = requirements(&revision_2_save()?)?;
     let recorded_now = saved_today()?;
@@ -206,15 +206,18 @@ fn no_block_of_that_save_is_judged_to_look_different_while_every_one_of_them_beh
         moved,
         HELD_BY_THE_REVISION_2_SAVE
             .into_iter()
-            .map(|name| (name.to_owned(), true, false))
+            .map(|name| (name.to_owned(), true, true))
             .collect::<Vec<(String, bool, bool)>>(),
-        "the behaviour list grew two fields and the appearance list grew nothing, so every one of \
-         these four blocks behaves differently and not one of them looks different. **The verdict \
-         cannot say this and the hashes can**: behaviour is asked first and answers alone, so an \
-         appearance byte bumped along with the behaviour one produces exactly the verdict a \
-         correct implementation produces, and this comparison against a save minted today is the \
-         only thing in the workspace that would report it. Every block is named in the answer \
-         rather than counted, so a fold that got one of the four wrong says which"
+        "The behaviour list grew two fields past this save and the appearance list has now grown \
+         one, so every one of these four blocks both behaves differently and looks different to a \
+         save minted today. **The second half is new and the first is not**: this reading asserted \
+         `looks the same` across two consecutive behaviour moves, and a spec that grows the \
+         appearance list is exactly what is entitled to end that — but only by saying so here, \
+         where somebody has to read it, rather than by the reading being widened until it stops \
+         objecting. The comparison stays against a save minted today rather than becoming a claim \
+         about one list, because that is what reports an appearance byte bumped without its list \
+         growing and a list grown without its byte moving. Every block is named in the answer rather \
+         than counted, so a fold that got one of the four wrong says which"
     );
     Ok(())
 }

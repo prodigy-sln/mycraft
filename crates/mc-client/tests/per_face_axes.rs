@@ -47,7 +47,7 @@ use std::error::Error;
 
 use mc_client::content::ContentView;
 use mc_core::block::source::InMemoryDefinitionSource;
-use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin, Opacity};
 use mc_core::content::{FaceTextures, ResolvedBlock, ResolvedContent};
 use mc_core::id::{BlockName, TextureKey};
 use mc_render::geometry::{SectionGeometry, SectionOrigin, build_section_geometry};
@@ -412,11 +412,13 @@ fn resolved() -> Result<ResolvedContent, Box<dyn Error>> {
                 name: BlockName::parse(BANDED)?,
                 textures: six_keys()?,
                 is_solid: true,
+                opacity: Opacity::OPAQUE,
             },
             ResolvedBlock {
                 name: BlockName::parse(VOID)?,
                 textures: FaceTextures::uniform(TextureKey::parse(VOID)?),
                 is_solid: false,
+                opacity: Opacity::OPAQUE,
             },
         ],
         assigned(&DISAGREEING)?,
@@ -472,6 +474,7 @@ fn the_filler(origin: &DefinitionOrigin) -> Result<BlockDefinition, Box<dyn Erro
         swimmable: false,
         move_resistance: 0.0,
         swim_ascent: 9.0,
+        opacity: Opacity::OPAQUE,
         origin: origin.clone(),
     })
 }
@@ -497,6 +500,7 @@ fn the_banded_block(origin: &DefinitionOrigin) -> Result<BlockDefinition, Box<dy
         swimmable: false,
         move_resistance: 0.0,
         swim_ascent: 9.0,
+        opacity: Opacity::OPAQUE,
         origin: origin.clone(),
     })
 }

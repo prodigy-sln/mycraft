@@ -99,6 +99,48 @@ const DRAWN_DIFFERENTLY: [Declared; 3] = [
     ("zinc.luau", "example:zinc", "example:jade", false, ""),
 ];
 
+/// Three blocks stating three different things about how much light they stop.
+///
+/// **`occludes = false` is written out on every block that passes light, and it
+/// is not decoration.** `occludes` falls back to `solid`, so a solid block
+/// declaring a degree below one resolves to a block that both passes light and
+/// hides what lies behind it — which the loader refuses, taking the whole root
+/// with it. The refusal would be correct and the fixture would be at fault, and
+/// the reading below would fail for a reason that has nothing to do with the
+/// seam it is about.
+///
+/// `example:zinc` states no degree at all, which is the case a default has to
+/// answer for; the other two state one either side of it.
+const STOPPING_DIFFERENT_AMOUNTS_OF_LIGHT: [Declared; 3] = [
+    (
+        "amber.luau",
+        "example:amber",
+        "example:quartz",
+        true,
+        "\toccludes = false,\n\topacity = 0.25,\n",
+    ),
+    (
+        "cobalt.luau",
+        "example:cobalt",
+        "example:onyx",
+        false,
+        "\topacity = 1.0,\n",
+    ),
+    ("zinc.luau", "example:zinc", "example:jade", true, ""),
+];
+
+/// What each of those blocks has to resolve to, block by block.
+///
+/// **Written from the declarations rather than read back from a run**, and
+/// stated as the value rather than as "not opaque": a `resolved_from` that
+/// swapped two blocks' degrees satisfies every reading that only asks whether a
+/// block differs from its neighbour.
+const THE_DEGREES_THEY_DECLARE: [(&str, f32); 3] = [
+    ("example:amber", 0.25),
+    ("example:cobalt", 1.0),
+    ("example:zinc", 1.0),
+];
+
 /// What a resolved content value states: each block's name, texture key and
 /// solidity, then the texture keys its layer assignment names and the layers it
 /// hands out.
@@ -146,6 +188,38 @@ fn two_roots_differing_in_a_texture_and_a_solidity_resolve_client_content_that_d
          none at all"
     );
     Ok(())
+}
+
+#[test]
+fn every_blocks_declared_degree_of_opacity_reaches_the_content_a_client_receives() -> TestResult {
+    let root = root_declaring(&STOPPING_DIFFERENT_AMOUNTS_OF_LIGHT)?;
+
+    let resolved = mc_sim::content::load(root.path(), &LayerAssignment::none())?.resolved;
+
+    assert_eq!(
+        degrees(&resolved),
+        THE_DEGREES_THEY_DECLARE
+            .iter()
+            .map(|(name, degree)| ((*name).to_owned(), *degree))
+            .collect::<Vec<_>>(),
+        "how much light a block stops is what decides which of the two terrain draws its faces          land in, and this copy is the only place a declared degree crosses into what a client          receives. Asserted here at the boundary rather than inferred from a frame, because every          other witness to this line is a rendered picture that needs a device — and read as the          value each block declares, beside the name that declared it, so that a copy handing back          a constant, a default, or one block's degree under another block's name is three          different failures rather than one silence"
+    );
+    Ok(())
+}
+
+/// The degree each block of `content` stops light at, beside its name, sorted by
+/// that name.
+///
+/// Sorted rather than taken in registration order: which order a directory is
+/// read in is not what this reading is about, and the names travel beside the
+/// degrees so nothing is lost by ordering them.
+fn degrees(content: &ResolvedContent) -> Vec<(String, f32)> {
+    let mut found: Vec<(String, f32)> = content
+        .blocks()
+        .map(|block| (block.name.as_str().to_owned(), block.opacity.get()))
+        .collect();
+    found.sort_by(|one, other| one.0.cmp(&other.0));
+    found
 }
 
 /// A content root declaring exactly `blocks`, in a temporary directory.

@@ -52,7 +52,26 @@ use thiserror::Error;
 /// after it enters the water moved while the mesh contract stood still. The
 /// four `r3` directories were shot under the old declaration and no frame under
 /// this one may be compared against them.
-pub const SCENE_REVISION: &str = "r4";
+///
+/// **`r5` is a third cause again, and it is the *vertex format*.** SPEC-031 gave
+/// the packed vertex an eight-bit opacity field at shift 36, and a packed vertex
+/// is a contract item a capture is a photograph of. The blended pass it feeds is
+/// not what bumps this: a second draw over the same faces at the same depths
+/// moves no pixel while nothing declares a degree below one, which phase 2
+/// measured by verifying the `r4` set green after the whole renderer rework. Nor
+/// is the content: `content/base/blocks/water.luau` declaring `opacity = 0.5`
+/// changes what the frames *show*, and an art edit is expressly not a bump
+/// (2026-08-26). It is the format alone, and the two arrive together because a
+/// field nothing writes is a field nothing can photograph.
+///
+/// **The tripwire is blind here for the third time, and three is a pattern.**
+/// `r3`, `r4` and `r5` all left `scene_contract.rs` green: their causes were the
+/// declared physics, the declared physics again, and now the vertex format, none
+/// of which is the mesh or the spawn. Every bump so far whose cause was neither
+/// of those two has been invisible to the only automated instrument that runs
+/// before an image is compared. `docs/technical/rendering.md` states it as a
+/// property of the guard rather than as a third footnote.
+pub const SCENE_REVISION: &str = "r5";
 
 /// The ticks of the replay that carry a committed golden.
 ///

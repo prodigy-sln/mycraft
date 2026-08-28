@@ -39,6 +39,7 @@
 use std::collections::BTreeSet;
 use std::error::Error;
 
+use mc_core::block::Opacity;
 use mc_core::content::{Face, FaceTextures};
 use mc_core::id::{BlockName, TextureKey};
 use mc_world::mesh::{Facing, PlaneExtent, PlanePos, Quad};
@@ -75,6 +76,16 @@ const NEIGHBOURING_BLOCK: &str = "example:jade";
 const SUBSTITUTED_ASSIGNMENT: [(&str, u16); 2] = [(ITS_DECLARED_KEY, 1), (NEIGHBOURING_BLOCK, 0)];
 
 /// A block declaring a different key on each of its six facings.
+/// Three blocks whose sorted order is deliberately not their emission order.
+///
+/// `example:amber` sorts first and so takes layer 0, `example:glass` layer 1 and
+/// `example:zinc` layer 2; the fixture emits zinc before amber, so a packer that
+/// sorted by layer would swap them and a packer that preserved the mesher's
+/// order would not.
+const SEEN_THROUGH: &str = "example:glass";
+const EARLY_IN_THE_SORT: &str = "example:amber";
+const LATE_IN_THE_SORT: &str = "example:zinc";
+
 const BANDED_BLOCK: &str = "example:banded";
 
 /// The six keys it declares, positionally in the order a declaration writes its
@@ -184,7 +195,11 @@ fn resolving(blocks: &[(&str, &str)]) -> Result<TextureResolution, Box<dyn Error
     for (block, key) in blocks {
         let parsed = TextureKey::parse(key)?;
         keys.insert(parsed.clone());
-        stated.push((BlockName::parse(block)?, FaceTextures::uniform(parsed)));
+        stated.push((
+            BlockName::parse(block)?,
+            FaceTextures::uniform(parsed),
+            Opacity::OPAQUE,
+        ));
     }
     Ok(TextureResolution::stating(
         stated,
@@ -207,6 +222,7 @@ fn stating(
         [(
             BlockName::parse(block)?,
             FaceTextures::uniform(TextureKey::parse(key)?),
+            Opacity::OPAQUE,
         )],
         TextureLayers::stated(layers),
     ))
@@ -228,8 +244,68 @@ fn banded_but_for_one_facing() -> Result<TextureResolution, Box<dyn Error>> {
         .try_into()
         .map_err(|_unexpected| "a declaration states exactly six facings")?;
     Ok(TextureResolution::stating(
-        [(BlockName::parse(BANDED_BLOCK)?, FaceTextures::stating(keys))],
+        [(
+            BlockName::parse(BANDED_BLOCK)?,
+            FaceTextures::stating(keys),
+            Opacity::OPAQUE,
+        )],
         TextureLayers::resolve(&covered),
+    ))
+}
+
+#[test]
+fn quads_that_stop_all_the_light_are_emitted_before_those_that_pass_some_of_it() -> TestResult {
+    // Emitted interleaved and out of layer order, so that three plausible wrong
+    // answers are each a different list: no partition at all, a partition that
+    // reordered within a half, and a sort by layer index.
+    let resolution = resolving_at(&[
+        (SEEN_THROUGH, 0.5),
+        (LATE_IN_THE_SORT, 1.0),
+        (EARLY_IN_THE_SORT, 1.0),
+    ])?;
+    let quads = [
+        quad_of(Facing::PosY, SEEN_THROUGH)?,
+        quad_of(Facing::PosY, LATE_IN_THE_SORT)?,
+        quad_of(Facing::PosY, EARLY_IN_THE_SORT)?,
+        quad_of(Facing::PosY, SEEN_THROUGH)?,
+    ];
+
+    let geometry =
+        build_section_geometry(&quads, SectionOrigin::new(UNSHIFTED_SECTION), &resolution)?;
+
+    assert_eq!(
+        (
+            geometry.opaque_quad_count(),
+            geometry.quad_count(),
+            corner_layers(&geometry),
+        ),
+        (2, 4, vec![2, 2, 2, 2, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]),
+        "the two terrain draws read fixed halves of one index buffer, so a section's opaque          quads have to come first and one number has to say where they end. The layer list is          what says which quad went where, and the fixture is arranged so that every wrong answer          is a different list: no partition gives [1, 2, 0, 1], a sort by layer gives          [0, 1, 1, 2], and a partition that reordered inside a half gives [0, 2, 1, 1] — the          mesher's order within each half is preserved, which `sweep.rs` forbids re-sorting"
+    );
+    Ok(())
+}
+
+/// A resolution stating one block per entry at the degree written beside it,
+/// each declaring a key equal to its own name.
+///
+/// The layers come from sorting those keys, so a block's name decides its layer
+/// index — which is what lets a fixture put emission order and layer order
+/// deliberately at odds.
+fn resolving_at(blocks: &[(&str, f32)]) -> Result<TextureResolution, Box<dyn Error>> {
+    let mut stated = Vec::new();
+    let mut keys = BTreeSet::new();
+    for (block, degree) in blocks {
+        let parsed = TextureKey::parse(block)?;
+        keys.insert(parsed.clone());
+        stated.push((
+            BlockName::parse(block)?,
+            FaceTextures::uniform(parsed),
+            Opacity::new(*degree).ok_or("a fixture states a degree the engine can keep")?,
+        ));
+    }
+    Ok(TextureResolution::stating(
+        stated,
+        TextureLayers::resolve(&keys),
     ))
 }
 

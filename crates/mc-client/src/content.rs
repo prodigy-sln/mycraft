@@ -16,15 +16,15 @@
 //! been cut — a resolved value that is a newtype over the registry, and a view
 //! that reaches back through one.
 //!
-//! # A face draws what its block declared, and the two halves travel together
+//! # A face draws what its block declared, and the halves travel together
 //!
 //! What comes out of here is a
 //! [`TextureResolution`](mc_render::texture::TextureResolution): each block's six
-//! declared keys beside the layer assignment. Both halves are read off the same
-//! resolved value in the same call, so a packer cannot be handed one content
-//! set's declarations against another's layers — which would resolve to a
-//! wrong-but-valid layer and draw a plausible wrong picture with no error
-//! anywhere.
+//! declared keys and its declared opacity, beside the layer assignment. All of
+//! it is read off the same resolved value in the same call, so a packer cannot
+//! be handed one content set's declarations against another's layers — which
+//! would resolve to a wrong-but-valid layer and draw a plausible wrong picture
+//! with no error anywhere.
 //!
 //! # The assignment is honoured, never re-derived
 //!
@@ -61,7 +61,7 @@ impl ContentView {
             resolution: TextureResolution::stating(
                 content
                     .blocks()
-                    .map(|block| (block.name.clone(), block.textures.clone())),
+                    .map(|block| (block.name.clone(), block.textures.clone(), block.opacity)),
                 TextureLayers::stated(
                     content
                         .layer_assignment()

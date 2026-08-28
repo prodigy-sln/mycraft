@@ -36,6 +36,7 @@ mod staged_layers;
 use std::error::Error;
 
 use mc_client::content::ContentView;
+use mc_core::block::Opacity;
 use mc_core::content::{FaceTextures, ResolvedBlock, ResolvedContent};
 use mc_core::id::{BlockName, TextureKey};
 use mc_render::geometry::{GeometryError, SectionGeometry, SectionOrigin, build_section_geometry};
@@ -222,6 +223,7 @@ fn stating(
             name: BlockName::parse(name)?,
             textures: FaceTextures::uniform(TextureKey::parse(name)?),
             is_solid: true,
+            opacity: Opacity::OPAQUE,
         });
     }
     Ok(ResolvedContent::stating(stated, assigned(layers)?))
@@ -240,11 +242,13 @@ fn substituting() -> Result<ResolvedContent, Box<dyn Error>> {
                 name: BlockName::parse(SUBSTITUTED_BLOCK)?,
                 textures: FaceTextures::uniform(TextureKey::parse(ITS_DECLARED_KEY)?),
                 is_solid: true,
+                opacity: Opacity::OPAQUE,
             },
             ResolvedBlock {
                 name: BlockName::parse(PLAINLY_KEYED_BLOCK)?,
                 textures: FaceTextures::uniform(TextureKey::parse(PLAINLY_KEYED_BLOCK)?),
                 is_solid: true,
+                opacity: Opacity::OPAQUE,
             },
         ],
         assigned(&SUBSTITUTED_ASSIGNMENT)?,

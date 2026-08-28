@@ -283,11 +283,21 @@ impl<'a> Plane<'a> {
 ///
 /// **The third is a rule the engine derives and not something content states.**
 /// It names no block and it is stated here and nowhere else. `merges_with_self`
-/// would be the field that let content override it, and **PRO-952 is its named
-/// breaker**: the day a translucent block wants the interior faces of its own
-/// volume drawn, this rule has to become a declaration. Until then two adjacent
-/// cells of one non-occluding block show no seam and a mod author cannot ask for
-/// one.
+/// would be the field that let content override it: the day a block wants the
+/// interior faces of its own volume drawn, this rule has to become a
+/// declaration. Until then two adjacent cells of one non-occluding block show no
+/// seam and a mod author cannot ask for one.
+///
+/// **A translucent block has now shipped and it did not need that field**, which
+/// is worth recording because this comment used to name transparency as the
+/// breaker. It is the opposite: the blended pass is *correct* precisely because
+/// a run of one kind draws only its two end faces, one of which is back-facing
+/// and culled — so a ray crosses one drawn face per run and two overlapping
+/// layers of one kind compose order-independently. Emitting the interior faces
+/// would give the sea a visible sheet per cell and make the draw order
+/// observable. The trigger that reopens the field is therefore narrower than it
+/// was written: a block that wants its own interior faces *drawn*, which is a
+/// thing no content has asked for yet.
 ///
 /// All three answers come from the registered definition alone, reached through
 /// a key. **No block name and no runtime id is looked at anywhere in this file**,

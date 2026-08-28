@@ -38,7 +38,7 @@ use std::sync::Arc;
 use glam::Vec3;
 use mc_client::startup::PreparationError;
 use mc_core::block::source::InMemoryDefinitionSource;
-use mc_core::block::{BlockDefinition, BlockId, BlockRegistry, DefinitionOrigin};
+use mc_core::block::{BlockDefinition, BlockId, BlockRegistry, DefinitionOrigin, Opacity};
 use mc_core::content::{FaceTextures, LayerAssignment, ResolvedBlock, ResolvedContent};
 use mc_core::id::{BlockName, TextureKey};
 use mc_render::window::{Ending, report};
@@ -139,6 +139,7 @@ pub fn declared(name: &str, is_solid: bool) -> Result<BlockDefinition, Box<dyn E
         swimmable: false,
         move_resistance: 0.0,
         swim_ascent: 9.0,
+        opacity: Opacity::OPAQUE,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
     })
 }
@@ -445,6 +446,7 @@ pub fn published_content(registry: &BlockRegistry) -> Result<PublishedContent, B
             name: declared.name.clone(),
             textures: declared.textures.clone(),
             is_solid: declared.is_solid,
+            opacity: Opacity::OPAQUE,
         });
     }
     let layers = LayerAssignment::none().appending(&registry.texture_keys())?;

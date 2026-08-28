@@ -16,7 +16,7 @@ use std::error::Error;
 
 use common::{TestResult, content_root};
 use mc_core::block::source::InMemoryDefinitionSource;
-use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin, Opacity};
 use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_world::content::LuauFileDefinitionSource;
@@ -108,6 +108,7 @@ fn hand_written_air() -> Result<BlockDefinition, Box<dyn Error>> {
         swimmable: false,
         move_resistance: 0.0,
         swim_ascent: 9.0,
+        opacity: Opacity::OPAQUE,
         origin: DefinitionOrigin::new("hand-written air"),
     })
 }
@@ -127,6 +128,7 @@ fn hand_written_stone() -> Result<BlockDefinition, Box<dyn Error>> {
         swimmable: false,
         move_resistance: 0.0,
         swim_ascent: 9.0,
+        opacity: Opacity::OPAQUE,
         origin: DefinitionOrigin::new("hand-written stone"),
     })
 }
@@ -147,6 +149,7 @@ fn hand_written_grass() -> Result<BlockDefinition, Box<dyn Error>> {
         swimmable: false,
         move_resistance: 0.0,
         swim_ascent: 9.0,
+        opacity: Opacity::OPAQUE,
         origin: DefinitionOrigin::new("hand-written grass"),
     })
 }

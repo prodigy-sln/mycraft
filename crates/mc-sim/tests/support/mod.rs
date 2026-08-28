@@ -27,7 +27,7 @@ pub mod volume;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
-use mc_core::block::{BlockId, BlockRegistry};
+use mc_core::block::{BlockId, BlockRegistry, Opacity};
 use mc_core::content::{LayerAssignment, ResolvedBlock, ResolvedContent};
 use mc_core::id::BlockName;
 use mc_sim::player::PlayerState;
@@ -141,6 +141,7 @@ pub fn published_content(registry: &BlockRegistry) -> Result<PublishedContent, B
             name: declared.name.clone(),
             textures: declared.textures.clone(),
             is_solid: declared.is_solid,
+            opacity: Opacity::OPAQUE,
         });
     }
     let layers = LayerAssignment::none().appending(&registry.texture_keys())?;

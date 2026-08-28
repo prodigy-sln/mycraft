@@ -70,7 +70,7 @@ use std::error::Error;
 use common::persistence::{declaration_of, saved_requirements, world_at, world_holding};
 use common::{FIXTURE_ORIGIN, TestResult};
 use mc_core::block::source::InMemoryDefinitionSource;
-use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin, Opacity};
 use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use tempfile::TempDir;
@@ -108,7 +108,7 @@ const A_DIFFERENT_NORTH: &str = "fixture:andesite_reworked";
 /// list's, and the two are different numbers: a single number shared between the
 /// two lists would report every block in every save as behaving differently the
 /// moment a texture key or a rendering flag joined this one.
-const STATED_APPEARANCE_REVISION: u8 = 3;
+const STATED_APPEARANCE_REVISION: u8 = 4;
 
 /// What the fixture block declares about being seen, stated once and read by both
 /// the declaration and the oracle.
@@ -123,6 +123,18 @@ const STATED_APPEARANCE_REVISION: u8 = 3;
 /// declared, and the comparison would fail for a reason that is about neither.
 const DRAWN: bool = true;
 const OCCLUDES: bool = false;
+
+/// What the fixture block declares about how much light it stops, which is all
+/// of it.
+///
+/// The value this fixture's `Opacity::OPAQUE` carries, written out here rather
+/// than read from the type: an expectation derived from the value under test
+/// agrees with whatever that value becomes. What a degree other than this one
+/// does to the record is `save_folds_a_declared_opacity.rs`'s subject; what this
+/// file needs from the field is only that its four bytes are in the sequence, in
+/// the position the format states, so that the six keys before it stay where a
+/// reader can find them.
+const OPACITY: f32 = 1.0;
 
 /// How the canonical encoding writes a `bool`.
 const FALSE_BYTE: u8 = 0x00;
@@ -195,6 +207,7 @@ fn registry_texturing(keys: [&str; 6]) -> Result<BlockRegistry, Box<dyn Error>> 
         swimmable: false,
         move_resistance: 0.0,
         swim_ascent: 9.0,
+        opacity: Opacity::OPAQUE,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
     })];
     let mut registry = BlockRegistry::new();
@@ -234,9 +247,15 @@ fn six_keys_with_north(key: &'static str) -> [&'static str; 6] {
 }
 
 /// The bytes the format states a block's declared appearance is: the revision,
-/// the name, the six keys in the order the six words are written, and then the
-/// two flags that say whether the block is drawn and whether it hides what is
-/// behind it.
+/// the name, the six keys in the order the six words are written, then the two
+/// flags that say whether the block is drawn and whether it hides what is behind
+/// it, and last the degree of the light it stops.
+///
+/// **The degree is appended after the flags and never inserted.** The canonical
+/// encoding writes a struct positionally, so a field placed among the ones
+/// already here moves every byte after it — this oracle would then be describing
+/// a record no save writes, and it would say so about six keys whose order is
+/// this file's whole subject.
 fn stated_appearance_bytes(name: &str, keys: [&str; 6]) -> Vec<u8> {
     let mut stated = vec![STATED_APPEARANCE_REVISION];
     push_text(&mut stated, name);
@@ -245,7 +264,14 @@ fn stated_appearance_bytes(name: &str, keys: [&str; 6]) -> Vec<u8> {
     }
     push_flag(&mut stated, DRAWN);
     push_flag(&mut stated, OCCLUDES);
+    push_number(&mut stated, OPACITY);
     stated
+}
+
+/// `number` as the canonical encoding writes it: the four bytes of its bit
+/// pattern, least significant first, whatever its value.
+fn push_number(stated: &mut Vec<u8>, number: f32) {
+    stated.extend_from_slice(&number.to_bits().to_le_bytes());
 }
 
 /// `flag` as the canonical encoding writes it.

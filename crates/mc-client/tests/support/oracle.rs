@@ -57,26 +57,53 @@
 //! close that, and they are the reason this module's old paragraph about water
 //! is gone rather than softened:
 //!
-//! - every declared sample is classified as exactly one of sky or a block the
-//!   world holds, the classes sum to the whole grid, and the sea is predicted at
-//!   one sample at least — so a march that collapsed, or that came to answer
-//!   "nothing" everywhere, is reported rather than passing quietly;
+//! - every declared sample is classified as exactly one of sky, a block the
+//!   world holds, or a composition of them, the classes sum to the whole grid,
+//!   and the sea is predicted at one sample at least — so a march that
+//!   collapsed, or that came to answer "nothing" everywhere, is reported rather
+//!   than passing quietly;
 //! - a world holding a block declared `drawn = false, solid = true` is marched
 //!   *through* — which no judge reading solidity can do.
 //!
-//! **The named breaker.** A first-drawn-voxel march is right only while every
-//! drawn block is opaque: the nearest drawn surface is then the one a pixel
-//! shows. The day a translucent block exists — PRO-952 — this judge needs a
-//! second rule, because the nearest drawn surface will no longer be the only
-//! thing the pixel is of. Recorded here, at the assumption, rather than
-//! reconstructed later.
+//! # The second rule, which the named breaker asked for and this is
+//!
+//! A first-drawn-voxel march was right only while every drawn block was opaque:
+//! the nearest drawn surface was then the one a pixel showed. A block that
+//! passes light no longer stops a ray. It is recorded as a **layer** and the
+//! march goes on, so what a pixel shows is the composition of every layer
+//! crossed over whatever finally stopped it.
+//!
+//! **A maximal run of one kind contributes exactly one layer, and the
+//! distinction from one-per-voxel is the whole of the rule.** This judge walks
+//! one voxel at a time, so a rule accumulating every voxel that passes light
+//! would answer ten layers through ten cells of sea where the engine draws one
+//! face — wrong in a way that reads exactly like a renderer defect. It is a
+//! restatement of two engine rules arrived at independently, which is the
+//! relationship this module already has with `drawn`: a block draws no face
+//! against its own kind, and the face a ray *leaves* a run through has its
+//! normal along the ray and is culled.
+//!
+//! **It is per run and not per volume.** An air gap ends a run, so a body
+//! entered, left and entered again contributes two layers, which is what the
+//! engine draws and what a volume rule gets wrong for a concave sea.
+//!
+//! **The run the eye stands in contributes nothing at all.** The eye is past
+//! that run's entry face and in front of its exit face, and the exit face is
+//! back-facing. That is why a camera inside a translucent volume gains no tint
+//! from the volume it stands in, and it falls out of the run rule rather than
+//! being a case beside it: the eye's own cell opens a run that the march is
+//! already inside.
+//!
+//! **What this judge still does not read.** The degree comes from
+//! [`BlockDefinition::opacity`](mc_core::block::BlockDefinition), the door
+//! `drawn` comes through, never from the resolution the packer partitions on;
+//! and composing those layers into a colour is [`super::composite`]'s.
 
 use std::error::Error;
 
 use glam::{IVec3, Vec3};
-use mc_core::block::{BlockRegistry, RegistryError};
+use mc_core::block::{BlockRegistry, Opacity, RegistryError};
 use mc_core::id::BlockName;
-use mc_render::camera::projection_for;
 use mc_render::color::CLEAR_COLOR_SRGB;
 use mc_render::surface::SurfaceSize;
 use mc_sim::camera::CameraPose;
@@ -85,6 +112,7 @@ use mc_testkit::frame::Rgba8Image;
 use mc_world::mesh::Facing;
 use mc_world::section::Contents;
 
+use super::march::{Basis, Lens, March};
 use super::probe::{DIFFERENT_COLOR, distance, pixel_color};
 
 /// How many sample pixels stand across the frame, and how many down it.
@@ -117,8 +145,8 @@ const MARCH_LIMIT: f32 = 272.0;
 
 /// What one marched ray is looking at.
 ///
-/// **Two arms, and no third for "I could not tell".** A ray either meets a drawn
-/// voxel inside the march limit or it does not, and there is no answer in
+/// **Three arms, and still no arm for "I could not tell".** A ray either meets a
+/// drawn voxel inside the march limit or it does not, and there is no answer in
 /// between: a block the registry does not register is a [`RegistryError`] the
 /// caller receives, never a sample quietly classified as nothing. That is what
 /// lets a reading compare the whole classification of a grid — an answer outside
@@ -132,12 +160,24 @@ const MARCH_LIMIT: f32 = 272.0;
 pub enum Sighted {
     /// The march met no drawn voxel inside [`MARCH_LIMIT`].
     Sky,
-    /// The nearest drawn voxel along the ray holds this block.
+    /// The nearest drawn voxel along the ray holds this block, and it stops all
+    /// the light reaching it.
     Terrain(BlockName),
+    /// The ray crossed one run of a block that passes light per entry, nearest
+    /// first, and met `beyond` past the last of them. `beyond` is `Sky` or
+    /// `Terrain` and never another `Through`, because [`Crossed::sighted`] is
+    /// the only thing that builds one and it flattens every layer into `layers`.
+    Through {
+        layers: Vec<BlockName>,
+        beyond: Box<Sighted>,
+    },
 }
 
 /// One declared sample pixel and what a ray through it is looking at.
 pub type SightedSample = ((u32, u32), Sighted);
+
+/// One declared sample pixel and everything the ray through it met.
+pub type CrossedSample = ((u32, u32), Crossed);
 
 /// What a sample is called wherever this suite tallies classifications as text.
 ///
@@ -146,6 +186,15 @@ pub type SightedSample = ((u32, u32), Sighted);
 /// able to impersonate the other.
 pub const SKY: &str = "sky";
 
+/// What joins a layer to what stands behind it wherever a classification is
+/// spelled out.
+///
+/// **Neither a block name nor [`SKY`] can contain it**, for the same reason the
+/// colon keeps those two apart: a composite class cannot impersonate a simple
+/// one, and a reading may split a class back into its parts and get exactly the
+/// names that went in.
+pub const OVER: &str = " over ";
+
 impl Sighted {
     /// This classification as the one word a tally is keyed by.
     #[must_use]
@@ -153,6 +202,67 @@ impl Sighted {
         match self {
             Self::Sky => SKY.to_owned(),
             Self::Terrain(block) => block.as_str().to_owned(),
+            Self::Through { layers, beyond } => {
+                let mut named: Vec<String> = layers
+                    .iter()
+                    .map(|block| block.as_str().to_owned())
+                    .collect();
+                named.push(beyond.described());
+                named.join(OVER)
+            }
+        }
+    }
+}
+
+/// One surface a marched ray met: the block standing there, and the facing of it
+/// the ray came in through.
+///
+/// The facing is `None` only where the eye already stood inside that voxel:
+/// there is no face to have entered by, and answering one would be an invention
+/// — which is why [`super::composite`] refuses such a surface.
+///
+/// **No [`Eq`], because `along` is a distance.** Whoever compares two of these
+/// is comparing a measurement, and a reading that wanted an exact equality over
+/// one would be asserting that two marches produced the same float — which is a
+/// statement about arithmetic rather than about what a ray met.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Surface {
+    pub block: BlockName,
+    pub facing: Option<Facing>,
+    /// How far along the ray this surface stands, in blocks. Zero where the eye
+    /// already stood inside the voxel.
+    pub along: f32,
+}
+
+/// Everything one marched ray met, in the order it met it.
+///
+/// **The one answer, from the one march.** [`Sighted`] is a view of this with
+/// the facings dropped, rather than a second march of its own: two marches would
+/// be two answers, and the day they parted the difference would read as a
+/// renderer fault.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Crossed {
+    /// One entry per maximal run of a block that passes light, nearest first.
+    pub layers: Vec<Surface>,
+    /// The surface that stopped the ray, or nothing where none did inside
+    /// [`MARCH_LIMIT`].
+    pub beyond: Option<Surface>,
+}
+
+impl Crossed {
+    /// This crossing as the classification a tally is keyed by.
+    #[must_use]
+    pub fn sighted(&self) -> Sighted {
+        let beyond = self
+            .beyond
+            .as_ref()
+            .map_or(Sighted::Sky, |met| Sighted::Terrain(met.block.clone()));
+        if self.layers.is_empty() {
+            return beyond;
+        }
+        Sighted::Through {
+            layers: self.layers.iter().map(|met| met.block.clone()).collect(),
+            beyond: Box::new(beyond),
         }
     }
 }
@@ -181,6 +291,24 @@ impl Voxels<'_> {
     /// would shrink the prediction, and a shrinking prediction is exactly what a
     /// one-sided comparison cannot see.
     pub fn drawn_block(&self, voxel: IVec3) -> Result<Option<&BlockName>, RegistryError> {
+        Ok(self.drawn_degree(voxel)?.map(|(block, _degree)| block))
+    }
+
+    /// That same block together with how much light the registry says it stops.
+    ///
+    /// The degree comes through
+    /// [`BlockDefinition`](mc_core::block::BlockDefinition), the door `drawn`
+    /// comes through and never the resolution the packer partitions on, so a
+    /// judge and a subject that were both wrong about a block would still have
+    /// to be wrong in two separate places.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RegistryError`] as [`drawn_block`](Self::drawn_block) does.
+    pub fn drawn_degree(
+        &self,
+        voxel: IVec3,
+    ) -> Result<Option<(&BlockName, Opacity)>, RegistryError> {
         let (Ok(x), Ok(y), Ok(z)) = (
             u32::try_from(voxel.x),
             u32::try_from(voxel.y),
@@ -198,7 +326,10 @@ impl Voxels<'_> {
         match self.world.block_at(x, y, z) {
             None => Ok(None),
             Some(Contents::Empty) => Ok(None),
-            Some(Contents::Holds(name)) => Ok(self.registry.resolve(name)?.drawn.then_some(name)),
+            Some(Contents::Holds(name)) => {
+                let definition = self.registry.resolve(name)?;
+                Ok(definition.drawn.then_some((name, definition.opacity)))
+            }
         }
     }
 
@@ -246,14 +377,58 @@ pub fn sighted_samples(
     size: SurfaceSize,
     voxels: &Voxels<'_>,
 ) -> Result<Vec<SightedSample>, RegistryError> {
+    Ok(crossed_samples(camera, size, voxels)?
+        .into_iter()
+        .map(|(pixel, crossed)| (pixel, crossed.sighted()))
+        .collect())
+}
+
+/// Everything the ray through `pixel` met, on a frame of `size` seen from
+/// `camera`.
+///
+/// The same march [`crossed_samples`] runs, over one pixel of a caller's own
+/// choosing rather than over the declared grid — which is what lets a reading
+/// ask whether a sample stands *inside* a silhouette by marching its immediate
+/// neighbours, instead of reading the answer off the frame it is judging.
+///
+/// # Errors
+///
+/// Returns [`RegistryError`] when the world holds a block `voxels`' registry
+/// does not register.
+pub fn crossed_at(
+    camera: &CameraPose,
+    size: SurfaceSize,
+    pixel: (u32, u32),
+    voxels: &Voxels<'_>,
+) -> Result<Crossed, RegistryError> {
+    let basis = Basis::of(camera);
+    crossed(basis.eye, basis.ray_through(pixel, &Lens::of(size)), voxels)
+}
+
+/// Everything the ray through each declared sample pixel met, in
+/// [`sample_pixels`] order.
+///
+/// The richer answer [`sighted_samples`] is a view of, and what a reading needs
+/// to predict a *colour*: a composition wants the facing each surface was
+/// entered by, because a block may draw a different image on each of its six.
+///
+/// # Errors
+///
+/// Returns [`RegistryError`] when the world holds a block `voxels`' registry
+/// does not register.
+pub fn crossed_samples(
+    camera: &CameraPose,
+    size: SurfaceSize,
+    voxels: &Voxels<'_>,
+) -> Result<Vec<CrossedSample>, RegistryError> {
     let basis = Basis::of(camera);
     let lens = Lens::of(size);
-    let mut sighted = Vec::new();
+    let mut crossings = Vec::new();
     for pixel in sample_pixels() {
-        let met = first_drawn(basis.eye, basis.ray_through(pixel, &lens), voxels)?;
-        sighted.push((pixel, met));
+        let met = crossed(basis.eye, basis.ray_through(pixel, &lens), voxels)?;
+        crossings.push((pixel, met));
     }
-    Ok(sighted)
+    Ok(crossings)
 }
 
 /// The sample pixels a ray cast from `camera` onto a frame of `size` meets a
@@ -324,75 +499,6 @@ pub fn pitched_down(camera: &CameraPose, degrees: f32) -> CameraPose {
     }
 }
 
-/// Where the camera stands and the three directions it stands in.
-///
-/// Built by hand from the pose. `right = forward × up` and `up = right ×
-/// forward` are the same two cross products the derived probes work the landmark
-/// pixel out with, and they are written here rather than shared, because two
-/// computations that share a step cannot check each other.
-///
-/// A forward direction parallel to the world's up axis would leave `right` with
-/// no length. The player's pitch is clamped to ±89°, so it cannot arise from a
-/// published camera; a caller handing this a degenerate pose gets a frame of
-/// `NaN` rays and a prediction of nothing, which the prediction floor is what
-/// catches.
-struct Basis {
-    eye: Vec3,
-    forward: Vec3,
-    right: Vec3,
-    up: Vec3,
-}
-
-impl Basis {
-    /// The basis `camera` implies.
-    fn of(camera: &CameraPose) -> Self {
-        let eye = Vec3::from_array(camera.eye);
-        let forward = (Vec3::from_array(camera.target) - eye).normalize();
-        let right = forward.cross(Vec3::Y).normalize();
-        Self {
-            eye,
-            forward,
-            right,
-            up: right.cross(forward),
-        }
-    }
-
-    /// The unit direction of the ray through the centre of `pixel`.
-    ///
-    /// The centre, at `pixel + 0.5`, because that is where a rasteriser samples
-    /// the pixel it is filling — an oracle that marched through the pixel's
-    /// corner would be judging the frame half a pixel away from where it looked.
-    fn ray_through(&self, pixel: (u32, u32), lens: &Lens) -> Vec3 {
-        let across = 2.0 * (pixel.0 as f32 + 0.5) / lens.width - 1.0;
-        let down = 1.0 - 2.0 * (pixel.1 as f32 + 0.5) / lens.height;
-        (self.forward
-            + self.right * (across * lens.aspect * lens.tan_half_fov)
-            + self.up * (down * lens.tan_half_fov))
-            .normalize()
-    }
-}
-
-/// How wide the frame is and how much of the world it takes in.
-struct Lens {
-    tan_half_fov: f32,
-    aspect: f32,
-    width: f32,
-    height: f32,
-}
-
-impl Lens {
-    /// The lens the renderer declares for a frame of `size`.
-    fn of(size: SurfaceSize) -> Self {
-        let projection = projection_for(size);
-        Self {
-            tan_half_fov: (projection.fov_y_radians * 0.5).tan(),
-            aspect: projection.aspect,
-            width: size.width as f32,
-            height: size.height as f32,
-        }
-    }
-}
-
 /// The first drawn voxel a ray cast from `camera` through `pixel` meets on a
 /// frame of `size`, and the facing of it the ray came in through.
 ///
@@ -432,126 +538,89 @@ pub fn first_drawn_face(
     Ok(None)
 }
 
-/// What a ray leaving `origin` along `direction` is looking at: the block of the
-/// first drawn voxel it meets, or sky where it met none inside [`MARCH_LIMIT`].
+/// Everything a ray leaving `origin` along `direction` meets: one entry per
+/// maximal run of a block that passes light, and then whatever stopped it.
 ///
 /// The voxel the eye already stands in counts, which is what makes an eye inside
-/// terrain a prediction of that terrain rather than of the sky beyond it.
-fn first_drawn(
-    origin: Vec3,
-    direction: Vec3,
-    voxels: &Voxels<'_>,
-) -> Result<Sighted, RegistryError> {
+/// opaque terrain a prediction of that terrain rather than of the sky beyond it.
+/// Where that voxel passes light it counts differently — it *opens* a run the
+/// march is already inside, so that run contributes no layer, which is this
+/// module's header's last paragraph falling out of one state variable rather
+/// than being a case beside the rule.
+fn crossed(origin: Vec3, direction: Vec3, voxels: &Voxels<'_>) -> Result<Crossed, RegistryError> {
     let mut march = March::of(origin, direction);
-    while march.travelled <= MARCH_LIMIT {
-        if let Some(block) = voxels.drawn_block(march.voxel)? {
-            return Ok(Sighted::Terrain(block.clone()));
+    let mut layers: Vec<Surface> = Vec::new();
+    // The kind of the cell the ray is inside, where that cell holds a block
+    // passing light. It is what makes a run maximal: a second cell of the same
+    // kind adds no layer, and anything else — air included — ends the run.
+    let mut running: Option<BlockName> = None;
+    let mut entered: Option<Facing> = None;
+    loop {
+        match met(voxels, &march, entered)? {
+            Met::Nothing => running = None,
+            Met::Stopping(surface) => {
+                return Ok(Crossed {
+                    layers,
+                    beyond: Some(surface),
+                });
+            }
+            Met::Passing(surface) => running = opening(&mut layers, running, surface),
         }
-        let _entered = march.step();
-    }
-    Ok(Sighted::Sky)
-}
-
-/// The facing a voxel was entered by, given which way the march is travelling on
-/// that axis: `lower` where it moves towards higher coordinates, and `higher`
-/// where it moves the other way.
-///
-/// A march never steps zero on the axis it chose, so the middle case is
-/// unreachable; it answers `lower` rather than carrying a fourth state nothing
-/// can produce.
-const fn entered_by(towards: i32, lower: Facing, higher: Facing) -> Facing {
-    if towards < 0 { higher } else { lower }
-}
-
-/// A ray walking the voxel grid one boundary crossing at a time.
-///
-/// Exact rather than sampled: stepping along the ray in fixed increments can
-/// pass through a voxel whose chord is shorter than the increment, which is
-/// precisely what happens where a ray clips the corner of a block — the places
-/// this oracle most needs to be right about. Crossing one boundary at a time
-/// cannot skip a voxel at all.
-struct March {
-    /// The voxel the ray is inside.
-    voxel: IVec3,
-    /// Which way each axis's voxel coordinate moves, as −1, 0 or +1.
-    towards: IVec3,
-    /// How far along the ray each axis's next boundary stands.
-    next: Vec3,
-    /// How far apart successive boundaries stand on each axis.
-    between: Vec3,
-    /// How far along the ray the current voxel was entered.
-    travelled: f32,
-}
-
-impl March {
-    /// The march of a ray leaving `origin` along the unit vector `direction`.
-    fn of(origin: Vec3, direction: Vec3) -> Self {
-        let voxel = origin.floor().as_ivec3();
-        Self {
-            voxel,
-            towards: IVec3::new(
-                towards(direction.x),
-                towards(direction.y),
-                towards(direction.z),
-            ),
-            next: Vec3::new(
-                boundary(origin.x, direction.x, voxel.x),
-                boundary(origin.y, direction.y, voxel.y),
-                boundary(origin.z, direction.z, voxel.z),
-            ),
-            between: direction.abs().recip(),
-            travelled: 0.0,
+        if march.travelled > MARCH_LIMIT {
+            return Ok(Crossed {
+                layers,
+                beyond: None,
+            });
         }
-    }
-
-    /// Crosses into the next voxel, which is the one on whichever axis's
-    /// boundary stands nearest, and answers the facing of it that was entered
-    /// through.
-    ///
-    /// A ray moving towards higher x enters the voxel it reaches by that
-    /// voxel's **negative** x side, which is what the pairing below says.
-    fn step(&mut self) -> Facing {
-        let next = self.next;
-        if next.x <= next.y && next.x <= next.z {
-            self.travelled = next.x;
-            self.voxel.x += self.towards.x;
-            self.next.x += self.between.x;
-            entered_by(self.towards.x, Facing::NegX, Facing::PosX)
-        } else if next.y <= next.z {
-            self.travelled = next.y;
-            self.voxel.y += self.towards.y;
-            self.next.y += self.between.y;
-            entered_by(self.towards.y, Facing::NegY, Facing::PosY)
-        } else {
-            self.travelled = next.z;
-            self.voxel.z += self.towards.z;
-            self.next.z += self.between.z;
-            entered_by(self.towards.z, Facing::NegZ, Facing::PosZ)
-        }
+        entered = Some(march.step());
     }
 }
 
-/// Which way a voxel coordinate moves as the ray advances along one axis.
-fn towards(direction: f32) -> i32 {
-    if direction > 0.0 {
-        1
-    } else if direction < 0.0 {
-        -1
+/// What the cell a march stands in is to the ray crossing it.
+enum Met {
+    /// Nothing drawn, so any run the ray was inside ends here.
+    Nothing,
+    /// A block that passes light, which opens or continues a run.
+    Passing(Surface),
+    /// A block that stops the ray.
+    Stopping(Surface),
+}
+
+/// What the cell `march` stands in is to a ray that entered it by `entered`.
+fn met(voxels: &Voxels<'_>, march: &March, entered: Option<Facing>) -> Result<Met, RegistryError> {
+    let Some((block, degree)) = voxels.drawn_degree(march.voxel)? else {
+        return Ok(Met::Nothing);
+    };
+    let surface = Surface {
+        block: block.clone(),
+        facing: entered,
+        along: march.travelled,
+    };
+    Ok(if degree.passes_light() {
+        Met::Passing(surface)
     } else {
-        0
-    }
+        Met::Stopping(surface)
+    })
 }
 
-/// How far along the ray the next voxel boundary on one axis stands.
+/// `surface` folded into the run the ray is already inside, answering the kind
+/// it is now inside.
 ///
-/// Infinite for an axis the ray does not move along, which is what keeps that
-/// axis from ever being the nearest boundary.
-fn boundary(origin: f32, direction: f32, voxel: i32) -> f32 {
-    if direction > 0.0 {
-        (voxel as f32 + 1.0 - origin) / direction
-    } else if direction < 0.0 {
-        (voxel as f32 - origin) / direction
-    } else {
-        f32::INFINITY
+/// A cell of the kind the ray was already crossing adds nothing — that is the
+/// run rule. A cell with no facing is the eye's own, which opens a run the march
+/// is already inside and contributes no layer, which is why a camera standing in
+/// a translucent volume gains nothing from it.
+fn opening(
+    layers: &mut Vec<Surface>,
+    running: Option<BlockName>,
+    surface: Surface,
+) -> Option<BlockName> {
+    if running.as_ref() == Some(&surface.block) {
+        return running;
     }
+    let block = surface.block.clone();
+    if surface.facing.is_some() {
+        layers.push(surface);
+    }
+    Some(block)
 }

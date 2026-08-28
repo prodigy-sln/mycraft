@@ -38,6 +38,7 @@ mod staged_layers;
 use std::error::Error;
 
 use mc_client::content::ContentView;
+use mc_core::block::Opacity;
 use mc_core::content::{FaceTextures, ResolvedBlock, ResolvedContent};
 use mc_core::id::{BlockName, TextureKey};
 
@@ -102,6 +103,7 @@ fn written_down() -> Result<ResolvedContent, Box<dyn Error>> {
             name: BlockName::parse(name)?,
             textures: FaceTextures::uniform(TextureKey::parse(texture)?),
             is_solid,
+            opacity: Opacity::OPAQUE,
         });
         assignment.push((texture, layer));
     }

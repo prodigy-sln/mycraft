@@ -36,7 +36,7 @@ use std::sync::Arc;
 use mc_client::launch::simulation_to_play;
 use mc_client::notice::changed_blocks;
 use mc_client::startup::acceptance_from;
-use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin, Opacity};
 use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_sim::persistence::Launching;
@@ -219,6 +219,7 @@ pub fn block(
         swimmable: false,
         move_resistance: 0.0,
         swim_ascent: 9.0,
+        opacity: Opacity::OPAQUE,
         origin: DefinitionOrigin::new("the changed-blocks fixture"),
     })
 }

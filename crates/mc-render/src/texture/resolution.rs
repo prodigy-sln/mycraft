@@ -1,5 +1,5 @@
-//! Which array-texture layer a block's face draws from: the block→faces map and
-//! the layer assignment, as one value.
+//! What a block's faces draw and how much light they stop: the block→appearance
+//! map and the layer assignment, as one value.
 //!
 //! **One type rather than two values travelling side by side**, and that is the
 //! whole reason this module exists. Both consumers of the question — the packer
@@ -26,19 +26,35 @@
 //! default. A section may still hold quads for a block a reload dropped, and
 //! inventing a key for one — from its name, or from any other block's row —
 //! draws a picture that is wrong in an entirely plausible way.
+//!
+//! **The declared opacity travels in the same row as the keys, for the same
+//! reason.** It decides which of the two terrain draws a face lands in, so a
+//! resolution answering "this block's keys" and "this block's opacity" out of
+//! two maps could answer the first and not the second — and a face resolved to a
+//! layer but not to a degree is exactly the plausible wrong picture the paragraph
+//! above is about. One row means the two answers are `Some` and `None` together.
 
 use std::collections::BTreeMap;
 
+use mc_core::block::Opacity;
 use mc_core::content::{Face, FaceTextures};
 use mc_core::id::{BlockName, TextureKey};
 
 use super::TextureLayers;
 
-/// What each block draws on each of its facings, and which layer each key
-/// occupies.
+/// Everything about one block a packer needs: what it draws on each facing, and
+/// how much light it stops.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BlockAppearance {
+    textures: FaceTextures,
+    opacity: Opacity,
+}
+
+/// What each block draws on each of its facings, how much light each stops, and
+/// which layer each key occupies.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TextureResolution {
-    blocks: BTreeMap<BlockName, FaceTextures>,
+    blocks: BTreeMap<BlockName, BlockAppearance>,
     layers: TextureLayers,
 }
 
@@ -49,13 +65,20 @@ impl TextureResolution {
     /// wrote and the assignment is what the session handed out, and a
     /// constructor computing one from the other would make every consumer agree
     /// with it by construction.
+    ///
+    /// A block arrives as its name, its six keys and its declared opacity
+    /// together, so there is no order of calls in which a block has one and not
+    /// the other.
     #[must_use]
     pub fn stating(
-        blocks: impl IntoIterator<Item = (BlockName, FaceTextures)>,
+        blocks: impl IntoIterator<Item = (BlockName, FaceTextures, Opacity)>,
         layers: TextureLayers,
     ) -> Self {
         Self {
-            blocks: blocks.into_iter().collect(),
+            blocks: blocks
+                .into_iter()
+                .map(|(name, textures, opacity)| (name, BlockAppearance { textures, opacity }))
+                .collect(),
             layers,
         }
     }
@@ -68,7 +91,21 @@ impl TextureResolution {
     /// the case that has to stay tellable.
     #[must_use]
     pub fn key_of(&self, block: &BlockName, face: Face) -> Option<&TextureKey> {
-        self.blocks.get(block).map(|textures| textures.at(face))
+        self.blocks
+            .get(block)
+            .map(|appearance| appearance.textures.at(face))
+    }
+
+    /// How much light `block` stops, or `None` where the content states no such
+    /// block.
+    ///
+    /// Partial in the same blocks [`key_of`](Self::key_of) is partial in, and
+    /// deliberately not defaulted to [`Opacity::OPAQUE`]: a block the resolution
+    /// never heard of is a block that draws nothing, and answering "it is
+    /// opaque" for one would put a face nobody resolved into the opaque draw.
+    #[must_use]
+    pub fn opacity_of(&self, block: &BlockName) -> Option<Opacity> {
+        self.blocks.get(block).map(|appearance| appearance.opacity)
     }
 
     /// The layers the array texture is filled from.

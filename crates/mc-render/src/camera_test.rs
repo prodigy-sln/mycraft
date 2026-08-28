@@ -177,6 +177,10 @@ fn section_holding(aabb: Aabb) -> SectionRecord {
         origin: [0, 0, 0],
         first_quad: 0,
         quad_count: 1,
+        // Every quad of this section stops all the light reaching it, which is
+        // what a section holding no declared translucency reports. Nothing the
+        // frustum answers depends on it.
+        opaque_quad_count: 1,
         aabb,
     }
 }

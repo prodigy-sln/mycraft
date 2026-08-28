@@ -262,6 +262,12 @@ defects: a phantom `error spawning child process` in one run, a cancellation in 
 and a false red invites "fixing" code that is correct, which is more expensive than the wait. Run it
 on a quiet tree.
 
+**On Windows the contended directory is no longer under `target/`.** ADR-031 moves the coverage
+target to `%SystemDrive%\mcv\<slot>`, the slot derived from the absolute repository root — so every
+mention of `target/llvm-cov-target` in this document names that path instead when the gate runs on
+Windows. The slot separates **worktrees**, not contexts: two runs in one checkout still share one
+directory and still fail exactly as described above and below. Run it on a quiet tree stands.
+
 The GPU suites have a related sensitivity: at nextest's default parallelism, nine test processes each
 holding its own device, buffer set and 256-layer array texture aborted a driver once
 (`code 0xc0000005`). It has not recurred at `--test-threads 2`; a nextest test-group for the GPU
@@ -4351,3 +4357,204 @@ good arm's opposite. It is denominated in the bound a run *expecting* an attempt
 times the attempt's own, for that reason and no other. `reload_watch/runs.rs` states the rule that a
 run's window must exceed what an attempt may take; a constant that violates a rule written six lines
 above it is what a reviewer, not a suite, is for.
+
+### The instrument is part of the claim, and it fails in three distinguishable ways
+
+The claim being made is never only "X is true". It is "X is true, **and here is the instrument that
+says so**". A reader who accepts the first half without the second has accepted something nobody
+checked, and the three ways that happens have three different tells. Every one of the three was
+committed by a real agent inside SPEC-031, the third by two of them independently inside one phase,
+which is what makes this a taxonomy rather than a warning.
+
+**1 — Unrun instrument: a prediction phrased as an observation.** Nothing was measured; a sentence in
+the past tense says otherwise. The tell is the **grammar**, and it is reliable enough to grep for:
+*"therefore it has never"*, *"with the variable set"*, *"six of these need a device"*. Each is a claim
+about what a run *would* report, written in the shape of what a run *did* report. The repair is not to
+soften the wording — it is to run the thing, and where it cannot be run, to say which reading is
+missing and why. §2's rule that a green suite is no evidence about a lint is this failure with the
+instrument named.
+
+**2 — Wrong instrument: a real measurement of the wrong quantity.** Something was genuinely run; it
+answered a different question. `wc -l` counts every line and the gate counts non-blank ones, so a file
+the gate accepts at 560 is reported over budget at 640. The tell is **implausible scale**: a
+measurement that indicts everything is indicting its own instrument. Nine files over a limit that has
+been green for six phases is not nine defects. Before reporting a sweep, check one case by the
+instrument that actually decides, and prefer that instrument outright where it can be invoked.
+
+**3 — State read as cause: evidence for *what is*, extended into *why*.** The observation is correct
+and the inference is not, because more than one history produces it. The tell is a question that can
+be asked mechanically: **would a second cause leave an identical observation?** A reverting mutation
+probe and a premature edit leave the same tree. A stale filesystem stat entry and a live editor leave
+the same ` M`. A file byte-identical to `HEAD` says nothing whatever about who touched it or when —
+`git hash-object <path>` against `git rev-parse :<path>` answers *whether it differs*, and no
+comparison of a tree against itself answers *why*. Where the cause matters, the instrument has to be
+one that records history: a reflog, a commit, an announced window with a recorded failing count.
+
+**The taxonomy caught its own author four commits after it was written, and that is recorded rather
+than tidied away.** Investigating whether a figure's premise had moved, the same context measured four
+composite colours against `base:stone` and reported one at ΔE 5.98 as a possible tolerance failure.
+They were `base:dirt` composites: **"lakebed" was taken to mean stone without checking which layer the
+lakebed is made of.** A real measurement, of the wrong quantity — entry 2, exactly. Two things follow.
+**The wrong-instrument tell is not always an implausible magnitude; sometimes it is a noun nobody
+verified.** And **the enumeration is what caught it** — not care, and not the author's own knowledge of
+the rule, which had been written down days earlier and did not help.
+
+**The rate did not fall with practice, and that is the finding rather than an aside.** Inside one
+phase, after the entry above was written, the same context stated the wrong *quantity* three times: a
+composite measured against a layer that is not its operand; a ceiling taken as the minimum over one
+column when two bounded the same thing; and a tolerance bracket taken from the layer-against-layer
+question when a blend is bound by composite-against-its-own-operands — that last worth a factor of four
+in the claimed headroom, `(4.3, 24.93)` where the truth was `(4.3, 9.46)`. **All three corrections came
+from somebody asking *which quantity is that*, and none from the arithmetic being re-checked.** The
+arithmetic was right every time. The third was found only by re-applying the question to text nobody
+had pointed at, which is what distinguishes fixing a class from fixing an instance.
+
+**A fault whose rate does not fall with repetition is not an attention problem, and instructing people
+to be careful about it will not work.** That is why this entry prescribes *enumerating the family* and
+*naming the quantity* rather than prescribing care: care was present, the rule was known, its author
+had written it days earlier, and none of that helped. What helped was a mechanical question asked by a
+second party. **Build the question into the procedure, or expect the fourth instance.**
+
+**What ties the three together** is that each looks exactly like a passing step in a report. An unrun
+instrument reads as a run one; a wrong instrument reads as a damning result; a cause read off state
+reads as a diagnosis. So the discipline is not scepticism about conclusions — it is that **a reading
+names its instrument**, and a reading whose instrument is not named has not been taken.
+
+### A coverage audit names an instrument, and the question is which property that instrument asserts
+
+The wrong-instrument family above applies to coverage as readily as to a figure, and there it deletes
+tests. A scenario audit removed a duplicate scenario on the ground that *"`golden_inventory` already
+proves it, and the measured hole was the sidecars"*. **`golden_inventory` did not open a sidecar at
+all** — its checks compared directory *names* against declared ids, and its only mention of provenance
+was a doc comment. The audit named a real instrument and was wrong about **what that instrument
+measures**. `grep -rn 'get("capture")' crates/ --include=*.rs` returned **zero** across the whole
+repository: the value existed in four committed files and was compared by nothing.
+
+The question that catches it is not *does an instrument exist* but **which property does that
+instrument actually assert?** — answered by reading the instrument, never by reading its name. **A
+deletion justified by a false premise is more dangerous than an absence, because it looks reasoned.**
+
+This is the second recorded instance. *The near miss* under the mutation-count discipline above is the
+first: a scenario cut on the claim that another covered the same drain guard, measured false in the
+next phase, which would have shipped a mutation with zero falsifiers. Both cuts were argued; neither
+premise was read. A cut that removes a falsifier is owed the same evidence as a claim about the
+product, and that evidence is the instrument's assertions, quoted.
+
+### When a guard and a document disagree, the guard is usually the one shaped wrongly
+
+A guard over prose that matches literal phrases constrains how a sentence may be written. The moment
+it does, **it has stopped checking the document and started editing it** — and the pressure lands on
+the reader, because the cheapest way to green it is always to write worse prose.
+
+Measured on SPEC-031: a documentation guard looked for `"Depth-write off in the second draw"` against a
+sentence reading `Depth-write **off** in the second draw`, with the emphasis on the word the sentence
+turns on. Removing that emphasis to satisfy a matcher would have been an agreement test relocated into
+documentation, paid for in legibility.
+
+**The test to apply is: which of the two has a reader?** The document does; the guard does not. So the
+guard moves.
+
+- **Prefer reading a structure over matching a phrase.** The repair there was to read the pass table's
+  `depth write` column rather than a sentence about it — after which emphasis, rewording and sentence
+  order are all free, and the guard still reddens if the document stops stating the setting.
+- **Where there is no structure to read, normalise before matching** — emphasis markers out of both
+  haystack and needle. This is a patch rather than a fix: it frees a bolded word and still breaks on a
+  reworded clause, so it belongs only where nothing structural exists to key on.
+- **Compare stated numbers against measured ones, never against constants copied into the test.** A
+  guard checking a list of strings against prose written to contain them is two copies agreeing with
+  each other, and neither has to be true about the engine.
+
+### `git diff --exit-code` isolates a revert only where the file's other work is committed
+
+`standards/global/git-workflow.md` says to revert a mutation by hand and confirm with
+`git diff --exit-code`, and this document leans on that check in three places above. It is right, and
+it has a precondition the sentence does not state. A mutation made in a file that **also carries
+uncommitted work** leaves `git diff` non-empty whether the revert succeeded or not, so the check cannot
+answer the question it is being asked — and it fails *open*, reading as "still dirty, as expected".
+That is exactly the position an implementer is in mid-task, which is the position the protocol is most
+often reached for from. The remedy is not a better command: **commit the file's own work before
+mutating it**, and the standing check works as written.
+
+A whole-file hash is the substitute, and it answers a third question. With `core.autocrlf=input` git
+normalises line endings before hashing, so `git hash-object` and `sha256sum` disagree by construction
+about a file whose endings moved. Which to reach for:
+
+| Question | Instrument |
+|---|---|
+| is the *content* back, as git will record it | `git hash-object <file>` against `git rev-parse :<file>` |
+| is the *file* back, byte for byte on disk | `sha256sum` against a baseline taken before mutating |
+| is *this file's* diff empty | `git diff --exit-code`, **only** where its other work is committed |
+
+Measured twice on SPEC-031, in opposite directions. A Python text-mode write on Windows rewrites a
+newline as a carriage-return pair, so an edit script silently converted two shaders LF to CRLF:
+`sha256sum -c` failed on a file whose content was correct, and only the byte-level reading could say
+which kind of difference it was. Later the same files read *clean* under `git hash-object` and
+`git diff` while `git status` reported them modified — racily-clean stat entries that survived
+`git update-index --really-refresh` and cleared only when the index was rewritten by naming those paths
+to `git add`. **One instrument said changed and the other said unchanged, and each was right about its
+own question.**
+
+**A mutation window is the fourth producer of that phantom, and the reflex it invites is the dangerous
+one.** The sightings above came from file rewrites; the fourth came from a mutate-then-revert-by-hand
+cycle, which this project runs deliberately and will keep running. The hazard is not the entry, it is
+the reading a person forms of it — `git status` says modified after I reverted by hand reads as **my
+revert failed**, and the reflex that follows is `git checkout -- <file>`, the one command
+`git-workflow.md` bans by name because it once wiped an uncommitted implementation in this repository.
+
+> **After a by-hand revert, expect the entry.** Confirm the revert with `git diff --numstat` or the
+> three-way identity of worktree, index and `HEAD`, and clear it by naming the single path to
+> `git add` — which rewrites the stat entry and stages nothing while the content matches. **Never
+> `git checkout --`.**
+
+The artefact belongs to whoever's mutation produced it, **even when the file is somebody else's**:
+ownership of the litter is not ownership of the code. That is what lets the person who cannot stage the
+path ask, and the person who can clear it, without either breaking the staging rule.
+
+**Stated at its true severity: nothing would have reached `main`.** The index holds LF and git
+normalises on commit, so the conversion was invisible past the working tree. What it cost was a wrong
+answer from a revert check, at the one moment that check is load-bearing. `.gitattributes` already
+calls line endings the one thing standing between a golden and a line-ending rewrite, and pins them for
+byte-sensitive goldens; this is that hazard's other face — not a golden being rewritten, but an
+evidence check unable to tell a rewrite from a change.
+
+### A run scoped to what you expect to move cannot report what you did not expect to move
+
+A commit that moved the appearance byte broke a save-format guard in a crate nobody had listed. The run
+taken to check it was scoped to the four save binaries the task was expected to touch, reported
+`15 tests run: 15 passed`, and said nothing whatever about the guard. The unscoped run is what caught
+it — and it paid twice, because that same broken guard turned out to hold a hand-built expected record
+whose four hashes were byte-identical to a fixture minted by an entirely different program, which is
+the strongest corroboration that fixture has.
+
+This is the same shape as a cancelled `N/M` count under §2: a result that reads like a verdict and is
+only a sample. **A scoped run answers "did what I changed break what I predicted"; it is not evidence
+about the suite.** Scope a run to shorten a debugging loop, never to close a phase or to support a
+claim that nothing else moved.
+
+### Removing a false scenario and correcting a true one are different acts
+
+Two scenarios on SPEC-031 came under dispute and were dispositioned in opposite directions, which is
+the useful part.
+
+**FR-1.3-S1 was left alone.** It was **true as written** — an implication, not a biconditional — and it
+simply did not adjudicate a dispute an "only if" had been read into it. Amending it would have put a
+correction in the record for a scenario that was never wrong, sending a later reader looking for a
+defect that does not exist. The dispute was settled against the architecture document instead, which is
+what actually bound.
+
+**FR-3.3-S1 was amended.** Its `WHERE` clause had two readings and it was **false under both** given
+the engine the architecture had chosen: under one the scenario contradicted a binding decision, under
+the other it fired never and left its requirement with no falsifier at all. A condition on which model
+gets chosen is dead weight once the choice is binding, so the clause was dropped rather than repaired.
+
+> **A scenario is amended when it is false under a binding decision, and left when it is merely
+> under-specific.** The record a spec leaves is read by someone reconstructing intent, and an amendment
+> is read as evidence that something was wrong. Spending that signal on a scenario that was correct
+> costs more than the ambiguity it was meant to tidy.
+
+The sequencing is worth one line, because it briefly made the record self-contradictory: the commit
+reconciling the test file and `test-map.md` against the amendment landed **before** the amended wording
+and the decision it cited existed, so for two commits the spec stated the original wording while two
+other documents said it had been replaced and named a decision that could not be read. **An amendment
+lands wording-first, or a reader meeting the halves out of order reads a sequencing mistake as a second
+dispute.**

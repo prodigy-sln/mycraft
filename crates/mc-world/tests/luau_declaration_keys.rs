@@ -69,7 +69,7 @@ use tempfile::TempDir;
 /// satisfied it exactly as a correct one did. [`fields_the_refusal_quotes`] reads
 /// the list out of the refusal instead, which makes a missing name, an extra name
 /// and a reordering three different failures.
-const RECOGNISED_FIELDS: [&str; 12] = [
+const RECOGNISED_FIELDS: [&str; 13] = [
     "name",
     "texture",
     "solid",
@@ -82,6 +82,7 @@ const RECOGNISED_FIELDS: [&str; 12] = [
     "swimmable",
     "move_resistance",
     "swim_ascent",
+    "opacity",
 ];
 
 /// A field name nobody recognises, and the shape of the mistake that produces
@@ -321,6 +322,7 @@ fn a_declaration_stating_every_recognised_field_and_nothing_else_registers() -> 
             raw_field("swimmable", "false"),
             raw_field("move_resistance", "0"),
             raw_field("swim_ascent", "0"),
+            raw_field("opacity", "1"),
         ]),
     )?;
 

@@ -34,6 +34,7 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::sync::{Arc, OnceLock};
 
+use mc_core::block::Opacity;
 use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_render::camera::{CameraView, Frustum, projection_for, view_projection, visible_sections};
@@ -147,7 +148,15 @@ pub fn assemble(sections: &[(SectionOrigin, Vec<Quad>)]) -> Result<Fixture, Box<
         // differing state them apart for themselves.
         let key = TextureKey::parse(quad.block.as_str())?;
         keys.insert(key.clone());
-        stated.push((quad.block.clone(), FaceTextures::uniform(key)));
+        // Every block of every fixture in this crate stops all the light
+        // reaching it. A scenario about what a declared translucency draws needs
+        // a declaration behind it, and this crate may not read a content root at
+        // all; those readings live where a root can be written.
+        stated.push((
+            quad.block.clone(),
+            FaceTextures::uniform(key),
+            Opacity::OPAQUE,
+        ));
     }
     let resolution = TextureResolution::stating(stated, TextureLayers::resolve(&keys));
     let built = sections

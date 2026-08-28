@@ -14,7 +14,7 @@
 //! `deny_unknown_fields` was TOML's, and a host that can read a named field but
 //! cannot ask what fields exist can never tell a typo from an absence.
 //!
-//! # What a `texture` may say, and what a number may be, are modules of their own
+//! # What a `texture` may say, what a number may be, and what `opacity` may be said beside, are modules of their own
 //!
 //! [`texture`] holds the reading of that one field and the refusals it raises:
 //! it is the field with two forms, one of which is a table with a shape of its
@@ -25,7 +25,11 @@
 //! same arrangement for the other end of a declaration: it holds what a stated
 //! number may be, the four ways one can be wrong, and the two fields that read
 //! one, so that a third number added later inherits all of it by calling one
-//! function rather than by being remembered.
+//! function rather than by being remembered. [`opacity`] is the third, and it
+//! exists for a reason neither of those has: it is the only field whose
+//! acceptance depends on **another field**, so the rule deciding it belongs
+//! neither beside the reading of its number nor in the middle of the check that
+//! reads every field in turn.
 //!
 //! # Nothing here runs the mod's code
 //!
@@ -44,6 +48,7 @@ use mc_core::id::BlockName;
 use mc_script::{FieldNames, ScriptHost, ScriptTable, ScriptValue};
 
 mod number;
+mod opacity;
 mod texture;
 
 /// The key a declaration names itself by.
@@ -70,6 +75,8 @@ const SWIMMABLE_FIELD: &str = "swimmable";
 const MOVE_RESISTANCE_FIELD: &str = "move_resistance";
 /// The key a declaration states how fast its volume lifts a swimmer in.
 const SWIM_ASCENT_FIELD: &str = "swim_ascent";
+/// The key a declaration states how much light it stops in.
+pub(super) const OPACITY_FIELD: &str = "opacity";
 
 /// Every field name a declaration may state, in the order the documentation
 /// introduces them.
@@ -82,7 +89,7 @@ const SWIM_ASCENT_FIELD: &str = "swim_ascent";
 /// `docs/modding/README.md`. Growing it means editing all three, and the guard
 /// sweeps every page under `docs/modding/` rather than a named one, so a page
 /// missed is a page reported.
-const RECOGNISED_FIELDS: [&str; 12] = [
+const RECOGNISED_FIELDS: [&str; 13] = [
     NAME_FIELD,
     TEXTURE_FIELD,
     SOLID_FIELD,
@@ -95,6 +102,7 @@ const RECOGNISED_FIELDS: [&str; 12] = [
     SWIMMABLE_FIELD,
     MOVE_RESISTANCE_FIELD,
     SWIM_ASCENT_FIELD,
+    OPACITY_FIELD,
 ];
 
 /// How many field names the loader will read out of one declaration.
@@ -187,6 +195,7 @@ fn check(
     let swimmable = defaulting_to(host, declaration, SWIMMABLE_FIELD, SWIMMABLE_BY_DEFAULT)?;
     let move_resistance = number::declared_resistance(host, declaration)?;
     let swim_ascent = number::declared_ascent(host, declaration)?;
+    let opacity = opacity::declared(host, declaration, occludes)?;
     Ok(BlockDefinition {
         name: BlockName::parse(&name).map_err(|error| FieldFault::invalid(NAME_FIELD, &error))?,
         textures,
@@ -200,6 +209,7 @@ fn check(
         swimmable,
         move_resistance,
         swim_ascent,
+        opacity,
         origin: origin.clone(),
     })
 }

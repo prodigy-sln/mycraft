@@ -170,11 +170,21 @@ loads and does nothing.
 | `swimmable` | **yes**, in behaviour, on the next tick: whether holding jump lifts a player inside it. Nothing is re-meshed for it |
 | `move_resistance` | **yes**, in behaviour, on the next tick: how much the block's volume slows what moves through it. Nothing is re-meshed for it |
 | `swim_ascent` | **yes**, in behaviour, on the next tick: how fast the block's volume lifts a swimmer holding jump. Nothing is re-meshed for it |
+| `opacity` | **yes** — how much you see through the block changes on the next batch. Nothing is re-meshed and no texture is uploaded: the faces move between the opaque and the blended draw and the degree is rewritten into the geometry already built |
 
 **What decides a re-mesh is `drawn`, `occludes` and the six keys — and nothing
 else.** Editing `solid`, `targetable`, `replaceable`, `breakable`, `breaks_into`,
 `swimmable`, `move_resistance` or `swim_ascent` changes what the world *does*
 without changing what it looks like, so no section is built again.
+
+**`opacity` is the one field that changes what the world looks like without
+re-meshing it**, and it is worth knowing which of the two you are watching.
+Nothing about *which faces exist* depends on the degree, so the mesh the world
+already has is the right one; what changes is which draw each face goes into and
+what number it carries. That work happens when the geometry is packed, which is
+the step after meshing and runs on every batch anyway. So editing a degree is
+cheaper than editing `occludes` — and if you edit both at once you pay for the
+re-mesh, because `occludes` asked for one.
 
 **Editing `solid` alone still redraws, and it is worth knowing why**, because the
 answer changes the moment you write one more line. `drawn` and `occludes` default
@@ -434,7 +444,7 @@ are the launch refusals** — same loader, same words — under the reload's own
 sentence. This one is `solid` typed as `slid`:
 
 ```
-mycraft: the content root could not be taken up: the content root could not be read: the content root's blocks could not be read: content/base/blocks/stone.luau, block `base:stone`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`
+mycraft: the content root could not be taken up: the content root could not be read: the content root's blocks could not be read: content/base/blocks/stone.luau, block `base:stone`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`, `opacity`
 ```
 
 The fields it lists are the whole set a declaration may state, which makes this the one

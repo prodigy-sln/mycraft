@@ -76,8 +76,26 @@ beach.
 
 What you see is the **surface and the edges only**. Water does not draw the
 insides of itself, so a body of it looks like one sheet rather than a stack of
-panes, and it does not hide what is underneath: the sand and stone of the lakebed
-show through, which is what makes it read as water rather than as a lid.
+panes.
+
+**And as of this build the sea is see-through.** Stand on the shore and look
+into it: the **lakebed** is there under the water, seen through the blue rather
+than hidden behind it. Half the light reaching a face of water carries on
+through, so what you get is the lakebed's own colour mixed evenly with the sea's
+— green under blue, because the lakebed here is **grass**, the same turf the
+beach is made of carrying on under the water. Past the far edge of the water it
+is the sky behind it instead.
+
+**Until this build the sea was a flat sheet of blue.** The lakebed under it was
+already being drawn — that part is not new — but the surface was drawn over the
+top of it and stopped all of the light, so from the shore you saw blue and
+nothing else. This page used to say the *sand and stone* of the lakebed showed
+through, and it was wrong on both counts: there is no sand in the game at all,
+and no stone lies under this sea anywhere.
+
+How much light a block stops is the block's own business rather than the
+engine's — water declares `opacity = 0.5` in `content/base/blocks/water.luau` —
+so a mod may make anything it likes see-through the same way.
 
 **You can swim in it.** Walk off the shore and you no longer drop to the lakebed
 like a stone — the sea slows everything that moves through it, so you sink into
@@ -152,9 +170,11 @@ behaviour changes is told three times, on three separate launches: once now, and
 once more each time the record moves again. Nothing is wrong when that happens,
 and there is nothing to fix.
 
-**The looks record moved when the game got real art.** Grass, dirt and stone
-draw pictures now where they drew generated stand-ins before, and grass draws six
-of them where it drew one. A world saved before that build comes back with every
+**The looks record moved when the game got real art**, and **it has moved again
+in this build**, because how much light a block stops is now part of what a block
+looks like. Grass, dirt and stone draw pictures where they drew generated
+stand-ins before, and grass draws six of them where it drew one; water now says
+how see-through it is. A world saved before either build comes back with every
 block counting as retextured — and **nothing is said about it**, because a
 message after every art change is what teaches people that a message means
 nothing. The world opens as normal: your terrain, your edits and where you were

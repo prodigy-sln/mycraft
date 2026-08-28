@@ -134,6 +134,15 @@ const CONTROL_PITCH_DEGREES: f32 = 3.0;
 /// that was unreachable before this feature: for as long as the mesher and the
 /// judge both decided by solidity, no ray could stop at water and no sample could
 /// be classified as it.
+///
+/// **It is the list of *parts*, and that is what a degree below one changed.** A
+/// ray crossing something that passes light is classified as every run it
+/// crossed and then what it met beyond them, joined by [`oracle::OVER`]. So a
+/// class is split back into its parts and every part is looked for here — which
+/// keeps the comparison total across a change that turned five possible answers
+/// into every sequence that can be made of them, and would otherwise have
+/// reported the shipped sea's own classification as a class the world does not
+/// place.
 const THE_CLASSES: [&str; 5] = [
     oracle::SKY,
     "base:dirt",
@@ -234,6 +243,44 @@ fn every_declared_sample_of_every_judged_frame_is_sky_or_a_block_the_world_place
          a march that stopped classifying; and a frame without the sea is a camera that cannot \
          see it, which is the state this feature found the declared spawn in",
         oracle::SAMPLE_COUNT
+    );
+    Ok(())
+}
+
+/// The control on the reading above, and it is the half that says the verdict
+/// can still see anything.
+///
+/// **A class list short by one name, over the same march.** The classification
+/// is no longer a flat set of five words: a ray crossing something that passes
+/// light is described as the runs it crossed joined to what it met beyond them,
+/// and the verdict decomposes that back into parts. A decomposition that had
+/// come to match everything — a split on the wrong separator, a comparison that
+/// fell back to `contains`, a class list quietly widened — would report an empty
+/// list forever, and `EveryPixelAccounted`-shaped good news is exactly what
+/// nobody re-reads.
+///
+/// The name withheld is the sea's, deliberately: it is the one this spec moves
+/// from a class of its own into a part of a composite, so the same reading has
+/// to find it on both sides of that change or it has stopped following it.
+#[test]
+fn a_class_the_declared_list_does_not_hold_is_named_rather_than_passed_over() -> TestResult {
+    let short: Vec<&str> = THE_CLASSES
+        .into_iter()
+        .filter(|class| *class != WATER)
+        .collect();
+    let classified = classifications_against(&JUDGED_TICKS, &short)?;
+
+    assert_eq!(
+        classified
+            .iter()
+            .map(|one| one.outside_the_declared_classes.clone())
+            .collect::<Vec<_>>(),
+        JUDGED_TICKS.map(|_| vec![WATER.to_owned()]).to_vec(),
+        "every judged frame sees the sea, so a list of classes that does not name it has to have \
+         the sea reported back against it — at every tick, and named rather than counted. This is \
+         the same summary the reading above runs, over the same march, with one name withheld: \
+         what it proves is that the verdict of nothing-outside is a verdict and not a scan that \
+         can no longer look. Reported: {classified:#?}"
     );
     Ok(())
 }
@@ -421,6 +468,14 @@ const NONE_AT_ALL: &str = "the sea at no sample at all";
 /// What the march classifies each declared sample as, at each of `ticks`, with
 /// no device involved.
 fn classifications(ticks: &[u32]) -> Result<Vec<Classified>, Box<dyn Error>> {
+    classifications_against(ticks, &THE_CLASSES)
+}
+
+/// That same classification judged against a stated list of classes.
+fn classifications_against(
+    ticks: &[u32],
+    allowed: &[&str],
+) -> Result<Vec<Classified>, Box<dyn Error>> {
     let prepared = prepare_scene()?;
     let voxels = Voxels {
         world: &prepared.world,
@@ -430,9 +485,10 @@ fn classifications(ticks: &[u32]) -> Result<Vec<Classified>, Box<dyn Error>> {
     for tick in ticks {
         let camera = support::frames::player_pose(*tick, &prepared.world, &prepared.registry)?;
         let sighted = oracle::sighted_samples(&camera, CAPTURE_SIZE, &voxels)?;
-        classified.push(summarised(
+        classified.push(summarised_against(
             *tick,
             sighted.iter().map(|(_, sighted)| sighted.described()),
+            allowed,
         ));
     }
     Ok(classified)
@@ -443,12 +499,26 @@ fn classifications(ticks: &[u32]) -> Result<Vec<Classified>, Box<dyn Error>> {
 /// The classes arrive as the words a tally is keyed by rather than as the
 /// classifications themselves, so the comparison this feeds is over the same
 /// spelling on both sides and a block name cannot arrive under the sky's word.
-fn summarised(tick: u32, classes: impl Iterator<Item = String>) -> Classified {
+/// The summary is taken against a stated list of classes rather than against the
+/// declared one.
+///
+/// **The list is a parameter so the reading can be driven over a short one.** A
+/// verdict that only ever reports an empty list is a verdict nobody has seen
+/// fail, and the way this one would stop being able to look is a decomposition
+/// that quietly matched everything — which a list short by one name catches and
+/// a hand-written class list would not, because it would not go through the same
+/// march.
+fn summarised_against(
+    tick: u32,
+    classes: impl Iterator<Item = String>,
+    allowed: &[&str],
+) -> Classified {
     let classes: Vec<String> = classes.collect();
     let mut outside: Vec<String> = classes
         .iter()
-        .filter(|class| !THE_CLASSES.contains(&class.as_str()))
-        .cloned()
+        .flat_map(|class| class.split(oracle::OVER))
+        .filter(|part| !allowed.contains(part))
+        .map(str::to_owned)
         .collect();
     outside.sort();
     outside.dedup();
@@ -456,7 +526,10 @@ fn summarised(tick: u32, classes: impl Iterator<Item = String>) -> Classified {
         tick,
         outside_the_declared_classes: outside,
         samples: classes.len(),
-        sea: if classes.iter().any(|class| class == WATER) {
+        sea: if classes
+            .iter()
+            .any(|class| class.split(oracle::OVER).any(|part| part == WATER))
+        {
             AT_LEAST_ONE
         } else {
             NONE_AT_ALL

@@ -117,6 +117,74 @@ pub fn landmarks(key: &TextureKey, supplied: &SuppliedTexels) -> Vec<[u8; 3]> {
     found
 }
 
+/// Every colour a face drawn from `texels` may show at any distance, ascending.
+///
+/// **A superset of [`landmarks`] and deliberately not a replacement for it.** A
+/// magnified face shows one texel and a fully minified one shows the layer's
+/// mean, which is what `landmarks` answers; between those two a face shows a
+/// *reduced* texel — the average of four, then of sixteen, and so on — and a
+/// reduction lands nowhere near either end for a layer whose texels differ.
+/// Measured on the shipped set: a grass side is four fifths dirt with a strip of
+/// turf across its top, and a pixel of one at middle distance stands as far as
+/// **ΔE 16.14** from every colour `landmarks` offers. That is not a renderer
+/// fault and it is not a tolerance's business; it is a colour the layer really
+/// does show.
+///
+/// **The reduction is written here and shares no code with
+/// `mc_render::texture::mip`**, for the reason this module's header gives about
+/// the transfer function: the mip chain is what *produces* those pixels, so an
+/// oracle calling into it would be checking an arithmetic against itself. What
+/// is written here is the obvious repeated 2 × 2 average in linear light, and
+/// `mip_test.rs` is where the shipped reduction is judged.
+///
+/// **`landmarks` is left alone on purpose.** Every reading that already judges a
+/// pixel against a layer accepts a narrower set than this, and widening that set
+/// under them would loosen controls this change has no business loosening.
+#[must_use]
+pub fn landmarks_at_every_scale(texels: &[[u8; 4]], edge: u32) -> Vec<[u8; 3]> {
+    let mut found: BTreeSet<[u8; 3]> = BTreeSet::new();
+    let mut level = texels.to_vec();
+    let mut side = edge;
+    loop {
+        found.extend(
+            level
+                .iter()
+                .map(|[red, green, blue, _]| [*red, *green, *blue]),
+        );
+        if side <= 1 || level.len() < (side * side) as usize {
+            break;
+        }
+        level = halved(&level, side);
+        side /= 2;
+    }
+    found.into_iter().collect()
+}
+
+/// `level`, a `side` by `side` image, reduced to one of half that edge by
+/// averaging each 2 × 2 block in linear light.
+fn halved(level: &[[u8; 4]], side: u32) -> Vec<[u8; 4]> {
+    let half = side.div_euclid(2);
+    (0..half * half)
+        .map(|at| quad_mean(level, side, at.div_euclid(half), at % half))
+        .collect()
+}
+
+/// The 2 × 2 block of `level` at `down` and `across`, averaged in linear light.
+///
+/// Opaque by construction: a reduction is about colour, and the alpha channel
+/// is reduced where it stands by the module this one shares no code with.
+fn quad_mean(level: &[[u8; 4]], side: u32, down: u32, across: u32) -> [u8; 4] {
+    let quad: Vec<[u8; 4]> = [(0, 0), (1, 0), (0, 1), (1, 1)]
+        .iter()
+        .filter_map(|(right, below)| {
+            level.get((((2 * down + below) * side) + (2 * across + right)) as usize)
+        })
+        .copied()
+        .collect();
+    let [red, green, blue] = linear_mean(&quad);
+    [red, green, blue, 255]
+}
+
 /// The colour `texels` average to in linear light.
 ///
 /// Each stored byte is decoded through the sRGB transfer function, the channel
@@ -362,6 +430,35 @@ fn color_stated_in(written: &str) -> Option<[u8; 3]> {
     Some(channels)
 }
 
+/// `src` laid over `dst` at `alpha`, in linear light and re-encoded.
+///
+/// **`src-over`, and the arithmetic is the whole point of it being here.** The
+/// colour attachment is `Rgba8UnormSrgb`, so the hardware decodes both operands
+/// to linear light, mixes them, and encodes the answer back — an expectation
+/// computed on the stored bytes is a different number, and at a half blend
+/// between two of this suite's fixture colours it stands ΔE 15.60 from the right
+/// one. That is far past what any reading here calls two colours the same, so it
+/// is a red test whose cheapest green is a looser tolerance, which is exactly the
+/// mistake this function exists to make impossible.
+///
+/// The transfer pair it goes through is the one declared at the foot of this
+/// module, written from IEC 61966-2-1 and sharing no code with
+/// `mc_render::texture::mip` or with anything in the draw path.
+///
+/// `alpha` is the **declared** degree and never the byte a packed vertex
+/// carries. The quantisation between the two is a term on the measured-error
+/// side of a tolerance — at most ΔE 0.47 over this suite's fixtures — and
+/// folding it into the expectation instead would be the prediction quietly
+/// adopting the encoding it is meant to be independent of.
+#[must_use]
+pub fn composited(src: [u8; 3], dst: [u8; 3], alpha: f64) -> [u8; 3] {
+    let mut mixed = [0u8; 3];
+    for ((channel, over), under) in mixed.iter_mut().zip(src).zip(dst) {
+        *channel = to_stored(alpha.mul_add(to_linear(over), (1.0 - alpha) * to_linear(under)));
+    }
+    mixed
+}
+
 /// The texels the built set under `root` offers, read the way a launch reads
 /// them.
 ///
@@ -402,4 +499,48 @@ fn to_stored(linear: f64) -> u8 {
         TRANSFER_SCALE * clamped.powf(1.0 / TRANSFER_EXPONENT) - TRANSFER_OFFSET
     };
     (encoded * STORED_MAX).round() as u8
+}
+
+/// How far the furthest texel of `key`'s layer stands from that layer's own
+/// linear-light mean, in ΔE.
+///
+/// **The layer's spread, measured rather than quoted.** It is the term every
+/// tolerance in this suite carries on its measured-error side, and it is a
+/// property of an image on disk — so a reading that states it can be checked
+/// against the image instead of against a number somebody wrote down.
+///
+/// # Errors
+///
+/// Returns an error for a key with no texels at all, or the distance metric's
+/// own failure.
+pub fn spread_of(key: &str, supplied: &SuppliedTexels) -> Result<f64, Box<dyn Error>> {
+    let texels = drawn_texels(&TextureKey::parse(key)?, supplied);
+    let mean = linear_mean(&texels);
+    let mut widest: Option<f64> = None;
+    for [red, green, blue, _] in &texels {
+        let apart = distance([*red, *green, *blue], mean)?;
+        widest = Some(widest.map_or(apart, |held: f64| held.max(apart)));
+    }
+    widest.ok_or_else(|| {
+        format!("`{key}`'s layer holds no texel, so it has no spread to measure").into()
+    })
+}
+
+/// How far two keys' linear-light means stand apart, in ΔE.
+///
+/// # Errors
+///
+/// Returns the key's parse failure or the distance metric's own.
+pub fn means_apart(
+    one: &str,
+    other: &str,
+    supplied: &SuppliedTexels,
+) -> Result<f64, Box<dyn Error>> {
+    let mean_of = |key: &str| -> Result<[u8; 3], Box<dyn Error>> {
+        Ok(linear_mean(&drawn_texels(
+            &TextureKey::parse(key)?,
+            supplied,
+        )))
+    };
+    distance(mean_of(one)?, mean_of(other)?)
 }

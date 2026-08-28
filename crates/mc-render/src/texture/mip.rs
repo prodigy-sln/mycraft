@@ -72,10 +72,17 @@ pub fn to_stored(linear: f32) -> u8 {
 ///
 /// **Colour is averaged in linear light and alpha is not**, because
 /// `Rgba8UnormSrgb` decodes RGB through the transfer function and alpha
-/// linearly — the format's own definition, not a preference. No test here
-/// discriminates the alpha treatment: every texture this increment ships is
-/// opaque, and both treatments answer 255 for a constant 255. **The first
-/// translucent texture must bring a test with it.**
+/// linearly — the format's own definition, not a preference.
+///
+/// **That treatment is discriminated now.** Both rules answer 255 for a constant
+/// 255, so the reading that tells them apart stands where they disagree most:
+/// two clear texels beside two opaque ones, which average where they stand to
+/// **128** and in linear light to **188**.
+/// `two_clear_texels_and_two_opaque_ones_reduce_to_the_stored_mean_and_not_the_lit_one`
+/// asserts the first and rejects the second, and it computes the second out of
+/// the transfer pair above rather than quoting it — so a pair that ever brought
+/// the two rules within a byte of each other reports itself instead of leaving a
+/// reading that can no longer tell them apart.
 #[must_use]
 pub fn reduced(level: &[[u8; 4]], size: u32) -> Vec<[u8; 4]> {
     let half = size >> 1;

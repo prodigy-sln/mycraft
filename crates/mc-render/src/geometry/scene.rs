@@ -38,15 +38,28 @@ pub const MAX_SECTIONS: usize = 1024;
 pub const MAX_QUADS: usize = 1 << 18;
 
 /// How many bytes one section occupies in [`SceneGeometry::section_bytes`].
-const SECTION_RECORD_BYTES: usize = 44;
+///
+/// `pub(crate)` so the buffer this table is uploaded into is allocated at this
+/// number rather than at a second literal of it. The two used to be written
+/// twice and moving one without the other allocates a section table that is
+/// short by a record per section — which no assertion on either side reports,
+/// because each side agrees with itself.
+pub(crate) const SECTION_RECORD_BYTES: usize = 48;
 
 /// Where one section's quads sit in the scene's buffers, and the box the
 /// culling pass tests.
+///
+/// `opaque_quad_count` splits the section's own quad range in two: the quads
+/// before it stop all the light reaching them and the ones from it on do not.
+/// It is a count and not a second range because the two halves are adjacent by
+/// construction — the packer emits them in that order — so one number says
+/// where both begin and end.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SectionRecord {
     pub origin: [i32; 3],
     pub first_quad: u32,
     pub quad_count: u32,
+    pub opaque_quad_count: u32,
     pub aabb: Aabb,
 }
 
@@ -114,6 +127,7 @@ impl SceneGeometry {
             origin: section.origin.world,
             first_quad,
             quad_count: section.quad_count() as u32,
+            opaque_quad_count: section.opaque_quad_count() as u32,
             aabb: section_box(section.origin.world),
         });
         Ok(())
@@ -138,8 +152,8 @@ impl SceneGeometry {
             .collect()
     }
 
-    /// The section table's bytes: origin, first quad, quad count, then the
-    /// box's minimum and maximum corner.
+    /// The section table's bytes: origin, first quad, quad count, opaque quad
+    /// count, then the box's minimum and maximum corner.
     ///
     /// Field order and widths are this crate's own declaration, and the compute
     /// shader's matching struct is written against it.
@@ -150,6 +164,7 @@ impl SceneGeometry {
             bytes.extend(record.origin.iter().flat_map(|axis| axis.to_le_bytes()));
             bytes.extend(record.first_quad.to_le_bytes());
             bytes.extend(record.quad_count.to_le_bytes());
+            bytes.extend(record.opaque_quad_count.to_le_bytes());
             bytes.extend(record.aabb.min.iter().flat_map(|axis| axis.to_le_bytes()));
             bytes.extend(record.aabb.max.iter().flat_map(|axis| axis.to_le_bytes()));
         }

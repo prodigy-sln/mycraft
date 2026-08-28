@@ -307,8 +307,14 @@ impl DefinitionHash {
 /// workspace. Every other witness compares one fold to another, and that cannot
 /// see a leading byte which moved in both — so a green suite is no evidence a
 /// revision is right.
+/// **And they are equal again, at 4, by routes that still share nothing.** The
+/// appearance list has now grown a third time, over how much light a block
+/// stops. Two numbers arriving at one value twice, having moved on five
+/// separate occasions and never once together, is the clearest evidence
+/// available that the equality means nothing — and the second invitation to
+/// unify them, which is the same mistake the paragraph above prices.
 const BEHAVIOUR_REVISION: u8 = 4;
-const APPEARANCE_REVISION: u8 = 3;
+const APPEARANCE_REVISION: u8 = 4;
 
 /// The declared behaviour of a block, as revision 4 of this list defines it.
 ///
@@ -401,12 +407,19 @@ struct DeclaredBehaviour<'a> {
 /// writes a tuple as its elements and nothing else, so the two shapes fold
 /// identically, and this one cannot have a face left out of it.
 ///
-/// **`drawn` and `occludes` are appended after the keys, in that order**, for
-/// the positional reason [`DeclaredBehaviour`] records. They are on this list
-/// because a block that stopped being drawn, or stopped hiding what stands
-/// behind it, is still the same block to stand on, to build through and to
-/// break: nothing about mutating the world changes, so nothing a player has to
-/// decide about changes either.
+/// **`drawn`, `occludes` and `opacity` are appended after the keys, in that
+/// order**, for the positional reason [`DeclaredBehaviour`] records. They are on
+/// this list because a block that stopped being drawn, stopped hiding what
+/// stands behind it, or started letting light through, is still the same block
+/// to stand on, to build through and to break: nothing about mutating the world
+/// changes, so nothing a player has to decide about changes either.
+///
+/// **The degree is folded as the `f32` a declaration stated and never as the
+/// byte a vertex carries.** Quantising it here would fold two declarations a
+/// code value apart into one record, so an edit a player can see would report
+/// the block unchanged — and it would tie the on-disk meaning of a save to an
+/// encoding the renderer is free to widen. The `-0.0 → 0.0` normalisation the
+/// loader applies is what keeps two spellings of the same degree folding alike.
 #[derive(Serialize)]
 struct DeclaredAppearance<'a> {
     input_version: u8,
@@ -414,6 +427,7 @@ struct DeclaredAppearance<'a> {
     textures: [&'a str; 6],
     drawn: bool,
     occludes: bool,
+    opacity: f32,
 }
 
 /// What revision 4 of the behaviour list records as `definition`'s declared
@@ -465,6 +479,7 @@ pub(crate) fn appearance_of(definition: &BlockDefinition) -> DefinitionHash {
         textures: Face::ALL.map(|face| definition.textures.at(face).as_str()),
         drawn: definition.drawn,
         occludes: definition.occludes,
+        opacity: definition.opacity.get(),
     })
 }
 

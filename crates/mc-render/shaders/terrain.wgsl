@@ -23,16 +23,22 @@ struct Frame {
 };
 
 // The section table, field for field as `SceneGeometry::section_bytes` writes
-// it: three origin components, the first quad, the quad count, then the box's
-// minimum and maximum corner. Spelled as scalars rather than as vectors because
-// a `vec3` carries sixteen-byte alignment and the record on the other side is
-// forty-four bytes of tightly packed fields.
+// it: three origin components, the first quad, the quad count, how many of those
+// quads are opaque, then the box's minimum and maximum corner. Spelled as
+// scalars rather than as vectors because a `vec3` carries sixteen-byte alignment
+// and the record on the other side is forty-eight bytes of tightly packed
+// fields.
+//
+// This stage reads only the origin. The rest of the record is declared because
+// the two stages read the same buffer and a struct short of a field would slide
+// every later one.
 struct Section {
     origin_x: i32,
     origin_y: i32,
     origin_z: i32,
     first_quad: u32,
     quad_count: u32,
+    opaque_quad_count: u32,
     min_x: f32,
     min_y: f32,
     min_z: f32,
@@ -53,27 +59,59 @@ struct VertexOutput {
     // Flat: a layer index is a choice of texture, and interpolating between two
     // of them would sample a third that nothing resolved.
     @location(1) @interpolate(flat) layer: u32,
+    // Flat for the same reason one step removed: the degree is a property of the
+    // block, identical at all four corners, and interpolating it would produce
+    // a value no declaration states wherever the rasteriser rounds.
+    @location(2) @interpolate(flat) opacity: f32,
 };
 
-// The bit layout of `PackedVertex`, which this decodes:
+// The bit layout of `PackedVertex`, field by field, as the shift each starts at
+// and the width it occupies.
 //
-//   x 0..5   y 5..10   z 10..15   facing 15..18   layer 18..26   section 26..36
-//
-// The section index is the one field that crosses the thirty-two bit boundary,
-// which is why it is assembled from both words.
+// These are `mc_render::geometry::vertex`'s own constants written out because a
+// shader cannot read a Rust one, and `build/validate.rs` compares every value
+// below against them and fails the build when any disagrees. The decode reads
+// them rather than repeating their numbers, so the check is over the numbers the
+// decode actually uses.
+const X_SHIFT: u32 = 0u;
+const COORDINATE_BITS: u32 = 5u;
+const FACING_SHIFT: u32 = 15u;
+const FACING_BITS: u32 = 3u;
+const LAYER_SHIFT: u32 = 18u;
+const LAYER_BITS: u32 = 8u;
+const SECTION_SHIFT: u32 = 26u;
+const SECTION_BITS: u32 = 10u;
+const OPACITY_SHIFT: u32 = 36u;
+const OPACITY_BITS: u32 = 8u;
+
+// How wide one word of the packed pair is.
+const WORD_BITS: u32 = 32u;
+
+// The largest value a quantised opacity carries, which is also what it is
+// divided by. `Opacity::from_quantised` is the same division on the CPU side.
+const STORED_MAX: f32 = 255.0;
+
+// The section index is the one field that crosses the boundary between the two
+// words, so it is assembled from both. The opacity sits wholly above the
+// boundary and is read out of the high word alone -- `vertex.rs` asserts that at
+// compile time, so a layout that ever moved it below thirty-two fails the Rust
+// build rather than decoding to nonsense here.
 @vertex
 fn vertex_main(@location(0) packed: vec2<u32>) -> VertexOutput {
     let low = packed.x;
     let high = packed.y;
 
+    let coordinate = (1u << COORDINATE_BITS) - 1u;
     let local = vec3<f32>(
-        f32(low & 31u),
-        f32((low >> 5u) & 31u),
-        f32((low >> 10u) & 31u),
+        f32((low >> X_SHIFT) & coordinate),
+        f32((low >> (X_SHIFT + COORDINATE_BITS)) & coordinate),
+        f32((low >> (X_SHIFT + 2u * COORDINATE_BITS)) & coordinate),
     );
-    let facing = (low >> 15u) & 7u;
-    let layer = (low >> 18u) & 255u;
-    let section_index = ((low >> 26u) & 63u) | ((high & 15u) << 6u);
+    let facing = (low >> FACING_SHIFT) & ((1u << FACING_BITS) - 1u);
+    let layer = (low >> LAYER_SHIFT) & ((1u << LAYER_BITS) - 1u);
+    let section_index =
+        ((low >> SECTION_SHIFT) | (high << (WORD_BITS - SECTION_SHIFT))) & ((1u << SECTION_BITS) - 1u);
+    let opacity = (high >> (OPACITY_SHIFT - WORD_BITS)) & ((1u << OPACITY_BITS) - 1u);
 
     let section = sections[section_index];
     let origin = vec3<f32>(
@@ -86,12 +124,22 @@ fn vertex_main(@location(0) packed: vec2<u32>) -> VertexOutput {
     out.clip_position = frame.view_projection * vec4<f32>(origin + local, 1.0);
     out.uv = plane_coordinates(facing, local);
     out.layer = layer;
+    out.opacity = f32(opacity) / STORED_MAX;
     return out;
 }
 
+// The texel, with the block's declared degree folded into its alpha.
+//
+// **The product of the two**, not one or the other: the declared degree decides
+// which of the two draws a face lands in and the texel's alpha modulates within
+// the blended one. So a block at a whole degree draws opaque however its
+// texture's alpha reads, and this multiply is the identity for it -- which is
+// what keeps the partition a function of a declared, greppable, hot-reloadable
+// number rather than of art.
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    return textureSample(terrain_textures, terrain_sampler, input.uv, input.layer);
+    let texel = textureSample(terrain_textures, terrain_sampler, input.uv, input.layer);
+    return vec4<f32>(texel.rgb, texel.a * input.opacity);
 }
 
 // Which two components of a corner's section-local position its face's plane

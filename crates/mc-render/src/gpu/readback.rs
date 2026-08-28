@@ -15,7 +15,7 @@ use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
 use std::time::Duration;
 
 use super::FrameError;
-use super::buffers::SceneBuffers;
+use super::buffers::{SceneBuffers, WORDS_PER_DRAW};
 
 /// How long a readback may take before the device is called lost.
 ///
@@ -37,17 +37,36 @@ pub(super) struct Gpu<'a> {
     pub(super) queue: &'a wgpu::Queue,
 }
 
-/// The indirect arguments' index count, as it stands after submission.
+/// How many indices the frame's terrain draws read, as it stands after
+/// submission.
+///
+/// **Both draws' counts, added.** The name says what was drawn and there are two
+/// draws, so reporting the opaque half alone would go on being right for exactly
+/// as long as no content declares a degree below one — and would then start
+/// under-reporting silently, which is the shape of failure this readback exists
+/// to catch. The two counts are picked out by striding the arguments rather than
+/// indexed by hand, so a third draw would be counted without this reading being
+/// edited.
 ///
 /// # Errors
 ///
 /// Returns [`FrameError::Readback`] naming this stage when the device did not
 /// hand the buffer over.
 pub(super) fn drawn_index_count(buffers: &SceneBuffers, gpu: Gpu<'_>) -> Result<u32, FrameError> {
-    let words = words_of(&buffers.args, WORD_BYTES, gpu, "indirect arguments")?;
-    words.first().copied().ok_or(FrameError::Readback {
-        stage: "indirect arguments",
-    })
+    let words = words_of(
+        &buffers.args,
+        buffers.args.size(),
+        gpu,
+        "indirect arguments",
+    )?;
+    words
+        .iter()
+        .step_by(WORDS_PER_DRAW)
+        .copied()
+        .reduce(u32::saturating_add)
+        .ok_or(FrameError::Readback {
+            stage: "indirect arguments",
+        })
 }
 
 /// The visibility flag of each of `sections` sections, in section-index order.

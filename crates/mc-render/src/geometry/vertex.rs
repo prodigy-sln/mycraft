@@ -12,10 +12,21 @@
 //! | facing | 3 | six of them |
 //! | texture layer | 8 | `wgpu`'s downlevel `max_texture_array_layers` is 256 |
 //! | section | 10 | `MAX_SECTIONS` is 1024 |
+//! | opacity | 8 | a degree quantised to a byte, `Opacity::quantised` |
 //!
-//! Thirty-six bits used of sixty-four. The spare bits are not a design margin
+//! Forty-four bits used of sixty-four. The spare bits are not a design margin
 //! to be spent casually — ambient occlusion and per-vertex light will want them
 //! — but they do mean none of the widths above had to be shaved to fit.
+//!
+//! **The opacity is spent against that sentence rather than around it.** It is a
+//! per-*block* number replicated across all four corners, which is the wasteful
+//! shape, and the two cheaper homes were both worse: a table indexed by texture
+//! layer is unsound the moment two blocks declare one key at two degrees, and
+//! baking the degree into the layer's own alpha spends a layer of a monotonic
+//! budget on every opacity a mod author types while the server runs. Twenty bits
+//! remain, which still covers both reserved uses — ambient occlusion wants two
+//! per corner and per-vertex light four to eight, and both are per-corner
+//! quantities this field is not competing with.
 //!
 //! **Packing refuses rather than truncates.** A coordinate of 17 masked into
 //! five bits becomes 1: a corner at the far side of the section, geometrically
@@ -24,6 +35,7 @@
 //! The coordinate bound is the section's, not the field's — five bits hold 31,
 //! and a corner at 20 is still a bug even though it fits.
 
+use mc_core::block::Opacity;
 use mc_core::content::LAYERS_A_SESSION_MAY_ASSIGN;
 use mc_world::mesh::Facing;
 use mc_world::section::{Axis, SECTION_SIZE};
@@ -41,12 +53,19 @@ const LAYER_BITS: u32 = 8;
 /// How many bits a section index occupies.
 const SECTION_BITS: u32 = 10;
 
+/// How many bits a quantised opacity occupies.
+///
+/// The width `Opacity::quantised` writes into, not a width chosen here: a byte
+/// is what that encoding produces and a ninth bit would have nothing to carry.
+const OPACITY_BITS: u32 = 8;
+
 const X_SHIFT: u32 = 0;
 const Y_SHIFT: u32 = X_SHIFT + COORDINATE_BITS;
 const Z_SHIFT: u32 = Y_SHIFT + COORDINATE_BITS;
 const FACING_SHIFT: u32 = Z_SHIFT + COORDINATE_BITS;
 const LAYER_SHIFT: u32 = FACING_SHIFT + FACING_BITS;
 const SECTION_SHIFT: u32 = LAYER_SHIFT + LAYER_BITS;
+const OPACITY_SHIFT: u32 = SECTION_SHIFT + SECTION_BITS;
 
 /// The last section-local corner coordinate.
 ///
@@ -77,18 +96,39 @@ const _: () = assert!(MAX_LAYER as usize + 1 == LAYERS_A_SESSION_MAY_ASSIGN);
 /// The highest section index a scene holds. See `MAX_SECTIONS` in `scene`.
 const MAX_SECTION: u32 = (1 << SECTION_BITS) - 1;
 
+/// Every field still fits the one word a vertex is.
+///
+/// The widths above are each derived from their own domain, so nothing stops
+/// their sum from outgrowing the word the day another one is added. This is what
+/// turns that into a build failure rather than a field silently shifted off the
+/// top.
+const _: () = assert!(OPACITY_SHIFT + OPACITY_BITS <= u64::BITS);
+
+/// The opacity sits wholly in the upper of the two words a vertex reaches the
+/// shader as.
+///
+/// `terrain.wgsl` reads it out of that word alone rather than assembling it from
+/// both, which is correct only while this holds. A layout that moved the field
+/// down fails here, in the crate that owns the layout, instead of decoding to a
+/// plausible wrong degree on the device.
+const _: () = assert!(OPACITY_SHIFT >= u32::BITS);
+
 /// One corner of a quad, in the frame the vertex buffer speaks.
 ///
 /// `local` runs `0..=16` per axis, `section` indexes the scene's section table,
 /// and `layer` indexes the array texture. Nothing here is a world coordinate:
 /// the world frame is reconstructed from the section's origin, which is what
 /// keeps the packed and world views from drifting apart.
+///
+/// `opacity` is the degree the corner's *block* declared, carried per corner
+/// because the fragment stage has no per-block quantity of its own to reach for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Vertex {
     pub local: [u8; 3],
     pub facing: Facing,
     pub layer: u16,
     pub section: u16,
+    pub opacity: Opacity,
 }
 
 /// A [`Vertex`] in the form the vertex buffer holds.
@@ -114,11 +154,20 @@ impl PackedVertex {
             | coordinate(Axis::Z, z)? << Z_SHIFT
             | (vertex.facing as u64) << FACING_SHIFT
             | layer(vertex.layer)? << LAYER_SHIFT
-            | section(vertex.section)? << SECTION_SHIFT;
+            | section(vertex.section)? << SECTION_SHIFT
+            // No bound to check: the encoding's output is a byte and the field
+            // is a byte wide, so there is no value of `Opacity` without a
+            // packed form and therefore no refusal to write.
+            | u64::from(vertex.opacity.quantised()) << OPACITY_SHIFT;
         Ok(Self(bits))
     }
 
     /// The vertex this value was packed from.
+    ///
+    /// Every field but the opacity comes back identical. The opacity comes back
+    /// **quantised** — a declared `0.5` returns as `0.50196` — because eight bits
+    /// cannot name every degree a declaration may state. Whoever needs the
+    /// declared number reads it from the declaration rather than from here.
     #[must_use]
     pub fn unpack(self) -> Vertex {
         // Every cast below narrows a value the mask has already bounded: five
@@ -139,6 +188,7 @@ impl PackedVertex {
                 .unwrap_or(Facing::NegX),
             layer: self.field(LAYER_SHIFT, LAYER_BITS) as u16,
             section: self.field(SECTION_SHIFT, SECTION_BITS) as u16,
+            opacity: Opacity::from_quantised(self.field(OPACITY_SHIFT, OPACITY_BITS) as u8),
         }
     }
 

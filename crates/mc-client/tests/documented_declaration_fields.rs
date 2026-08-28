@@ -49,6 +49,8 @@ mod entry;
 mod input;
 #[path = "support/launch_notices.rs"]
 mod launch_notices;
+#[path = "support/opacity_refusals.rs"]
+mod opacity_refusals;
 #[path = "support/per_facing_refusals.rs"]
 mod per_facing_refusals;
 #[path = "support/persistence.rs"]
@@ -100,6 +102,10 @@ const MOVE_RESISTANCE_FIELD: &str = "move_resistance";
 /// swimmer who asks to rise.
 const SWIM_ASCENT_FIELD: &str = "swim_ascent";
 
+/// The field a mod author states to say how much of the light reaching their
+/// block it stops.
+const OPACITY_FIELD: &str = "opacity";
+
 /// What the guide says leaving `swimmable` out means, written in the page's own
 /// convention for a constant default.
 const A_MISSING_SWIMMABLE_MEANS: &str = "`false`";
@@ -121,6 +127,27 @@ const A_MISSING_RESISTANCE_MEANS: &str = "`0.0`";
 /// to guess it will guess `0.0` and write a still pool where they meant to leave
 /// the field out.
 const A_MISSING_ASCENT_MEANS: &str = "`9.0`";
+
+/// What the guide says leaving `opacity` out means.
+///
+/// **The row a mod author most needs and is least able to guess from the field's
+/// own name.** An author reading `opacity` beside a table with no default will
+/// reasonably guess `0.0`, which is the value that makes a block invisible — so
+/// a table that names the field and omits this cell teaches the opposite of what
+/// the loader does. Written with a point for the reason the resistance's is: the
+/// field is a number and a bare `1` would read as the integer a declaration may
+/// also write.
+const A_MISSING_OPACITY_MEANS: &str = "`1.0`";
+
+/// What the guide states bounds an opacity, whole.
+///
+/// Worded like the resistance's row rather than freshly, because the two are one
+/// promise in two places: the floor is spelled as the loader's refusal spells it
+/// and the ceiling is the figure an author types. **Both bounds are inclusive**,
+/// which is what `at most` and `not less than` say and what a wording like
+/// `below 1.0` would quietly deny — a block declared at exactly `1.0` is a legal
+/// declaration and the commonest one anybody writes deliberately.
+const AN_OPACITY_IS_BOUNDED_BY: &str = "not less than zero, and at most `1.0`";
 
 /// What the guide states bounds a resistance, whole.
 ///
@@ -182,6 +209,7 @@ struct WhatTheGuideTabulates {
     what_a_missing_swimmable_means: Option<String>,
     what_a_missing_resistance_means: Option<String>,
     what_a_missing_ascent_means: Option<String>,
+    what_a_missing_opacity_means: Option<String>,
 }
 
 /// Every page under `directory`, at any depth.
@@ -361,6 +389,19 @@ fn the_field_table(directory: &Path) -> Result<Vec<TabulatedRow>, Box<dyn Error>
     Ok(table.clone())
 }
 
+/// The bound the guide states on an opacity, or `None` where its table carries
+/// no such row.
+///
+/// # Errors
+///
+/// Returns an error for the reason [`the_field_table`] does.
+fn what_bounds_an_opacity(directory: &Path) -> Result<Option<String>, Box<dyn Error>> {
+    Ok(the_field_table(directory)?
+        .into_iter()
+        .find(|row| row.field == OPACITY_FIELD)
+        .map(|row| row.bound))
+}
+
 /// The bound the guide states on a resistance, or `None` where its table carries
 /// no such row.
 ///
@@ -392,6 +433,7 @@ fn what_the_guide_tabulates(directory: &Path) -> Result<WhatTheGuideTabulates, B
         what_a_missing_swimmable_means: stated(SWIMMABLE_FIELD),
         what_a_missing_resistance_means: stated(MOVE_RESISTANCE_FIELD),
         what_a_missing_ascent_means: stated(SWIM_ASCENT_FIELD),
+        what_a_missing_opacity_means: stated(OPACITY_FIELD),
     })
 }
 
@@ -469,6 +511,7 @@ fn the_guide_tabulates_every_field_with_the_value_its_absence_means() -> TestRes
             what_a_missing_swimmable_means: Some(A_MISSING_SWIMMABLE_MEANS.to_owned()),
             what_a_missing_resistance_means: Some(A_MISSING_RESISTANCE_MEANS.to_owned()),
             what_a_missing_ascent_means: Some(A_MISSING_ASCENT_MEANS.to_owned()),
+            what_a_missing_opacity_means: Some(A_MISSING_OPACITY_MEANS.to_owned()),
         },
         "a mod author writing their first declaration reads this table rather than a refusal, \
          so a field that exists in the loader and not in the table is a field nobody will use — \
@@ -494,6 +537,26 @@ fn the_guide_states_the_bound_a_resistance_is_kept_within() -> TestResult {
         bound,
         Some(A_RESISTANCE_IS_BOUNDED_BY.to_owned()),
         "the page-side twin of the loader pair in `luau_declaration_medium_ceiling.rs`, and the          two guard opposite directions of one promise. That pair asks whether the loader still          stops where the page says; this asks whether the page still says where the loader          stops. Nothing could see the second before: an edit making this cell read `at most          1e40` leaves a correct loader, a lying page and every other test in the workspace          green — which is precisely how a mod author comes to write a number that is refused by          the thing that documented it. The cell is compared whole rather than searched for a          figure, so a floor quietly dropped from the sentence is as visible as a ceiling quietly          raised"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_guide_states_the_bound_an_opacity_is_kept_within() -> TestResult {
+    let bound = what_bounds_an_opacity(&pages()?)?;
+
+    assert_eq!(
+        bound,
+        Some(AN_OPACITY_IS_BOUNDED_BY.to_owned()),
+        "the field's own row is the only place a mod author reads what values it may hold, and \
+         opacity is the first field on this declaration with a ceiling anybody can reach: the \
+         two numbers above it stop at a width nobody types on purpose, and this one stops at \
+         `1.0`, which is a value an author will write. A row naming the field and leaving the \
+         cell to be guessed sends them to the refusal to find out — and the refusal is the \
+         artefact this page exists to spare them. The cell is compared whole rather than \
+         searched for a figure, so a floor quietly dropped from the sentence is as visible as a \
+         ceiling quietly raised, and the inclusiveness of both bounds is carried in the words \
+         rather than left to the reader"
     );
     Ok(())
 }

@@ -3,9 +3,9 @@
 //!
 //! # What this carries, and what it deliberately does not
 //!
-//! A block's **name**, the **key each of its six faces draws from** and its
-//! **solidity**, plus the **layer assignment** the renderer draws against. Those
-//! are what a client draws and predicts with.
+//! A block's **name**, the **key each of its six faces draws from**, its
+//! **solidity** and **how much light it stops**, plus the **layer assignment**
+//! the renderer draws against. Those are what a client draws and predicts with.
 //!
 //! It carries none of `replaceable`, `breakable` or `breaks_into`. Those are the
 //! rules by which a world is **mutated**, the server recomputes every one of
@@ -48,6 +48,7 @@ use std::collections::BTreeSet;
 
 use thiserror::Error;
 
+use crate::block::Opacity;
 use crate::id::{BlockName, TextureKey};
 
 /// How many array-texture layers one session may assign.
@@ -355,6 +356,13 @@ pub struct ResolvedBlock {
     pub textures: FaceTextures,
     /// Whether it stops a player, which is also what the mesher culls faces by.
     pub is_solid: bool,
+    /// How much of the light reaching it it stops.
+    ///
+    /// Copied across the seam rather than recomputed, for the reason every other
+    /// field here is: what a declaration said is the server's answer, and a
+    /// client deriving its own would be reproducing a decision instead of
+    /// honouring one.
+    pub opacity: Opacity,
 }
 
 /// Everything a content root declares that a client needs, and nothing it does

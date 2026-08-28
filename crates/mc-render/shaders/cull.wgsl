@@ -2,11 +2,19 @@
 // indices into the one indirect draw.
 //
 // One workgroup per section at 64 lanes. Lane 0 tests the section's world box
-// against the six frustum planes, writes the visibility flag, and reserves a
-// range of the destination index buffer with a single atomic add on the indirect
-// arguments' index count -- which is why there is no second dispatch and no
-// prefix sum. All 64 lanes then stride the section's quads, so a dense section
-// does not serialise on one lane.
+// against the six frustum planes, writes the visibility flag, and reserves two
+// ranges of the destination index buffer with one atomic add each -- which is
+// why there is no second dispatch and no prefix sum. All 64 lanes then stride
+// the section's quads, so a dense section does not serialise on one lane.
+//
+// The index buffer is two fixed halves. A section's quads before
+// `opaque_quad_count` stop all the light reaching them and compact into the
+// lower half, drawn by `args[0]`; the ones from there on pass light and compact
+// into the upper half, drawn by `args[1]`. **The upper half's base is read out of
+// `args[1].first_index`, which the CPU writes when it zeroes the counts.** It is
+// deliberately not a constant here: a copy of `6 * MAX_QUADS` in this file would
+// be a fourth hand-duplicated CPU/GPU number, and the one whose drift writes
+// translucent indices into the opaque range.
 //
 // Two things are fixed here because the build-time validator counts them:
 //
@@ -14,15 +22,26 @@
 //     weakest adapter in the declared range dropping out of the supported set,
 //     not a refactor. The four are: the section table, the visibility flags, the
 //     destination indices, and the indirect arguments. The frustum arrives as a
-//     uniform precisely so that it costs none of them.
-//   * the winding literal below, against the geometry builder's own constant.
+//     uniform precisely so that it costs none of them, and holding two draws'
+//     arguments in one array costs none of them either.
+//   * the winding literal below, against the geometry builder's own constant,
+//     and the `Section` record's own field list.
 //
-// The order visible sections land in the index buffer is whatever the atomic
-// hands out, and therefore not reproducible between runs. That is safe here for
-// a stated reason: terrain is fully opaque, depth-tested, and no two quads cover
-// the same voxel face -- so no two fragments contend for one depth value and the
-// image does not depend on the order. The day a transparency pass arrives this
-// reasoning expires and compaction has to become order-stable.
+// The order visible sections land in either half is whatever the atomic hands
+// out, and therefore not reproducible between runs. **A transparency pass has now
+// arrived and the order is still free, for a narrower reason than before.** In
+// the opaque half the old argument stands unchanged: depth-tested, and no two
+// quads cover the same voxel face, so no two fragments contend for one depth
+// value. In the blended half the order does reach the image -- but for two
+// overlapping layers of one block kind `src-over` is symmetric in their
+// opacities, and the residual left by the two layers sampling different texels
+// of one texture is bounded by a quarter of that texture's own spread, which for
+// the one translucent kind the shipped content declares is ΔE 0.79 against a
+// tolerance of about 4.3. What expires this reasoning is not transparency but a
+// **second translucent kind whose colour differs from the first** reaching
+// content or a committed golden; at that point compaction has to become
+// order-stable and the blended half back-to-front. `docs/technical/rendering.md`
+// records the artefact with the frame that shows it.
 
 // The six indices a quad is drawn as. This is the CPU's QUAD_INDEX_PATTERN,
 // spelled a second time because the compute pass writes the index buffer and
@@ -55,6 +74,10 @@ struct Section {
     origin_z: i32,
     first_quad: u32,
     quad_count: u32,
+    // How many of this section's quads stop all the light reaching them. The
+    // quads before it are compacted into the lower half of the index buffer and
+    // the ones from it on into the upper half.
+    opaque_quad_count: u32,
     min_x: f32,
     min_y: f32,
     min_z: f32,
@@ -63,8 +86,9 @@ struct Section {
     max_z: f32,
 };
 
-// The arguments the one `draw_indexed_indirect` reads. Exactly one field varies:
-// `index_count`, which this pass raises. `instance_count` is 1 and
+// The arguments each `draw_indexed_indirect` reads. Two fields vary:
+// `index_count`, which this pass raises, and `first_index`, which the CPU writes
+// once per frame and this pass only reads. `instance_count` is 1 and
 // `first_instance` is 0 so that no optional device feature is required.
 struct DrawArgs {
     index_count: atomic<u32>,
@@ -78,12 +102,14 @@ struct DrawArgs {
 @group(0) @binding(1) var<storage, read> sections: array<Section>;
 @group(0) @binding(2) var<storage, read_write> visible: array<u32>;
 @group(0) @binding(3) var<storage, read_write> indices: array<u32>;
-@group(0) @binding(4) var<storage, read_write> args: DrawArgs;
+@group(0) @binding(4) var<storage, read_write> args: array<DrawArgs, 2>;
 
 // What lane 0 decided, for the other sixty-three to read after the barrier.
-var<workgroup> reserved_base: u32;
-var<workgroup> reserved_quads: u32;
 var<workgroup> reserved_first_quad: u32;
+var<workgroup> opaque_quads: u32;
+var<workgroup> opaque_base: u32;
+var<workgroup> translucent_quads: u32;
+var<workgroup> translucent_base: u32;
 
 @compute @workgroup_size(64)
 fn cull_sections(
@@ -96,28 +122,41 @@ fn cull_sections(
         let section = sections[section_index];
         let seen = admits(section);
         visible[section_index] = select(0u, 1u, seen);
-        reserved_quads = select(0u, section.quad_count, seen);
         reserved_first_quad = section.first_quad;
-        reserved_base = atomicAdd(&args.index_count, INDICES_PER_QUAD * reserved_quads);
+        opaque_quads = select(0u, section.opaque_quad_count, seen);
+        translucent_quads = select(0u, section.quad_count - section.opaque_quad_count, seen);
+        opaque_base = atomicAdd(&args[0].index_count, INDICES_PER_QUAD * opaque_quads);
+        // The one place the upper half's base comes from. `first_index` is
+        // written by the CPU before this pass is recorded and by nothing during
+        // it, so this read is the constant the queue write already placed.
+        translucent_base =
+            args[1].first_index + atomicAdd(&args[1].index_count, INDICES_PER_QUAD * translucent_quads);
     }
     workgroupBarrier();
 
     compact(lane);
 }
 
-// Writes six indices for every quad this lane is responsible for.
-//
-// Lane `l` takes quads `l`, `l + 64`, `l + 128`, ... of the section, so the
-// writes are spread across the workgroup rather than issued by one invocation.
+// Writes six indices for every quad this lane is responsible for, in each half.
 fn compact(lane: u32) {
+    write_indices(lane, 0u, opaque_quads, opaque_base);
+    write_indices(lane, opaque_quads, translucent_quads, translucent_base);
+}
+
+// Writes six indices for `count` quads starting `first` into the section, from
+// `base` onward.
+//
+// Lane `l` takes the range's quads `l`, `l + 64`, `l + 128`, ..., so the writes
+// are spread across the workgroup rather than issued by one invocation.
+fn write_indices(lane: u32, first: u32, count: u32, base: u32) {
     var pattern = QUAD_INDEX_PATTERN;
     var quad = lane;
     loop {
-        if quad >= reserved_quads {
+        if quad >= count {
             break;
         }
-        let corner = CORNERS_PER_QUAD * (reserved_first_quad + quad);
-        let at = reserved_base + INDICES_PER_QUAD * quad;
+        let corner = CORNERS_PER_QUAD * (reserved_first_quad + first + quad);
+        let at = base + INDICES_PER_QUAD * quad;
         for (var step = 0u; step < INDICES_PER_QUAD; step = step + 1u) {
             indices[at + step] = corner + pattern[step];
         }

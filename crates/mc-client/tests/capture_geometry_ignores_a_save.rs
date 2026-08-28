@@ -54,7 +54,7 @@ use std::path::Path;
 use mc_client::launch::save_path;
 use mc_client::startup::{PreparationError, PreparedScene, prepare_scene};
 use mc_core::block::source::InMemoryDefinitionSource;
-use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin, Opacity};
 use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, TextureKey};
 use mc_render::geometry::scene::SceneGeometry;
@@ -139,6 +139,7 @@ fn a_registry_holding_the_marker() -> Result<BlockRegistry, Box<dyn Error>> {
             swimmable: false,
             move_resistance: 0.0,
             swim_ascent: 9.0,
+            opacity: Opacity::OPAQUE,
             origin,
         })],
     ))?;

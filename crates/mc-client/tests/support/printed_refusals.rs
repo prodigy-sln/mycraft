@@ -215,6 +215,10 @@ pub fn printed_refusals() -> Result<Vec<String>, Box<dyn Error>> {
     // is a refusal. Appended for the reason recorded above — `the_block_refusal`
     // reads `printed.first()`.
     printed.extend(crate::launch_notices::launch_notices()?);
+    // The three a declared degree of opacity raises live in their own module, for
+    // the line count above and because they are one field's refusals. Appended
+    // like the three groups before them, for the `printed.first()` reason.
+    printed.extend(crate::opacity_refusals::opacity_refusals()?);
     Ok(printed)
 }
 

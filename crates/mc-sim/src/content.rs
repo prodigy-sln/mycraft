@@ -163,6 +163,7 @@ fn resolved_from(
             name: definition.name.clone(),
             textures: definition.textures.clone(),
             is_solid: definition.is_solid,
+            opacity: definition.opacity,
         })
         .collect::<Vec<_>>();
     let layers = spent.appending(&registry.texture_keys())?;

@@ -55,6 +55,18 @@ impl App {
 
     /// Hands the device and the re-mesh worker the content a reload accepted.
     ///
+    /// **A reload that moved only a declared opacity uploads nothing new.** The
+    /// layers are the layers it already had; what carries the changed degree is
+    /// the resolution retired below, which the next batch is packed against. So
+    /// that edit costs a re-pack and neither a re-mesh nor a texture upload.
+    ///
+    /// **Nothing in this workspace reaches this function**, because `App` needs a
+    /// window nothing here constructs. Readings of an accepted reload take their
+    /// value from the `Unuploaded` its report handed over; the upload and the
+    /// retirement performed with it are held by [`Unuploaded`]'s own type
+    /// obligation rather than by an assertion, and that residual is recorded
+    /// rather than closed.
+    ///
     /// # Errors
     ///
     /// Returns whatever the texture upload refused.

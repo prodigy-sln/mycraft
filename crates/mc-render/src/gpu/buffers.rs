@@ -27,7 +27,7 @@
 use mc_core::content::TEXTURE_EDGE;
 use mc_core::id::TextureKey;
 
-use crate::geometry::scene::{MAX_QUADS, MAX_SECTIONS, SceneGeometry};
+use crate::geometry::scene::{MAX_QUADS, MAX_SECTIONS, SECTION_RECORD_BYTES, SceneGeometry};
 use crate::geometry::vertex::MAX_LAYER;
 use crate::texture::mip::levels_for;
 use crate::texture::sampler::{Filter, SamplerRequest};
@@ -48,10 +48,14 @@ const VERTEX_BYTES: u64 = 8;
 /// Bytes in one index.
 const INDEX_BYTES: u64 = 4;
 
-/// Bytes in one section table record: origin, first quad, quad count, and the
-/// box's two corners. Declared by `SceneGeometry::section_bytes`; `cull.wgsl`'s
-/// `Section` struct is written against the same layout, field by field.
-const SECTION_BYTES: u64 = 44;
+/// Bytes in one section table record: origin, first quad, quad count, opaque
+/// quad count, and the box's two corners.
+///
+/// Read from the table's own declaration rather than written a second time —
+/// `SceneGeometry::section_bytes` is what emits the record and both shaders'
+/// `Section` struct is written against the same layout, field by field, checked
+/// at build time.
+const SECTION_BYTES: u64 = SECTION_RECORD_BYTES as u64;
 
 /// Bytes in one visibility flag.
 const FLAG_BYTES: u64 = 4;
@@ -63,18 +67,48 @@ const TEXTURE_LAYERS: u32 = MAX_LAYER + 1;
 /// Bytes in one RGBA8 texel.
 const TEXEL_BYTES: u32 = 4;
 
-/// The five `u32`s of `wgpu::util::DrawIndexedIndirectArgs`, in the order the
-/// device reads them.
+/// How many indices one half of the index buffer holds.
 ///
-/// Exactly one of them varies: the compute pass raises `index_count` by six per
-/// quad it compacts. `instance_count` is 1 and `first_instance` is 0 so that
-/// neither `MULTI_DRAW_INDIRECT` nor `INDIRECT_FIRST_INSTANCE` is required of
-/// the device — the optional-feature set stays empty, which is a requirement in
-/// its own right.
-const INDIRECT_ARGS: [u32; 5] = [0, 1, 0, 0, 0];
+/// The buffer is two halves of this size: the lower one is compacted into by the
+/// quads that stop all the light reaching them, the upper one by the quads that
+/// do not. Fixed halves rather than one range split where the counts happen to
+/// fall, because each draw needs a statically known base and the split is not
+/// statically known.
+const INDICES_PER_HALF: u64 = INDICES_PER_QUAD as u64 * MAX_QUADS as u64;
 
-/// Bytes in the indirect argument buffer.
-const ARGS_BYTES: u64 = 20;
+/// Where the upper half of the index buffer begins.
+///
+/// **Written into `args[1].first_index` and read back out of it by the shader**,
+/// which is the whole reason it is a CPU-side constant and appears in no `.wgsl`
+/// file. A copy in the shader would be a fourth hand-duplicated CPU/GPU number,
+/// and the one whose drift writes an index of one half into the other.
+const UPPER_HALF_FIRST_INDEX: u32 = INDICES_PER_HALF as u32;
+
+/// The five `u32`s of `wgpu::util::DrawIndexedIndirectArgs` for each of the two
+/// terrain draws, in the order the device reads them.
+///
+/// Exactly two of them vary: the compute pass raises each `index_count` by six
+/// per quad it compacts into that half, and the second draw's `first_index` is
+/// where its half begins. `instance_count` is 1 and `first_instance` is 0 in both
+/// so that neither `MULTI_DRAW_INDIRECT` nor `INDIRECT_FIRST_INSTANCE` is
+/// required of the device — the optional-feature set stays empty, which is a
+/// requirement in its own right.
+const INDIRECT_ARGS: [[u32; 5]; 2] = [[0, 1, 0, 0, 0], [0, 1, UPPER_HALF_FIRST_INDEX, 0, 0]];
+
+/// How many `u32`s one `DrawArgs` occupies, the first of them its index count.
+///
+/// Counted from the arguments themselves rather than written as five, because
+/// it is what says where the second draw's arguments begin — and the shader
+/// reads the same array. `array<DrawArgs, 2>` in WGSL takes the stride
+/// `roundUp(AlignOf, SizeOf) = roundUp(4, 20) = 20`, so both sides mean the same
+/// byte without either of them rounding.
+pub(super) const WORDS_PER_DRAW: usize = INDIRECT_ARGS[0].len();
+
+/// Bytes in one `DrawArgs`, which is also the offset the second one starts at.
+pub(super) const DRAW_ARGS_BYTES: u64 = (WORDS_PER_DRAW * size_of::<u32>()) as u64;
+
+/// Bytes in the indirect argument buffer: one `DrawArgs` per terrain draw.
+const ARGS_BYTES: u64 = DRAW_ARGS_BYTES * INDIRECT_ARGS.len() as u64;
 
 /// Bytes in the per-frame uniform: a `mat4x4<f32>` and six `vec4<f32>` planes.
 const FRAME_UNIFORM_BYTES: u64 = 64 + 96;
@@ -139,12 +173,18 @@ impl SceneBuffers {
 
     /// Writes the indirect arguments back to their pre-frame state.
     ///
-    /// The compute pass raises `index_count` with an atomic add, so it has to
-    /// start each frame at zero — this is the CPU half of that, and it is why
-    /// nothing needs a second dispatch or a prefix sum.
+    /// The compute pass raises each `index_count` with an atomic add, so both
+    /// have to start each frame at zero — this is the CPU half of that, and it is
+    /// why nothing needs a second dispatch or a prefix sum.
+    ///
+    /// It also restates where the upper half begins. That write is what the
+    /// shader reads its base from, and it is ordered before the pass by the same
+    /// guarantee the zeroed counts already rest on: a queue write lands before
+    /// the command buffer submitted after it.
     pub(super) fn reset_draw(&self, queue: &wgpu::Queue) {
         let bytes: Vec<u8> = INDIRECT_ARGS
             .iter()
+            .flatten()
             .flat_map(|word| word.to_le_bytes())
             .collect();
         queue.write_buffer(&self.args, 0, &bytes);
@@ -368,12 +408,18 @@ fn vertex_buffer(device: &wgpu::Device) -> wgpu::Buffer {
     )
 }
 
-/// The destination index buffer the compute pass compacts into.
+/// The destination index buffer the compute pass compacts into, in two halves.
+///
+/// Twice the indices a scene may hold, because either half may need all of them:
+/// a world declaring nothing translucent fills only the lower one and a world
+/// declaring everything translucent only the upper. The alternative — one range
+/// grown from both ends — buys the memory back at the cost of a reservation
+/// nobody can read.
 fn index_buffer(device: &wgpu::Device) -> wgpu::Buffer {
     allocate(
         device,
         "indices",
-        INDEX_BYTES * u64::from(INDICES_PER_QUAD) * MAX_QUADS as u64,
+        INDEX_BYTES * INDICES_PER_HALF * 2,
         wgpu::BufferUsages::INDEX | wgpu::BufferUsages::STORAGE,
     )
 }

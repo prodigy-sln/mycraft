@@ -40,6 +40,7 @@ use mc_testkit::frame::{
     AdapterProvenance, Backend, CaptureId, GoldenFailureReason, GoldenOutcome, GoldenSettings,
     OptIns, Rgba8Image, Thresholds, verify_against_golden,
 };
+use serde_json::Value;
 use tempfile::TempDir;
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -260,4 +261,130 @@ fn a_frame() -> Result<Rgba8Image, Box<dyn Error>> {
 /// The provenance a golden would have been written with, had one been written.
 fn an_adapter() -> AdapterProvenance {
     AdapterProvenance::new("test", Backend::Other, None)
+}
+
+/// The name the harness writes a golden's provenance under.
+///
+/// **Written out here, and it is the one hand-duplicated string in this file.**
+/// `mc_testkit`'s own path helper is `pub(crate)`, so a reader of the set has no
+/// public door to it; `mc-testkit/tests/support/mod.rs` carries the same literal
+/// for the same reason. What keeps the two honest is that the writer's side is
+/// pinned by `golden_update.rs`, which asserts the field this reads out of a
+/// sidecar the harness actually wrote.
+const GOLDEN_SIDECAR: &str = "default.provenance.json";
+
+/// The field a sidecar names its own capture in.
+const CAPTURE_FIELD: &str = "capture";
+
+/// What the sidecars under a golden root say about the captures they belong to.
+///
+/// **A total verdict rather than a list of strays.** `assert!(faults.is_empty())`
+/// cannot tell a clean set from a scan that opened nothing — a root that had
+/// moved, a directory listing that came back empty, a loop that stopped
+/// visiting — and every one of those answers "nothing wrong" exactly as loudly
+/// as a correct set does. Both arms carry how many sidecars were read, so a scan
+/// that looked at none fails on the count before its verdict is ever weighed.
+#[derive(Debug, PartialEq, Eq)]
+enum Provenance {
+    /// Every directory's sidecar names that directory.
+    EverySidecarNamesItsOwnCapture { sidecars_read: usize },
+    /// The ones that do not, each named with what is wrong with it.
+    Disagreeing {
+        sidecars_read: usize,
+        faults: Vec<String>,
+    },
+}
+
+#[test]
+fn every_committed_sidecar_names_the_capture_of_the_directory_holding_it() -> TestResult {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens");
+    let declared = declared_capture_ids(SCENE_REVISION)?;
+
+    assert_eq!(
+        provenance_under(&root)?,
+        Provenance::EverySidecarNamesItsOwnCapture {
+            sidecars_read: declared.len(),
+        },
+        "a sidecar is the only record of which capture a committed frame is of, and it is the \
+         half of a re-shoot that no other reading can see: the mint writes nothing for a capture \
+         that still matches, this file's inventory compares directory *names*, and the golden \
+         comparison reads *pixels* — so all three agree while a sidecar still names the revision \
+         it was shot under. Measured on the 2026-08-27 re-shoot, a `git mv` passed every one of \
+         them with two directories carrying stale ids. The count is `declared_capture_ids`' own \
+         length rather than a number written here, so a set that grows moves it and a scan that \
+         read nothing cannot pass. `{}` holds {} declared captures",
+        root.display(),
+        declared.len()
+    );
+    Ok(())
+}
+
+#[test]
+fn that_same_scan_reports_a_sidecar_naming_another_capture_and_one_naming_none() -> TestResult {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("sidecars-a-scan-has-to-report");
+
+    assert_eq!(
+        provenance_under(&root)?,
+        Provenance::Disagreeing {
+            sidecars_read: 2,
+            faults: vec![
+                "`a-directory-with-no-sidecar` has no `default.provenance.json` beside its frame"
+                    .to_owned(),
+                "`a-sidecar-naming-another-capture`'s sidecar names \
+                 `a-capture-this-directory-is-not`"
+                    .to_owned(),
+                "`a-sidecar-stating-no-capture`'s sidecar states no `capture` at all".to_owned(),
+            ],
+        },
+        "a scan asserting only that a committed set is clean goes green forever the day it stops \
+         being able to look, so the same scan is driven over three directories committed to be \
+         wrong in three different ways. **All three have to be told apart**, because they are \
+         three different defects and a reader has to know which: a sidecar that went missing in a \
+         rename, one whose field a format change dropped, and one carrying an id from the \
+         revision before. The count of two is the two sidecars that exist to be opened, so a scan \
+         that opened the wrong number is a failure of this reading as well"
+    );
+    Ok(())
+}
+
+/// What every directory under `root` says about the capture it holds.
+///
+/// Directories are walked in name order so a verdict reads the same way twice,
+/// and a sidecar that cannot be opened is a **fault rather than an error**: a
+/// missing record is one of the three things this reading exists to report, and
+/// propagating it would stop the scan at the first one instead of naming them
+/// all.
+fn provenance_under(root: &Path) -> Result<Provenance, Box<dyn Error>> {
+    let mut directories = entries_of(root)?;
+    directories.sort();
+    let mut sidecars_read = 0;
+    let mut faults = Vec::new();
+    for directory in directories {
+        let Ok(stated) = fs::read_to_string(root.join(&directory).join(GOLDEN_SIDECAR)) else {
+            faults.push(format!(
+                "`{directory}` has no `{GOLDEN_SIDECAR}` beside its frame"
+            ));
+            continue;
+        };
+        sidecars_read += 1;
+        let named: Value = serde_json::from_str(&stated)?;
+        match named.get(CAPTURE_FIELD).and_then(Value::as_str) {
+            Some(capture) if capture == directory => {}
+            Some(capture) => faults.push(format!("`{directory}`'s sidecar names `{capture}`")),
+            None => faults.push(format!(
+                "`{directory}`'s sidecar states no `{CAPTURE_FIELD}` at all"
+            )),
+        }
+    }
+    Ok(if faults.is_empty() {
+        Provenance::EverySidecarNamesItsOwnCapture { sidecars_read }
+    } else {
+        Provenance::Disagreeing {
+            sidecars_read,
+            faults,
+        }
+    })
 }

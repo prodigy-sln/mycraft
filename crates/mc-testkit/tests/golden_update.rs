@@ -93,7 +93,8 @@ fn the_update_path_leaves_a_matching_golden_byte_for_byte_alone() -> TestResult 
 }
 
 #[test]
-fn a_written_golden_records_the_adapter_and_backend_that_produced_it() -> TestResult {
+fn a_written_golden_records_the_capture_the_adapter_and_the_backend_that_produced_it() -> TestResult
+{
     let goldens = TempDir::new()?;
     let artifacts = TempDir::new()?;
     let capture = CaptureId::new(CAPTURE)?;
@@ -110,12 +111,18 @@ fn a_written_golden_records_the_adapter_and_backend_that_produced_it() -> TestRe
     let sidecar: Value = serde_json::from_str(&fs::read_to_string(&sidecar_path)?)?;
     assert_eq!(
         (
+            sidecar.get("capture").and_then(Value::as_str),
             sidecar.get("adapter").and_then(Value::as_str),
             sidecar.get("backend").and_then(Value::as_str),
         ),
-        (Some(ADAPTER), Some(BACKEND)),
-        "the day a second adapter runs the gate, the existing set's provenance \
-         has to already be known"
+        (Some(CAPTURE), Some(ADAPTER), Some(BACKEND)),
+        "the day a second adapter runs the gate, the existing set's provenance has to \
+         already be known — and the capture is the field saying which frame this record is \
+         *of*. A sidecar carrying the right adapter under the wrong id is what a re-shoot \
+         done as a rename leaves behind, and it passes the inventory, the comparison and the \
+         mint alike. This is the writer's half of that: `golden_inventory.rs` reads the \
+         committed set and this reads what the harness writes, so a regression in either is \
+         a failure of its own"
     );
     Ok(())
 }

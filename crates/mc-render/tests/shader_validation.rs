@@ -52,12 +52,20 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 
+use mc_core::block::Opacity;
+use mc_render::geometry::scene::SceneGeometry;
+use mc_render::geometry::vertex::{PackedVertex, Vertex};
+use mc_render::geometry::{SectionOrigin, build_section_geometry};
+use mc_world::mesh::Facing;
 use tempfile::TempDir;
 
 #[path = "../build/validate.rs"]
 mod validate;
 
-use validate::{PLANE_AXES, QUAD_INDEX_PATTERN, ShaderError, validate_shader_directory};
+use validate::{
+    PLANE_AXES, QUAD_INDEX_PATTERN, SECTION_RECORD, ShaderError, VERTEX_LAYOUT,
+    validate_shader_directory,
+};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -359,3 +367,158 @@ fn the_terrain_shaders_plane_axis_table_is_checked_against_the_one_corners_are_p
     );
     Ok(())
 }
+
+/// The only device-free witness to the packed vertex's opacity field.
+///
+/// **Measured, and it is why this reading is written against packing's own
+/// output rather than against a constant.** Move `vertex.rs`'s `OPACITY_SHIFT`
+/// and leave `build/validate.rs` and `terrain.wgsl` alone — the direction real
+/// drift travels, because nobody edits the validator's copy by accident — and
+/// the build stays **green**: the table and the shader go on agreeing with each
+/// other about a number neither of them reads from the type. Seven tests redden.
+/// Six are rendered frames that need a device. This is the seventh.
+///
+/// So with `MYCRAFT_ALLOW_NO_GPU` set, deleting this test does not lose a
+/// duplicate reading of the bit layout. It leaves the layout observed by nothing
+/// at all, and a vertex decoded a bit out draws the whole world at a plausible
+/// wrong texture, degree or section — which no mean colour and no golden
+/// reports, because a golden is a photograph of whatever shipped.
+/// `build/validate.rs`'s header carries the other half of this note, so neither
+/// side can be removed in ignorance of the other.
+#[test]
+fn the_validators_vertex_layout_is_checked_against_the_bits_packing_actually_writes() -> TestResult
+{
+    // Against the packer's own output rather than against `vertex.rs`'s private
+    // constants, which is the stronger tie: it is the bits a vertex buffer
+    // carries that a shader decodes, and a constant renamed or left behind would
+    // still agree with a copy of itself.
+    let written = [
+        ("const LAYER_SHIFT", packed_with(|vertex| vertex.layer = 1)?),
+        (
+            "const SECTION_SHIFT",
+            packed_with(|vertex| vertex.section = 1)?,
+        ),
+        (
+            "const OPACITY_SHIFT",
+            packed_with(|vertex| vertex.opacity = one_step_of_a_degree())?,
+        ),
+    ];
+    let declared: Vec<(&str, u64)> = written
+        .iter()
+        .map(|(name, _)| (*name, 1u64 << shift_declared_for(name)))
+        .collect();
+
+    assert_eq!(
+        written.to_vec(),
+        declared,
+        "the build script cannot depend on the crate it builds, so the validator holds its own          copy of the packed vertex's bit layout — and an agreement check against a private copy          agrees with itself unless that copy is tied back to what packing emits. Each field is          set to its own lowest step with every other field zero, so the word that comes out is          one bit and that bit names the shift"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_validators_section_record_is_checked_against_the_stride_a_scene_writes() -> TestResult {
+    // The list's own length is the record's stride, because every scalar in it
+    // is four bytes wide. A field added to the shaders' struct without the Rust
+    // side growing allocates a section table short by a record per section, and
+    // neither side disagrees with itself.
+    let one = SceneGeometry::assemble(vec![one_section(A_FIRST_SECTION)?])?;
+    let two = SceneGeometry::assemble(vec![
+        one_section(A_FIRST_SECTION)?,
+        one_section(A_SECOND_SECTION)?,
+    ])?;
+
+    let stride = SECTION_RECORD.len() * BYTES_PER_SCALAR;
+    assert_eq!(
+        (one.section_bytes().len(), two.section_bytes().len()),
+        (stride, stride + stride),
+        "the validator's field list is the shaders' `Section` struct written a second time, and          its length times four is the stride the section buffer is allocated at. Compared against          the bytes a scene actually writes rather than against `SECTION_RECORD_BYTES`, because two          constants agreeing with each other is the shape this file's own header warns about. Both          a one-section scene and a two-section one are read, so a table off by a field is a          different failure from a writer that emitted one record and stopped"
+    );
+    Ok(())
+}
+
+/// The smallest degree that sets a bit at all.
+///
+/// **Not `Opacity::CLEAR`**, which is the smallest *degree* and encodes to the
+/// byte zero — a vertex packed at it leaves the field empty and the word comes
+/// out as nothing, which is a reading that would pass for a field packed
+/// anywhere. It is the smallest byte instead, one step above that.
+fn one_step_of_a_degree() -> Opacity {
+    Opacity::from_quantised(1)
+}
+
+/// How wide every scalar of the section record is.
+const BYTES_PER_SCALAR: usize = 4;
+
+/// Two section origins, so the stride is read from the gap between two records
+/// rather than from the length of one.
+const A_FIRST_SECTION: [i32; 3] = [0, 0, 0];
+const A_SECOND_SECTION: [i32; 3] = [16, 0, 0];
+
+/// The word a vertex packs to when `set` has moved one field off zero.
+///
+/// # Errors
+///
+/// Returns the packing refusal, which none of these values can provoke.
+fn packed_with(set: impl FnOnce(&mut Vertex)) -> Result<u64, Box<dyn Error>> {
+    let mut vertex = Vertex {
+        local: [0, 0, 0],
+        facing: Facing::NegX,
+        layer: 0,
+        section: 0,
+        opacity: Opacity::CLEAR,
+    };
+    set(&mut vertex);
+    Ok(u64::from_le_bytes(
+        PackedVertex::pack(&vertex)?.to_le_bytes(),
+    ))
+}
+
+/// The shift the validator's own table declares for `name`.
+fn shift_declared_for(name: &str) -> u32 {
+    VERTEX_LAYOUT
+        .iter()
+        .find(|(declared, _)| *declared == name)
+        .map_or(u32::MAX, |(_, shift)| *shift)
+}
+
+/// One section at `origin` holding a single upward face.
+///
+/// # Errors
+///
+/// Returns the parse or packing refusal, neither of which this fixture can
+/// provoke.
+fn one_section(origin: [i32; 3]) -> Result<mc_render::geometry::SectionGeometry, Box<dyn Error>> {
+    let block = mc_core::id::BlockName::parse(A_BLOCK_THE_STRIDE_DOES_NOT_DEPEND_ON)?;
+    let key = mc_core::id::TextureKey::parse(A_BLOCK_THE_STRIDE_DOES_NOT_DEPEND_ON)?;
+    let resolution = mc_render::texture::TextureResolution::stating(
+        [(
+            block.clone(),
+            mc_core::content::FaceTextures::uniform(key.clone()),
+            Opacity::OPAQUE,
+        )],
+        mc_render::texture::TextureLayers::resolve(&std::collections::BTreeSet::from([key])),
+    );
+    let quad = mc_world::mesh::Quad {
+        facing: Facing::PosY,
+        plane: 0,
+        origin: mc_world::mesh::PlanePos {
+            primary: 0,
+            secondary: 0,
+        },
+        extent: mc_world::mesh::PlaneExtent {
+            primary: 1,
+            secondary: 1,
+        },
+        block,
+    };
+    Ok(build_section_geometry(
+        &[quad],
+        SectionOrigin::new(origin),
+        &resolution,
+    )?)
+}
+
+/// A block whose only job is to give each section a quad; the record's stride is
+/// a property of the table's shape and not of what a section holds.
+const A_BLOCK_THE_STRIDE_DOES_NOT_DEPEND_ON: &str = "example:filler";

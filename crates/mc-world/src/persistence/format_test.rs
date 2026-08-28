@@ -133,15 +133,22 @@ const CRATE_DEPTH: usize = 2;
 /// equality, every save in existence would now report every block as retextured
 /// over a number no still frame can show.
 ///
-/// **`STATED_APPEARANCE_REVISION` standing still is the assertion here, not an
-/// omission.** A fold that bumped both bytes together is invisible to every
-/// witness comparing one appearance hash to another — they move as a pair and go
-/// on agreeing. This constant and its twin in
-/// `tests/save_per_face_appearance.rs` are the only two things in the workspace
-/// that hold the appearance byte by hand, so they are what reddens when it
-/// moves.
+/// **Which of the two moves is the assertion here, and it has now been each of
+/// them in turn.** A fold that bumped both bytes together is invisible to every
+/// witness comparing one hash to another — they move as a pair and go on
+/// agreeing. Last phase this constant standing still at 3 was the claim, while
+/// its twin moved; this phase it is the appearance list that grew a degree of
+/// opacity and `STATED_BEHAVIOUR_REVISION` standing still at 4 that is the
+/// claim. Neither number is decoration in either direction.
+///
+/// This constant, its twin in `tests/save_per_face_appearance.rs`, and the pair
+/// in `tests/save_folds_a_declared_opacity.rs` are the only things in the
+/// workspace holding either byte by hand, so they are what reddens when one
+/// moves. **They did**: this guard was the reading that caught an appearance
+/// bump landing with its oracle still at 3, over a save binary run that had been
+/// scoped to the tests expected to move.
 const STATED_BEHAVIOUR_REVISION: u8 = 4;
-const STATED_APPEARANCE_REVISION: u8 = 3;
+const STATED_APPEARANCE_REVISION: u8 = 4;
 
 /// Where an FNV-1a 64 fold starts, and what it multiplies by.
 ///
@@ -349,6 +356,26 @@ fn stated_behaviour_bytes(definition: &BlockDefinition) -> Vec<u8> {
 /// two alike or stops being shipped. The second witness is deliberately not a
 /// shipped block: `tests/save_per_face_appearance.rs` folds a fixture that is
 /// drawn and see-through, and nothing outside that file decides what it says.
+///
+/// **The degree of opacity is appended after both flags and is the last byte
+/// group of the record**, for the positional reason the behaviour list records.
+/// It is on this list because how much light a block stops is the definition of
+/// something visible: a block that became see-through is the same block to stand
+/// on, to build through and to break, so a player whose world predates the field
+/// is owed a retexture and never a warning that everything they built behaves
+/// differently.
+///
+/// **Folded as the `f32` the declaration stated, never as `Opacity::quantised`.**
+/// That byte is the renderer's, which has eight bits to spend and rounds into
+/// them; a save records what an author wrote, and two declarations a quarter of a
+/// code value apart are two different declarations whatever the renderer makes of
+/// them.
+///
+/// **Every shipped block states nothing about it today, so all four fold `1.0`
+/// here** — which makes this half blind to a fold that hardcoded the constant
+/// rather than reading the field. That witness is `tests/save_folds_a_declared_opacity.rs`,
+/// over a fixture declaring a quarter, and it is named here because a guard whose
+/// blindness is not written down is one somebody will later mistake for cover.
 fn stated_appearance_bytes(definition: &BlockDefinition) -> Vec<u8> {
     let mut stated = vec![STATED_APPEARANCE_REVISION];
     push_text(&mut stated, definition.name.as_str());
@@ -357,6 +384,7 @@ fn stated_appearance_bytes(definition: &BlockDefinition) -> Vec<u8> {
     }
     push_flag(&mut stated, definition.drawn);
     push_flag(&mut stated, definition.occludes);
+    push_number(&mut stated, definition.opacity.get());
     stated
 }
 

@@ -7,8 +7,10 @@
 //! content on exactly the terms a third-party mod is.
 
 mod definition;
+mod opacity;
 mod registry;
 pub mod source;
 
 pub use definition::{BlockDefinition, BlockId, DefinitionOrigin};
+pub use opacity::Opacity;
 pub use registry::{BlockRegistry, RegistryError};

@@ -14,7 +14,10 @@ inherited it rather than discovering it.
 
 There is no lighting model. Terrain is flat-shaded: a fragment's colour is
 its texture sample and nothing else — no ambient occlusion, no directional
-term, no shadows, no transparency pass.
+term, no shadows. **There is a transparency pass, and it is the one
+exception**: a face whose block declares `opacity < 1.0` is drawn in a second,
+unsorted terrain draw and blended with what is behind it, which is what makes
+the sea see-through. See "The blended terrain draw" below.
 
 ## The section mesher
 
@@ -167,9 +170,17 @@ What that costs a mod author, stated because it is not currently askable: **two
 adjacent cells holding the same non-occluding block show no seam between them,
 and there is no field that turns the rule off.** The value that would do it is
 `merges_with_self = false`, whose one identified use is drawing the interior
-faces of a translucent volume — per-pane glass — and translucency is PRO-952.
-The day that spec lands, this rule has to become a declaration; until then the
-engine's answer is the only answer.
+faces of a translucent volume — per-pane glass.
+
+**Translucency itself has since landed and did not need that field**, so the
+breaker is narrower than this paragraph first stated. SPEC-031 gave blocks a
+declared `opacity` and the sea a blended draw with this rule untouched, and the
+blended draw is order-independent *because* of it: a run of one kind shows only
+its two end faces, one of which is back-facing and culled, so a ray crosses one
+drawn face per run. What still needs the field is a block that wants its own
+interior faces drawn, which is per-pane glass and is still PRO-952. Until that
+lands the engine's answer is the only answer. `mc-world/src/mesh/sweep.rs`
+carries the same correction beside the rule itself.
 
 Until the shipped water declaration made water drawn, no shipped content ever
 reached this third question: `occludes(beyond)` culled first every time. That
@@ -442,9 +453,11 @@ Current behaviour, not a roadmap.
   is drawn because its declaration says so, never because it is solid — see
   "Which faces exist" above. `base:water` declares `solid = false, drawn =
   true, occludes = false`, so the sea is meshed and shows its surface and
-  edges while the lakebed shows through. It is drawn **opaque**: there is
-  still no transparency pass, no alpha and no sorted draw, and that is
-  PRO-952 rather than a limitation of the mesher.
+  edges while the lakebed shows through. It also declares `opacity = 0.5`, so
+  those faces are drawn **blended** rather than opaque. What is still absent
+  is any **sorting** — not between sections, not between quads, not between
+  the two draws — and any interior face of a translucent volume; both are
+  PRO-952 rather than limitations of the mesher.
 - **The merge predicate keys on a deduplicated key, and the deduplication is
   held by one module and by review, not by the test suite.** A run merges
   while the next cell shows an uncovered face of the same `Key`, and keys are
@@ -569,9 +582,17 @@ A vertex is a **single `u64`, 8 bytes**, and each field is cut to the width its
 own domain needs rather than the width of the Rust type it arrives in: 5 bits
 per coordinate (corners run `0..=16`, seventeen values), 3 for the facing, 8 for
 the texture layer (the downlevel `max_texture_array_layers` is 256), and 10 for
-the section index (`MAX_SECTIONS` is 1024). Thirty-six bits of sixty-four. The
+the section index (`MAX_SECTIONS` is 1024), and 8 for the block's **declared
+degree of opacity**, quantised to a byte. Forty-four bits of sixty-four. The
 spare bits are not margin to spend casually — ambient occlusion and per-vertex
 light will want them.
+
+The degree sits directly above the section index, which is the one neighbour a
+shift can collide with: an `OPACITY_SHIFT` one bit low overlaps the section's
+top bits and corrupts geometry rather than colour, so the two failures are
+distinguishable but only if the probe is chosen to separate them. A build-time
+check pins the whole layout against both shaders' copies — see *Shaders are
+validated when the crate is built* below, including what that check cannot see.
 
 **Packing refuses rather than truncates.** A coordinate of 17 masked into five
 bits becomes 1: a corner at the far side of the section, geometrically
@@ -585,8 +606,16 @@ in-plane coordinates in whole blocks, which is what makes the texture-coordinate
 convention above — a face merged across four blocks shows the texture four times
 — a property of the format rather than of the mesher.
 
-A section record is **44 tightly packed bytes, eleven scalars**: three origin
-components, the first quad index, the quad count, and the AABB's two corners.
+A section record is **48 tightly packed bytes, twelve scalars**: three origin
+components, the first quad index, the quad count, the **opaque quad count**, and
+the AABB's two corners. `opaque_quad_count` splits the section's own quad range
+in two — the quads before it stop all the light reaching them, the ones from it
+on do not — and it is a count rather than a second range because the packer
+emits the two halves adjacent by construction, so one number says where both
+begin and end. `SECTION_RECORD_BYTES` is stated once in `geometry/scene.rs` and
+the buffer is allocated at it; the number used to be written twice, and moving
+one copy allocates a table short by a record per section, which no assertion on
+either side reports because each side agrees with itself.
 Both WGSL shaders declare it as scalars rather than `vec3` because `vec3` carries
 16-byte alignment and would disagree with the CPU's layout — silently, and in a
 way that surfaces as a culling bug.
@@ -884,35 +913,229 @@ rest drawing keys nobody is playing, with no error anywhere. That is why resolut
 lives where vertices are built and not in a `Quad` — see §"A face draws what its
 block declared, and a `Quad` carries no key".
 
-### The compute cull pass and the single indirect draw
+### The compute cull pass and the two indirect draws
 
 One entry point, **one workgroup per section**, `workgroup_size(64)`:
 
 1. Lane 0 tests the section's world AABB against the six frustum planes — read
    from a **uniform** buffer, so they consume no storage binding — and writes
    `visible[section_index]`.
-2. If visible, lane 0 reserves an index range with
-   `atomicAdd(&indirect_args.index_count, 6u * quad_count)`. The atomic counter
-   **is** the indirect arguments' `index_count` field, so there is no second
-   dispatch and no prefix sum; the CPU zeroes that one `u32` before the pass.
-3. All 64 lanes stride the section's quads, writing six indices each. Striping
-   the writes is what keeps a dense section from serialising on one lane.
+2. If visible, lane 0 reserves an index range **in each half** with an
+   `atomicAdd` on that half's own `index_count`, by `6u * opaque_quad_count` and
+   `6u * (quad_count - opaque_quad_count)`. The atomic counters **are** the two
+   sets of indirect arguments' `index_count` fields, so there is no second
+   dispatch and no prefix sum; the CPU returns both to their declared state
+   before the pass.
+3. All 64 lanes stride the section's quads, writing six indices each into
+   whichever half the quad belongs to. Striping the writes is what keeps a dense
+   section from serialising on one lane.
 
-The indirect arguments are `instance_count: 1`, `first_index: 0`,
-`base_vertex: 0`, `first_instance: 0` — **exactly one field is dynamic**. That
-shape is chosen for portability, not tidiness: `first_instance = 0` avoids the
-`INDIRECT_FIRST_INSTANCE` device feature and `instance_count = 1` avoids
-`MULTI_DRAW_INDIRECT`, so the optional-feature set stays empty. The compaction
-invariant is `index_count == 6 × Σ quad_count` over the admitted sections.
+The indirect arguments are an `array<DrawArgs, 2>`: `instance_count: 1`,
+`base_vertex: 0`, `first_instance: 0` in both, `first_index: 0` in the opaque
+half and the upper half's base in the blended one. **Two fields are dynamic and
+only one of them per draw.** The shape is chosen for portability, not tidiness:
+`first_instance = 0` avoids the `INDIRECT_FIRST_INSTANCE` device feature and
+`instance_count = 1` avoids `MULTI_DRAW_INDIRECT`, so the optional-feature set
+stays empty. The compaction invariant is
+`index_count == 6 × Σ quad_count` over the admitted sections, **summed across
+the two halves**.
 
-**Compaction order is nondeterministic, and that is safe only for a stated
-reason.** `atomicAdd` gives no ordering guarantee, so visible sections' index
-runs land in an arbitrary order. Terrain is fully opaque and depth-tested, and
-the mesher's property tests assert no two quads cover the same (voxel, facing)
-pair — so no two fragments ever contend for the same depth and the image is
-order-independent. **The day a transparency pass arrives, or anything emits a
-second quad for one (voxel, facing) pair, this reasoning expires and compaction
-must become order-stable.**
+**The blended half's base is read out of the args buffer, never duplicated.**
+`reset_draw` writes `args[1].first_index` with `6 × MAX_QUADS` exactly as it
+already writes `index_count = 0`, and the shader reads it back as
+`base = args[1].first_index + atomicAdd(...)`. Spelling `6 * MAX_QUADS` into WGSL
+would be a fourth hand-duplicated CPU/GPU number, and the one whose drift writes
+translucent indices into the opaque range.
+
+**Compaction order is nondeterministic, and after the blended pass arrived the
+argument for it got narrower rather than disappearing.** `atomicAdd` gives no
+ordering guarantee, so visible sections' index runs land in an arbitrary order
+within either half. In the **opaque** half the original argument stands
+unchanged: depth-tested, and the mesher's property tests assert no two quads
+cover the same (voxel, facing) pair, so no two fragments contend for one depth
+value and the image is order-independent. In the **blended** half the order
+*does* reach the image, and what makes it safe is a property of the content
+rather than of the engine — stated in full under the next heading.
+
+### The blended terrain draw: the model, the pass order, the depth writes
+
+**The model is B1: one unsorted blended pass, depth-test on, depth-write off.**
+There is no sorting anywhere — not between sections, not between quads inside
+one section, not between the two draws. A face is translucent if and only if
+**its block declares `opacity < 1.0`**; the texel's own alpha modulates the
+result inside the blended pass and decides nothing about which pass a face lands
+in.
+
+**One render pass, two draws, opaque first.**
+
+| | pipeline | blend | depth test | depth write |
+|---|---|---|---|---|
+| first draw | `mycraft terrain` | none | `Less` | **on** |
+| second draw | `mycraft terrain blended` | `SrcAlpha`/`OneMinusSrcAlpha`, alpha `One`/`OneMinusSrcAlpha` | `Less` | **off** |
+
+Opaque first is what makes the depth test mean anything to the second draw: by
+the time a blended fragment is tested, every opaque surface nearer than it has
+already written its depth, so a translucent face behind a wall is rejected and
+one in front of it composites. Depth-write **off** in the second draw is what
+lets two translucent surfaces along one ray both survive — a blended fragment
+that wrote depth would occlude the next one and the composition would be a
+single layer. The opaque pipeline is unchanged in every respect; the blended
+one differs from it in exactly those two settings and in nothing else. The
+`BlendState` is the HUD pass's verbatim, which is the one blend this backend is
+already proven on.
+
+Both draws read the same vertex buffer and the same index buffer. What separates
+them is where in that buffer each half begins, which the indirect arguments
+carry — so a frame in which nothing declares a degree below one leaves the second
+draw's index count at zero, and a draw of zero indices is not a special case
+anybody had to write down. That is what let the whole draw path land one spec
+phase before any content declared a degree, with every committed frame unmoved.
+
+#### What B1 gets wrong, stated as a limit rather than left to be found
+
+**`src-over` is not commutative, and nothing here sorts.** The order two
+translucent fragments composite in is the order their indices land in the buffer,
+which is the mesher's emission order within a section and the atomic's hand-out
+order between sections. Neither has anything to do with distance from the eye.
+
+For two translucent surfaces along one ray at declared degrees `a` (nearer) and
+`b` (farther), over an opaque colour `W`, in linear light:
+
+- **back-to-front**, which is correct: `a·N + (1−a)·b·F + (1−a)(1−b)·W`
+- **front-to-back**, which is what the engine draws when emission order runs the
+  other way: `b·F + (1−b)·a·N + (1−a)(1−b)·W`
+
+The two agree for all `N` and `F` exactly when `a = b` **and** `N = F` — the
+weights on the near and far colours swap otherwise. That is why the artefact is
+invisible for the content that ships: **one translucent kind**, so `a = b` and
+`N` and `F` are two texels of one texture, and the residual is **derived and
+bounded**, not measured: at `a = b` the difference between the two orderings is
+`a²(B−A)`, a quarter of that texture's own spread, which for `base:water` is
+**≤ ΔE 0.79**.
+
+**The tolerance it is weighed against is a sum, and the components belong here
+rather than only the total.** The floor is `3.16 + 0.79 + 0.3 ≈ 4.3`: the
+layer's own **texel spread 3.16**, this **ordering residual ≤ 0.79**, and the
+**quantisation term < 0.3** — 0.26 of one code value at these magnitudes, from
+the declared degree being packed to a byte before it reaches a fragment. A total
+stated alone goes stale silently when one component moves; stated as its terms,
+the arithmetic is checkable and a component that has moved reddens on the sum.
+
+| term | value | what it is a property of |
+|---|---|---|
+| texel spread | 3.16 | the layer's own art — how far one texel stands from the layer's mean |
+| ordering residual | ≤ 0.79 | the *engine*, and derived rather than measured: `a²(B−A)` at `a = b` |
+| quantisation | < 0.3 | the *encoding* — 0.26 of one code value, from the degree packed to a byte |
+| **floor** | **≈ 4.3** | their sum, and nothing else |
+
+**The ceiling is where a blended reading differs from an opaque one, and naming
+the wrong one overstates the headroom by a factor of two.** Two distances bound
+a tolerance here and they answer different questions:
+
+- **Layer against layer** — could this pixel be a *different layer* drawn
+  unblended? `base:stone` is the nearest, at **ΔE 24.93** measured against every
+  colour `base:water` shows at any scale. (The **25.34** the 2026-08-26 entry
+  records is the same pair against the narrower landmark set; both are correct
+  about their own set, and that entry is left as it stands because it is a record
+  of what was taken that day.)
+- **Composite against its own operands** — could this pixel be the sea *failing
+  to draw*, so the lakebed shows through, or the sea *drawing opaque*, which is
+  the state the engine was in before this spec? Over the derived family at the
+  declared degree these come to **10.85** and **9.46** respectively, both on
+  `base:stone`.
+
+**The second binds, and it is 9.46.** Those two are the failures a blend can
+actually have; a different layer at the pixel is a layer-index or mesh fault with
+its own instruments, and the distinction has its own section under *"What
+golden-frame verification cannot see"*. So the bracket a per-pixel blend
+tolerance sits in is **(4.3, 9.46)** rather than (4.3, 24.93) — a quarter of the
+room the layer-against-layer figure suggests.
+
+**The occurrence question is settled, and the binding figure is 11.95.**
+`base:stone` lies under the sea **nowhere** — zero across the three declared
+ticks, the declared submerged pose, a **103 680**-pose sweep, and the block
+directly beneath every water cell. The water-over-stone family is therefore
+arithmetic about a pairing this world does not produce, and the nearest
+*occurring* operand distance is the sky row at **ΔE 11.95**. Against the ΔE 8 a
+per-pixel blend reading uses, that is **3.95** of headroom.
+
+**`9.46` is kept beside it and neither replaces the other.** It is the derived
+bound over a family that *includes* a stone lakebed — so it is not a
+conservatism to be discarded now the sweep has come back empty, it is what this
+ceiling becomes the day any world places stone under water. A measured *is* over
+the poses that occur and a derived *cannot exceed* over the family that could
+answer different questions, and this spec has already paid once for letting the
+second wear the first's clothes.
+
+Both figures are **derived**, and the distinction is load-bearing: `≤ 0.79` is a
+bound a measurement must not exceed, never a value it must equal. The engine is
+not correct here; the content is uniform enough that the incorrectness does not
+reach a pixel anyone can tell apart.
+
+#### The artefact, drawn — one scene, one eye, two emission orders
+
+**The frames below are the same scene from the same eye.** Two translucent panes
+of different colours stand one behind the other over an opaque wall, in one
+section, and **the only difference between the two pictures is the order the two
+panes reach the packer.** Nothing about the camera, the world, the degrees or
+the art changes between them.
+
+**The pose is the fixture's and not the phenomenon's, and confusing the two is
+the way this page could mislead.** The eye stands at **`(8, 8, 40)`** looking at
+**`(8, 8, 0)`** because that is where this fixture put it — square onto the
+panes, far enough back that both fit the frame. **The artefact is not a property
+of where the eye stands.** A reader who takes the coordinates as the recipe,
+stands there in some other scene and sees nothing has been misled by the frames
+rather than helped by them: what produces it is two translucent surfaces of
+different colours along one ray, in whatever order the buffer happened to
+receive them, and no camera position causes or cures that.
+
+| emission order | what it is | composite predicted |
+|---|---|---|
+| farther pane first | the nearer surface composites last, which is what a **sorted** model draws | **`(182, 135, 99)`** |
+| nearer pane first | the nearer surface composites first — **the artefact** | **`(150, 124, 125)`** |
+
+![The two panes with the farther one emitted first](images/two-translucent-kinds-farther-emitted-first.png)
+
+![The two panes with the nearer one emitted first](images/two-translucent-kinds-nearer-emitted-first.png)
+
+`images/two-translucent-kinds-farther-emitted-first.png` and
+`images/two-translucent-kinds-nearer-emitted-first.png`, in that order.
+
+**The two composites stand ΔE 24.52 apart** — against a closest pair of **24.02**
+among all six colours either frame may hold, so the difference between a sorted
+model and this one is wider here than any two colours in the scene are from each
+other. This is not a subtle grading difference; it is a different colour.
+
+**The values above are the *predicted* ones and they are what the page claims.**
+The device draws `(182, 135, 98)` for the first — one unit of blue, a rounding —
+and `(150, 124, 125)` for the second exactly. The prediction is stated rather
+than the pixel because a page that recorded one machine's output would be
+photographing the renderer instead of grading it, which is the fault the whole
+golden discipline downstream of here exists to prevent.
+
+**What the pair proves that the algebra alone cannot.** The algebra above says
+the weights on the near and far colours swap when emission order does. These two
+frames are that swap happening, in the shipped draw path, with everything else
+held: **the drawn colour follows the order the quads were emitted in and not
+their distance from the eye.** One frame of one order would have been consistent
+with a sorted renderer that happened to agree.
+
+**The trigger for fixing it is written down so it is not a judgement call.** What
+expires this reasoning is *a second translucent block kind whose colour differs
+from the first reaching shipped content or a committed golden* — not "someday".
+At that point compaction has to become order-stable and the blended half sorted
+back-to-front. Until then, order-stable compaction is Out of Scope by the
+spec's own listing (F1, F2).
+
+**Between sections the artefact is also nondeterministic**, which is worse than
+merely wrong: `atomicAdd` hands out ranges in whatever order the hardware
+happens to, so the same scene can composite two differently-coloured translucent
+surfaces one way on one run and the other way on the next. Inside a section the
+offsets are fixed (`reserved_base + 6·quad`), so a same-section artefact is wrong
+but repeatable. **A reader who meets this as a flaky test should read it here
+first**: two runs of one scene disagreeing over a pixel where two translucent
+kinds overlap is this limit, not a broken device.
 
 ### The frustum test exists twice, deliberately
 
@@ -1001,13 +1224,44 @@ empty shader directory, so a broken glob cannot pass by validating nothing.
 
 The build script and its tests include **one source file** by `#[path]`, so the
 tests exercise the exact code the build runs. Beyond validation, that code closes
-the two duplications this design forces: the cull shader's six-element winding
-literal must equal the Rust index pattern, and the shader's plane-axis table must
-equal what `Facing` declares. The table is six rows in `Facing` declaration order
-and the shader derives nothing from a facing value — a three-row axis-indexed
-table would only be reachable by the very expression being guarded, and
-reordering the enum would move four of six shader rows while leaving every suite
-green.
+the four duplications this design forces, each a table a shader carries because
+it cannot read the CPU's:
+
+- **The winding literal** — the cull shader's six indices must equal the Rust
+  index pattern. A quad wound differently on the two sides draws a hole.
+- **The plane-axis table** — the terrain shader's two components per face must
+  equal what `Facing` declares. The table is six rows in `Facing` declaration
+  order and the shader derives nothing from a facing value: a three-row
+  axis-indexed table would only be reachable by the very expression being
+  guarded, and reordering the enum would move four of six shader rows while
+  leaving every suite green. Exchanged on one side only, the texture runs
+  *across* a face rather than along it, which leaves the face's mean colour
+  untouched — so no probe reports it and a golden minted from that renderer
+  records it as ground truth.
+- **The packed vertex's bit layout** — a field read a bit out of place decodes
+  every corner in the world to a plausible wrong coordinate, texture, section or
+  degree, each of which leaves a frame that looks like a frame.
+- **The section record's field list** — both shaders declare the struct the
+  section table is read through and neither can check it for itself. A field
+  inserted, removed or exchanged with its neighbour compiles perfectly and reads
+  every later field out of the wrong four bytes.
+
+**The last two run after the first two, and the ordering is about specificity
+rather than about which test passes.** The tables a shader *reads* are checked
+before the layouts it merely *declares*: the terrain stage declares the whole
+section record and reads only the origin out of it, so a section-record
+complaint is the least specific thing that can be said about a shader and goes
+last. Placed first, it masks the fault a doctored fixture was written to have.
+
+**What none of them can see, measured rather than cautioned.** Every check here
+compares a shader against `validate_tables`' copy, and nothing at build time
+compares either against the type it stands for. Moving `vertex.rs`'s own
+`OPACITY_SHIFT` by one, with the validator and both shaders untouched, leaves
+the build **green** — the two copies go on agreeing about a number neither
+reads. The witness that closes it is a test, not the build: seven redden, six of
+which need a device, and the seventh is `tests/shader_validation.rs`'s agreement
+between the packing the vertex actually writes and the validator's layout.
+`build/validate.rs`'s own header carries the measurement.
 
 ### Refusals, and what recovers
 
@@ -1696,6 +1950,120 @@ re-verified with `MYCRAFT_UPDATE_GOLDENS` unset and `golden_mismatch` selected �
 byte-identical apart from the capture id they name: the same adapter, backend and
 driver produced both sets.
 
+#### 2026-08-28, the spec that made the sea pass light — and the first set that can see an opacity regression
+
+**`r4` → `r5`, four directories deleted and four added.** The fourth bump, and
+the first whose cause is neither the mesh, the spawn nor the declared physics.
+
+**What moved the revision, and what did not.** SPEC-031 landed three things and
+only one of them is a revision. The **packed vertex grew an eight-bit opacity
+field at shift 36**, and a packed vertex is a contract item a capture is a
+photograph of — that, alone, is the bump. The **blended pass** is not: a second
+draw over the same faces at the same depths moves no pixel while nothing declares
+a degree below one, which is not an argument but a reading — the whole renderer
+rework landed in its own phase and closed by verifying the committed `r4` set
+green with `MYCRAFT_UPDATE_GOLDENS` unset, four tests, four passed. And the
+**content** is not: `content/base/blocks/water.luau` declaring `opacity = 0.5`
+changes what the frames show, and an art edit is expressly not a bump by the
+2026-08-26 entry above. The format and the content arrive in one commit because
+a field nothing writes is a field nothing can photograph, but only the first of
+them is why the directories are renamed.
+
+**The tripwire is blind here for the third time, and three is a property of the
+guard rather than three anecdotes.** `crates/mc-sim`'s `scene_contract.rs`
+compares quad count and per-block area, both properties of the mesh alone
+(`crates/mc-sim/src/replay/contract.rs:47-49`). It stayed green through `r3`
+(declared physics), through `r4` (declared physics again) and through `r5` (the
+vertex format), and in each case the failure it could not raise arrived as an
+image comparison instead. Stated generally: **every bump so far whose cause was
+neither the mesh nor the spawn has been invisible to the only automated
+instrument that runs before an image is compared.** That is not a footnote to
+three log entries — it is the guard's shape, and the fourth instance should be
+expected rather than discovered. The guard itself stays deferred (F6); naming
+the pattern is what this entry is for.
+
+**All four frames moved, including the HUD capture, and the mechanism is worth
+recording because the obvious inference is wrong.** The renderer rework moved no
+HUD pixel — phase 2 measured that. It does **not** follow that the content change
+moved none either: **the HUD capture composites over the terrain frame**, so
+anything that moves terrain moves the HUD set. It was predicted not to move and
+it moved, first under a one-line mutation of `water.luau` during test authoring
+(`1635 tests run: 1632 passed, 3 failed` — `terrain_goldens`, the sea's colour
+reading, and the unpredicted `hud_goldens`) and then in the mint itself, where
+git records four added and four deleted PNGs and not one rename. Contrast the
+`r4` mint, where tick 0 and the HUD capture came back byte-identical: there the
+cause was the camera path, which is dry at tick 0.
+
+**The derived check the mint had to make, and the order that makes it possible.**
+Because the opaque pipeline is untouched, the pixels that **differ** between the
+`r4` blobs and the `r5` mint must be a **subset of the water region in the old
+blobs, position-identical in both directions** — a changed pixel outside it is a
+wrong partition or a wrong vertex field, and no count can report it. **The
+deletion rule and this check are in tension and the ordering is binding**: the
+moment the `-r4` directories are deleted, the thing the check compares against is
+gone, and a comparison run afterwards is not a weaker check but no check at all,
+failing in a way that looks exactly like a step that passed. So the old blobs are
+preserved outside the working tree (or fixed at a commit and read with
+`git show <sha>:<path>`) **before** anything deletes them, the check is run
+against the preserved copies, and only then are the directories removed.
+
+Measured, with the region taken as every colour `base:water`'s layer shows at any
+scale — its texels and every mip level — and a pixel assigned to it by CIE76
+distance:
+
+| capture | differing | in the old water region | differing outside it | region left alone |
+|---|---|---|---|---|
+| `player-walk-t000` | 88 280 | 88 280 | 0 | 0 |
+| `player-walk-t059` | 179 216 | 179 216 | 0 | 0 |
+| `player-walk-t119` | 322 569 | 322 569 | 0 | 0 |
+| `player-walk-hud-t000` | 88 280 | 88 280 | 0 | 0 |
+
+The two sets coincide in **both** directions in all four captures, and the
+coincidence is a plateau rather than a knife edge: it holds unchanged at every
+classifier tolerance from **ΔE 2 to ΔE 20**.
+
+**Both ends of that plateau are measured on the `r4` blobs themselves rather
+than inherited.** The farthest a water pixel stands from its own layer's colours
+is **ΔE 1.17**, identical across all four captures; the nearest a *non*-water
+pixel stands to them is **ΔE 24.93** in three of the four and **28.95** at tick
+119, so the bracket is **(1.17, 24.93)** and the sweep to 20 sits inside it with
+room at both ends. **This is deliberately not the ΔE 25.34 the 2026-08-26 entry
+records, and the difference is the colour set rather than a disagreement**: that
+figure is `base:stone`'s distance to the narrower landmark set, and the region
+here admits every colour the layer shows *at any scale*, mip reductions included,
+so the nearest wrong answer comes in by four tenths. A figure whose premise is a
+colour set has to be re-taken when the set changes, which is why this one was.
+
+The 88 280 at tick 0 and in the HUD capture is the same figure the 2026-08-26
+entry records for the stand-in's region — the same pixels, two content revisions
+apart.
+
+**The check was itself controlled, because an absence assertion that can no
+longer look reports "nothing outside" as loudly as a clean answer does.** Run
+with the mint replaced by copies of the old blobs — nothing differing at all —
+it reports 88 280 region pixels left alone and fails. Run against a mint with one
+non-water pixel doctored at (5, 5), it names that pixel and fails. Both arms bite.
+
+**Verified in the order this section prescribes**, on the tree carrying the
+declaration and the bumped revision, `MYCRAFT_UPDATE_GOLDENS` confirmed unset
+immediately before every run that was not the mint: `terrain_probes`,
+`replay_oracle`, `hud_prediction` and `the_sea_the_camera_sees_is_the_water_layer`
+— **23 tests run, 23 passed**, a bare count and so a complete run. Then the mint,
+naming only the two golden binaries — 3 passed. Then the subset check above.
+Then the four `-r4` directories deleted, and the set re-verified with the opt-in
+unset and `golden_mismatch` selected — **4 passed** — and `golden_inventory` —
+**4 passed**. Every sidecar names `player-walk-*-r5`, which is what the deletion
+rule exists for; the same adapter, backend and driver produced both sets.
+
+**`r5` is the first golden set that can see an opacity regression at all, and
+that is worth more than the rename.** While no shipped block declared a degree
+below one, every face was drawn in the opaque pass and the packed opacity byte
+was written, read and discarded — so moving the real packing shift left every
+committed frame green. Measured during phase 2: the whole renderer rework, vertex
+field included, left the `r4` set unmoved. The mint does not merely change a
+revision; it gives the instrument a sense it did not have, and from `r5` onward a
+frame comparison is evidence about the opacity path as well as about the mesh.
+
 ## What golden-frame verification cannot see
 
 **This section is now about terrain, and no longer about the whole frame.**
@@ -1790,6 +2158,31 @@ have been equally invisible**, so *terrain's* pixel-scale correctness rests on
 reading the code and on a human looking at the window, not on the golden set.
 When a change could plausibly produce sparse artifacts there, verify it with a
 per-pixel oracle or accept that nothing automated is watching.
+
+### A colour reading tells a layer from its own operands, not from every layer
+
+**A separate blindness from the ones above, recorded because the measurement
+that found it makes it look like something else.** Every reading that judges a
+blended surface asks *is this pixel the composite predicted for it, or is it one
+of that composite's own **operands** drawn unblended* — the sea failing to draw,
+or drawing opaque. Both are the failures a blend can actually have, and the
+tolerance is derived against them.
+
+**It does not ask whether the pixel is some entirely different layer.** Measured
+over the derived family at the shipped degree: a `base:water`-over-`base:dirt`
+composite stands as close as **ΔE 5.98** to an unblended `base:stone` colour —
+inside any per-pixel tolerance these readings use. That is **not** a defect in
+the blend and not a tolerance that needs moving: reaching that state requires a
+*wrong layer* at that pixel, which is a layer-index or mesh fault rather than a
+blend one, and it has its own instruments — the packed vertex's layer field, the
+build-time layout checks, and the mesher's own tests.
+
+It is recorded here for one reason: **an operand-based bracket is not a
+colour-uniqueness bracket, and the two are easy to mistake for each other**
+precisely because both are stated in ΔE against the same palette. A future
+reader measuring a composite against every layer will find numbers under the
+tolerance and think a guard has failed. Nothing has; a different guard is
+answering, and no reading here claims the stronger property.
 
 ### The HUD's 733 pixels are the exception, and the exception is bounded
 

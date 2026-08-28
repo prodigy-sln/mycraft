@@ -1702,3 +1702,153 @@ refuses a block that is merely no longer what it was.
 - **Strict argument parsing.** An unrecognised argument stays ignored, which is also
   why the retired `--load-changed-blocks` needs no handling: it stops matching, and
   the load it used to ask for is now what happens anyway.
+
+## ADR-030 — The refusal on a translucent occluder reads the resolved `occludes`, which couples the opacity default to every solid block
+
+**Status**: Accepted · **Date**: 2026-08-27 ·
+**Implemented 2026-08-27 by SPEC-031**
+
+**Context.** `opacity` is refused when it states a degree below `1.0` on a block
+that also occludes: `occludes` suppresses the meeting face of whatever the block
+touches, so a block light was meant to pass through would have nothing behind it
+left to show. The question the implementation had to settle is *which* occlusion —
+the line the author wrote, or the value the declaration resolves to. `occludes`
+falls back to whatever the same declaration said about `solid`.
+
+**Decision.** The **resolved** value. The mesher reads the resolved value, so the
+written-line reading would let `solid = true, opacity = 0.5` — glass — register,
+draw a translucent face, have the geometry behind it culled, and be refused by
+nothing. That is the outcome `optional_boolean`'s doc already names as the worst
+available: the block behaves exactly as if the line had never been written, so
+there is no symptom to notice. **A refusal that misses the case it was written for
+is worse than no refusal, because it reads as coverage.** The cost is one line an
+author has to write anyway for the feature to work.
+
+The refusal names **whichever line actually caused the occlusion**, in two
+distinct causes: a written `occludes = true` names a line to *delete*, while a bare
+`solid = true` names `solid` and a line to *add*. Quoting an `occludes = true` at
+an author whose file has no such line sends them searching for something that is
+not there — the same defect as blaming a floor for a value that is not a number,
+which this loader already avoids in the other direction.
+
+**Consequence, and it is not obvious from any test.** The two rules together make
+`OPACITY_BY_DEFAULT` **load-bearing for every solid block in the shipped content
+root**, not for one scenario. Measured: setting it below `1.0` makes every solid
+block occlude by solidity *and* pass light, so the cross-field refusal rejects the
+whole root — 352 of 1 614 tests red, not the two that name the default.
+
+**That coupling is a robustness property and should not be "fixed".** Because it
+exists, a future change to the default **fails loudly at load** — with a refusal
+naming a file, a block and a field — rather than silently at draw, where a world
+of half-transparent stone would look like a renderer defect. Anyone tempted to
+decouple them should be clear they are trading a refusal for a wrong picture.
+
+**Water is unaffected either way**, being non-solid; this decision is entirely
+about the see-through blocks that come after it.
+
+---
+
+## ADR-031 — The Windows coverage target is a short absolute path, namespaced per worktree
+
+**Status**: Accepted · **Date**: 2026-08-28 · **Windows only** ·
+**Reprieve, not a fix — the durable remedy is tracked as PRO-997**
+
+**Context.** `cargo llvm-cov` generates its report by invoking `llvm-cov export`
+with one `-object <path>` argument per test binary in the workspace. At 383
+binaries that command line crossed `CreateProcess`'s hard limit of 32 767
+characters, and the gate's coverage stage failed with `os error 206`
+(`ERROR_FILENAME_EXCED_RANGE`) **after every test had passed** — a
+report-generation failure wearing a test failure's costume, with no failing test
+to name because the coverage half runs once the suite is green. Every phase that
+adds a test file walks the workspace back into it.
+
+Two figures for that crossing are on record and they do not agree: PRO-997 says
+32 756 and the gate's own comment says ~32 883. The gap is 127 characters, which
+is about what the `-ignore-filename-regex` argument costs — measured at 99
+characters on the invocation today — so the smaller figure is most likely the
+object list alone and the larger the whole invocation. That is offered as a
+reconciliation and not as a measurement: the `target/` layout that produced both
+is gone and neither can be re-taken. **The figures below can be, and were.**
+
+Only the **repeated prefix** matters. Each argument carries the coverage target
+directory's path once, so a character removed from that prefix is removed once per
+binary while a character removed from anything else is removed once. Under
+`target/` each argument carries `target\llvm-cov-target\debug\deps\` — 34
+characters; from a short absolute root it carries `C:\mcv\debug\deps\` — 18.
+
+**That was measured, not derived**, on a throwaway one-test crate rather than by
+reasoning from the layout, and the measurement is what caught the part a derivation
+would have got wrong: cargo-llvm-cov emits the object path **absolute** when the
+target directory sits outside the working directory, which is why a short absolute
+root beats a long relative one instead of merely trading one prefix for another.
+
+**Decision.** On Windows the gate sets `CARGO_LLVM_COV_TARGET_DIR` to
+`%SystemDrive%\mcv\<slot>`, where `<slot>` is the first four hex characters of the
+SHA-256 of the lower-cased absolute repository root. Nothing changes on other
+platforms, where the argument limit is orders of magnitude larger and `target/`
+stays put.
+
+**The slot exists because the directory would otherwise be one fixed location
+shared by every gate run on the machine.** `standards/global/git-workflow.md` §5
+states that more than one agent may hold this working tree at once, and the project
+uses `git worktree`; two concurrent `cargo llvm-cov nextest --workspace` runs from
+sibling worktrees would write coverage artefacts into the same place, producing
+either a percentage that silently reflects a mixture of two branches or lock
+contention that reads as an unrelated gate failure. **A coverage number that is
+quietly wrong is worse than one that fails loudly.** The key is the repository
+root, not the branch name: a branch moves, and would orphan the directory it named.
+The slot separates **worktrees, not contexts** — two gate runs in one checkout
+still share one directory and still fail as `docs/technical/testing.md` describes.
+
+**Measured cost, on the tree that carries this record.** Both readings were taken
+from `cargo llvm-cov report -vv`, which prints the `llvm-cov export` invocation it
+is about to make, run with the gate's own `--ignore-filename-regex` and `--json`
+so the printed invocation is the one the gate makes. The figure is that command
+line with the printer's own quoting removed, which is the string `CreateProcess`
+actually receives; both rows are the same 391 test binaries.
+
+| prefix | chars | command line | headroom | further test binaries |
+|---|---|---|---|---|
+| `C:\mcv\debug\deps\` | 18 | 27 722 | 5 045 | 72 |
+| `C:\mcv\<slot>\debug\deps\` | 23 | **29 688** | **3 079** | **41** |
+
+At a measured mean of 74.4 characters per `-object` argument, the slot costs
+**1 966 characters — 31 of the 72 binaries of headroom the un-namespaced path
+had**, or 43% of it. That is a large proportional bite and it is accepted
+knowingly: the hazard it removes is a silently wrong number, while the headroom it
+spends is headroom PRO-997 has to reclaim either way. For scale, the workspace
+went from 383 to 391 test binaries over the single spec that produced this record.
+
+Four hex characters were chosen for a collision probability that is effectively
+zero across any plausible number of worktrees. Two would return 13 of those 31
+binaries at 256 slots, which is a few percent of collision across a handful of
+worktrees — and a collision is silent, reinstating exactly the hazard the slot
+exists to remove. **Neither length changes the wall's position by more than a few
+specs**, which is the argument for spending the headroom rather than shaving it.
+
+**This is a reprieve and not a fix.** The limit returns at the rate the workspace
+adds test files, and no directory name is short enough to be a solution. The real
+remedy is an **LLVM response file** (`llvm-cov @args`, the object list read from a
+file instead of the command line), which is **cargo-llvm-cov's to emit** — it
+builds the invocation, so the fix is an upstream request rather than a local
+workaround. It is tracked as **PRO-997**, named here and in the gate comment so the
+next person to meet `os error 206` finds the issue rather than re-deriving it.
+
+**Consequences.**
+
+- **Coverage artefacts now live outside the repository.** They are several
+  gigabytes, and a cleaner that only knows about `target/` will miss them entirely.
+  Anything that reclaims disk space, or that wipes coverage state to get a clean
+  reading, has a second location to visit.
+- **The pre-namespacing `C:\mcv\debug\` is now litter.** It was the target for the
+  window between the original change and this record, nothing writes to it any
+  more, and nothing will clean it. It is safe to delete by hand; it is not safe to
+  delete `C:\mcv` itself, which is now the parent of every worktree's slot.
+- **The coverage figure is unchanged.** This is worth recording because it was the
+  live risk rather than the arithmetic: `--ignore-filename-regex` is built from
+  `crates/*` patterns, so had the report's **source** paths gone absolute along with
+  the object paths, the ADR-008/ADR-013 exclusions would have silently stopped
+  applying and the percentage would have moved for a reason unrelated to any code.
+  Measured across the change on one tree: **93.78% lines, 92.32% regions, 11 118
+  lines tracked, `1665 tests run: 1665 passed, 1 skipped`** — identical before and
+  after.

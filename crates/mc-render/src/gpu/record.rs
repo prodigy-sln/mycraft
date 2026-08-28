@@ -1,13 +1,14 @@
-//! Recording one frame: the compute cull pass, and the single indirect draw.
+//! Recording one frame: the compute cull pass, and the two indirect draws.
 //!
 //! The order is the whole design. The CPU writes the frame's camera and its six
 //! frustum planes into a uniform and returns the indirect arguments to their
 //! declared state; the compute pass runs one workgroup per section, flags the
-//! ones the frustum admits and compacts their indices while raising the
-//! arguments' index count with an atomic add; the render pass then issues
-//! **one** `draw_indexed_indirect` over whatever that count came to. Nothing
-//! between those steps is a decision — which is why the visible set can be
-//! compared against a pure function that never saw a device.
+//! ones the frustum admits and compacts their indices into the two halves of the
+//! index buffer while raising each half's index count with an atomic add; the
+//! render pass then issues **one `draw_indexed_indirect` per half**, opaque
+//! first, over whatever those counts came to. Nothing between those steps is a
+//! decision — which is why the visible set can be compared against a pure
+//! function that never saw a device.
 //!
 //! While the scene is still being prepared there is nothing to draw and the
 //! frame is a bare clear. A surface texture that was acquired and left unwritten
@@ -20,7 +21,7 @@ use crate::camera::{Frustum, Plane, projection_for, view_projection};
 use crate::snapshot::{FrameStats, FrameWork, ScenePhase, TerrainSnapshot, frame_work};
 use crate::surface::SurfaceSize;
 
-use super::buffers::SceneBuffers;
+use super::buffers::{DRAW_ARGS_BYTES, SceneBuffers};
 use super::pipeline::Pipelines;
 use super::{FrameError, RecordTarget, TerrainRenderer, clear_color};
 
@@ -148,19 +149,34 @@ fn draw(
     Ok(())
 }
 
-/// The one terrain draw: bind, point at the compacted indices, and let the
-/// device read how many of them there are.
+/// The two terrain draws: bind once, point at the compacted indices, and let the
+/// device read how many of them each half holds.
+///
+/// **Opaque first, blended second, in the same render pass.** Rasterization
+/// order between two draws of one pass is what makes "first" mean what it says,
+/// so the blended draw reads the depth the opaque one wrote and a translucent
+/// face behind an opaque one is discarded rather than mixed into it. Two passes
+/// would need the depth attachment loaded rather than cleared and would say the
+/// same thing less directly.
+///
+/// Both draws read the same vertex buffer and the same index buffer; what
+/// separates them is where in that buffer each half begins, which the arguments
+/// carry. A frame in which nothing declares a degree below one leaves the second
+/// draw's index count at zero, and a draw of zero indices is not a special case
+/// anybody has to write down.
 fn record_terrain_draw(
     pass: &mut wgpu::RenderPass<'_>,
     pipelines: &Pipelines,
     buffers: &SceneBuffers,
 ) {
-    pass.set_pipeline(&pipelines.terrain);
     pass.set_bind_group(0, &pipelines.frame_group, &[]);
     pass.set_bind_group(1, &pipelines.texture_group, &[]);
     pass.set_vertex_buffer(0, buffers.vertices.slice(..));
     pass.set_index_buffer(buffers.indices.slice(..), wgpu::IndexFormat::Uint32);
+    pass.set_pipeline(&pipelines.terrain);
     pass.draw_indexed_indirect(&buffers.args, 0);
+    pass.set_pipeline(&pipelines.blended_terrain);
+    pass.draw_indexed_indirect(&buffers.args, DRAW_ARGS_BYTES);
 }
 
 /// The single colour attachment, cleared to the declared colour.

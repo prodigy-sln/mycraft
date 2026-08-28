@@ -1,0 +1,6 @@
+{
+  "capture": "a-capture-this-directory-is-not",
+  "adapter": "a fixture, not an adapter",
+  "backend": "other",
+  "driver_description": "none"
+}

@@ -30,7 +30,7 @@
 use std::error::Error;
 
 use mc_core::block::source::InMemoryDefinitionSource;
-use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin};
+use mc_core::block::{BlockDefinition, BlockRegistry, DefinitionOrigin, Opacity};
 use mc_core::content::FaceTextures;
 use mc_core::id::{BlockName, NamespacedIdError, TextureKey};
 use mc_world::section::{Contents, LocalPos, PaletteIndex, SECTION_SIZE, Section, SectionData};
@@ -231,6 +231,7 @@ fn definition(name: &str, is_solid: bool) -> Result<BlockDefinition, NamespacedI
         swimmable: false,
         move_resistance: 0.0,
         swim_ascent: 9.0,
+        opacity: Opacity::OPAQUE,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
     })
 }

@@ -74,10 +74,15 @@ pub struct FrameStats {
 
 /// How many draw calls the terrain costs, whatever is in it.
 ///
-/// One indirect draw, always: visibility is decided on the GPU and the index
-/// count is the only field that varies. A per-section call would be a
-/// regression, and this constant is where that shows up in the statistics.
-const TERRAIN_DRAW_CALLS: u32 = 1;
+/// **Two indirect draws, always: one per layer.** Visibility is decided on the
+/// GPU and each draw's index count is the only field that varies, so the number
+/// moves with neither what is in view, nor how many sections there are, nor how
+/// much of the world passes light — a frame declaring no translucency issues the
+/// second draw over zero indices rather than skipping it. A per-section call
+/// would be a regression, and this constant is where that shows up in the
+/// statistics: what it watches is that the count stays a property of the
+/// pipeline rather than of the scene.
+const TERRAIN_DRAW_CALLS: u32 = 2;
 
 /// The statistics for drawing `snapshot` under `projection`.
 ///

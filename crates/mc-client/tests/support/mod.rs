@@ -33,12 +33,21 @@
 // Each test binary links this whole module and uses a subset of it.
 #![allow(dead_code)]
 
+/// A world in which every drawn block is opaque, and what the ray-marched
+/// oracle predicted over it before an opacity could be declared at all.
+pub mod all_opaque;
 /// What a texture key's layer is filled with, and the colours a frame drawn
 /// from it may hold.
 pub mod art;
+/// Two translucent kinds of different colours over one opaque wall, which is
+/// the fixture the chosen ordering model's stated artefact is shown with.
+pub mod artefact;
 /// Content roots whose built texture set has been put into one particular
 /// state, for scenarios about what the client makes of the set it is handed.
 pub mod built_sets;
+/// The colours a marched ray's crossing is predicted to draw, composed in linear
+/// light from what each layer declares.
+pub mod composite;
 /// Content roots built from the shipped one, for scenarios about what a root
 /// declares and about what it stops declaring.
 pub mod content;
@@ -53,6 +62,9 @@ pub mod goldens;
 /// Rendering one tick of the replay with a HUD over it, through the frame call
 /// the windowed client makes.
 pub mod hud_frames;
+/// A ray walking the voxel grid one boundary crossing at a time, apart from the
+/// judge that walks it.
+pub mod march;
 /// The voxel model a texture was baked from, read independently of the baker, so
 /// a baked image can be judged against the plane it is a view of.
 pub mod model;
@@ -62,6 +74,8 @@ pub mod oracle;
 /// Rendering one waiting frame with the debug overlay's readout over it, in the
 /// one fixture module that may carry a readout and shoots no golden.
 pub mod overlay_frames;
+/// Reading a whole frame against the colours it is allowed to hold.
+pub mod pixel_census;
 /// An independent prediction of where a content root's HUD declarations land and
 /// what they paint, sharing no code with the composition it judges.
 pub mod prediction;
@@ -70,6 +84,9 @@ pub mod probe;
 /// Reading a rendered swatch against the colours the texture behind it is made
 /// of.
 pub mod swatch;
+/// Panes of flat colour standing one behind another, declared through a content
+/// root and drawn offscreen.
+pub mod translucency;
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -167,6 +184,7 @@ pub fn published_content(registry: &BlockRegistry) -> Result<PublishedContent, B
             name: definition.name.clone(),
             textures: definition.textures.clone(),
             is_solid: definition.is_solid,
+            opacity: definition.opacity,
         });
     }
     let layers = LayerAssignment::none().appending(&registry.texture_keys())?;

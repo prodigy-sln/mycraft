@@ -58,6 +58,26 @@ use support::{
 /// How many sections every counting fixture holds.
 const SECTIONS: u32 = 64;
 
+/// How many indirect draws terrain costs, whatever a scene holds.
+///
+/// **Constant in the number of sections, and that is the whole property these
+/// readings guard** — one draw for the opaque pass and one for the blended one,
+/// `architecture.md` Decision 4. It moved from one to two when the blended pass
+/// arrived; what it watches for did not move with it, because a call per section
+/// would still answer {SECTIONS} here. That is why every reading below compares
+/// against it by equality: a range admitting "at least one" would accept the
+/// regression this exists to catch.
+///
+/// **Written by hand and deliberately not imported from `mc_render::snapshot`.**
+/// It is a control, and being stated independently is the whole of its value: an
+/// assertion comparing a reported statistic against the very constant production
+/// computed it from agrees with itself and can never fail, whatever the frame did.
+/// That is the shape `build/validate.rs`'s own header warns about, and this
+/// project has already shipped a guard asserting a constant equalled a copy of
+/// itself. Importing it here to remove the duplication would leave two green
+/// tests watching nothing.
+const TERRAIN_DRAWS: u32 = 2;
+
 /// How many indices one quad is drawn by.
 const INDICES_PER_QUAD: u32 = 6;
 
@@ -141,7 +161,7 @@ fn the_centre_pixel_is_the_same_whichever_order_the_two_sections_arrive_in() -> 
 }
 
 #[test]
-fn a_rendered_frame_reports_its_tick_its_sections_and_its_one_draw_call() -> TestResult {
+fn a_rendered_frame_reports_its_tick_its_sections_and_the_draws_terrain_costs() -> TestResult {
     let Some(context) = support::device()? else {
         return Ok(());
     };
@@ -158,9 +178,9 @@ fn a_rendered_frame_reports_its_tick_its_sections_and_its_one_draw_call() -> Tes
             frame.stats.sections_admitted,
             frame.stats.terrain_draw_calls
         ),
-        (TICK, SECTIONS, admitted.len() as u32, 1),
+        (TICK, SECTIONS, admitted.len() as u32, TERRAIN_DRAWS),
         "a frame reports the tick it was handed, how many sections it was given, how many of \
-         them the frustum admits, and the one draw call terrain costs"
+         them the frustum admits, and what terrain costs it in draw calls"
     );
     Ok(())
 }
@@ -196,7 +216,7 @@ fn a_terrain_pass_that_cannot_be_recorded_names_the_stage_that_failed() -> TestR
 }
 
 #[test]
-fn a_scene_of_sixty_four_visible_sections_still_costs_one_terrain_draw_call() -> TestResult {
+fn a_scene_of_sixty_four_visible_sections_still_costs_a_fixed_number_of_draws() -> TestResult {
     let Some(context) = support::device()? else {
         return Ok(());
     };
@@ -209,12 +229,16 @@ fn a_scene_of_sixty_four_visible_sections_still_costs_one_terrain_draw_call() ->
          visible sections"
     );
 
-    let frame = render_counting(&context, &fixture, "terrain-one-draw-call")?;
+    let frame = render_counting(&context, &fixture, "terrain-draw-calls")?;
 
     assert_eq!(
-        frame.stats.terrain_draw_calls, 1,
-        "terrain is one indirect draw whatever is in it; a call per section is the regression \
-         this counts"
+        frame.stats.terrain_draw_calls, TERRAIN_DRAWS,
+        "terrain costs a fixed number of indirect draws whatever is in it — one for each \
+         layer the pass draws, and never one for each section. A call per section is the \
+         regression this counts, and this scene holds {SECTIONS} visible sections, so that \
+         regression answers {SECTIONS} here rather than {TERRAIN_DRAWS}. The count moved \
+         from one to two when the blended pass arrived and what it guards did not move \
+         with it, which is why this stays an equality rather than becoming a range"
     );
     Ok(())
 }
@@ -245,7 +269,7 @@ fn the_compute_pass_selects_the_sections_the_frustum_function_admits() -> TestRe
 }
 
 #[test]
-fn a_frame_with_nothing_in_view_still_issues_its_draw_call_with_no_indices() -> TestResult {
+fn a_frame_with_nothing_in_view_still_issues_its_draw_calls_with_no_indices() -> TestResult {
     let Some(context) = support::device()? else {
         return Ok(());
     };
@@ -261,9 +285,10 @@ fn a_frame_with_nothing_in_view_still_issues_its_draw_call_with_no_indices() -> 
 
     assert_eq!(
         (frame.stats.terrain_draw_calls, drawn),
-        (1, 0),
-        "the draw is still issued when nothing survives culling; it is its index count that \
-         goes to zero, not the call"
+        (TERRAIN_DRAWS, 0),
+        "every draw is still issued when nothing survives culling — the blended one over \
+         zero indices just as the opaque one is. It is the index count that goes to zero, \
+         not the calls"
     );
     Ok(())
 }

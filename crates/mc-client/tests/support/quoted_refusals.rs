@@ -63,7 +63,7 @@ const THE_LIST_IS_INTRODUCED_BY: &str = "a declaration may state ";
 ///
 /// Written out here rather than read from the loader — see the module header for
 /// why, and for what that cost before anything compared it against a run.
-pub const FIELDS_IN_THE_ORDER_THE_GUIDE_STATES: [&str; 12] = [
+pub const FIELDS_IN_THE_ORDER_THE_GUIDE_STATES: [&str; 13] = [
     "name",
     "texture",
     "solid",
@@ -76,6 +76,7 @@ pub const FIELDS_IN_THE_ORDER_THE_GUIDE_STATES: [&str; 12] = [
     "swimmable",
     "move_resistance",
     "swim_ascent",
+    "opacity",
 ];
 
 /// Where the pages a mod author reads live.
