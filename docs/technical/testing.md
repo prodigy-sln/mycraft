@@ -81,6 +81,15 @@ the mouse and pinning the CPU. **Ask before starting one on a machine you are sh
 driver along with the workers if you have to stop it**: terminating `cargo`, `rustc` and `llvm-cov`
 leaves the loop that launched them alive, and it starts the next iteration.
 
+**Fifteen to eighteen minutes exceeds most agent tooling's foreground command timeout, so a background
+run is not a convenience here — it is the only way to get one to completion.** That has a cost of its
+own: a background run does not survive the session that launched it. A process still in flight when
+the launching session ends leaves a log that stops mid-stream, with no `GATE FAILED` or `GATE PASSED`
+banner and no captured exit code — and a log in that shape reads exactly like a red gate to whoever
+reads it next, even though nothing about the code has been judged. Check the log's own tail for one of
+the two banners before treating an incomplete-looking run as a finding; an unterminated log says the
+run did not finish, never that it failed.
+
 ### The two art stages, and the one exception to "every stage runs"
 
 The base game's texture set is derived from `content/base/textures.toml` by `voxforge build`
@@ -226,6 +235,22 @@ code. Apparent matches on *fail* are usually behavioural test names sitting on `
 **read them rather than counting them**, because counting a pattern instead of reading it is exactly
 how a real failure gets waved through.
 
+**Two further ways the gate lies about the code, neither a coverage-locking symptom, and both
+distinguishable only by reading the body.**
+
+- **A full disk presents as a missing binary, after the build already claimed success.** `error:
+  creating test list failed … --list --format terse … (os error 2)`, nextest exit 104 — and the build
+  step above it had already printed `Finished`. The disk had filled (a stray-`.profraw` and
+  unnamespaced-build-output accumulation, not this run's own doing), so the linker never wrote the
+  binary nextest was about to list; the log reads as a broken test harness and is actually a full
+  volume. Check free space before trusting `--list`'s own error text.
+- **A run killed at a session boundary presents as one failing test, not as no result.** The log shows
+  `FAIL … (test failed with exit code 1073807364)`. That number is `0x40010004`,
+  `DBG_TERMINATE_PROCESS` — the process was torn down from outside, not failed from inside — and the
+  test count beside it is slashed (`N/M`, not a bare `N`), which is the tell that the run was cancelled
+  rather than completed. A cancelled run proves nothing about the one test it names or about any other;
+  re-run it to a bare count before reading anything into either verdict.
+
 Three further rules, each added because the previous one was found insufficient:
 
 - **Check for live processes under `target/` before a run — necessary, not sufficient.** Orphans can
@@ -313,6 +338,14 @@ instead of after it**, so the lint and the requirement asked for one shape. Neit
 about lints; together they are the reason a lint finding is worth reading for what it implies about
 the design rather than silenced at the narrowest scope that goes green.
 
+**A second, measured instance: a file-size violation landed inside the same blind window.** A
+test-author commit made while the tree was still mid-window — the implementation half of the split
+not yet landed, so the gate had nothing to run against — grew a test file past the 600-line test cap
+without anything able to say so at the time. It surfaced only once the window closed and the gate
+could run again, and the fix was the standing one: split by the question each half answers, not by
+trimming toward the cap. Treat every commit inside an open window as size-blind as well as lint-blind,
+and check the files it touches by hand (or with `wc -l`, below) before handing it off.
+
 ### Complexity thresholds
 
 `clippy.toml` makes `code-quality.md` §2 machine-enforceable rather than reviewer-enforced:
@@ -332,14 +365,17 @@ length prefix is attacker-controlled.
 
 **The file-length limit is measured two ways and they disagree, by about 12%.** The gate counts with
 `Measure-Object -Line`, which does **not** count blank lines; a reviewer counting physically counts
-them. `crates/mc-render/tests/hud_offscreen.rs` sits at exactly **600 physical** lines — the cap —
-and **529** non-blank, so the gate sees 71 lines of headroom and passes. Neither measure is wrong,
-and the gap applies to every file in the workspace. The standing instruction when a file reaches
-either figure is to **split it by responsibility rather than argue the measure**: `app.rs` reached
-506 non-blank against the 500 limit while the HUD landed and was split into a surface-setup module
-and a frame module, because configuring a surface happens once and what a frame shows is the other
-question. A split made to satisfy a count invents a boundary the design did not have; a split by
-responsibility would have been right at 400 lines too.
+them, and so does the Unix `wc -l` a reviewer working from Bash reaches for instead of PowerShell —
+both agree with each other and disagree with the gate for the same reason. `crates/mc-render/tests/hud_offscreen.rs`
+sits at exactly **600 physical** lines — the cap — and **529** non-blank, so the gate sees 71 lines of
+headroom and passes. Neither measure is wrong, and the gap applies to every file in the workspace. The
+standing instruction when a file reaches either figure is to **split it by responsibility rather than
+argue the measure**: `app.rs` reached 506 non-blank against the 500 limit while the HUD landed and was
+split into a surface-setup module and a frame module, because configuring a surface happens once and
+what a frame shows is the other question. A split made to satisfy a count invents a boundary the
+design did not have; a split by responsibility would have been right at 400 lines too, and landing a
+file at exactly the cap — as `hud_offscreen.rs` above did — is itself worth avoiding: the next
+reasonable addition has no headroom left to be judged on its own merits.
 
 **`too_many_arguments` counts `self`, so a method gets three parameters and not four.** Clippy
 measures the whole parameter list, receiver included. This is worth knowing before a signature is
@@ -503,6 +539,21 @@ doc-example control red and *only* it; dropping the `_test.rs` term from
 the file filter turns the sibling control red and *only* it. That each
 mutation hits exactly one control is the evidence that the two are
 independent rather than one check written twice.
+
+### A scan for a name literal has one shipped source it deliberately cannot cover
+
+An Invariant-1 scan scoped to a declared set of sources — the kind that looks for a name-literal
+comparison rather than a bare mention of the name's type — includes `terrain.wgsl` in that set and
+knows it as the weak member. WGSL has no string type, so the offence the scan looks for (a string
+literal carrying `:` in a namespaced-id position, or an equality against a constructed name) cannot be
+spelled there in a form the scan would catch — not because the shader is exempt from the invariant,
+but because the language cannot commit the violation in the detectable shape. What still slips past a
+scan built this way is a shader special-casing a block by **layer index** instead: a bare integer
+carries no name for the scan to find, and a block reached that way is unnamed and untraceable to the
+declaration that put it at that layer. This is accepted with the reason recorded rather than treated
+as a gap the scan should have closed — no mechanical check over WGSL text can close it, and the
+guard against it is a reviewer reading a shader change for a layer constant that should have been a
+lookup.
 
 ## Structural-invariant tests
 
@@ -3149,6 +3200,40 @@ If you cannot tell which cause you have, that is the question to ask rather than
 the one to decide. A mutation narrowed until it bites and a fixture left unable to
 see anything both end in green, and only one of them is evidence.
 
+### Predict a mutation's outcome before running it, and report what did not bite alongside what did
+
+**Writing the prediction down before the mutation runs is what turns a green result into a failure
+condition rather than a shrug.** A property asserted over per-sample colour predictions had its
+falsifying mutation — carrying a tint by view depth instead of by radial distance — spelled out in
+the test author's own notes before any draw path existed to run it against: which named readings
+*must* redden, and which two would not be reached by it at all because the property they assert
+cannot distinguish the two laws at that particular distance. Run afterward, the prediction held, and
+turned up two further readings nobody had predicted, which is the useful outcome a pre-registered
+prediction makes visible — an unpredicted red is worth noticing precisely because it was not asked
+for, where a red with no prior prediction at all is just a number.
+
+The same discipline applies in the other direction. `standards/global/testing.md` §2 already asks that
+a non-biting mutation be recorded beside its biting neighbours rather than dropped; doing that only
+pays off if the *prediction* — which readings this mutation was expected to touch — was written down
+first, because a non-biting result with no prior prediction cannot be told apart from a mutation that
+was simply never aimed at anything.
+
+### A vacuity check is a scheduled step, not an instinct to reach for when something feels wrong
+
+The two readings that most directly proved the property above — a wall's centre pixel and a pixel a
+quarter of the frame's width off it — were only checkable once a **positive control** existed asking
+whether the sample grid could see the difference between the two candidate laws at all. That control
+was not designed in the abstract: the first version of the per-sample grid was written the *wrong*
+way, judged against one colour derived from view depth rather than each sample's own radial distance,
+and it went green — for the wrong reason, because the grid's own geometry happened not to expose the
+gap between the two laws at the tolerance in use. The control's real shape was found by noticing that
+a wrongly-shaped assertion had gone green, not by suspecting it up front.
+
+The actionable form: **schedule the vacuity check as a step every falsifiable-in-principle scenario
+goes through, rather than trusting instinct to flag the ones that need it.** A green result on first
+write is not evidence the assertion is sound; it is the point at which the check is owed, not the
+point at which it can be skipped because nothing looks wrong.
+
 ### A guard that names a specific dependency silently narrows as the set it guards grows
 
 A dependency-graph guard asserted that the registry-contract crate reaches no
@@ -3186,6 +3271,22 @@ prompt you to.
 
 It was found while *verifying* the guard rather than while changing it: the task
 asked only that both its assertions still hold, and they did.
+
+### A hand-maintained list read by filtering cannot see an extra member
+
+`standards/global/testing.md` §2 already names the general shape: two mirrors of a field list were
+each held at six names while the loader grew to nine, and neither reddened, because each compared its
+needles by *filtering* — one asked which of its own needles occur in the observed message, the other
+looked each observed name up in its own held list and skipped what it did not recognise. Both
+directions of filtering pass over an addition instead of reporting it.
+
+The loader's own declared-field list is exactly this shape, and it has grown twice in this project's
+life (thirteen names to fifteen, most recently). **The repair that survives a growth is to read the
+list *out of* the observed output and compare the whole thing, in order, against what the page or the
+guard expects** — never to filter one against the other. Read that way, a missing name, an extra name
+and a reordering are three separate, nameable failures rather than one silent pass. The comparison
+that reads the refusal's own quoted list this way is the one to copy for the next field-list mirror;
+the ones that filter are the ones to replace before they are next asked to notice a growth.
 
 ### A bare-spelling needle cannot tell a door from a variable, and that is the design
 
@@ -3582,6 +3683,12 @@ failing test's name and useless for everything above, and it cost two diagnoses 
 ```powershell
 pwsh -NoProfile -File scripts/sdd-gate.ps1 > gate.log 2>&1; $LASTEXITCODE
 ```
+
+**And even that filter has to match on more than `^FAIL`.** Nextest's own per-test failure lines are
+**indented**, not left-aligned against the banner lines around them, so an anchored `^FAIL` pattern
+matches nothing and a `-Pattern "FAIL"` search without the anchor is what actually finds the name of
+what failed. A search that came back empty on an indented line is not evidence of a clean run — check
+whether the pattern could have matched the shape the log actually has before reading silence as green.
 
 ### The one question the eight below are instances of
 
@@ -4505,6 +4612,13 @@ revert failed**, and the reflex that follows is `git checkout -- <file>`, the on
 > three-way identity of worktree, index and `HEAD`, and clear it by naming the single path to
 > `git add` — which rewrites the stat entry and stages nothing while the content matches. **Never
 > `git checkout --`.**
+
+**Recurred once more, and confirms which of the two commands is the revert check.** A by-hand revert
+in `crates/mc-world/src/content/luau_declaration/number.rs` read as ` M` under `git status` while
+`git diff --exit-code` reported clean on the same file at the same moment — the same phantom, a fifth
+sighting rather than a new one. `git diff --exit-code` is the instrument that answers "is this file's
+diff empty", and it is the one to trust; `git status` alone is a stat cache and disagrees with it by
+construction on exactly this axis.
 
 The artefact belongs to whoever's mutation produced it, **even when the file is somebody else's**:
 ownership of the litter is not ownership of the code. That is what lets the person who cannot stage the

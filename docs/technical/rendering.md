@@ -881,6 +881,16 @@ swing can find is not something a section could show. A reload changing only
 `targetable` is accepted, publishes an advanced serial, and rebuilds **zero**
 sections.
 
+**The guard over this key was blind for a field with no reading of its own, and is
+not any more.** A field being outside the geometry key by construction is only as
+good as the instrument that would notice if a later change put it back inside, and
+that instrument reddens only for a field somebody has written a reading against.
+Measured directly: adding a per-frame medium property to the key moved **zero** of
+1710 workspace tests before a reading for it existed, and moves **exactly one**
+after — the one reading written for it. The "exactly one" is itself the finding: it
+shows nothing else in the workspace was resting on that key by accident, which a
+count of zero could never have told anyone either way.
+
 **Selective marking was measured and refused, and the measurement is the reason.**
 The shipped world's highest occupied section is 3 in fifteen columns and 4 in one, so
 marking only the sections whose palettes hold a changed name, plus their neighbours,
@@ -1137,6 +1147,163 @@ but repeatable. **A reader who meets this as a flaky test should read it here
 first**: two runs of one scene disagreeing over a pixel where two translucent
 kinds overlap is this limit, not a broken device.
 
+### The medium the eye stands in, and how far into the frame it reaches
+
+The block filling the eye's **own cell** declares a colour and a distance, and
+everything the terrain pass draws is carried toward that colour by how far away
+it stands. This is a **per-frame, per-eye** input: nothing in the packed vertex,
+the merge predicate or the section record knows about it, which is why the next
+section's four-storage-buffer budget is untouched and why the scene contract is
+untouched with it.
+
+**The law.** A surface at distance `d` from the eye, in a medium declaring colour
+`T` at distance `D`, is drawn as its own colour carried toward `T` by
+`min(1, d / D)` in linear light — untinted at the eye, wholly `T` at `D` and
+beyond. A linear ramp to a stated distance rather than an exponential falloff,
+because *"you can see twelve blocks through this"* is a claim an author can make
+and a reading can check, while an exponential never actually hides anything.
+ADR-032 in `technical/decisions.md` records the Beer-Lambert alternative and why
+it was rejected. **The law is a published content surface**, not an
+implementation detail: it is what a declared distance *means*, so changing it
+changes every shipped declaration and is an amendment rather than a choice.
+
+**`d` is radial from the eye, and not depth along the view direction.** The two
+agree at the centre of the frame and nowhere else, which is the shape of defect
+that looks correct in every screenshot somebody takes of the middle of the
+picture. What makes it radial is that `VertexOutput` carries `world_position` as
+a **varying** and the fragment stage takes
+`length(input.world_position - frame.eye)` for itself. **That length may not move
+to the vertex stage.** Perspective-correct interpolation is exact only for
+functions affine in world space and `length` is not one, so a per-vertex distance
+draws a merged quad at its chord — an error that grows with the quad, which is
+exactly the geometry the mesher produces. Squarely faced at `6.0` blocks, a pixel
+a quarter of the frame's width from the centre stands at `6.74`; that pair is
+what tells a radial implementation from a depth one.
+
+**A pixel drawing no terrain is given the tint through the clear**, so the sky
+stops being sky. The clear is the frame's own rather than the configuration's:
+`record` chooses `snapshot.tint` decoded, falling back to
+`TerrainPassConfig::clear_color_linear`, which goes on meaning **the dry sky** and
+nothing else. A reader looking for a sky rule inside the shader will not find
+one, and there is deliberately no second declaration for the far field — a medium
+states one colour, and the mix and the clear are two routes to it.
+
+**One decode feeds both, and that is structural rather than tidiness.** `record`
+calls `srgb8_to_linear` **once per frame**; that single result is narrowed to
+`f32` for the uniform the fragment mixes with and used at `f64` for the clear. A
+second decode — the obvious "let `draw` decode for itself" simplification — parts
+the sky from the far terrain by a transfer function, and that is the failure
+recorded under "One pass configuration, two targets" below, at this exact site: a
+green unit test of the conversion **and** a green test comparing the two
+configurations to each other, while every shipped frame was wrong. The only
+instruments that can see it are the two readings that predict **the same colour
+by two routes** — a surface at full reach through the mix, and a pixel with no
+surface at all through the clear — so those two must not share a decode through
+their fixture either.
+
+**`tint_reach` is `1 / D`, and the literal `0.0` where nothing tints.** Never the
+reciprocal of a sentinel distance, and **there is no branch**: `mix(a, b, 0.0)`
+returns `a` bit for bit under every form a backend compiles it into, so a dry
+frame is the tinted arithmetic with a factor of nought rather than a frame that
+skipped the tint. That is the whole of why a capture shot before any medium
+existed can be compared against one shot after **byte for byte**. An `if` in the
+fragment leaves every other reading in the suite green while that claim degrades
+silently into a tolerance claim. The loader's **exclusive** `> 0` floor on
+`tint_distance` is what keeps the reciprocal finite, so that bound carries two
+independent reasons and neither is the other's spare.
+
+**The tint carries no alpha and does not touch the fragment's own.** Coverage
+stays the declared degree's, so a translucent layer carried at its own distance
+blends `src-over` an opaque one carried at its own — two layers each reaching the
+eye through that much of the medium, which is an outcome of the existing blend
+rather than an arrangement made for it.
+
+**The HUD is not tinted, and the reason is pass ordering rather than a rule
+anybody wrote.** A frame is three passes in one call and the HUD composites over
+the terrain frame in a **later pass** with `LoadOp::Load`, so the mix and the
+clear have both already happened by the time an element is drawn. The debug
+overlay is excluded the same way and for the same reason. Nothing states this
+exclusion as a condition anywhere in the code, which is why it is stated here:
+**whoever moves the tint into a later full-screen pass takes it away without ever
+deciding to.**
+
+**Where the tint comes from, and what may never cache it.**
+`mc_sim::world::eye_medium(world, at)` floors the eye on all three axes through
+the shared `containing`, reads the block at that cell, and resolves its declared
+tint
+through the registry the world holds *now*; an empty cell, a cell outside the
+world and an unresolvable name are each no tint. **Exactly floor**, so an eye at
+`y = 34.98` is inside the cell whose top face is `35.0` and one at `35.02` is
+not. It is filled at **both** `SimSnapshot` publishers — a tint computed only in
+`advance` leaves the first frame of every session untinted, which no single-frame
+reading can see — and `App::snapshot` copies it into `TerrainSnapshot` computing
+nothing of its own. `mc-render` holds neither a world nor a registry and may not
+name `mc-sim`, so answering the question there is the seam. **Resolved at every
+publish and never cached across ticks**: a cache satisfies every reading that
+declares its own pose and draws one frame, and breaks only the reload readings,
+whose whole content is that a *second* frame differs from the first. That same
+rule is why a tint edit needs no re-mesh — `changes_geometry` is keyed positively
+on the three fields that decide what is drawn, so a medium property is outside it
+the moment it exists.
+
+**Whether a player can reach the medium at all is arithmetic over two constants, not
+a property the draw path guarantees.** `EYE_HEIGHT` stands over the feet, a swimmer
+sinks to rest on the bed, and the shipped sea's two-deep columns put a resting eye
+`0.38` blocks below the surface — the whole of the margin by which the shipped world
+is submersible at all; the one-deep columns leave it dry. A reading over the shipped
+world turns that arithmetic into an observation rather than an assumption, and its
+control is a sea one voxel shallower, which must report the eye as dry rather than
+pass by omission. **The margin is known debt**: nothing here ties `EYE_HEIGHT` or the
+sea's depth to each other, so a later change to either kills submersion silently, and
+the one thing that would say so is that reading — there is no other guard on the
+relationship between the two constants.
+
+**The frame record grew from 160 bytes to 192, and that is one atomic move across
+three files.** `eye: vec3<f32>` at 160, `tint_reach: f32` at 172,
+`tint_color: vec3<f32>` at 176, and the four declared bytes of padding the record
+ends on — all appended **after** everything the cull stage reads, because
+`cull.wgsl` binds the same buffer and its own `struct Frame` must stay a **valid
+prefix** of terrain's. `FRAME_UNIFORM_BYTES`, `FRAME_RECORD` in
+`build/validate_tables.rs` and the shader's own struct move **together**: the
+table check is a *build script*, so a mismatch is not a red test but the whole
+workspace failing to compile, which also stops `clippy --workspace --all-targets`
+from saying anything at all. `min_binding_size: None` catches a buffer that is
+too small and never a CPU writing `tint_color` where the shader reads `eye` —
+which at two fields was nearly inconceivable and at six is a plausible wrong
+picture with no error anywhere. Binding 0's visibility is `VERTEX | FRAGMENT`;
+**no storage binding joins either stage**, which is the whole of why mixing in
+the terrain fragment stage was affordable where a depth-sampling full-screen pass
+was not.
+
+#### `SCENE_REVISION` did not move, and why that reasoning does not transfer
+
+The revision identifies the **scene contract** — pose, world, camera path, tick
+list, merge predicate, vertex format. A medium is per-frame and per-eye and
+touches none of them, and no judged camera is submerged:
+`replay_oracle.rs::the_camera_of_every_judged_frame_stands_in_open_air` asserts
+it at all three declared ticks and the HUD capture is tick 0. So `tint_reach` is
+the literal zero in every judged frame, and **that is a deliverable rather than
+an assumption**: every committed capture was redrawn from the tree carrying the
+declared sea tint and came back **byte-identical** to its blob — 0 of 3 686 400
+channel bytes apart on each of the four.
+
+**Why a bump would have been worse than merely unnecessary.** A bump renames the
+set by **deletion and a fresh mint**, never `git mv`. The fresh set here would be
+**byte-identical** to the deleted one — the frames do not move, which is the
+whole claim — so the re-shoot would consume the one reading that proves this
+change safe, replacing captures shot before the feature existed with captures
+shot from the renderer under test. A set minted from this renderer cannot report
+a tint leaking into a dry frame; the set it would have replaced is the only thing
+that can.
+
+**The standing condition.** The next change to the `Frame` record answers the
+comparability question **afresh, by rendering rather than by classifying** — draw
+the committed captures from the new tree and compare the bytes, as this spec did.
+*"It is only another per-frame uniform, like the tint"* is a classification, and
+classification is exactly what this precedent would license if it were left as a
+rule of thumb. The reason above is about **what the frames did**, not about what
+kind of change it was, and only the first of those is re-checkable.
+
 ### The frustum test exists twice, deliberately
 
 The pure Rust `Frustum::admits` and the WGSL test in the cull shader are the same
@@ -1206,6 +1373,12 @@ where a unit test of the conversion and a test comparing the two configurations
 to each other can both pass while every shipped frame is wrong — neither looks at
 the value that reaches the device. Only an assertion on a captured frame closes
 it.
+
+**`clear_color_linear` is no longer the only clear a frame may have.** It means
+the **dry sky** and is what a frame whose eye stands in nothing that tints falls
+back to; a frame with a medium clears to that medium's colour instead, decoded by
+the same call the shader's uniform is narrowed from. "The medium the eye stands
+in" above is where that lives, and it is the paragraph the warning here is about.
 
 The camera matrices are `glam::camera::rh::proj::directx::perspective` (NDC z in
 `0..1`, clip-space y **up**) and `glam::camera::rh::view::look_at_mat4`. The
@@ -2063,6 +2236,55 @@ committed frame green. Measured during phase 2: the whole renderer rework, verte
 field included, left the `r4` set unmoved. The mint does not merely change a
 revision; it gives the instrument a sense it did not have, and from `r5` onward a
 frame comparison is evidence about the opacity path as well as about the mesh.
+
+#### 2026-09-01, the spec that put the eye inside the medium — and the set that was not re-shot
+
+**No mint, no deletion, `r5` throughout.** SPEC-032 gave every frame a colour and
+a reach taken from the block the eye's own cell holds, and `base:water` now
+declares `tint = "#3A6EA5"` at `tint_distance = 12.0`. The reasoning for holding
+the revision is in "The medium the eye stands in" above and is not repeated here;
+what belongs in this log is the reading, because **a set that is not re-shot owes
+the same evidence as one that is.**
+
+**Taken twice, `MYCRAFT_UPDATE_GOLDENS` verified unset immediately before each.**
+Once on the tree carrying the draw path with the sea still untinted — **30 tests
+run: 30 passed** — which isolates the machinery from the content, so a frame that
+moved after the declaration could only be the declaration. Then once after it:
+**1709 tests run: 1709 passed, 1 skipped**, bare counts and so complete runs.
+
+**Every committed capture redraws byte-identical to its blob** — 0 of 3 686 400
+channel bytes apart on each of the four, with no tolerance applied at all. The
+comparison is stronger than the golden lifecycle's own, deliberately: that path
+forgives ΔE 2.0 over a 0.01 % area budget, and the shape a dry frame would
+actually leak in — a strength that failed to reach the literal zero — applies to
+the whole frame at once at a strength under ΔE 2.0 and passes it. The strong
+claim is available because there is no branch in the fragment, so the reading
+asks for it.
+
+**The control is what makes "nothing moved" mean anything.** A build that never
+writes the tint into the frame at all satisfies every reading above, so
+`a_dry_judged_frame_is_unmoved_by_a_declared_sea_tint.rs` carries, in the same
+verdict, a submerged frame over the same tree that **must** move. Neither reading
+borrows the other's: the byte-for-byte one names it rather than repeating it,
+because a second copy of a control through the same code path reads as strength
+and is not.
+
+**The submerged readings run at their own tolerance, ΔE 3.0, and it is measured
+rather than chosen.** Three independent instruments bracket a correct frame's own
+noise at `1.19 < T < 7.45`: the 8-bit sRGB round trip a linear-light mix has to
+survive costs a correct frame up to ΔE 1.19 by itself, so any tolerance under that
+floor rejects code that is right, and the ceiling is where a real tint stops being
+distinguishable from none. `3.0` sits inside that band with room on both sides, and
+a tolerance chosen without measuring the floor is a tolerance that will eventually
+reject correct arithmetic and read as a rendering regression.
+
+**The radial law — carried by distance from the eye, not by depth along the view
+ray — has six witnesses now, not four.** Mutating the draw path to carry the tint
+by depth instead of by radial distance moves 6 of 1710 tests: the four the guard
+was written to catch, plus two nobody predicted in advance, over the **shipped**
+sea rather than a fixture, at ΔE 2.0 — tighter than the 3.0 above. Those two are
+the stronger pair, because they are evidence about the law over the world a player
+actually stands in rather than only over a fixture built to expose the difference.
 
 ## What golden-frame verification cannot see
 

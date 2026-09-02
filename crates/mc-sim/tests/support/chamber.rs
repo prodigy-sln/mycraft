@@ -411,6 +411,7 @@ fn declaring(
             swim_ascent: 9.0,
             opacity: Opacity::OPAQUE,
             origin: origin.clone(),
+            tint: None,
         }));
     }
     Ok(declared)

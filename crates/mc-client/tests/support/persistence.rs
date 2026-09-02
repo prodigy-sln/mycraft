@@ -141,6 +141,7 @@ pub fn declared(name: &str, is_solid: bool) -> Result<BlockDefinition, Box<dyn E
         swim_ascent: 9.0,
         opacity: Opacity::OPAQUE,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
+        tint: None,
     })
 }
 

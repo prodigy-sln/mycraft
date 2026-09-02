@@ -43,6 +43,8 @@
 
 #[path = "support/built_set_refusals.rs"]
 mod built_set_refusals;
+#[path = "support/documented_fields.rs"]
+mod documented_fields;
 #[path = "support/entry.rs"]
 mod entry;
 #[path = "support/input/mod.rs"]
@@ -70,26 +72,14 @@ mod reload_world;
 mod support;
 
 use std::error::Error;
-use std::ffi::OsStr;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use documented_fields::{absent_means, bound, named, pages_under, stated_for};
 use quoted_refusals::{
     every_field_the_guide_states, fields_a_refusal_quotes, pages, quoted_refusals_in,
 };
 use support::TestResult;
-
-/// The extension a page is written with.
-const PAGE_EXTENSION: &str = "md";
-
-/// The first cell of the header row of the table that names every field.
-const FIELD_COLUMN: &str = "Field";
-
-/// The header of the column stating what leaving a field out means.
-const ABSENT_MEANS_COLUMN: &str = "Absent means";
-
-/// The header of the column stating what values a field may hold.
-const BOUND_COLUMN: &str = "Bound";
 
 /// The field a mod author states to make their block one a player can swim in.
 const SWIMMABLE_FIELD: &str = "swimmable";
@@ -105,6 +95,11 @@ const SWIM_ASCENT_FIELD: &str = "swim_ascent";
 /// The field a mod author states to say how much of the light reaching their
 /// block it stops.
 const OPACITY_FIELD: &str = "opacity";
+
+/// The two fields a mod author states to say what their block does to the light
+/// of everything seen from **inside** it, and how far it lets an eye see.
+const TINT_FIELD: &str = "tint";
+const TINT_DISTANCE_FIELD: &str = "tint_distance";
 
 /// What the guide says leaving `swimmable` out means, written in the page's own
 /// convention for a constant default.
@@ -165,17 +160,39 @@ const AN_OPACITY_IS_BOUNDED_BY: &str = "not less than zero, and at most `1.0`";
 /// reddening would ask of them.
 const A_RESISTANCE_IS_BOUNDED_BY: &str = "not less than zero, and at most `3.4e38`";
 
+/// What the guide says leaving either medium field out means.
+///
+/// **One phrase for both rows, and it is not a value.** Every other default in
+/// this table is a value a declaration could have written — `false`, `0.0`,
+/// `1.0` — and these two are the one pair whose absence is not a value at all:
+/// there is no default colour and no default distance anywhere in the engine.
+/// A row stating `0.0`, or a colour, would tell an author that their block is
+/// already a medium and that stating the fields only adjusts it, which is the
+/// opposite of what the loader does.
+const A_MISSING_MEDIUM_MEANS: &str = "no tint at all";
+
+/// What the guide states bounds a tint, whole.
+///
+/// **Both accepted forms are named and so is the alpha rule**, because this is
+/// the one field in the tree an author may write either colour dialect into and
+/// the page is where they learn that. The alpha clause is what stops somebody
+/// reading `#RRGGBBAA` as an invitation to state a strength there — it is a form
+/// the field accepts and a value it refuses, which is a distinction no shorter
+/// cell can carry.
+const A_TINT_IS_BOUNDED_BY: &str =
+    "`#RRGGBB` or `#RRGGBBAA` in either case, and an alpha other than `FF` is refused";
+
+/// What the guide states bounds a tint distance, whole.
+///
+/// **The floor is exclusive and the cell has to say so**, which is what makes it
+/// the one bound on this page not worded like the others: every other floor here
+/// reads `not less than zero` and admits zero, and this one does not. A cell
+/// borrowing that wording promises a value the loader refuses, and the author
+/// who writes it learns the page is wrong rather than that their line is.
+const A_TINT_DISTANCE_IS_BOUNDED_BY: &str = "finite and greater than zero, and at most `3.4e38`";
+
 /// One page's name beside the recognised list one of its quotations introduces.
 type QuotedList = (String, Vec<String>);
-
-/// One row of the guide's field table: the field it names, what it says leaving
-/// that field out means, and the bound it states on the value.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct TabulatedRow {
-    field: String,
-    absent_means: String,
-    bound: String,
-}
 
 /// What the pages quote back as the fields a declaration may state.
 ///
@@ -210,37 +227,8 @@ struct WhatTheGuideTabulates {
     what_a_missing_resistance_means: Option<String>,
     what_a_missing_ascent_means: Option<String>,
     what_a_missing_opacity_means: Option<String>,
-}
-
-/// Every page under `directory`, at any depth.
-///
-/// # Errors
-///
-/// Returns an error if the directory cannot be walked.
-fn pages_under(directory: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
-    let mut found = Vec::new();
-    for entry in fs::read_dir(directory)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            found.extend(pages_under(&path)?);
-        } else if path.extension() == Some(OsStr::new(PAGE_EXTENSION)) {
-            found.push(path);
-        }
-    }
-    found.sort();
-    Ok(found)
-}
-
-/// How a page names itself in a verdict.
-///
-/// The file name alone, never the path: a path renders with OS-specific
-/// separators and an expectation carrying one would be a Windows-only or
-/// Unix-only test.
-fn named(page: &Path) -> String {
-    page.file_name()
-        .unwrap_or_else(|| OsStr::new("a page with no name"))
-        .to_string_lossy()
-        .into_owned()
+    what_a_missing_tint_means: Option<String>,
+    what_a_missing_tint_distance_means: Option<String>,
 }
 
 /// Every recognised list a quotation on `text` introduces, attributed to `page`.
@@ -300,133 +288,18 @@ fn what_the_pages_quote_back(directory: &Path) -> Result<WhatThePagesQuoteBack, 
     }
 }
 
-/// The cells of one markdown table row, trimmed.
-fn cells(line: &str) -> Vec<String> {
-    line.trim()
-        .trim_matches('|')
-        .split('|')
-        .map(|cell| cell.trim().to_owned())
-        .collect()
-}
-
-/// Whether `line` is the header row of the table that names every field.
-fn is_the_field_table_header(line: &str) -> bool {
-    let header = cells(line);
-    header.first().is_some_and(|first| first == FIELD_COLUMN)
-        && header.iter().any(|cell| cell == ABSENT_MEANS_COLUMN)
-        && header.iter().any(|cell| cell == BOUND_COLUMN)
-}
-
-/// Every field the table starting at `header` names, beside what it says leaving
-/// each out means, in the order the table names them.
-fn tabulated(header: &str, rows: &mut dyn Iterator<Item = &str>) -> Vec<TabulatedRow> {
-    let heading = cells(header);
-    let at = |wanted: &str| heading.iter().position(|cell| cell == wanted);
-    let (Some(absent_at), Some(bound_at)) = (at(ABSENT_MEANS_COLUMN), at(BOUND_COLUMN)) else {
-        return Vec::new();
-    };
-    rows.take_while(|line| line.trim_start().starts_with('|'))
-        .map(cells)
-        .filter(|row| row.first().is_some_and(|first| first.starts_with('`')))
-        .filter_map(|row| {
-            Some(TabulatedRow {
-                field: row.first()?.trim_matches('`').to_owned(),
-                absent_means: row.get(absent_at)?.clone(),
-                bound: row.get(bound_at)?.clone(),
-            })
-        })
-        .collect()
-}
-
-/// Every table on `text` that names a declaration's fields beside what leaving
-/// each out means.
-fn field_tables_in(text: &str) -> Vec<Vec<TabulatedRow>> {
-    let mut tables = Vec::new();
-    let mut lines = text.lines();
-    while let Some(line) = lines.next() {
-        if is_the_field_table_header(line) {
-            // The alignment row between the header and the first field.
-            lines.next();
-            tables.push(tabulated(line, &mut lines));
-        }
-    }
-    tables
-}
-
-/// Every such table under `directory`.
-///
-/// # Errors
-///
-/// Returns an error if the directory cannot be walked or a page cannot be read.
-fn field_tables_under(directory: &Path) -> Result<Vec<Vec<TabulatedRow>>, Box<dyn Error>> {
-    let mut tables = Vec::new();
-    for page in pages_under(directory)? {
-        tables.extend(field_tables_in(&fs::read_to_string(&page)?));
-    }
-    Ok(tables)
-}
-
-/// The one table under `directory` that names what a declaration may state.
-///
-/// # Errors
-///
-/// Returns an error unless exactly one page carries that table: none means the
-/// reading has nothing to say and must not answer as though the table were empty,
-/// and a second one means this reading would be silently choosing between two
-/// statements of the same contract. A table whose `Bound` column has been renamed
-/// is found by nothing and reaches the same error, which is the loud failure
-/// rather than a silently empty bound.
-fn the_field_table(directory: &Path) -> Result<Vec<TabulatedRow>, Box<dyn Error>> {
-    let tables = field_tables_under(directory)?;
-    let [table] = tables.as_slice() else {
-        return Err(format!(
-            "exactly one page under {} must tabulate what a declaration may state, and {} do",
-            directory.display(),
-            tables.len()
-        )
-        .into());
-    };
-    Ok(table.clone())
-}
-
-/// The bound the guide states on an opacity, or `None` where its table carries
-/// no such row.
-///
-/// # Errors
-///
-/// Returns an error for the reason [`the_field_table`] does.
-fn what_bounds_an_opacity(directory: &Path) -> Result<Option<String>, Box<dyn Error>> {
-    Ok(the_field_table(directory)?
-        .into_iter()
-        .find(|row| row.field == OPACITY_FIELD)
-        .map(|row| row.bound))
-}
-
-/// The bound the guide states on a resistance, or `None` where its table carries
-/// no such row.
-///
-/// # Errors
-///
-/// Returns an error for the reason [`the_field_table`] does.
-fn what_bounds_a_resistance(directory: &Path) -> Result<Option<String>, Box<dyn Error>> {
-    Ok(the_field_table(directory)?
-        .into_iter()
-        .find(|row| row.field == MOVE_RESISTANCE_FIELD)
-        .map(|row| row.bound))
-}
-
 /// What the guide's field table says about the fields it names.
 ///
 /// # Errors
 ///
 /// Returns an error for the reason [`the_field_table`] does.
 fn what_the_guide_tabulates(directory: &Path) -> Result<WhatTheGuideTabulates, Box<dyn Error>> {
-    let table = the_field_table(directory)?;
+    let table = documented_fields::the_field_table(directory)?;
     let stated = |wanted: &str| {
         table
             .iter()
             .find(|row| row.field == wanted)
-            .map(|row| row.absent_means.clone())
+            .map(absent_means)
     };
     Ok(WhatTheGuideTabulates {
         fields_in_order: table.iter().map(|row| row.field.clone()).collect(),
@@ -434,6 +307,8 @@ fn what_the_guide_tabulates(directory: &Path) -> Result<WhatTheGuideTabulates, B
         what_a_missing_resistance_means: stated(MOVE_RESISTANCE_FIELD),
         what_a_missing_ascent_means: stated(SWIM_ASCENT_FIELD),
         what_a_missing_opacity_means: stated(OPACITY_FIELD),
+        what_a_missing_tint_means: stated(TINT_FIELD),
+        what_a_missing_tint_distance_means: stated(TINT_DISTANCE_FIELD),
     })
 }
 
@@ -512,6 +387,8 @@ fn the_guide_tabulates_every_field_with_the_value_its_absence_means() -> TestRes
             what_a_missing_resistance_means: Some(A_MISSING_RESISTANCE_MEANS.to_owned()),
             what_a_missing_ascent_means: Some(A_MISSING_ASCENT_MEANS.to_owned()),
             what_a_missing_opacity_means: Some(A_MISSING_OPACITY_MEANS.to_owned()),
+            what_a_missing_tint_means: Some(A_MISSING_MEDIUM_MEANS.to_owned()),
+            what_a_missing_tint_distance_means: Some(A_MISSING_MEDIUM_MEANS.to_owned()),
         },
         "a mod author writing their first declaration reads this table rather than a refusal, \
          so a field that exists in the loader and not in the table is a field nobody will use — \
@@ -531,10 +408,10 @@ fn the_guide_tabulates_every_field_with_the_value_its_absence_means() -> TestRes
 
 #[test]
 fn the_guide_states_the_bound_a_resistance_is_kept_within() -> TestResult {
-    let bound = what_bounds_a_resistance(&pages()?)?;
+    let stated = stated_for(&pages()?, MOVE_RESISTANCE_FIELD, bound)?;
 
     assert_eq!(
-        bound,
+        stated,
         Some(A_RESISTANCE_IS_BOUNDED_BY.to_owned()),
         "the page-side twin of the loader pair in `luau_declaration_medium_ceiling.rs`, and the          two guard opposite directions of one promise. That pair asks whether the loader still          stops where the page says; this asks whether the page still says where the loader          stops. Nothing could see the second before: an edit making this cell read `at most          1e40` leaves a correct loader, a lying page and every other test in the workspace          green — which is precisely how a mod author comes to write a number that is refused by          the thing that documented it. The cell is compared whole rather than searched for a          figure, so a floor quietly dropped from the sentence is as visible as a ceiling quietly          raised"
     );
@@ -543,10 +420,10 @@ fn the_guide_states_the_bound_a_resistance_is_kept_within() -> TestResult {
 
 #[test]
 fn the_guide_states_the_bound_an_opacity_is_kept_within() -> TestResult {
-    let bound = what_bounds_an_opacity(&pages()?)?;
+    let stated = stated_for(&pages()?, OPACITY_FIELD, bound)?;
 
     assert_eq!(
-        bound,
+        stated,
         Some(AN_OPACITY_IS_BOUNDED_BY.to_owned()),
         "the field's own row is the only place a mod author reads what values it may hold, and \
          opacity is the first field on this declaration with a ceiling anybody can reach: the \
@@ -557,6 +434,31 @@ fn the_guide_states_the_bound_an_opacity_is_kept_within() -> TestResult {
          searched for a figure, so a floor quietly dropped from the sentence is as visible as a \
          ceiling quietly raised, and the inclusiveness of both bounds is carried in the words \
          rather than left to the reader"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_guide_states_what_a_medium_may_be_written_as_and_how_far_it_may_reach() -> TestResult {
+    let colour = stated_for(&pages()?, TINT_FIELD, bound)?;
+    let distance = stated_for(&pages()?, TINT_DISTANCE_FIELD, bound)?;
+
+    assert_eq!(
+        (colour, distance),
+        (
+            Some(A_TINT_IS_BOUNDED_BY.to_owned()),
+            Some(A_TINT_DISTANCE_IS_BOUNDED_BY.to_owned()),
+        ),
+        "these are the two rows a mod author needs most and can guess least. The colour is the \
+         one field in this tree either dialect may be written into, and an author who reads a \
+         cell naming a single form will believe the file they copied out of the other \
+         directory is malformed — while one who reads `#RRGGBBAA` with no alpha clause will \
+         write a strength there and be refused by the thing that documented it. The distance \
+         carries this page's **only exclusive floor**: every other bound here reads `not less \
+         than zero` and admits zero, and a cell that borrowed that wording would promise a \
+         value the loader refuses. Both cells are compared whole rather than searched for a \
+         figure, and the two are read together because a page that gained one row and not the \
+         other is exactly what a reading of either alone cannot report"
     );
     Ok(())
 }

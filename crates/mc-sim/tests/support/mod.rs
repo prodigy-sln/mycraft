@@ -22,6 +22,7 @@ pub mod overlap;
 pub mod pool;
 pub mod sea;
 pub mod solidity;
+pub mod submersion;
 pub mod volume;
 
 use std::error::Error;

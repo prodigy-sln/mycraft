@@ -187,6 +187,7 @@ fn declared_registry() -> Result<BlockRegistry, Box<dyn Error>> {
                 swim_ascent: 9.0,
                 opacity: Opacity::OPAQUE,
                 origin: origin.clone(),
+                tint: None,
             })
         })
         .collect::<Result<Vec<_>, Box<dyn Error>>>()?;

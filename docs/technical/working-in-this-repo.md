@@ -158,6 +158,18 @@ is a boundary nobody will respect, and the usual next move — shaving a file he
 buy four lines — deletes the reason the file exists in order to satisfy a limit that
 was never about the header.
 
+**A third split, past `session.rs` and `app.rs`, and the naming pattern all three now
+share.** A test file over the geometry key a reload's marking rule reads split along
+the fields that key is **keyed on** versus the fields it deliberately **excludes** —
+two questions, not one file answering both. Named the same way, two more splits in this
+project's history read as "the day the wall moves is not the day the tolerance changes"
+and "the day a new root joins the catalogue is not the day `ContentRoot` grows a
+method" — each naming the two moments a reader could confuse, rather than naming a line
+count. **The rule this illustrates: a size cap is a responsibility limit, not a byte
+budget.** Never trim prose to fit under it, and never land a file at exactly the cap —
+a file sitting on the limit has no room left for the next reasonable addition to be
+judged on its own merits rather than as the thing that finally forced a split.
+
 ### A split becomes `foo/mod.rs`, and that is not up for decision at the moment of a split
 
 Rust offers two layouts for the same module tree — `foo/mod.rs`, or `foo.rs` beside a
@@ -332,6 +344,18 @@ The general falsifiability form of this — that a green suite is no evidence ab
 document — is in `technical/testing.md`. This section is about the habit that catches
 it: **when a spec removes a "today" or a "not yet", grep for the words it just made
 false before calling the spec done.**
+
+## An archived test-map names paths as of its own merge, and is never re-pointed
+
+A completed spec's `test-map.md` moves to `specs/archive/` with the rest of its folder and is left
+exactly as it was written — that is what archiving a spec means. A later spec that renames or moves a
+test the archived map named does not go back and edit the archive to match: the map is history, and
+history does not get re-pointed. So a scenario ID that leads you into an archived `test-map.md` may
+hand you a path the tree no longer has, for a test that still exists somewhere under a different one.
+
+**Search by the test's name, not by the path an archived map states.** The name is stable across a
+move in a way the path is not, and `git log -S'<test name>'` or a plain workspace-wide search for it
+finds the test wherever it currently lives.
 
 ## A quoted heredoc through the Bash tool loses one level of backslash
 

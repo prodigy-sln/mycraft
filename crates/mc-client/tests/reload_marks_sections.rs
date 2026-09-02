@@ -1,4 +1,17 @@
-//! Which sections a reload leaves to be meshed again: every one of them, or none.
+//! Which sections a reload leaves to be meshed again when a candidate changes
+//! what a block **draws**: every one of them, or none.
+//!
+//! # This file is one half of a pair, and the seam is the question asked
+//!
+//! Every reading here is about a field the marking rule is keyed on — whether a
+//! block is drawn, whether it hides what stands behind it, the keys its six
+//! faces draw from — or about the *set* of sections such a change leaves. The
+//! other half, `reload_marks_no_section.rs`, is about the fields the rule
+//! deliberately excludes, and it carries its own controls. **The pair was one
+//! file until it outgrew the size a test file is allowed**, and the split is by
+//! that question rather than by outcome: the "same six keys restated" reading
+//! below marks nothing and belongs here, because it is the control for the
+//! re-pointed facing beside it and its subject is a texture key.
 //!
 //! # One instrument, and it is the set the frame path drains
 //!
@@ -49,10 +62,13 @@
 //! can edit a cell and no mark can arrive from anywhere but the reload. Each
 //! scenario also drains before it reloads, which is both a guard that a launch
 //! leaves nothing outstanding and the reason the reading afterwards is the
-//! reload's alone.
+//! reload's alone. Both are `support/marks_sections.rs`, shared with the other
+//! half so the two suites cannot launch into different worlds.
 
 #[path = "support/input/mod.rs"]
 mod input;
+#[path = "support/marks_sections.rs"]
+mod marks_sections;
 #[path = "support/reload.rs"]
 mod reload;
 #[path = "support/reload_content.rs"]
@@ -65,25 +81,17 @@ mod support;
 
 use std::error::Error;
 
-use glam::Vec3;
-
 use input::InputHarness;
+use marks_sections::{IN_OPEN_AIR, a_client_over_the_shipped_world, require_nothing_outstanding};
 use reload::{
     DIRT, DIRT_FILE, Declaration, GRASS, GRASS_FILE, STONE, STONE_FILE, WATER, WATER_FILE,
     accepted, adoption, candidate, declaring, restating, shipped, shipped_restating_stone,
     stone_that_is_not_solid,
 };
-use reload_content::{Run, run_of, serial_reported};
-use reload_remesh::{Marking, a_client_over, every_section_once, marked, require, serial_serving};
+use reload_remesh::{Marking, a_client_over, every_section_once, marked};
 use reload_world::{published_tick, shipped_world, standing_at};
+use support::TestResult;
 use support::content::ContentRoot;
-use support::{TestResult, content_root};
-
-/// Where the player stands: over the landmark pillar's top, in open air.
-///
-/// Nothing a tick does from here writes to a cell, so every mark these scenarios
-/// read is the reload's.
-const IN_OPEN_AIR: Vec3 = Vec3::new(8.5, 70.0, 8.5);
 
 /// How many ticks are advanced with the whole world marked.
 ///
@@ -108,45 +116,6 @@ const ZIRCON_FILE: &str = "zircon.luau";
 /// that moves, and it is the only difference between the two roots.
 const NORTHS_OWN_KEY: &str = "base:zircon_north";
 const A_DIFFERENT_NORTH: &str = "base:zircon_north_reworked";
-
-/// The resistance the medium scenarios below give stone.
-///
-/// Any value above zero would do — these scenarios are about what a reload draws
-/// again, not about what the number does to a walk — so it is a plain one stated
-/// against stone's silence, and stone stays solid so that nothing here is also a
-/// solidity edit.
-const A_RESISTANCE_WORTH_DECLARING: f32 = 3.0;
-
-/// The ascent the medium scenario below gives stone.
-///
-/// **Not `9.0`**, which is what the loader supplies to a declaration that says
-/// nothing: a candidate stating the default differs from the serving root in
-/// nothing at all, and would leave the reading below green against a marking rule
-/// that had learned the field. Stone stays solid and stays silent about
-/// swimmability, so nothing here is also a solidity or a buoyancy edit.
-const AN_ASCENT_WORTH_DECLARING: f32 = 4.0;
-
-#[test]
-fn a_candidate_touching_neither_solidity_nor_a_texture_key_leaves_no_section_to_mesh() -> TestResult
-{
-    let mut client = a_client_over_the_shipped_world()?;
-    require_nothing_outstanding(&mut client)?;
-    let unbreakable = shipped_restating_stone(&Declaration::of(STONE).breakable(false))?;
-
-    let answered = adoption(client.adopt(candidate(unbreakable.path())?));
-    let left_to_mesh = marked(&mut client);
-
-    assert_eq!(
-        (answered, left_to_mesh),
-        (accepted(DIRT), Marking::NoSectionAtAll),
-        "`breakable` decides what a click does and nothing about what is drawn, so a reload that \
-         changes it alone has no picture to correct. **This is satisfied by an implementation that \
-         never meshes anything on any reload**, which is why it is read on the same instrument as \
-         the scenario below it: the discrimination is that one of the two marks nothing and the \
-         other marks the world"
-    );
-    Ok(())
-}
 
 #[test]
 fn a_candidate_taking_stones_solidity_away_leaves_every_section_of_the_world_to_mesh() -> TestResult
@@ -249,36 +218,6 @@ fn a_candidate_restating_the_same_six_facing_keys_leaves_no_section_to_mesh() ->
 }
 
 #[test]
-fn a_reload_that_changes_no_geometry_and_one_that_does_are_told_apart_on_one_instrument()
--> TestResult {
-    let mut client = a_client_over_the_shipped_world()?;
-    require_nothing_outstanding(&mut client)?;
-    let unbreakable = shipped_restating_stone(&Declaration::of(STONE).breakable(false))?;
-    let softened = shipped_restating_stone(&stone_that_is_not_solid())?;
-
-    let first = adoption(client.adopt(candidate(unbreakable.path())?));
-    let after_the_first = marked(&mut client);
-    let second = adoption(client.adopt(candidate(softened.path())?));
-    let after_the_second = marked(&mut client);
-
-    assert_eq!(
-        (first, after_the_first, second, after_the_second),
-        (
-            accepted(DIRT),
-            Marking::NoSectionAtAll,
-            accepted(DIRT),
-            every_section_once()
-        ),
-        "two candidates, one session, one instrument. **Without this pairing, an implementation \
-         that meshes nothing on any reload satisfies both the no-section scenario and the \
-         exactly-256 one** — the first because it is right and the second because nothing would be \
-         comparing them. What is graded here is the discrimination itself: `breakable` moves \
-         nothing and declared solidity moves everything"
-    );
-    Ok(())
-}
-
-#[test]
 fn a_candidate_that_stops_stone_being_drawn_leaves_every_section_of_the_world_to_mesh() -> TestResult
 {
     let mut client = a_client_over_the_shipped_world()?;
@@ -323,163 +262,6 @@ fn a_candidate_that_stops_stone_occluding_leaves_every_section_of_the_world_to_m
     Ok(())
 }
 
-#[test]
-fn a_candidate_taking_stones_targetability_away_publishes_a_later_serial_and_marks_no_section()
--> TestResult {
-    let mut client = a_client_over_the_shipped_world()?;
-    require_nothing_outstanding(&mut client)?;
-    let unaimable = shipped_restating_stone(&Declaration::of(STONE).targetable(false))?;
-    let launched = serial_serving(&client)?.get();
-
-    let answered = client.adopt(candidate(unaimable.path())?);
-    let published = serial_reported(&answered);
-    let left_to_mesh = marked(&mut client);
-
-    assert_eq!(
-        (
-            adoption(answered),
-            run_of(launched, &[published]),
-            left_to_mesh
-        ),
-        (
-            accepted(DIRT),
-            Run::EachLaterThanTheLast,
-            Marking::NoSectionAtAll
-        ),
-        "what a swing can find changes not one pixel, so a reload that moves it alone has nothing \
-         to draw again — and an implementation folding all five declaration properties into one \
-         geometry key passes both scenarios above and fails only here. **The zero is asserted \
-         beside the acceptance and the serial because a refused reload marks nothing either**, \
-         and so does one that published no content at all: on its own, `NoSectionAtAll` is \
-         satisfied by a reload that never happened"
-    );
-    Ok(())
-}
-
-#[test]
-fn a_candidate_that_only_makes_stone_something_to_swim_in_marks_no_section() -> TestResult {
-    let mut client = a_client_over_the_shipped_world()?;
-    require_nothing_outstanding(&mut client)?;
-    let swimmable = shipped_restating_stone(&Declaration::of(STONE).swimmable(true))?;
-    let launched = serial_serving(&client)?.get();
-
-    let answered = client.adopt(candidate(swimmable.path())?);
-    let published = serial_reported(&answered);
-    let left_to_mesh = marked(&mut client);
-
-    assert_eq!(
-        (
-            adoption(answered),
-            run_of(launched, &[published]),
-            left_to_mesh
-        ),
-        (
-            accepted(DIRT),
-            Run::EachLaterThanTheLast,
-            Marking::NoSectionAtAll
-        ),
-        "whether a player can hold itself up in a block's volume decides what happens when they \
-         walk into it and changes not one pixel of it, so there is nothing to draw again. **The \
-         zero is asserted beside the acceptance and the serial because a refused reload marks \
-         nothing either**, and so does one that published no content at all: on its own, \
-         `NoSectionAtAll` is satisfied by a reload that never happened. The scenario below it on \
-         this same instrument is what says the harness can still mark the world"
-    );
-    Ok(())
-}
-
-#[test]
-fn a_candidate_that_only_makes_stone_slow_what_moves_through_it_marks_no_section() -> TestResult {
-    let mut client = a_client_over_the_shipped_world()?;
-    require_nothing_outstanding(&mut client)?;
-    let resistant = shipped_restating_stone(
-        &Declaration::of(STONE).move_resistance(A_RESISTANCE_WORTH_DECLARING),
-    )?;
-    let launched = serial_serving(&client)?.get();
-
-    let answered = client.adopt(candidate(resistant.path())?);
-    let published = serial_reported(&answered);
-    let left_to_mesh = marked(&mut client);
-
-    assert_eq!(
-        (
-            adoption(answered),
-            run_of(launched, &[published]),
-            left_to_mesh
-        ),
-        (
-            accepted(DIRT),
-            Run::EachLaterThanTheLast,
-            Marking::NoSectionAtAll
-        ),
-        "how much a volume slows what moves through it is a number the physics divides by, and a \
-         still frame cannot show it — so an implementation that added either medium field to the \
-         geometry key rebuilds all 256 sections for an edit that changes no picture, which is what \
-         this reports. It is asserted separately from the buoyancy scenario above because a key \
-         that learned one of the two and not the other passes exactly one of them"
-    );
-    Ok(())
-}
-
-#[test]
-fn a_candidate_that_only_changes_how_fast_a_block_carries_a_swimmer_marks_no_section() -> TestResult
-{
-    let mut client = a_client_over_the_shipped_world()?;
-    require_nothing_outstanding(&mut client)?;
-    let lifting =
-        shipped_restating_stone(&Declaration::of(STONE).swim_ascent(AN_ASCENT_WORTH_DECLARING))?;
-    let launched = serial_serving(&client)?.get();
-
-    let answered = client.adopt(candidate(lifting.path())?);
-    let published = serial_reported(&answered);
-    let left_to_mesh = marked(&mut client);
-
-    assert_eq!(
-        (
-            adoption(answered),
-            run_of(launched, &[published]),
-            left_to_mesh
-        ),
-        (
-            accepted(DIRT),
-            Run::EachLaterThanTheLast,
-            Marking::NoSectionAtAll
-        ),
-        "how fast a volume carries a swimmer upward is a number the physics launches at, and a \
-         still frame cannot show it — so an implementation that added the ascent to the geometry \
-         key rebuilds all 256 sections every time an author retunes a rate nobody can see, and the \
-         author reads the flicker as the reload having found something. It is asserted separately \
-         from the two medium scenarios above because a key that learned one medium field and not \
-         another passes exactly the scenarios about the ones it did not learn. **The serial and \
-         the acceptance are asserted beside the zero because a refused reload marks nothing \
-         either**, and so does one that published no content at all"
-    );
-    Ok(())
-}
-
-#[test]
-fn the_same_harness_marks_every_section_for_a_candidate_that_only_stops_drawing_stone() -> TestResult
-{
-    let mut client = a_client_over_the_shipped_world()?;
-    require_nothing_outstanding(&mut client)?;
-    let invisible = shipped_restating_stone(&Declaration::of(STONE).drawn(false))?;
-
-    let answered = client.adopt(candidate(invisible.path())?);
-    let left_to_mesh = marked(&mut client);
-
-    assert_eq!(
-        (adoption(answered), left_to_mesh),
-        (accepted(DIRT), every_section_once()),
-        "the control the three medium scenarios above cannot supply for themselves. Each of them \
-         asserts an absence, and a reload path that came to mark nothing at all — or a harness \
-         whose drain stopped reporting — satisfies all three forever. This is the same client, the same \
-         root and the same reading over the one field whose whole subject is the picture, so the \
-         discrimination is which of two answers the marking gives rather than whether it can give \
-         one"
-    );
-    Ok(())
-}
-
 /// Which tick `client` last published, or nothing where it has published none.
 fn published_at(client: &InputHarness) -> Option<u32> {
     client
@@ -492,11 +274,6 @@ fn ticks_between(before: Option<u32>, after: Option<u32>) -> Option<u32> {
     before
         .zip(after)
         .map(|(before, after)| after.saturating_sub(before))
-}
-
-/// A client playing the world it launches into, over the shipped content root.
-fn a_client_over_the_shipped_world() -> Result<InputHarness, Box<dyn Error>> {
-    a_client_over(&content_root()?, standing_at(IN_OPEN_AIR), shipped_world)
 }
 
 /// A client serving content that declares a block per facing, and the root it is
@@ -525,23 +302,6 @@ fn shipped_declaring_zircon(north: &str) -> Result<ContentRoot, Box<dyn Error>> 
         shipped()?,
         ZIRCON_FILE,
         &Declaration::of(ZIRCON).repointing_north(north),
-    )
-}
-
-/// Refuses unless the client has nothing outstanding to mesh.
-///
-/// **Both a guard and the reason the reading afterwards means anything**: a launch
-/// that left sections marked would make every count below the reload's plus
-/// something else, and this is also the drain that leaves the set empty for the
-/// reload to fill.
-fn require_nothing_outstanding(client: &mut InputHarness) -> Result<(), Box<dyn Error>> {
-    let outstanding = marked(client);
-    require(
-        outstanding == Marking::NoSectionAtAll,
-        format!(
-            "this scenario reads what one reload left to be meshed, so the launch has to have left \
-             nothing — and it left {outstanding:?}"
-        ),
     )
 }
 

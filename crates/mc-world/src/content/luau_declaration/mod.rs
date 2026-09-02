@@ -14,7 +14,7 @@
 //! `deny_unknown_fields` was TOML's, and a host that can read a named field but
 //! cannot ask what fields exist can never tell a typo from an absence.
 //!
-//! # What a `texture` may say, what a number may be, and what `opacity` may be said beside, are modules of their own
+//! # What a `texture` may say, what a number may be, and what a field may be said beside, are modules of their own
 //!
 //! [`texture`] holds the reading of that one field and the refusals it raises:
 //! it is the field with two forms, one of which is a table with a shape of its
@@ -26,10 +26,12 @@
 //! number may be, the four ways one can be wrong, and the two fields that read
 //! one, so that a third number added later inherits all of it by calling one
 //! function rather than by being remembered. [`opacity`] is the third, and it
-//! exists for a reason neither of those has: it is the only field whose
-//! acceptance depends on **another field**, so the rule deciding it belongs
-//! neither beside the reading of its number nor in the middle of the check that
-//! reads every field in turn.
+//! exists for a reason neither of those has: it is a field whose acceptance
+//! depends on **another field**, so the rule deciding it belongs neither beside
+//! the reading of its number nor in the middle of the check that reads every
+//! field in turn. [`tint`] is the fourth and the same arrangement — a colour and
+//! a distance that are stated together or not at all, so what decides that is
+//! one place rather than two halves of one rule sitting apart.
 //!
 //! # Nothing here runs the mod's code
 //!
@@ -50,6 +52,7 @@ use mc_script::{FieldNames, ScriptHost, ScriptTable, ScriptValue};
 mod number;
 mod opacity;
 mod texture;
+mod tint;
 
 /// The key a declaration names itself by.
 const NAME_FIELD: &str = "name";
@@ -77,6 +80,10 @@ const MOVE_RESISTANCE_FIELD: &str = "move_resistance";
 const SWIM_ASCENT_FIELD: &str = "swim_ascent";
 /// The key a declaration states how much light it stops in.
 pub(super) const OPACITY_FIELD: &str = "opacity";
+/// The key a declaration states the colour of the medium it is in.
+pub(super) const TINT_FIELD: &str = "tint";
+/// The key a declaration states how far that medium lets an eye see in.
+pub(super) const TINT_DISTANCE_FIELD: &str = "tint_distance";
 
 /// Every field name a declaration may state, in the order the documentation
 /// introduces them.
@@ -89,7 +96,7 @@ pub(super) const OPACITY_FIELD: &str = "opacity";
 /// `docs/modding/README.md`. Growing it means editing all three, and the guard
 /// sweeps every page under `docs/modding/` rather than a named one, so a page
 /// missed is a page reported.
-const RECOGNISED_FIELDS: [&str; 13] = [
+const RECOGNISED_FIELDS: [&str; 15] = [
     NAME_FIELD,
     TEXTURE_FIELD,
     SOLID_FIELD,
@@ -103,6 +110,8 @@ const RECOGNISED_FIELDS: [&str; 13] = [
     MOVE_RESISTANCE_FIELD,
     SWIM_ASCENT_FIELD,
     OPACITY_FIELD,
+    TINT_FIELD,
+    TINT_DISTANCE_FIELD,
 ];
 
 /// How many field names the loader will read out of one declaration.
@@ -183,6 +192,11 @@ fn check(
     origin: &DefinitionOrigin,
 ) -> Result<BlockDefinition, FieldFault> {
     only_recognised_fields(host, declaration)?;
+    // Everything up to `occludes` is bound first, because `is_solid` and
+    // `occludes` are each read a second time — by the three fields that fall
+    // back to solidity, and by what `opacity` may be stated beside. The rest is
+    // read where the definition states it, in the order it was always read in,
+    // so what a declaration wrong in two ways is refused on does not move.
     let name = declared_text(host.read_field(declaration, NAME_FIELD), NAME_FIELD)?;
     let textures = texture::declared_textures(host, declaration)?;
     let is_solid = required_boolean(host.read_field(declaration, SOLID_FIELD), SOLID_FIELD)?;
@@ -191,13 +205,7 @@ fn check(
     let breaks_into = optional_residue(host.read_field(declaration, BREAKS_INTO_FIELD))?;
     let drawn = defaulting_to_solidity(host, declaration, DRAWN_FIELD, is_solid)?;
     let occludes = defaulting_to_solidity(host, declaration, OCCLUDES_FIELD, is_solid)?;
-    let targetable = defaulting_to_solidity(host, declaration, TARGETABLE_FIELD, is_solid)?;
-    let swimmable = defaulting_to(host, declaration, SWIMMABLE_FIELD, SWIMMABLE_BY_DEFAULT)?;
-    let move_resistance = number::declared_resistance(host, declaration)?;
-    let swim_ascent = number::declared_ascent(host, declaration)?;
-    let opacity = opacity::declared(host, declaration, occludes)?;
     Ok(BlockDefinition {
-        name: BlockName::parse(&name).map_err(|error| FieldFault::invalid(NAME_FIELD, &error))?,
         textures,
         is_solid,
         replaceable,
@@ -205,11 +213,15 @@ fn check(
         breaks_into,
         drawn,
         occludes,
-        targetable,
-        swimmable,
-        move_resistance,
-        swim_ascent,
-        opacity,
+        targetable: defaulting_to_solidity(host, declaration, TARGETABLE_FIELD, is_solid)?,
+        swimmable: defaulting_to(host, declaration, SWIMMABLE_FIELD, SWIMMABLE_BY_DEFAULT)?,
+        move_resistance: number::declared_resistance(host, declaration)?,
+        swim_ascent: number::declared_ascent(host, declaration)?,
+        opacity: opacity::declared(host, declaration, occludes)?,
+        tint: tint::declared(host, declaration)?,
+        // Written here because the name's shape is the last thing a declaration
+        // is refused on, and a struct literal is evaluated as it is written.
+        name: BlockName::parse(&name).map_err(|error| FieldFault::invalid(NAME_FIELD, &error))?,
         origin: origin.clone(),
     })
 }

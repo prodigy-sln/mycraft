@@ -95,11 +95,16 @@ fn cull_bindings(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     })
 }
 
-/// What the vertex stage binds: the frame uniform, and the section table it
-/// reconstructs world positions from.
+/// What the two terrain stages bind: the frame uniform, and the section table
+/// the vertex stage reconstructs world positions from.
+///
+/// **The uniform is visible to the fragment stage and the section table is
+/// not.** The fragment stage reads the eye and the medium's tint out of the
+/// uniform; it has no use for a section, and widening a storage binding it does
+/// not read would spend one of the four per stage that the build enforces.
 fn frame_bindings(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     let entries = [
-        uniform_entry(0, wgpu::ShaderStages::VERTEX),
+        uniform_entry(0, wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT),
         storage_entry(1, wgpu::ShaderStages::VERTEX, true),
     ];
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

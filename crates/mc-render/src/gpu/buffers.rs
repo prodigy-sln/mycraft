@@ -110,8 +110,24 @@ pub(super) const DRAW_ARGS_BYTES: u64 = (WORDS_PER_DRAW * size_of::<u32>()) as u
 /// Bytes in the indirect argument buffer: one `DrawArgs` per terrain draw.
 const ARGS_BYTES: u64 = DRAW_ARGS_BYTES * INDIRECT_ARGS.len() as u64;
 
-/// Bytes in the per-frame uniform: a `mat4x4<f32>` and six `vec4<f32>` planes.
-const FRAME_UNIFORM_BYTES: u64 = 64 + 96;
+/// Bytes in the per-frame uniform: a `mat4x4<f32>`, six `vec4<f32>` planes, and
+/// the thirty-two bytes the eye and its medium's tint occupy after them.
+///
+/// **Public for one reason, and it is not a caller.** Nothing outside this
+/// module allocates the buffer, and nothing here needs the number named
+/// elsewhere. It is reachable so that a test can compare it against the size
+/// **naga derives for the `struct Frame` the shader itself declares** — which is
+/// the only thing that can say the bytes this crate allocates and the record the
+/// two stages read are the same record.
+///
+/// **A second hand-written copy in `build/validate_tables.rs` would not have
+/// said that.** The build's checks compare a table against a *shader*, never
+/// against this constant, so the copy would go on agreeing with the shaders
+/// while a growth that missed this line allocated a buffer too small — a green
+/// build and an undersized uniform. What closes it is a production value against
+/// an independently derived one, which is what this visibility buys and all it
+/// buys.
+pub const FRAME_UNIFORM_BYTES: u64 = 64 + 96 + 32;
 
 /// Everything the pass binds.
 #[derive(Debug)]

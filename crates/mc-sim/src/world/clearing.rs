@@ -30,7 +30,7 @@ use mc_world::world::Extent;
 
 use crate::player::{BlockPos, PlayerState, Solidity, collide};
 
-use super::inside_the_world;
+use super::{containing, inside_the_world};
 
 /// How far the search looks, in blocks, on each axis it looks along.
 ///
@@ -69,7 +69,7 @@ pub(crate) fn cleared(feet: Vec3, world: &dyn Solidity, ground: Extent) -> Clear
     if !collide::overlaps_solid(feet, world) {
         return Clearing::Unneeded;
     }
-    let standing = collide::cell_of(feet);
+    let standing = containing(feet);
     candidates()
         .map(|offset| centre_of(standing, offset))
         .find(|position| eligible(*position, world, ground))

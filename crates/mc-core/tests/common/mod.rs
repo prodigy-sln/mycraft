@@ -53,6 +53,7 @@ pub fn definition(
         swim_ascent: 9.0,
         opacity: Opacity::OPAQUE,
         origin: DefinitionOrigin::new(origin),
+        tint: None,
     })
 }
 

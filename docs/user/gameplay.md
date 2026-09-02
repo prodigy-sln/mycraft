@@ -117,6 +117,43 @@ walk, which read as a swamp rather than as water. What changed is the water's ow
 declaration — the numbers live in `content/base/blocks/water.luau`, not in the
 engine — so a mod may declare a liquid that carries you at any rates it likes.
 
+**And as of this build, going under the surface changes what you see.** Sink to
+the lakebed in the deep part of the sea and you are looking at the world from
+*inside* the water rather than through a pane of it. Everything drawn is carried
+toward the sea's own blue by how far away it is: a face right in front of you
+keeps nearly all of its own colour, the lakebed a few blocks off is visibly blue
+over green, and anything **twelve blocks** away or further is that blue and
+nothing else — which is what the far end of the channel looks like from down
+there. The sky goes with it. Look up while you are under and you get the same
+blue instead of daylight, so the surface overhead reads as a lid rather than as a
+window, and the moment you break it again the picture is a dry one.
+
+What does *not* change is the crosshair and anything else drawn on top of the
+world. It keeps its own colours, so you can still see where you are aiming.
+
+**Only part of the sea is deep enough for that, and this is where to go.** Your
+eye sits **1.62 blocks** above your feet, so standing on the bed of water one
+block deep leaves it well clear of the surface — wade in at the beach and nothing
+happens, however far you walk. Where the sea is **two blocks deep** the bed is
+two blocks under the surface, which puts a resting eye **0.38 blocks** below it.
+That deep channel is **47 of the sea's 178 columns**, a narrow strip running the
+length of the water; the other 131 are one block deep and leave you dry. So the
+way to see this is to swim out over the deep part, stop holding jump, and let
+yourself sink — the view changes as you settle, and holding jump again takes you
+back out.
+
+**0.38 blocks is the whole of the margin**, and it is worth knowing it is that
+tight: under the surface, but only just.
+
+**The colour and the reach are the water's own, not the engine's.**
+`content/base/blocks/water.luau` declares `tint = "#3A6EA5"` and
+`tint_distance = 12.0` — what a view through the medium is carried toward, and
+how far it takes to get there completely. Both are edits that reach a running
+game with no restart: a shorter distance is a murkier sea, a longer one a clearer
+one, and a different colour is a different liquid. Any block may declare the
+pair, so a gas, an acid pool or a nebula is somebody's content rather than an
+engine change.
+
 **You can now aim at water, and swinging at it does nothing.** The crosshair used
 to look straight through water and find whatever solid block was behind it, so a
 swing aimed at the sea broke the lakebed under it. It stops at the water now — and
@@ -538,3 +575,11 @@ What is *not* here is art for everything. A block nobody has baked a picture for
 stand-in derived from its key's spelling, and that is the ordinary answer rather than a gap being
 worked on — so a mod adding a block gets a stand-in until it ships a model. Baking one mid-session
 needs a restart before the game reads it, as the section on live edits above says.
+
+**Being under the water is a colour and nothing more.** There are no bubbles, no droplets on the
+view and no ripple or wobble to what you are looking through; the water does not bend what is
+behind it, and nothing patterns the lakebed. There is no breath meter and you cannot drown, so you
+may stay under for as long as you like, and there is no sound and no swimming animation. Seen from
+below, the surface above you is that same flat colour rather than a mirror or a view of the sky.
+Those are all things a later build may add; none of them is here, and what is here is the one
+thing the section on going under describes.

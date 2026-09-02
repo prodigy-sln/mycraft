@@ -36,6 +36,7 @@
 //! `MAX_SAVE_BYTES` before it is decoded at all; that check is what converts a
 //! read bound into a memory bound, and it is ours rather than the library's.
 
+mod declaration;
 mod error;
 mod format;
 mod read;

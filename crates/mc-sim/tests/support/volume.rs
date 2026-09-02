@@ -265,6 +265,7 @@ pub fn registry_of_declarations(
             swim_ascent: states.swim_ascent,
             opacity: Opacity::OPAQUE,
             origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
+            tint: None,
         }));
     }
     let mut registry = BlockRegistry::new();

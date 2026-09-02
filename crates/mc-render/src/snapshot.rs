@@ -15,6 +15,8 @@
 
 use std::sync::Arc;
 
+use mc_core::block::MediumTint;
+
 use crate::camera::{CameraView, Frustum, Projection, view_projection, visible_sections};
 use crate::geometry::scene::SceneGeometry;
 
@@ -24,6 +26,13 @@ pub struct TerrainSnapshot {
     pub tick: u32,
     pub camera: CameraView,
     pub scene: Arc<SceneGeometry>,
+    /// What the medium the eye stands in does to the light reaching it, as the
+    /// simulation resolved it for this tick.
+    ///
+    /// **Carried, never worked out here.** Which block the eye is in is a
+    /// question about the world and the registry, and this crate holds neither
+    /// — answering it here is the seam.
+    pub tint: Option<MediumTint>,
 }
 
 /// How far the scene has got, as the frame path is allowed to see it.

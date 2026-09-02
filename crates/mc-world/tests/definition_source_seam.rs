@@ -110,6 +110,7 @@ fn hand_written_air() -> Result<BlockDefinition, Box<dyn Error>> {
         swim_ascent: 9.0,
         opacity: Opacity::OPAQUE,
         origin: DefinitionOrigin::new("hand-written air"),
+        tint: None,
     })
 }
 
@@ -130,6 +131,7 @@ fn hand_written_stone() -> Result<BlockDefinition, Box<dyn Error>> {
         swim_ascent: 9.0,
         opacity: Opacity::OPAQUE,
         origin: DefinitionOrigin::new("hand-written stone"),
+        tint: None,
     })
 }
 
@@ -151,6 +153,7 @@ fn hand_written_grass() -> Result<BlockDefinition, Box<dyn Error>> {
         swim_ascent: 9.0,
         opacity: Opacity::OPAQUE,
         origin: DefinitionOrigin::new("hand-written grass"),
+        tint: None,
     })
 }
 

@@ -382,6 +382,7 @@ impl App {
                 ScenePhase::Preparing => Arc::clone(&self.nothing),
                 ScenePhase::Ready(scene) => Arc::clone(scene),
             },
+            tint: published.as_ref().and_then(|published| published.tint),
         }
     }
 

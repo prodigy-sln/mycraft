@@ -314,6 +314,11 @@ pub fn snapshot(tick: u32, camera: CameraView, fixture: &Fixture) -> TerrainSnap
         tick,
         camera,
         scene: Arc::clone(&fixture.scene),
+        // This crate holds no world and no registry, and may name `mc-sim` in
+        // no dependency of any kind, so there is nothing here for an eye's cell
+        // to be resolved against. A fixture drawing hand-placed geometry has no
+        // medium to be inside.
+        tint: None,
     }
 }
 

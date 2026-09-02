@@ -148,7 +148,7 @@ const CRATE_DEPTH: usize = 2;
 /// bump landing with its oracle still at 3, over a save binary run that had been
 /// scoped to the tests expected to move.
 const STATED_BEHAVIOUR_REVISION: u8 = 4;
-const STATED_APPEARANCE_REVISION: u8 = 4;
+const STATED_APPEARANCE_REVISION: u8 = 5;
 
 /// Where an FNV-1a 64 fold starts, and what it multiplies by.
 ///
@@ -376,6 +376,15 @@ fn stated_behaviour_bytes(definition: &BlockDefinition) -> Vec<u8> {
 /// rather than reading the field. That witness is `tests/save_folds_a_declared_opacity.rs`,
 /// over a fixture declaring a quarter, and it is named here because a guard whose
 /// blindness is not written down is one somebody will later mistake for cover.
+///
+/// **The medium is read off the definition rather than written as the absent
+/// marker**, and the same blindness applies with a shorter life: no shipped
+/// block declares one *yet*, so every block folds the tag byte alone today and
+/// this half cannot see a fold that skipped the field. Reading it from the
+/// definition is what makes that end by itself the moment content declares a
+/// tint, rather than turning into a failure somebody has to come back and
+/// repair. The witness while it lasts is `tests/save_folds_a_declared_tint.rs`,
+/// over a fixture that declares one.
 fn stated_appearance_bytes(definition: &BlockDefinition) -> Vec<u8> {
     let mut stated = vec![STATED_APPEARANCE_REVISION];
     push_text(&mut stated, definition.name.as_str());
@@ -385,7 +394,22 @@ fn stated_appearance_bytes(definition: &BlockDefinition) -> Vec<u8> {
     push_flag(&mut stated, definition.drawn);
     push_flag(&mut stated, definition.occludes);
     push_number(&mut stated, definition.opacity.get());
+    push_medium(&mut stated, definition);
     stated
+}
+
+/// What `definition` declares its medium to be, as the canonical encoding writes
+/// an optional value: one tag byte, and behind a present one the three channel
+/// bytes with no length in front of them and the distance's four.
+fn push_medium(stated: &mut Vec<u8>, definition: &BlockDefinition) {
+    match definition.tint {
+        None => stated.push(ABSENT_BYTE),
+        Some(tint) => {
+            stated.push(PRESENT_BYTE);
+            stated.extend_from_slice(&tint.color());
+            push_number(stated, tint.distance());
+        }
+    }
 }
 
 /// `text` as the canonical encoding writes it: its length, then its bytes.

@@ -69,7 +69,7 @@ use tempfile::TempDir;
 /// satisfied it exactly as a correct one did. [`fields_the_refusal_quotes`] reads
 /// the list out of the refusal instead, which makes a missing name, an extra name
 /// and a reordering three different failures.
-const RECOGNISED_FIELDS: [&str; 13] = [
+const RECOGNISED_FIELDS: [&str; 15] = [
     "name",
     "texture",
     "solid",
@@ -83,11 +83,21 @@ const RECOGNISED_FIELDS: [&str; 13] = [
     "move_resistance",
     "swim_ascent",
     "opacity",
+    "tint",
+    "tint_distance",
 ];
 
 /// A field name nobody recognises, and the shape of the mistake that produces
 /// one: a letter short of `solid`.
 const A_MISSPELLING_OF_SOLID: &str = "slid";
+
+/// The colour and the distance the whole-contract control states.
+///
+/// Stated together because the two fields are stated together or not at all, so
+/// a control naming one of them declares the contradiction the loader refuses
+/// and stops being a control.
+const A_MEDIUM_COLOUR: &str = "#3A6EA5";
+const A_MEDIUM_DISTANCE: &str = "12.0";
 
 /// A third, a letter *past* `drawn` — the newest field on the list and therefore
 /// the one whose absence from a stale mirror shows up last.
@@ -323,6 +333,8 @@ fn a_declaration_stating_every_recognised_field_and_nothing_else_registers() -> 
             raw_field("move_resistance", "0"),
             raw_field("swim_ascent", "0"),
             raw_field("opacity", "1"),
+            text_field("tint", A_MEDIUM_COLOUR),
+            raw_field("tint_distance", A_MEDIUM_DISTANCE),
         ]),
     )?;
 

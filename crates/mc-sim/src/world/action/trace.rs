@@ -36,6 +36,7 @@ use mc_world::mesh::Facing;
 use mc_world::section::Axis;
 
 use crate::player::{BlockPos, Targetable};
+use crate::world::containing;
 
 /// The voxel a ray met, how it entered, and how far along it that was.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -163,15 +164,6 @@ fn facings_along(axis: Axis, climbing: bool) -> Option<(Facing, Facing)> {
 /// is `+1` for the three facings that climb and `−1` for the three that do not.
 fn steps_up(facing: Facing) -> bool {
     facing.step().into_iter().sum::<i32>() > 0
-}
-
-/// The voxel a point lies in.
-fn containing(point: Vec3) -> BlockPos {
-    BlockPos {
-        x: point.x.floor() as i32,
-        y: point.y.floor() as i32,
-        z: point.z.floor() as i32,
-    }
 }
 
 /// One step off `facing` from `cell`.

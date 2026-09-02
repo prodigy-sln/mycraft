@@ -155,6 +155,7 @@ pub struct Declaration {
     swimmable: Option<bool>,
     move_resistance: Option<f32>,
     swim_ascent: Option<f32>,
+    tint: Option<(String, f32)>,
 }
 
 impl Declaration {
@@ -182,6 +183,7 @@ impl Declaration {
             swimmable: None,
             move_resistance: None,
             swim_ascent: None,
+            tint: None,
         }
     }
 
@@ -291,6 +293,19 @@ impl Declaration {
         self
     }
 
+    /// The same declaration, stating the colour its volume carries what is seen
+    /// from inside it toward, and how far it lets a viewer see.
+    ///
+    /// **One method for the pair rather than two**, because the loader takes
+    /// them together or not at all: a fixture that could state one alone would
+    /// build a root the loader refuses, and every scenario over it would be
+    /// about a refusal rather than about the field.
+    #[must_use]
+    pub fn tint(mut self, colour: &str, blocks: f32) -> Self {
+        self.tint = Some((colour.to_owned(), blocks));
+        self
+    }
+
     /// The declaration as a Luau chunk returning a table.
     #[must_use]
     pub fn text(&self) -> String {
@@ -359,7 +374,23 @@ impl Declaration {
             // Debug for the reason the line above gives.
             stated.push_str(&format!("\tswim_ascent = {swim_ascent:?},\n"));
         }
+        stated.push_str(&self.stated_tint());
         stated
+    }
+
+    /// The two lines a stated tint writes, and nothing where none is stated.
+    ///
+    /// Its own function because `stated_fields` is already at `clippy.toml`'s
+    /// thirty-line cap — the same seam that split it out of `text` when the
+    /// appearance fields arrived. **Both lines or neither**, which is what the
+    /// loader takes and what makes an unstated tint spellable at all.
+    fn stated_tint(&self) -> String {
+        // Debug on the reach for the reason `move_resistance` gives above.
+        self.tint
+            .as_ref()
+            .map_or_else(String::new, |(colour, blocks)| {
+                format!("\ttint = \"{colour}\",\n\ttint_distance = {blocks:?},\n")
+            })
     }
 }
 

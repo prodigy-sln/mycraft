@@ -233,6 +233,7 @@ fn definition(name: &str, is_solid: bool) -> Result<BlockDefinition, NamespacedI
         swim_ascent: 9.0,
         opacity: Opacity::OPAQUE,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
+        tint: None,
     })
 }
 

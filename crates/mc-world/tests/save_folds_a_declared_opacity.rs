@@ -77,7 +77,7 @@ const A_CELL: mc_world::world::WorldPos = world_at(1, 1, 1);
 /// make together. **The appearance list's number is the one this spec moves and
 /// the behaviour list's is the one it must not**, and stating both as literals is
 /// what lets one comparison say so.
-const STATED_APPEARANCE_REVISION: u8 = 4;
+const STATED_APPEARANCE_REVISION: u8 = 5;
 const STATED_BEHAVIOUR_REVISION: u8 = 4;
 
 /// What the fixture declares about how much light it stops.
@@ -159,6 +159,7 @@ fn registry_holding_the_fixture() -> Result<BlockRegistry, Box<dyn Error>> {
         swim_ascent: SWIM_ASCENT,
         opacity,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
+        tint: None,
     })];
     let mut registry = BlockRegistry::new();
     registry.apply(&InMemoryDefinitionSource::new(
@@ -218,6 +219,13 @@ fn stated_behaviour_bytes() -> Vec<u8> {
 /// ones moves every byte after it and every save in existence would disagree for
 /// a reason nobody declared — while the revision byte reported a change smaller
 /// than the one that was made.
+///
+/// **The degree is no longer the last thing in the record**, and the marker
+/// behind it is what says so: this fixture declares no medium, and the tag byte
+/// for that absence is what every save in existence writes. Without it a degree
+/// appended *after* the medium rather than before it would fold to the same
+/// bytes as one appended before, which is precisely the sliding this file exists
+/// to catch one field further along.
 fn stated_appearance_bytes() -> Vec<u8> {
     let mut stated = vec![STATED_APPEARANCE_REVISION];
     push_text(&mut stated, TINTED);
@@ -227,6 +235,7 @@ fn stated_appearance_bytes() -> Vec<u8> {
     push_flag(&mut stated, DRAWN);
     push_flag(&mut stated, OCCLUDES);
     push_number(&mut stated, A_QUARTER);
+    stated.push(NOTHING_BYTE);
     stated
 }
 

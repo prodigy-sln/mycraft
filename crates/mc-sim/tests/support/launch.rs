@@ -95,6 +95,7 @@ pub fn registry_with_the_marker() -> Result<BlockRegistry, Box<dyn Error>> {
             swim_ascent: 9.0,
             opacity: Opacity::OPAQUE,
             origin,
+            tint: None,
         })],
     ))?;
     Ok(registry)

@@ -17,7 +17,7 @@
 use std::error::Error;
 use std::sync::{Arc, OnceLock};
 
-use mc_core::block::BlockRegistry;
+use mc_core::block::{BlockRegistry, RegistryError};
 use mc_render::camera::{CameraView, camera_view};
 use mc_render::geometry::scene::SceneGeometry;
 use mc_render::gpu::{RecordTarget, TerrainRenderer, TerrainTextures};
@@ -28,6 +28,7 @@ use mc_render::texture::sampler::TERRAIN_SAMPLER;
 use mc_render::texture::supplied::SuppliedTexels;
 use mc_sim::camera::CameraPose;
 use mc_sim::replay::{ReplayWorld, TickIndex, scripted_intent, simulation_for};
+use mc_sim::world::{World, eye_medium};
 use mc_testkit::frame::gpu::{
     AcquireOptions, Acquisition, CaptureContext, CaptureRequest, DrawWork, capture_and_verify,
     draw_fn,
@@ -179,14 +180,59 @@ pub fn replay_camera(
     Ok(camera_view(pose.eye, pose.target))
 }
 
-/// The snapshot the client hands the renderer for `tick`.
+/// The snapshot the client hands the renderer for `tick`, for a frame drawn
+/// over no world at all.
+///
+/// **The tint is `None` because there is nothing to resolve it against**, not
+/// because a fixture chose it: the callers of this form draw a scene assembled
+/// by hand or no scene whatever, and hold no world and no registry an eye's
+/// cell could be looked up in. A frame over a world goes through
+/// [`snapshot_in`], which asks the simulation's own resolver.
 #[must_use]
 pub fn snapshot(tick: u32, camera: CameraView, scene: &Arc<SceneGeometry>) -> TerrainSnapshot {
     TerrainSnapshot {
         tick,
         camera,
         scene: Arc::clone(scene),
+        tint: None,
     }
+}
+
+/// That same snapshot for a frame drawn over `prepared`'s world, with the tint
+/// **resolved from the eye's own cell** rather than stated here.
+///
+/// **A second constructor rather than two more parameters on the first.**
+/// Threading a world and a registry through [`snapshot`] makes five, over
+/// `clippy.toml`'s arity cap, and the three-parameter form is what everything
+/// that draws no world still wants.
+///
+/// **Why it resolves rather than takes a tint.** A fixture that stated its own
+/// answer would be asserting about a frame the product never draws: the shipped
+/// client copies a field the simulation published, and the simulation published
+/// it by asking [`mc_sim::world::eye_medium`] which block fills the cell the eye
+/// is in. Calling that same function here is what makes a dry frame dry because
+/// the eye stands in open air, and not because this line said `None`.
+///
+/// # Errors
+///
+/// Returns [`RegistryError`] when the prepared world holds a block its own
+/// registry does not register.
+pub fn snapshot_in(
+    prepared: &PreparedScene,
+    tick: u32,
+    camera: CameraView,
+    scene: &Arc<SceneGeometry>,
+) -> Result<TerrainSnapshot, RegistryError> {
+    let world = World::new(
+        prepared.world.blocks().clone(),
+        Arc::clone(&prepared.registry),
+    )?;
+    Ok(TerrainSnapshot {
+        tick,
+        camera,
+        scene: Arc::clone(scene),
+        tint: eye_medium(&world, camera.eye),
+    })
 }
 
 /// One frame of the replay, waiting to be drawn.

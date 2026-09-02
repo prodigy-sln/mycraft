@@ -28,6 +28,7 @@ use std::cmp::Ordering;
 use glam::Vec3;
 
 use crate::player::{BlockPos, Medium, Solidity, VoxelMedium};
+use crate::world::containing;
 
 /// How far the player's box reaches from the feet centre on x and z, in blocks.
 const HALF_WIDTH: f32 = 0.3;
@@ -284,11 +285,6 @@ pub(crate) fn overlaps_solid(feet: Vec3, world: &dyn Solidity) -> bool {
     overlaps(Aabb::around(feet), world)
 }
 
-/// The voxel a point lies in.
-pub(crate) fn cell_of(point: Vec3) -> BlockPos {
-    floor_voxel(point)
-}
-
 /// Every voxel `area` touches.
 ///
 /// A voxel fills `[v, v + 1)`, so the ones an interval `[min, max]` touches run
@@ -296,28 +292,19 @@ pub(crate) fn cell_of(point: Vec3) -> BlockPos {
 /// where the half-open rule earns its keep: a box whose face lands exactly on
 /// `max` stops one voxel short of the one beginning there.
 fn voxels(area: Aabb) -> impl Iterator<Item = BlockPos> {
-    let low = floor_voxel(area.min);
+    let low = containing(area.min);
     let high = ceil_voxel(area.max);
     (low.y..=high.y).flat_map(move |y| {
         (low.z..=high.z).flat_map(move |z| (low.x..=high.x).map(move |x| BlockPos { x, y, z }))
     })
 }
 
-/// The voxel a box's lower corner lies in.
-fn floor_voxel(corner: Vec3) -> BlockPos {
-    BlockPos {
-        x: corner.x.floor() as i32,
-        y: corner.y.floor() as i32,
-        z: corner.z.floor() as i32,
-    }
-}
-
 /// The last voxel a box's upper corner reaches.
 ///
-/// The subtraction saturates because the conversion above it does: a coordinate
-/// far enough out saturates to the smallest `i32`, and taking one from that
-/// overflows and panics in a debug build — in the one loop this project does not
-/// accept a panic in.
+/// The subtraction saturates because [`containing`]'s conversion does: a
+/// coordinate far enough out saturates to the smallest `i32`, and taking one
+/// from that overflows and panics in a debug build — in the one loop this
+/// project does not accept a panic in.
 fn ceil_voxel(corner: Vec3) -> BlockPos {
     BlockPos {
         x: (corner.x.ceil() as i32).saturating_sub(1),

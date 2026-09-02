@@ -1852,3 +1852,90 @@ next person to meet `os error 206` finds the issue rather than re-deriving it.
   Measured across the change on one tree: **93.78% lines, 92.32% regions, 11 118
   lines tracked, `1665 tests run: 1665 passed, 1 skipped`** — identical before and
   after.
+
+---
+
+## ADR-032 — A medium tints on a linear ramp to a stated distance, not an exponential density
+
+**Status**: Accepted · **Date**: 2026-08-31 ·
+**Adopted by SPEC-032 (PRO-998); this is a published content surface**
+
+**Context.** A block declares what it looks like from *inside* — a colour, and
+how far you can see through it — and everything the frame draws is carried
+toward that colour with distance. The colour and the distance are content
+(Invariant 1), so a mod author ships a gas, an acid pool or a nebula with no
+engine change. The question this settles is the **law**: given a surface at
+distance `d` from the eye in a medium declaring colour `T`, how much of `T` does
+that surface's pixel carry?
+
+Two families were available, and both are shipped by real engines:
+
+- **A density.** Beer–Lambert, `1 − exp(−σd)`, or the exponential-squared
+  variant. The author declares an extinction coefficient.
+- **A ramp to a stated distance.** The author declares the distance at which the
+  medium hides what lies beyond it completely, and the mix runs linearly to it.
+
+**Decision.** A **linear ramp**. A surface at distance `d` in a medium declaring
+`T` at `D` is drawn as its own colour carried toward `T` by `min(1, d / D)`, in
+linear light, with `d` measured **radially from the eye**. Untinted at the eye,
+wholly `T` at `D` and at every distance beyond it. A pixel the frame draws no
+terrain at is `T` as well, so the sky stops being sky.
+
+**Why, and it is about the author rather than about the physics.** An
+exponential is the more physical model and it is the wrong published surface,
+because **it never actually hides anything**: `exp(−σd)` is positive at every
+finite `d`, so whatever number an author writes, some fraction of every surface
+in the world keeps coming through. There is then no distance in the declaration
+that means what it says. "You can see twelve blocks through this" is a claim an
+author can make deliberately, check by walking twelve blocks, and a per-pixel
+reading can assert against arithmetic; "σ = 0.19" is a number tuned until it
+looks right, and nothing can be asserted about it that is not a restatement of
+the implementation. The parameterisation is the field's semantics, and the
+semantics have to be something a person can hold.
+
+The survey agrees rather than merely permitting it. Minecraft replaces the fog
+colour, collapses the fog distance and draws no sky while the camera is in a
+fluid. Source declares a fog colour and a start/end **distance** per water
+volume in the map — content-declared, in the shape Invariant 1 asks for. Neither
+asks an author for an extinction coefficient.
+
+**What the choice costs, stated rather than hidden.** The ramp has a first
+derivative discontinuity at `d = D` — beyond it, everything is flatly `T`.
+Physically, distant objects should keep resolving faintly forever. In a voxel
+world where the medium is a pond, nothing is ever at `d > D` and visible, so the
+discontinuity is unobservable; in a medium declaring a very short distance, the
+flat region is exactly the "you cannot see past this" the author asked for. The
+ramp also cannot express a medium that darkens without a horizon. That is a
+declaration this contract does not offer, and the honest reading is that adding
+one later means a second field with its own name, not a reinterpretation of this
+one.
+
+**What a future change must not break.** `tint_distance` is the distance at
+which the medium is *complete*. A later change that made it a half-life, an
+extinction coefficient, or the distance at which the mix reaches some fraction
+would leave every declaration already written meaning something different, with
+no refusal and no symptom beyond the picture looking wrong. A richer medium is
+added as a new field; this one's meaning is fixed.
+
+**Where the distance is measured from, and it is not free.** Radially from the
+eye, not along the view direction. The two disagree away from the frame's
+centre — at a quarter of the frame's width from centre, over the shipped
+1280×720 camera at a 60° vertical field, a wall 6.0 blocks along the view
+direction stands 6.74 blocks from the eye. A view-depth implementation looks
+correct at the centre of every frame and is wrong everywhere else, so the
+distinction is asserted rather than assumed.
+
+**What the bound on `D` actually guarantees, because it is easy to overstate.**
+The loader refuses a distance that is not finite and greater than zero, and the
+floor is *exclusive* for two reasons: zero is a claim no author means — a medium
+complete at no distance hides everything including itself — and the draw path
+carries `1 / D` rather than `D`, so excluding zero is what makes that reciprocal
+**defined**. It does not make it finite, and it was never asked to. A subnormal
+distance such as `1e-45` passes the floor and gives a reciprocal of infinity,
+which the law turns into `min(1, d · ∞) = 1` at every `d > 0` — a frame drawn
+wholly at the declared colour. **That is the correct answer for a medium you can
+see `1e-45` blocks through, and the intended reading rather than an oversight.**
+Raising the floor to `f32::MIN_POSITIVE` would refuse a value that behaves
+correctly, and would make the refusal a lie: `` `tint_distance` must be greater
+than zero `` would actually mean "at least 1.18e-38", a bound no author will ever
+write and one that costs more to explain than it buys.

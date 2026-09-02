@@ -103,11 +103,31 @@ fn changes_geometry(serving: &BlockRegistry, candidate: &BlockRegistry) -> bool 
 ///
 /// **They are excluded by not being in this map, and never by a clause that
 /// names them.** A predicate listing the fields that do *not* mark is a
-/// hand-maintained list against a growing type: the day a fourth medium property
+/// hand-maintained list against a growing type: the day another medium property
 /// is declared it marks the world by default, silently, and nothing reddens.
 /// Keyed positively on the three that decide what is drawn, a new property is
-/// outside the comparison the moment it exists, and it is
-/// `reload_marks_sections.rs` that reddens if one is ever added here.
+/// outside the comparison the moment it exists — and that is a **default**,
+/// which is the strongest half of this and the half that needs nobody to
+/// remember anything.
+///
+/// **What is guarded, exactly, and it is per field rather than in general.**
+/// `reload_marks_no_section.rs` reddens when a field is added here only if that
+/// field has a reading of its own there. Every non-drawing field a declaration
+/// states today has one — `targetable`, `breakable`, `swimmable`,
+/// `move_resistance`, `swim_ascent` and the medium's colour and reach — so
+/// adding any of them to this key reddens exactly one test, measured rather
+/// than assumed. **A newly declared field owes a reading beside those**, and
+/// until it has one the default above is all that stands behind it. The medium's
+/// tint is why this paragraph exists: it was declared with no reading anywhere,
+/// the prose above promised one, and the mutation that should have caught it
+/// moved nothing at all.
+///
+/// **Its sibling `reload_marks_sections.rs` holds the other half** — the fields
+/// this map *is* keyed on, and the readings that a candidate touching one of
+/// them marks the world. The two were one file until adding the tint's reading
+/// took it past the size a test file is allowed; the seam is which side of this
+/// comparison a field falls on, which is why the pair is named here rather than
+/// only one of them.
 ///
 /// **All six keys and not one.** A block whose `north` alone was re-pointed is a
 /// block that draws differently, and comparing a single key would leave such a

@@ -70,8 +70,23 @@ const OPACITY_BY_DEFAULT: f32 = 1.0;
 /// from ever being said out loud.
 pub(super) struct Bounds {
     within: RangeInclusive<f32>,
+    floor: TheFloor,
     floor_in_words: &'static str,
     ceiling_in_words: &'static str,
+}
+
+/// Whether the floor of a range is the smallest value a field admits or the
+/// largest one it refuses.
+///
+/// **It travels inside [`Bounds`] rather than as a fifth parameter**, which is
+/// the reason that type exists — `clippy.toml` caps a function at four — and it
+/// belongs beside the words the floor is refused in because the two are one
+/// statement about one end of a range.
+enum TheFloor {
+    /// Admitted, which every number on a declaration but one is.
+    Admitted,
+    /// Refused, with everything under it.
+    Refused,
 }
 
 impl Bounds {
@@ -87,6 +102,29 @@ impl Bounds {
     pub(super) fn at_least_zero() -> Self {
         Self {
             within: 0.0..=f32::MAX,
+            floor: TheFloor::Admitted,
+            floor_in_words: "zero",
+            ceiling_in_words: "3.4e38",
+        }
+    }
+
+    /// What a distance a medium states may be: greater than zero, and no wider
+    /// than the width the engine keeps.
+    ///
+    /// **The declaration's first exclusive floor**, and it has two independent
+    /// reasons. Zero is what every other number here admits — a resistance of
+    /// zero is "unaffected" and a degree of zero is a pane with no glass in it —
+    /// while a medium reaching its full strength at *no distance at all* hides
+    /// everything including the inside of the eye, which is a different claim
+    /// rather than a weaker one. And the draw path carries the reciprocal of
+    /// this number, which excluding zero is what makes **defined**.
+    ///
+    /// The ceiling is [`at_least_zero`](Self::at_least_zero)'s, unreachable for
+    /// the reason stated there and repeated here so there is one reader.
+    pub(super) fn above_zero() -> Self {
+        Self {
+            within: 0.0..=f32::MAX,
+            floor: TheFloor::Refused,
             floor_in_words: "zero",
             ceiling_in_words: "3.4e38",
         }
@@ -98,8 +136,34 @@ impl Bounds {
     pub(super) fn a_degree() -> Self {
         Self {
             within: Opacity::CLEAR.get()..=Opacity::OPAQUE.get(),
+            floor: TheFloor::Admitted,
             floor_in_words: "zero",
             ceiling_in_words: "one",
+        }
+    }
+
+    /// Whether `stated` falls outside the floor, which the floor itself does
+    /// where it is the largest value refused rather than the smallest admitted.
+    fn breaks_the_floor(&self, stated: f32) -> bool {
+        let floor = *self.within.start();
+        match self.floor {
+            TheFloor::Admitted => stated < floor,
+            TheFloor::Refused => stated <= floor,
+        }
+    }
+
+    /// The sentence a value under the floor is refused in.
+    ///
+    /// **Two sentences rather than one with a word swapped**, because "may not
+    /// be less than zero" is a *true* statement about zero — so an exclusive
+    /// floor borrowing it would refuse a value while describing it as
+    /// acceptable, and send whoever wrote it hunting for a minus sign they never
+    /// typed.
+    fn refused_below(&self, field: &str) -> String {
+        let floor = self.floor_in_words;
+        match self.floor {
+            TheFloor::Admitted => format!("`{field}` may not be less than {floor}"),
+            TheFloor::Refused => format!("`{field}` must be greater than {floor}"),
         }
     }
 }
@@ -171,7 +235,7 @@ pub(super) fn declared_degree(
 }
 
 /// A field a declaration may leave out, which has to be a finite number inside
-/// `bounds` whenever it is stated.
+/// `bounds` whenever it is stated, and means `absent` when it is not.
 ///
 /// **The loader's only numeric reader**, so what it refuses and the words it
 /// refuses in are the vocabulary every number on a declaration is read through.
@@ -222,8 +286,24 @@ pub(super) fn optional_number_within(
     bounds: Bounds,
     absent: f32,
 ) -> Result<f32, FieldFault> {
+    Ok(stated_number_within(declared, field, bounds)?.unwrap_or(absent))
+}
+
+/// The same reader, for the one field whose absence is not a value.
+///
+/// `tint_distance` says nothing about what a distance defaults to, because it
+/// has no default: its absence is a claim about the **pair** it belongs to, and
+/// deciding that is [`super::tint`]'s. So it needs the four refusals above
+/// without the fifth answer, and the two doors are one function rather than two
+/// readers — a second reader would be a second place for the modding guide and
+/// the program to disagree about what a number may be.
+pub(super) fn stated_number_within(
+    declared: Option<ScriptValue>,
+    field: &str,
+    bounds: Bounds,
+) -> Result<Option<f32>, FieldFault> {
     let stated = match declared {
-        None => return Ok(absent),
+        None => return Ok(None),
         Some(ScriptValue::Integer(whole)) => whole as f32,
         Some(ScriptValue::Number(fraction)) => fraction as f32,
         Some(found) => return Err(FieldFault::wrong_kind(field, &found, "a number")),
@@ -234,11 +314,8 @@ pub(super) fn optional_number_within(
             &format!("`{field}` must be a finite number"),
         ));
     }
-    if stated < *bounds.within.start() {
-        return Err(FieldFault::invalid(
-            field,
-            &format!("`{field}` may not be less than {}", bounds.floor_in_words),
-        ));
+    if bounds.breaks_the_floor(stated) {
+        return Err(FieldFault::invalid(field, &bounds.refused_below(field)));
     }
     if stated > *bounds.within.end() {
         return Err(FieldFault::invalid(
@@ -246,5 +323,5 @@ pub(super) fn optional_number_within(
             &format!("`{field}` may not be more than {}", bounds.ceiling_in_words),
         ));
     }
-    Ok(stated + 0.0)
+    Ok(Some(stated + 0.0))
 }

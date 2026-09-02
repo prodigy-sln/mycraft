@@ -221,6 +221,7 @@ pub fn block(
         swim_ascent: 9.0,
         opacity: Opacity::OPAQUE,
         origin: DefinitionOrigin::new("the changed-blocks fixture"),
+        tint: None,
     })
 }
 

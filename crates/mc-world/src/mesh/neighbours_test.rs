@@ -87,6 +87,7 @@ fn registry_of_the_six() -> Result<BlockRegistry, Box<dyn Error>> {
             swim_ascent: 9.0,
             opacity: Opacity::OPAQUE,
             origin: DefinitionOrigin::new(GUARD_ORIGIN),
+            tint: None,
         }));
     }
     let mut registry = BlockRegistry::new();

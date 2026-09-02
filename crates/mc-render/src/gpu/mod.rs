@@ -55,7 +55,7 @@ use depth::DepthAttachment;
 use hud_pass::ArrayTexture;
 use pipeline::Pipelines;
 
-pub use buffers::terrain_sampler;
+pub use buffers::{FRAME_UNIFORM_BYTES, terrain_sampler};
 pub use hud::{FrameRenderer, FrameSnapshot};
 
 /// What a renderer's array texture is filled from and read through.
@@ -323,7 +323,15 @@ const fn depth_compare(config: &TerrainPassConfig) -> wgpu::CompareFunction {
 /// than the colour anybody chose — wrong in an invisible direction, which is why
 /// the conversion happens once, in the pure layer, and this only unpacks it.
 const fn clear_color(config: &TerrainPassConfig) -> wgpu::Color {
-    let [red, green, blue] = config.clear_color_linear;
+    opaque(config.clear_color_linear)
+}
+
+/// A linear triple as the opaque clear value wgpu takes.
+///
+/// Shared with the per-frame choice in [`record`], so the dry sky and a
+/// medium's own colour are unpacked by one spelling rather than two.
+pub(super) const fn opaque(linear: [f64; 3]) -> wgpu::Color {
+    let [red, green, blue] = linear;
     wgpu::Color {
         r: red,
         g: green,

@@ -58,6 +58,20 @@ pub const BLOCK_DIRECTORY: &str = "blocks";
 pub const BLOCK_DECLARATION_EXTENSION: &str = "luau";
 pub const HUD_DECLARATION_EXTENSION: &str = "toml";
 
+/// The catalogue of shipped roots a scenario asks for by name, and the
+/// declaration text each one rewrites.
+///
+/// **Re-exported whole, so every path that named this module still does.** The
+/// split is by responsibility and not by import surface: a scenario asking for
+/// `content::SEA_FILE` is asking what the shipped sea is declared in, and which
+/// file holds that answer is this module's business rather than the caller's.
+mod shipped;
+// A binary that names none of the catalogue still links it, so a glob it never
+// reaches is the expected case rather than a stale import. `reload_remesh.rs`
+// carries the same allowance over its three children.
+#[allow(unused_imports)]
+pub use shipped::*;
+
 /// A content root written into a temporary directory, removed when this is
 /// dropped.
 ///
@@ -252,230 +266,6 @@ pub fn shipped_copy() -> Result<ContentRoot, Box<dyn Error>> {
     let directory = TempDir::new()?;
     copy_tree(&content_root()?, directory.path())?;
     Ok(ContentRoot { directory })
-}
-
-/// The file the shipped sea is declared in.
-pub const SEA_DECLARATION: &str = "water.luau";
-
-/// The line the degree is written directly beneath, which is the field that puts
-/// water on screen at all.
-const DRAWN: &str = "\tdrawn = true,\n";
-
-/// The shipped content root copied with its sea declaring `degree`.
-///
-/// **The shipped declaration with one line added, read off disk rather than
-/// restated here.** What this builds is the shipped root as it stands *plus* the
-/// one field, so every reading over it is about the shipped world, the shipped
-/// art, the shipped physics and the shipped strata — and the day the shipped
-/// root declares the degree itself, the only difference left is the degree's
-/// value. A declaration written out in this module instead would drift from the
-/// shipped one silently, and a reading about "the sea" would be about a sea
-/// nobody ships.
-///
-/// # Errors
-///
-/// Returns an error if the shipped declaration cannot be read or no longer
-/// carries the line the degree is written beneath, or if the copy fails.
-pub fn shipped_with_the_sea_declaring(degree: f32) -> Result<ContentRoot, Box<dyn Error>> {
-    let at = content_root()?.join(BLOCK_DIRECTORY).join(SEA_DECLARATION);
-    let shipped = fs::read_to_string(&at)?;
-    if !shipped.contains(DRAWN) {
-        return Err(format!(
-            "`{}` no longer states `{}` on a line of its own, so this fixture has nowhere to write \
-             the degree it is about. It has to be added to the shipped declaration rather than to \
-             one written here, or every reading over it is about a sea nobody ships",
-            at.display(),
-            DRAWN.trim()
-        )
-        .into());
-    }
-    let stated = shipped.replace(DRAWN, &format!("{DRAWN}\topacity = {degree:?},\n"));
-    shipped_copy()?
-        .not_declaring_blocks(&[SEA_DECLARATION])?
-        .declaring_block(SEA_DECLARATION, &stated)
-}
-
-/// The shipped content root copied with the named HUD declarations removed.
-///
-/// # Errors
-///
-/// Returns an error if the copy fails, or if a named declaration was not there
-/// to remove — see this module's header for why that is a failure rather than
-/// nothing happening.
-pub fn shipped_without(declarations: &[&str]) -> Result<ContentRoot, Box<dyn Error>> {
-    let copied = shipped_copy()?;
-    for file_name in declarations {
-        let declared = copied.path().join(HUD_DIRECTORY).join(file_name);
-        if !declared.is_file() {
-            return Err(format!(
-                "this fixture has to remove `{HUD_DIRECTORY}/{file_name}` from a copy of the \
-                 shipped content root, but the shipped root does not declare it. What it would \
-                 build is a root that never had a crosshair rather than one whose crosshair was \
-                 taken away, and the two are not the same claim"
-            )
-            .into());
-        }
-        fs::remove_file(&declared)?;
-    }
-    Ok(copied)
-}
-
-/// The shipped content root copied with one block definition file renamed.
-///
-/// **The declaration inside is untouched; only its file name moves.** Blocks are
-/// registered in file-name sorted order and a client holds the first solid block
-/// in that order, so renaming one file is the smallest edit that changes which
-/// block a run holds — and it changes nothing else: the same four blocks are
-/// registered, the same world generates, and the same texture keys resolve to
-/// the same layers. Deleting a definition instead would change the world as
-/// well as the held block, and two frames differing for two reasons say nothing
-/// about either.
-///
-/// # Errors
-///
-/// Returns an error if the copy or the rename fails, or if `from` was not there
-/// to rename — a root that never declared it is not a root whose declaration
-/// moved.
-pub fn shipped_renaming_block(from: &str, to: &str) -> Result<ContentRoot, Box<dyn Error>> {
-    let copied = shipped_copy()?;
-    let blocks = copied.path().join(BLOCK_DIRECTORY);
-    let declared = blocks.join(from);
-    if !declared.is_file() {
-        return Err(format!(
-            "this fixture has to rename `{BLOCK_DIRECTORY}/{from}` inside a copy of the shipped \
-             content root, but the shipped root does not declare it. What it would build is a \
-             root that registers the same blocks in the same order, and the two frames a \
-             scenario compares would then hold the same block for a reason nothing states"
-        )
-        .into());
-    }
-    fs::rename(&declared, blocks.join(to))?;
-    Ok(copied)
-}
-
-/// The shipped content root copied with several block declarations renamed, in
-/// the order given.
-///
-/// **More than one, because which block a client holds is the *first solid* one
-/// in file-name order** — so moving one declaration out of the way only reaches
-/// the second, and reaching the third needs two moved. A scenario needing two
-/// blocks whose textures share no colour cannot always take the first two it is
-/// offered.
-///
-/// # Errors
-///
-/// Returns an error if any named declaration is not there to rename, for the
-/// reason [`shipped_renaming_block`] gives.
-pub fn shipped_renaming_blocks(renames: &[(&str, &str)]) -> Result<ContentRoot, Box<dyn Error>> {
-    let copied = shipped_copy()?;
-    let blocks = copied.path().join(BLOCK_DIRECTORY);
-    for (from, to) in renames {
-        let declared = blocks.join(from);
-        if !declared.is_file() {
-            return Err(format!(
-                "this fixture has to rename `{BLOCK_DIRECTORY}/{from}` inside a copy of the \
-                 shipped content root, but the shipped root does not declare it. What it would \
-                 build is a root that registers the same blocks in the same order, and the two \
-                 frames a scenario compares would then hold the same block for a reason nothing \
-                 states"
-            )
-            .into());
-        }
-        fs::rename(&declared, blocks.join(to))?;
-    }
-    Ok(copied)
-}
-
-/// The shipped content root copied with one more declaration written into
-/// `hud/`.
-///
-/// # Errors
-///
-/// Returns an error if the copy or the write fails.
-pub fn shipped_with(file_name: &str, declaration: &str) -> Result<ContentRoot, Box<dyn Error>> {
-    let copied = shipped_copy()?;
-    let declared = copied.path().join(HUD_DIRECTORY);
-    fs::create_dir_all(&declared)?;
-    fs::write(declared.join(file_name), declaration)?;
-    Ok(copied)
-}
-
-/// The shipped content root copied with the named HUD declarations restating
-/// their `outline` colour as their fill `color`.
-///
-/// **Both colours come out of the shipped declaration, so nothing here states a
-/// colour of its own.** What this builds is the frame a negative control needs: a
-/// crosshair whose fill pixels really are drawn, and drawn in the colour the same
-/// declaration reserves for its outline. A prediction that accepted it would be
-/// accepting "something was painted here" in place of "the declared colour was".
-///
-/// # Errors
-///
-/// Returns an error if the copy, the read or the write fails, or if a named
-/// declaration states no `color` or no `outline` to move — a root that never
-/// declared one is not a root whose fill colour changed.
-pub fn shipped_filling_with_the_outline_color(
-    declarations: &[&str],
-) -> Result<ContentRoot, Box<dyn Error>> {
-    let copied = shipped_copy()?;
-    for file_name in declarations {
-        let declared = copied.path().join(HUD_DIRECTORY).join(file_name);
-        let stated = fs::read_to_string(&declared)?;
-        let filled = line_of(&stated, COLOR_FIELD, file_name)?;
-        let outlined = value_of(&stated, OUTLINE_FIELD, file_name)?;
-        if filled.ends_with(&outlined) {
-            return Err(format!(
-                "`{HUD_DIRECTORY}/{file_name}` already fills with the colour it outlines with, so \
-                 restating it changes nothing and the control below would be about the shipped \
-                 declaration rather than about a fill in the wrong colour"
-            )
-            .into());
-        }
-        let restated = stated.replace(&filled, &format!("{COLOR_FIELD} = {outlined}"));
-        fs::write(&declared, restated)?;
-    }
-    Ok(copied)
-}
-
-/// The field a declaration states its fill colour in, and the one it states its
-/// contrast outline in, as a declaration spells them.
-const COLOR_FIELD: &str = "color";
-const OUTLINE_FIELD: &str = "outline";
-
-/// The whole `field = value` line `stated` holds, matched from the start of the
-/// line so the word inside one of these files' prose comments cannot be hit.
-///
-/// # Errors
-///
-/// Returns an error naming the field and the file when the declaration does not
-/// state it.
-fn line_of(stated: &str, field: &str, file_name: &str) -> Result<String, Box<dyn Error>> {
-    let opening = format!("{field} = ");
-    stated
-        .lines()
-        .find(|line| line.starts_with(&opening))
-        .map(str::to_owned)
-        .ok_or_else(|| {
-            format!(
-                "this fixture has to restate `{HUD_DIRECTORY}/{file_name}`'s `{field}`, but that \
-                 declaration does not state it. What it would build is a root the control below \
-                 was never going to be about"
-            )
-            .into()
-        })
-}
-
-/// What `stated` states `field` as, quotes included.
-///
-/// # Errors
-///
-/// Returns an error naming the field and the file when the declaration does not
-/// state it.
-fn value_of(stated: &str, field: &str, file_name: &str) -> Result<String, Box<dyn Error>> {
-    let line = line_of(stated, field, file_name)?;
-    Ok(line
-        .split_once(" = ")
-        .map_or(line.clone(), |(_, value)| value.to_owned()))
 }
 
 /// Every entry directly under `directory`, whatever it is called.

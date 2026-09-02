@@ -1,7 +1,7 @@
 //! What a block definition is, where it was declared, and the dense id a
 //! registry assigns it.
 
-use crate::block::Opacity;
+use crate::block::{MediumTint, Opacity};
 use crate::content::FaceTextures;
 use crate::id::BlockName;
 
@@ -148,6 +148,20 @@ pub struct BlockDefinition {
     /// invisible.
     pub opacity: Opacity,
     pub origin: DefinitionOrigin,
+    /// What this block does to the light of everything seen from **inside** it.
+    ///
+    /// The one question it answers is what the world looks like to an eye
+    /// standing in this block's volume, and it answers nothing else: how much
+    /// of what lies beyond this block is seen *through* it is
+    /// [`opacity`](Self::opacity), and the two are separate claims one
+    /// declaration may make together.
+    ///
+    /// Absent in a declaration means `None`, which is no tint at all — not a
+    /// colourless one, and not one at some default distance. There is no
+    /// default tint and no default distance anywhere in the engine, so a block
+    /// either says what its medium does to a view or says nothing about the
+    /// matter.
+    pub tint: Option<MediumTint>,
 }
 
 /// A block's dense runtime id, valid only for the registry that assigned it.

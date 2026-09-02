@@ -17,9 +17,23 @@
 // clustered against -- a directional term would move every one of them by an
 // amount nothing has declared.
 
+// The three fields after the planes are read by this stage alone and are
+// declared last for that reason: `cull.wgsl` binds the same buffer and its own
+// declaration has to stay a valid prefix of this one, which appending -- and
+// only appending -- preserves. `build/validate.rs` fails the build when either
+// half of that stops holding.
+//
+// `tint_reach` is the reciprocal of the distance a medium reaches full strength
+// at, and is zero where the eye stands in nothing that tints. Zero rather than a
+// sentinel distance is what makes the untinted frame the same arithmetic with a
+// factor of nought instead of a second code path.
 struct Frame {
     view_projection: mat4x4<f32>,
     planes: array<vec4<f32>, 6>,
+    eye: vec3<f32>,
+    tint_reach: f32,
+    tint_color: vec3<f32>,
+    _padding: f32,
 };
 
 // The section table, field for field as `SceneGeometry::section_bytes` writes
@@ -63,6 +77,13 @@ struct VertexOutput {
     // block, identical at all four corners, and interpolating it would produce
     // a value no declaration states wherever the rasteriser rounds.
     @location(2) @interpolate(flat) opacity: f32,
+    // Interpolated, and it is the *position* that travels rather than the
+    // distance to it. Perspective-correct interpolation is exact for a function
+    // affine in world space; `length` is not one, so a distance taken per vertex
+    // and interpolated draws every point of a merged quad as though it stood
+    // where the straight line between two corners says -- which across a quad
+    // spanning several blocks is wrong by more than a frame reading tolerates.
+    @location(3) world_position: vec3<f32>,
 };
 
 // The bit layout of `PackedVertex`, field by field, as the shift each starts at
@@ -120,26 +141,43 @@ fn vertex_main(@location(0) packed: vec2<u32>) -> VertexOutput {
         f32(section.origin_z),
     );
 
+    let world = origin + local;
+
     var out: VertexOutput;
-    out.clip_position = frame.view_projection * vec4<f32>(origin + local, 1.0);
+    out.clip_position = frame.view_projection * vec4<f32>(world, 1.0);
     out.uv = plane_coordinates(facing, local);
     out.layer = layer;
     out.opacity = f32(opacity) / STORED_MAX;
+    out.world_position = world;
     return out;
 }
 
-// The texel, with the block's declared degree folded into its alpha.
+// The texel carried toward the medium's colour by how far away it is, with the
+// block's declared degree folded into its alpha.
 //
-// **The product of the two**, not one or the other: the declared degree decides
-// which of the two draws a face lands in and the texel's alpha modulates within
-// the blended one. So a block at a whole degree draws opaque however its
-// texture's alpha reads, and this multiply is the identity for it -- which is
-// what keeps the partition a function of a declared, greppable, hot-reloadable
-// number rather than of art.
+// **The alpha is the product of the two**, not one or the other: the declared
+// degree decides which of the two draws a face lands in and the texel's alpha
+// modulates within the blended one. So a block at a whole degree draws opaque
+// however its texture's alpha reads, and this multiply is the identity for it --
+// which is what keeps the partition a function of a declared, greppable,
+// hot-reloadable number rather than of art.
+//
+// **The tint carries no alpha and does not touch the fragment's own.** Coverage
+// stays the declared degree's, so a translucent layer carried at its own
+// distance blends src-over an opaque one carried at its own -- two layers each
+// reaching the eye through the medium that much of it, which is the outcome
+// rather than an arrangement.
+//
+// `tint_reach` is `1 / D` and is zero where the eye stands in nothing that
+// tints, so `toward` is exactly zero and `mix` returns the texel bit for bit.
+// **There is no branch here and there is not to be one**: a dry frame is this
+// same arithmetic with a factor of nought, which is what lets a capture shot
+// before any medium existed be compared against one shot after, byte for byte.
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let texel = textureSample(terrain_textures, terrain_sampler, input.uv, input.layer);
-    return vec4<f32>(texel.rgb, texel.a * input.opacity);
+    let toward = min(1.0, length(input.world_position - frame.eye) * frame.tint_reach);
+    return vec4<f32>(mix(texel.rgb, frame.tint_color, toward), texel.a * input.opacity);
 }
 
 // Which two components of a corner's section-local position its face's plane

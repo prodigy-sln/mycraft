@@ -351,6 +351,9 @@ fn captured(
         tick: 0,
         camera: camera_view(EYE, LOOK_AT),
         scene: Arc::clone(scene),
+        // The panes are quads placed by hand with no world behind them, and the
+        // declared eye stands well clear of every one of them.
+        tint: None,
     };
     let phase = ScenePhase::Ready(Arc::clone(scene));
     let mut ran = false;

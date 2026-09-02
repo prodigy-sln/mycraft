@@ -108,7 +108,7 @@ const A_DIFFERENT_NORTH: &str = "fixture:andesite_reworked";
 /// list's, and the two are different numbers: a single number shared between the
 /// two lists would report every block in every save as behaving differently the
 /// moment a texture key or a rendering flag joined this one.
-const STATED_APPEARANCE_REVISION: u8 = 4;
+const STATED_APPEARANCE_REVISION: u8 = 5;
 
 /// What the fixture block declares about being seen, stated once and read by both
 /// the declaration and the oracle.
@@ -139,6 +139,10 @@ const OPACITY: f32 = 1.0;
 /// How the canonical encoding writes a `bool`.
 const FALSE_BYTE: u8 = 0x00;
 const TRUE_BYTE: u8 = 0x01;
+
+/// How the canonical encoding writes an optional value that is not there, which
+/// is what a block declaring no medium records.
+const NO_MEDIUM_BYTE: u8 = 0x00;
 
 /// Where an FNV-1a 64 fold starts, and what it multiplies by.
 ///
@@ -209,6 +213,7 @@ fn registry_texturing(keys: [&str; 6]) -> Result<BlockRegistry, Box<dyn Error>> 
         swim_ascent: 9.0,
         opacity: Opacity::OPAQUE,
         origin: DefinitionOrigin::new(FIXTURE_ORIGIN),
+        tint: None,
     })];
     let mut registry = BlockRegistry::new();
     registry.apply(&InMemoryDefinitionSource::new(
@@ -265,6 +270,12 @@ fn stated_appearance_bytes(name: &str, keys: [&str; 6]) -> Vec<u8> {
     push_flag(&mut stated, DRAWN);
     push_flag(&mut stated, OCCLUDES);
     push_number(&mut stated, OPACITY);
+    // The fixture declares no medium, and the tag byte for that absence is what
+    // every save in existence writes. It is here rather than left off because
+    // the six keys are only pinned in place by everything that follows them:
+    // a record short of its last field cannot see one appended in the wrong
+    // position.
+    stated.push(NO_MEDIUM_BYTE);
     stated
 }
 

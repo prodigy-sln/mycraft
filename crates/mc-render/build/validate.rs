@@ -22,9 +22,9 @@
 //! seam this file's own history argues for: five of six faces drew wrong while
 //! three hand-written copies of one table agreed with each other exactly.
 //!
-//! # Five checks nothing else can make
+//! # Six checks nothing else can make
 //!
-//! Beyond "does it compile", the validator enforces five facts the design rests
+//! Beyond "does it compile", the validator enforces six facts the design rests
 //! on and that no unit test on either side of the CPU/GPU line can see:
 //!
 //! - **The storage-binding budget.** The weakest adapter in the declared
@@ -47,6 +47,12 @@
 //!   section table is read through and neither can check it for itself. A field
 //!   inserted, removed or exchanged with its neighbour compiles perfectly and
 //!   reads every later field out of the wrong four bytes.
+//! - **The per-frame record's field list, and that cull's is a valid prefix of
+//!   terrain's.** Both stages bind one uniform buffer and the compute stage
+//!   reads only what the record opens with, so its declaration may stop early
+//!   but may not stop differently or reach past terrain's. `min_binding_size` is
+//!   `None` on that binding and catches a buffer that is too small — never a CPU
+//!   that writes one field where the shader reads another.
 //!
 //! # What these checks cannot see, measured
 //!
@@ -91,8 +97,21 @@ use thiserror::Error;
 #[path = "validate_tables.rs"]
 mod validate_tables;
 
+/// What each shader must say, split from how the shaders are read.
+///
+/// Reached by the same `#[path]` mechanism the tables are, so both includers
+/// still include exactly one thing.
+#[path = "validate_checks.rs"]
+mod validate_checks;
+
+use validate_checks::{
+    IMAGE_SIGNS_DECLARATION, IMAGE_SWAPS_DECLARATION, check_frame_record, check_image_basis,
+    check_index_pattern, check_plane_axes, check_section_record, check_vertex_layout,
+};
+
 pub use validate_tables::{
-    IMAGE_SIGNS, IMAGE_SWAPS, PLANE_AXES, QUAD_INDEX_PATTERN, SECTION_RECORD, VERTEX_LAYOUT,
+    FRAME_RECORD, IMAGE_SIGNS, IMAGE_SWAPS, PLANE_AXES, QUAD_INDEX_PATTERN, SECTION_RECORD,
+    VERTEX_LAYOUT,
 };
 
 /// How many storage buffers one shader stage may bind.
@@ -106,25 +125,6 @@ const CULL_SHADER: &str = "cull.wgsl";
 
 /// The one shader whose plane-axis table is checked.
 const TERRAIN_SHADER: &str = "terrain.wgsl";
-
-/// How the winding literal's declaration begins.
-///
-/// Matched as text rather than evaluated as a constant expression: the value is
-/// a literal by construction, and walking naga's constant arena to reach it
-/// would be a second, larger thing to get wrong.
-const INDEX_PATTERN_DECLARATION: &str = "const QUAD_INDEX_PATTERN";
-
-/// How the plane-axis table's declaration begins.
-const PLANE_AXES_DECLARATION: &str = "const PLANE_AXES";
-
-/// How the image-swap table's declaration begins.
-const IMAGE_SWAPS_DECLARATION: &str = "const IMAGE_SWAPS";
-
-/// How the image-sign table's declaration begins.
-const IMAGE_SIGNS_DECLARATION: &str = "const IMAGE_SIGNS";
-
-/// How the section record's declaration begins, in both shaders.
-const SECTION_RECORD_DECLARATION: &str = "struct Section {";
 
 /// Why the shipped shaders are not acceptable.
 #[derive(Debug, Error)]
@@ -207,6 +207,29 @@ pub enum ShaderError {
         found: Vec<String>,
         expected: Vec<String>,
     },
+    #[error(
+        "{file}: the per-frame record is declared as {found:?} where the frame uniform is \
+         written as {expected:?}; the order of a uniform's fields is what carries their \
+         offsets, so a pair exchanged makes the stage read every byte of one out of the other \
+         while the CPU that filled the buffer stays perfectly correct and nothing at runtime \
+         reports it"
+    )]
+    FrameRecordMismatch {
+        file: String,
+        found: Vec<String>,
+        expected: Vec<String>,
+    },
+    #[error(
+        "{file}: the per-frame record is declared as {found:?}, which is not a prefix of the \
+         {expected:?} the terrain stage reads; both stages bind one buffer, so a compute stage \
+         reaching past what terrain declares decides which quads are drawn on bytes the CPU \
+         never wrote for it"
+    )]
+    FramePrefixMismatch {
+        file: String,
+        found: Vec<String>,
+        expected: Vec<String>,
+    },
 }
 
 /// Validates every `.wgsl` source in `directory`, returning their file names in
@@ -222,7 +245,10 @@ pub enum ShaderError {
 /// has drifted from the geometry builder's, and
 /// [`ShaderError::PlaneAxesMismatch`] when the terrain shader's plane-axis table
 /// has, and [`ShaderError::ImageBasisMismatch`] when either of its image-basis
-/// tables has.
+/// tables has. Returns [`ShaderError::FrameRecordMismatch`] when the terrain
+/// shader's per-frame record is not the one the frame uniform is written as, and
+/// [`ShaderError::FramePrefixMismatch`] when the cull shader's is not a prefix
+/// of it.
 pub fn validate_shader_directory(directory: &Path) -> Result<Vec<String>, ShaderError> {
     let sources = read_sources(directory)?;
     if sources.is_empty() {
@@ -309,9 +335,13 @@ fn validate_source(file: &str, source: &str) -> Result<(), ShaderError> {
         check_image_basis(file, source, IMAGE_SIGNS_DECLARATION, signs)?;
         check_vertex_layout(file, source)?;
     }
-    // Both shaders declare the section record and read the same buffer through
-    // it, so both are checked against the one layout the scene writes.
+    // Both shaders declare both records and read the same two buffers through
+    // them, so both are checked against the one layout each is written at. The
+    // per-frame record first: it is the one whose two declarations may
+    // legitimately differ, so a shader wrong about both is reported as the
+    // narrower fault.
     if file == CULL_SHADER || file == TERRAIN_SHADER {
+        check_frame_record(file, source)?;
         check_section_record(file, source)?;
     }
     Ok(())
@@ -358,172 +388,4 @@ fn check_storage_budget(
         }
     }
     Ok(())
-}
-
-/// The cull shader's winding literal against the geometry builder's.
-fn check_index_pattern(file: &str, source: &str) -> Result<(), ShaderError> {
-    let found = declared_values(source, INDEX_PATTERN_DECLARATION);
-    if found == QUAD_INDEX_PATTERN {
-        return Ok(());
-    }
-    Err(ShaderError::IndexPatternMismatch {
-        file: file.to_owned(),
-        found,
-        expected: QUAD_INDEX_PATTERN.to_vec(),
-    })
-}
-
-/// The terrain shader's plane-axis table against the geometry builder's.
-///
-/// The shader's copy is one flat list, because a `vec2` constructor per row
-/// would put a bracket inside the literal that the reader below would have to
-/// understand. The rows are compared flattened for the same reason: what the
-/// build has to answer is whether the twelve numbers agree, and reporting them
-/// as the shader wrote them is what lets a developer diff the two by eye.
-fn check_plane_axes(file: &str, source: &str) -> Result<(), ShaderError> {
-    let found = declared_values(source, PLANE_AXES_DECLARATION);
-    let expected: Vec<u32> = PLANE_AXES.into_iter().flatten().collect();
-    if found == expected {
-        return Ok(());
-    }
-    Err(ShaderError::PlaneAxesMismatch {
-        file: file.to_owned(),
-        found,
-        expected,
-    })
-}
-
-/// One of the terrain shader's image-basis tables against the geometry
-/// builder's, named by its `declaration`.
-///
-/// Flat and flattened for the reasons [`check_plane_axes`] gives. **And the
-/// reason these checks exist rather than trust is worth a sentence: none of them
-/// is evidence that the values are right.** They close a drift between two
-/// copies, and this project shipped a table on which all three copies agreed and
-/// all three were wrong. What can say the values are right is a reading of a
-/// drawn face — FR-8.1-S7 for where its bands sit, FR-8.1-S8 for which way it
-/// runs.
-fn check_image_basis(
-    file: &str,
-    source: &str,
-    declaration: &str,
-    expected: Vec<u32>,
-) -> Result<(), ShaderError> {
-    let found = declared_values(source, declaration);
-    if found == expected {
-        return Ok(());
-    }
-    Err(ShaderError::ImageBasisMismatch {
-        file: file.to_owned(),
-        found,
-        expected,
-    })
-}
-
-/// Fails unless every field of the packed vertex sits where the geometry builder
-/// puts it.
-///
-/// Each shift and width is a named scalar constant the decode itself reads, so
-/// this compares the numbers the shader actually uses rather than a comment
-/// beside them — which is what the three-hand-written-copies defect turned on.
-fn check_vertex_layout(file: &str, source: &str) -> Result<(), ShaderError> {
-    for (declaration, expected) in VERTEX_LAYOUT {
-        let found = declared_scalar(source, declaration);
-        if found != Some(expected) {
-            return Err(ShaderError::VertexLayoutMismatch {
-                file: file.to_owned(),
-                field: declaration.to_owned(),
-                found,
-                expected,
-            });
-        }
-    }
-    Ok(())
-}
-
-/// Fails unless the shader's section record is the one the scene writes, field
-/// for field and type for type.
-///
-/// Names as well as types, because the two failures differ: a field renamed is a
-/// shader that no longer compiles, but a field **inserted, removed or exchanged
-/// with its neighbour** compiles perfectly and reads every later field out of the
-/// wrong four bytes. The order is what carries the offsets, so the comparison is
-/// over the whole list in order rather than over its membership.
-fn check_section_record(file: &str, source: &str) -> Result<(), ShaderError> {
-    let found = declared_fields(source, SECTION_RECORD_DECLARATION);
-    let expected: Vec<String> = SECTION_RECORD
-        .iter()
-        .map(|(name, scalar)| format!("{name}: {scalar}"))
-        .collect();
-    if found == expected {
-        return Ok(());
-    }
-    Err(ShaderError::SectionRecordMismatch {
-        file: file.to_owned(),
-        found,
-        expected,
-    })
-}
-
-/// The value of a `const NAME: u32 = <literal>u;` declaration, or `None` where
-/// the shader has no such declaration or it has outgrown that shape.
-///
-/// Blunt in the same way [`declared_values`] is, and for the same reason: a
-/// declaration this cannot read reports as absent, which is a refusal rather
-/// than a pass.
-fn declared_scalar(source: &str, declaration: &str) -> Option<u32> {
-    let (_, after_name) = source.split_once(declaration)?;
-    let (_, after_equals) = after_name.split_once('=')?;
-    let (value, _) = after_equals.split_once(';')?;
-    value.trim().trim_end_matches('u').parse().ok()
-}
-
-/// The `name: type` of every field of a struct declaration, in order.
-///
-/// Comment lines inside the struct are skipped, so a field may be explained
-/// where it is declared without the explanation reading as a field.
-fn declared_fields(source: &str, declaration: &str) -> Vec<String> {
-    let Some((_, body)) = source.split_once(declaration) else {
-        return Vec::new();
-    };
-    let Some((body, _)) = body.split_once('}') else {
-        return Vec::new();
-    };
-    body.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with("//"))
-        .map(|line| {
-            line.trim_end_matches(',')
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
-        .collect()
-}
-
-/// The values `declaration` names in the source, or nothing when it names none.
-///
-/// An absent or unreadable declaration returns an empty list rather than a
-/// variant of its own: "the shader does not say how it winds a quad" and "the
-/// shader winds it differently" are the same defect from the build's point of
-/// view, and both are reported by showing what was found.
-///
-/// The parse is deliberately blunt — the first `(` after the name to the first
-/// `)` after that — which is exactly enough for a constructor call over integer
-/// literals and nothing else. A declaration that outgrew that shape would read
-/// as empty here, which is a refusal rather than a pass.
-fn declared_values(source: &str, declaration: &str) -> Vec<u32> {
-    let Some((_, after_name)) = source.split_once(declaration) else {
-        return Vec::new();
-    };
-    let Some((_, after_open)) = after_name.split_once('(') else {
-        return Vec::new();
-    };
-    let Some((values, _)) = after_open.split_once(')') else {
-        return Vec::new();
-    };
-    values
-        .split(',')
-        .filter_map(|value| value.trim().trim_end_matches('u').parse().ok())
-        .collect()
 }

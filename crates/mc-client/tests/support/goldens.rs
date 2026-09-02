@@ -27,7 +27,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use mc_render::capture::{SCENE_REVISION, capture_id};
-use mc_testkit::frame::{CaptureId, GoldenOutcome, GoldenSettings, OptIns, Thresholds};
+use mc_testkit::frame::gpu::CaptureContext;
+use mc_testkit::frame::{CaptureId, GoldenOutcome, GoldenSettings, OptIns, Rgba8Image, Thresholds};
 
 use super::frames::ReplayFrame;
 use super::repository_root;
@@ -93,29 +94,86 @@ pub fn judged_over(
     judged_against: u16,
     artifact_root: PathBuf,
 ) -> Result<Option<GoldenOutcome>, Box<dyn Error>> {
+    shot(root, tick, |context, frame| {
+        let request = super::frames::request(context, &capture_id(tick, SCENE_REVISION)?)?;
+        let settings = settings(judged_against, artifact_root)?;
+        frame.verify(&request, &settings)
+    })
+}
+
+/// The pixels `tick`'s capture draws, prepared from the content root at `root`,
+/// with no golden read at all.
+///
+/// **The same shot as [`judged_over`], through the same five steps**, so a
+/// reading comparing these bytes against a committed blob is looking at the
+/// picture the mint path produces and not at a second one assembled beside it.
+/// That module header's rule — a mint path differing from a verify path is the
+/// one thing the golden discipline cannot survive — is what [`shot`] exists to
+/// keep, and it applies to a third reader exactly as it does to the first two.
+///
+/// # Errors
+///
+/// Returns the preparation, pipeline, spawn or capture failure.
+pub fn drawn_over(root: &Path, tick: u16) -> Result<Option<Rgba8Image>, Box<dyn Error>> {
+    shot(root, tick, |context, frame| {
+        let request = super::frames::request(context, &capture_id(tick, SCENE_REVISION)?)?;
+        frame.capture(&request)
+    })
+}
+
+/// The five steps every declared terrain capture is shot through, with `run`
+/// deciding what is made of the frame.
+///
+/// **The tint is resolved by the simulation's own resolver against the world
+/// this capture is of**, through [`super::frames::snapshot_in`]. A hard-coded
+/// `None` here would make every golden reading pass about a renderer that cannot
+/// tint at all: the frame would be untinted because this line said so, and
+/// nothing would redden the day a tint reached a dry camera. Resolving is what
+/// makes the answer `None` because the eye stands in open air — which is the
+/// property `replay_oracle.rs` asserts separately, and the premise the whole
+/// golden set rests on.
+fn shot<T>(
+    root: &Path,
+    tick: u16,
+    run: impl FnOnce(&CaptureContext, &mut ReplayFrame<'_>) -> Result<T, Box<dyn Error>>,
+) -> Result<Option<T>, Box<dyn Error>> {
     let prepared = super::prepare_scene_at(root)?;
     let Some(context) = super::frames::device()? else {
         return Ok(None);
     };
     let mut renderer = super::frames::prepared_renderer(&context, &prepared)?;
-    let scene = Arc::new(prepared.scene);
+    let scene = Arc::new(prepared.scene.clone());
     let camera =
         super::frames::replay_camera(u32::from(tick), &prepared.world, &prepared.registry)?;
-    let snapshot = super::frames::snapshot(u32::from(tick), camera, &scene);
-
-    let request = super::frames::request(&context, &capture_id(tick, SCENE_REVISION)?)?;
-    let settings = settings(judged_against, artifact_root)?;
+    let snapshot = super::frames::snapshot_in(&prepared, u32::from(tick), camera, &scene)?;
     let mut frame = ReplayFrame {
         context: &context,
         renderer: &mut renderer,
         snapshot: &snapshot,
     };
-    Ok(Some(frame.verify(&request, &settings)?))
+    let produced = run(&context, &mut frame)?;
+    Ok(Some(produced))
 }
 
 /// The golden lifecycle's settings for the capture declared at `tick`.
 fn settings(tick: u16, artifact_root: PathBuf) -> Result<GoldenSettings, Box<dyn Error>> {
     settings_for(&capture_id(tick, SCENE_REVISION)?, artifact_root)
+}
+
+/// Where this repository's committed captures live.
+///
+/// **One statement of it, shared with the settings below**, so a reading that
+/// opens a committed blob by hand and a reading that judges through the golden
+/// lifecycle cannot end up looking in two directories.
+///
+/// # Errors
+///
+/// Returns an error if the repository root cannot be located.
+pub fn golden_root() -> Result<PathBuf, Box<dyn Error>> {
+    Ok(repository_root()?
+        .join("crates")
+        .join("mc-render")
+        .join("goldens"))
 }
 
 /// Where a golden comparison writes its evidence.
@@ -141,10 +199,7 @@ pub fn artifact_root() -> Result<PathBuf, Box<dyn Error>> {
 /// root, or the failure to locate the repository.
 pub fn settings_for(id: &str, artifact_root: PathBuf) -> Result<GoldenSettings, Box<dyn Error>> {
     Ok(GoldenSettings {
-        golden_root: repository_root()?
-            .join("crates")
-            .join("mc-render")
-            .join("goldens"),
+        golden_root: golden_root()?,
         artifact_root,
         capture: CaptureId::new(id)?,
         thresholds: Thresholds::default(),

@@ -60,9 +60,9 @@ see [script-limits.md](script-limits.md) for the budget and the memory cap, and
 declaration calls nothing the engine provides: it returns a table and that is
 all. There is no `mycraft.*` binding to use here.
 
-## The thirteen fields
+## The fifteen fields
 
-Three are required and ten are optional.
+Three are required and twelve are optional.
 
 | Field | Type | Required | Absent means | Bound |
 |---|---|---|---|---|
@@ -79,6 +79,8 @@ Three are required and ten are optional.
 | `move_resistance` | number | no | `0.0` | not less than zero, and at most `3.4e38` |
 | `swim_ascent` | number | no | `9.0` | not less than zero, and at most `3.4e38` |
 | `opacity` | number | no | `1.0` | not less than zero, and at most `1.0` |
+| `tint` | string, a colour | no | no tint at all | `#RRGGBB` or `#RRGGBBAA` in either case, and an alpha other than `FF` is refused |
+| `tint_distance` | number, in blocks | no | no tint at all | finite and greater than zero, and at most `3.4e38` |
 
 `drawn`, `occludes` and `targetable` are the only fields whose default is not a
 constant. Every other absence means the same thing in every declaration; those
@@ -92,6 +94,13 @@ it lifts you, so a default derived from `solid` would invent a claim you never
 made — and it would make every solid block in the game a wall you can float
 inside. `swimmable` absent is `false`, `move_resistance` absent is `0.0` and
 `swim_ascent` absent is `9.0`, on a solid block and a non-solid one alike.
+
+**Nor are the two medium-colour fields, and their absence is not a value at
+all.** There is no default tint and no default distance anywhere in the engine,
+so a block either says what its volume carries a view toward or says nothing
+about the matter. `tint` and `tint_distance` are stated **together or not at
+all**, and stating one without the other is refused naming the one you are
+missing — see "Seeing from inside a block", below.
 
 ```luau
 return {
@@ -112,6 +121,9 @@ return {
 	swim_ascent = 9.0,             -- optional, absent means 9.0
 
 	opacity = 1.0,                 -- optional, absent means 1.0
+
+	tint = "#3A6EA5",              -- optional, absent means no tint at all
+	tint_distance = 12.0,          -- optional, and required beside `tint`
 }
 ```
 
@@ -192,7 +204,7 @@ quoted in full under "Reading a refusal", below.
 **A field the loader does not recognise is refused, not ignored.** A misspelled
 `replacable` is a word anybody types once, and a loader that read the keys it
 knows and never asked what else was there could not tell a typo from an absence.
-The refusal names the field you wrote **and all thirteen you may write**, because a
+The refusal names the field you wrote **and all fifteen you may write**, because a
 name is only recognisable as a typo once you can see what it was nearly —
 `drawnn` beside `drawn` explains itself where `drawnn` alone does not.
 
@@ -464,7 +476,7 @@ A `blocks/amber.luau` declaring `slid = true` where it meant `solid` is refused
 like this:
 
 ```
-mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`, `opacity`
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`, `opacity`, `tint`, `tint_distance`
 ```
 
 The parts read outermost first, separated by `: ` — the stage that failed, then
@@ -475,7 +487,7 @@ short — `drawnn` for `drawn`, which is the typo the newest field on the list
 invites:
 
 ```
-mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `drawnn`: `drawnn` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`, `opacity`
+mycraft: the shipped content could not be read: content/base/blocks/amber.luau, block `example:amber`, field `drawnn`: `drawnn` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`, `opacity`, `tint`, `tint_distance`
 ```
 
 A field that exists but holds the wrong kind of value is refused differently, and
@@ -685,6 +697,133 @@ mycraft: the shipped content could not be read: content/base/blocks/amber.luau, 
 The remedy is the opposite one: a line to **add**, not to delete. Write
 `occludes = false` beside your degree, as the pane above does. That is the whole
 difference between the two sentences, and it is why there are two.
+
+## Seeing from inside a block
+
+`opacity` says how much of what is behind your block reaches an eye standing
+**outside** it. `tint` and `tint_distance` say what the world looks like to an
+eye standing **inside** it — inside the block's own cell, which is where you are
+when you are under water.
+
+They are two claims about two different views, and neither is derived from the
+other. A block that stops all the light may still declare a tint, and it is not a
+contradiction: your block's own faces point away along every ray leaving an eye
+that stands in it, so what such a block does is draw the whole frame at the
+colour you named.
+
+**`tint`** is the colour a view through the volume is carried toward. **Absent
+means no tint at all.**
+
+**`tint_distance`** is how far a surface stands from the eye before it is drawn
+wholly at that colour, in blocks. **Absent means no tint at all.**
+
+A surface at half that distance is drawn halfway toward the colour, one at a
+tenth of it a tenth of the way, and anything at or beyond it is drawn at the
+colour outright. Nothing fades further than the colour: the ramp stops where
+your distance says it does.
+
+### Both, or neither
+
+There is no default colour and no default distance anywhere in this engine, so
+half a medium is not something the engine will complete for you. A declaration
+stating one field and not the other is refused **naming the one that is
+missing**, because that is the line you have to add:
+
+| You write | The refusal |
+|---|---|
+| `tint` with no `tint_distance` | `` `tint_distance` is required beside `tint`: a colour with no distance does not say how far this medium lets an eye see `` |
+| `tint_distance` with no `tint` | `` `tint` is required beside `tint_distance`: a distance with no colour does not say what this medium carries a view toward `` |
+
+### Writing the colour
+
+Either form, in either case: `#RRGGBB`, or `#RRGGBBAA` whose alpha is `FF`. So
+`#3A6EA5`, `#3a6ea5` and `#3A6EA5FF` are three spellings of one colour and
+register as one value — which matters beyond taste, because a save folds the
+colour you declared, and three spellings hashing apart would tell every player
+holding that block that it had been retextured.
+
+**Both forms are accepted because both are already written in this tree.** A
+material file spells a colour `#rrggbb` and a HUD file spells one `#RRGGBBAA`,
+so whichever you copied from, your block works.
+
+**A colour states no alpha.** How strongly the medium acts is how far it lets you
+see, which is the other field — so an eight-digit colour is a *form* this field
+takes and an alpha below `FF` is a *value* it refuses:
+
+| You write | The refusal |
+|---|---|
+| `tint = 5` | `` `tint` must be a colour string, but is a number `` |
+| `tint = "#GG0000"` | `` `tint` must be written `#RRGGBB` or `#RRGGBBAA`, in upper case or lower `` |
+| `tint = "3A6EA5"` | the same — the lead is part of the form |
+| `tint = "#3A6EA"` | the same — seven digits is neither form |
+| `tint = "#3A6EA580"` | `` `tint` states no alpha: how strongly a medium acts is `tint_distance`, so an eight-digit colour must end `FF` `` |
+
+That last one is its own refusal on purpose. Every character of `#3A6EA580` is a
+hexadecimal digit and its length is one this field accepts, so it is not a
+malformed colour and you are not told it is: told that, you would edit it down to
+six digits, lose the strength you were reaching for, and never learn which field
+carries it.
+
+### Writing the distance
+
+It is read by the same rules the two numbers under "Declaring a medium" are —
+both of Luau's ways of writing a number, the same `3.4e38` ceiling, the same
+refusal for a value that is not finite — **with one difference that is the only
+exclusive floor on this declaration**:
+
+| You write | The refusal |
+|---|---|
+| `tint_distance = 0.0` | `` `tint_distance` must be greater than zero `` |
+| `tint_distance = -1.0` | the same |
+| `tint_distance = math.huge` | `` `tint_distance` must be a finite number `` |
+| `tint_distance = 0/0` | the same |
+| `tint_distance = 1e40` | the same — past the width the engine keeps |
+| `tint_distance = "far"` | `` `tint_distance` must be a number, but is a string `` |
+
+Zero is refused rather than admitted, which is the opposite of every other number
+here: a resistance of zero is "unaffected" and an opacity of zero is a pane with
+no glass in it, but a medium reaching full strength at *no distance at all* would
+hide everything including itself. If you want a volume that shows nothing, write
+a very small distance — `0.001` is a legal declaration and does exactly that.
+
+Note which refusal `math.huge` gets. Finiteness is asked before the floor, and it
+has to be: an infinity passes a "greater than zero" test, so a floor checked
+first would admit `math.huge` outright — and a NaN fails one, so the same wrong
+order would tell you your `0/0` was too small.
+
+### A worked example: water you can see a little way through
+
+```luau
+return {
+	name = "example:pool",
+	texture = "example:pool",
+	solid = false,
+
+	drawn = true,
+	occludes = false,
+	targetable = false,
+
+	swimmable = true,
+	move_resistance = 3.0,
+	swim_ascent = 6.0,
+
+	opacity = 0.5,
+	tint = "#3A6EA5",
+	tint_distance = 12.0,
+}
+```
+
+Stand outside it and you see half of what is behind it, in whatever your texture
+looks like. Stand *inside* it — put your eye in one of its cells — and everything
+you look at is carried toward `#3A6EA5`, by how far away it is: a face two blocks
+off is barely touched, one six blocks off is drawn halfway there, and anything
+twelve blocks off or further is that blue and nothing else. A pixel with no
+surface in it at all is that blue too, so the volume closes over the sky rather
+than leaving a hole in it.
+
+Lower `tint_distance` and the water thickens; raise it and it clears. Both of
+those are edits you can make while the game is running — see
+[hot-reload.md](hot-reload.md).
 
 ## Replaceability is not derived from solidity
 
@@ -1060,7 +1199,7 @@ called and a key is what it is drawn from.
 ## What is not here yet
 
 Per-cell state, callbacks and components. Worldgen in script. Reading a second
-content root. And `extends`, in every form — a declaration states its own thirteen
+content root. And `extends`, in every form — a declaration states its own fifteen
 fields and inherits nothing.
 
 **Declarations now reload while the game is running.** Save a file in `blocks/` and

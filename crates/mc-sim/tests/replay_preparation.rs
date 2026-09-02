@@ -92,6 +92,7 @@ fn foreign_registry() -> Result<BlockRegistry, Box<dyn Error>> {
         swim_ascent: 9.0,
         opacity: Opacity::OPAQUE,
         origin: origin.clone(),
+        tint: None,
     };
     let mut registry = BlockRegistry::new();
     registry.apply(&InMemoryDefinitionSource::new(origin, vec![Ok(definition)]))?;

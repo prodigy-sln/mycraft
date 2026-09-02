@@ -171,11 +171,21 @@ loads and does nothing.
 | `move_resistance` | **yes**, in behaviour, on the next tick: how much the block's volume slows what moves through it. Nothing is re-meshed for it |
 | `swim_ascent` | **yes**, in behaviour, on the next tick: how fast the block's volume lifts a swimmer holding jump. Nothing is re-meshed for it |
 | `opacity` | **yes** — how much you see through the block changes on the next batch. Nothing is re-meshed and no texture is uploaded: the faces move between the opaque and the blended draw and the degree is rewritten into the geometry already built |
+| `tint`, `tint_distance` | **yes**, with no restart and nothing re-meshed — the next frame drawn from inside one of that block's cells carries the new colour or the new distance. Adding the pair, removing both, and changing either one are all picked up |
 
 **What decides a re-mesh is `drawn`, `occludes` and the six keys — and nothing
 else.** Editing `solid`, `targetable`, `replaceable`, `breakable`, `breaks_into`,
-`swimmable`, `move_resistance` or `swim_ascent` changes what the world *does*
-without changing what it looks like, so no section is built again.
+`swimmable`, `move_resistance`, `swim_ascent`, `tint` or `tint_distance` changes
+what the world *does*, or what it looks like from inside one block, without
+changing which faces exist — so no section is built again.
+
+**A medium's colour and its distance are cheaper still.** Nothing is re-meshed
+and nothing is even re-packed: what an eye standing inside a block is looking
+through is resolved fresh for every frame, out of the registry the reload just
+replaced. So the first frame after a taken-up reload already carries the new
+value, and a reload that removes both fields draws the very next frame untinted.
+A refused reload leaves the tint that was already in force exactly where it was,
+like every other refused reload.
 
 **`opacity` is the one field that changes what the world looks like without
 re-meshing it**, and it is worth knowing which of the two you are watching.
@@ -444,7 +454,7 @@ are the launch refusals** — same loader, same words — under the reload's own
 sentence. This one is `solid` typed as `slid`:
 
 ```
-mycraft: the content root could not be taken up: the content root could not be read: the content root's blocks could not be read: content/base/blocks/stone.luau, block `base:stone`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`, `opacity`
+mycraft: the content root could not be taken up: the content root could not be read: the content root's blocks could not be read: content/base/blocks/stone.luau, block `base:stone`, field `slid`: `slid` is not a field a declaration may state; a declaration may state `name`, `texture`, `solid`, `replaceable`, `breakable`, `breaks_into`, `drawn`, `occludes`, `targetable`, `swimmable`, `move_resistance`, `swim_ascent`, `opacity`, `tint`, `tint_distance`
 ```
 
 The fields it lists are the whole set a declaration may state, which makes this the one

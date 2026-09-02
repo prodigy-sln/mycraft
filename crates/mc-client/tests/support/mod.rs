@@ -45,6 +45,9 @@ pub mod artefact;
 /// Content roots whose built texture set has been put into one particular
 /// state, for scenarios about what the client makes of the set it is handed.
 pub mod built_sets;
+/// The captures this repository has committed a frame for, redrawn and read
+/// back beside the blobs on disk.
+pub mod committed_captures;
 /// The colours a marched ray's crossing is predicted to draw, composed in linear
 /// light from what each layer declares.
 pub mod composite;
@@ -65,6 +68,9 @@ pub mod hud_frames;
 /// A ray walking the voxel grid one boundary crossing at a time, apart from the
 /// judge that walks it.
 pub mod march;
+/// A medium filling the cells an eye stands in, with an opaque wall a stated
+/// distance beyond it, meshed and drawn through the client's own path.
+pub mod medium;
 /// The voxel model a texture was baked from, read independently of the baker, so
 /// a baked image can be judged against the plane it is a view of.
 pub mod model;
@@ -81,6 +87,9 @@ pub mod pixel_census;
 pub mod prediction;
 /// Assertions about a captured frame that come from nowhere near the renderer.
 pub mod probe;
+/// The shipped world seen from a declared pose inside its sea, and from one just
+/// above it.
+pub mod submerged;
 /// Reading a rendered swatch against the colours the texture behind it is made
 /// of.
 pub mod swatch;

@@ -178,3 +178,29 @@ pub const SECTION_RECORD: [(&str, &str); 12] = [
     ("max_y", "f32"),
     ("max_z", "f32"),
 ];
+
+/// The per-frame uniform's fields, in the order the terrain stage declares them
+/// and with the WGSL type each is read as.
+///
+/// **Cull's declaration has to be a valid prefix of this** — equal for as far as
+/// it goes, never longer and never differently ordered — because both stages
+/// bind the same buffer and the compute stage reads only what the record opens
+/// with. Nothing else in the toolchain can see that violated: two structs whose
+/// fields diverge after their common ones both compile, both bind, and each
+/// reads the other's bytes as its own.
+///
+/// **Not a second copy of a Rust constant, which every other value in this file
+/// is.** The CPU side of this record is written as bytes at hand-laid offsets
+/// rather than as a table, so there is nothing here to agree with — and
+/// `min_binding_size: None` catches a buffer that is too *small* and nothing
+/// else, never a CPU that writes one field where the shader reads another. The
+/// order of these names is what carries the offsets, and it is checked here or
+/// nowhere.
+pub const FRAME_RECORD: [(&str, &str); 6] = [
+    ("view_projection", "mat4x4<f32>"),
+    ("planes", "array<vec4<f32>, 6>"),
+    ("eye", "vec3<f32>"),
+    ("tint_reach", "f32"),
+    ("tint_color", "vec3<f32>"),
+    ("_padding", "f32"),
+];

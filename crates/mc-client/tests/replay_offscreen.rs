@@ -107,6 +107,9 @@ fn render_tick(
         tick,
         camera,
         scene: Arc::clone(scene),
+        // Nothing here reads a pixel: what this suite counts is sections and
+        // compacted indices, neither of which a tint reaches.
+        tint: None,
     };
     let phase = ScenePhase::Ready(Arc::clone(scene));
     let request = request(context, tick)?;

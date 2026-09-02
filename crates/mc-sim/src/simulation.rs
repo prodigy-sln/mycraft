@@ -7,8 +7,9 @@
 //! the pointer rather than the contents.
 //!
 //! **That the held snapshot cannot change underneath its holder is a property of
-//! the type, not of a compiler error.** It holds a tick, a pose and a player
-//! state, all plain values, and it must stay that way — a field carrying a
+//! the type, not of a compiler error.** It holds a tick, a pose, a player state
+//! and the tint of what the eye stands in, all plain values, and it must stay
+//! that way — a field carrying a
 //! `Mutex` or an `AtomicU32` would silently reopen the hole while every test here
 //! still passed.
 //!
@@ -38,7 +39,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
+use glam::Vec3;
 
+use mc_core::block::MediumTint;
 use mc_core::content::{ContentSerial, ResolvedContent};
 use mc_core::hud::HudLayout;
 use mc_core::id::BlockName;
@@ -48,7 +51,7 @@ use crate::content::LoadedContent;
 use crate::player::{PlayerState, advance_player, eye_pose};
 use crate::reload::ReloadRefusal;
 use crate::world::action::{EditReport, TickIntent, resolve};
-use crate::world::{Clearing, RemeshWork, SectionKey, World, clearing, reload};
+use crate::world::{Clearing, RemeshWork, SectionKey, World, clearing, eye_medium, reload};
 
 /// What the simulation publishes: which tick it is at, where the camera is, and
 /// everything it knows about the player.
@@ -57,6 +60,15 @@ pub struct SimSnapshot {
     pub tick: u32,
     pub camera: CameraPose,
     pub player: PlayerState,
+    /// What the block the eye stands in does to the light reaching it, where
+    /// that block declares anything.
+    ///
+    /// **Resolved afresh for every publish and never carried forward from the
+    /// last one.** The declaration behind it can be replaced while the game
+    /// runs, and a remembered answer would go on describing content that is no
+    /// longer loaded — which is invisible in any single frame and shows only in
+    /// the second one after a reload.
+    pub tint: Option<MediumTint>,
 }
 
 /// The tick a simulation publishes before any intent has been submitted.
@@ -193,11 +205,14 @@ impl Simulation {
     /// state where it has a world and nothing to draw it with.
     #[must_use]
     fn new(spawn: PlayerState, world: World, content: PublishedContent) -> Self {
+        let camera = eye_pose(&spawn);
+        let tint = eye_medium(&world, Vec3::from(camera.eye));
         Self {
             published: ArcSwap::from_pointee(SimSnapshot {
                 tick: FIRST_TICK,
-                camera: eye_pose(&spawn),
+                camera,
                 player: spawn,
+                tint,
             }),
             content: ArcSwap::from_pointee(content),
             player: spawn,
@@ -237,10 +252,12 @@ impl Simulation {
             .action
             .as_ref()
             .map(|action| resolve(action, &self.player, &mut self.world));
+        let camera = eye_pose(&self.player);
         self.published.store(Arc::new(SimSnapshot {
             tick: self.published.load().tick.saturating_add(1),
-            camera: eye_pose(&self.player),
+            camera,
             player: self.player,
+            tint: eye_medium(&self.world, Vec3::from(camera.eye)),
         }));
         report
     }

@@ -91,6 +91,7 @@ fn snapshot(tick: u32, scene: &Arc<SceneGeometry>) -> TerrainSnapshot {
         tick,
         camera: camera_view([0.0, 0.0, 0.0], [0.0, 0.0, -64.0]),
         scene: Arc::clone(scene),
+        tint: None,
     }
 }
 

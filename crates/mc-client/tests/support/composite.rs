@@ -54,7 +54,7 @@
 use std::collections::BTreeSet;
 use std::error::Error;
 
-use mc_core::block::BlockRegistry;
+use mc_core::block::{BlockRegistry, MediumTint};
 use mc_core::content::TEXTURE_EDGE;
 use mc_core::id::BlockName;
 use mc_render::color::CLEAR_COLOR_SRGB;
@@ -231,6 +231,68 @@ impl<'a> Palette<'a> {
         nearest_between(&predicted, &unblended)
     }
 
+    /// Every colour a pixel whose ray met `crossed` may draw, seen from inside a
+    /// medium declaring `tint`.
+    ///
+    /// **Each layer is carried by its own distance and the carried layers are
+    /// then composed**, which is the order the law and `src-over` put them in.
+    /// A pixel whose ray met nothing is the medium's own colour rather than the
+    /// sky's — the clear carries the tint, so the far field and the empty field
+    /// arrive at one colour by two routes.
+    ///
+    /// # Errors
+    ///
+    /// As [`predicted`](Self::predicted).
+    pub fn predicted_through(
+        &self,
+        crossed: &Crossed,
+        tint: Option<MediumTint>,
+    ) -> Result<Vec<[u8; 3]>, Box<dyn Error>> {
+        let mut standing: Vec<[u8; 3]> = match &crossed.beyond {
+            None => vec![carried(CLEAR_COLOR_SRGB, tint, f32::INFINITY)],
+            Some(surface) => self
+                .landmarks_of(surface)?
+                .into_iter()
+                .map(|colour| carried(colour, tint, surface.along))
+                .collect(),
+        };
+        for layer in crossed.layers.iter().rev() {
+            let degree = self.degree_of(&layer.block)?;
+            let over: Vec<[u8; 3]> = self
+                .landmarks_of(layer)?
+                .into_iter()
+                .map(|colour| carried(colour, tint, layer.along))
+                .collect();
+            standing = over
+                .iter()
+                .flat_map(|src| standing.iter().map(|dst| composited(*src, *dst, degree)))
+                .collect::<BTreeSet<[u8; 3]>>()
+                .into_iter()
+                .collect();
+        }
+        Ok(standing)
+    }
+
+    /// How far the nearest colour `crossed` predicts, seen through `tint`,
+    /// stands from `drawn`.
+    ///
+    /// # Errors
+    ///
+    /// As [`predicted_through`](Self::predicted_through), or the distance
+    /// metric's own failure.
+    pub fn stands_from_through(
+        &self,
+        crossed: &Crossed,
+        drawn: [u8; 3],
+        tint: Option<MediumTint>,
+    ) -> Result<f64, Box<dyn Error>> {
+        let mut nearest = f64::MAX;
+        for colour in self.predicted_through(crossed, tint)? {
+            nearest = nearest.min(distance(colour, drawn)?);
+        }
+        Ok(nearest)
+    }
+
     /// The texture key `surface`'s face draws from.
     fn key_of(&self, surface: &Surface) -> Result<mc_core::id::TextureKey, Box<dyn Error>> {
         let facing = surface.facing.ok_or_else(|| {
@@ -253,6 +315,26 @@ impl<'a> Palette<'a> {
             })?
             .clone())
     }
+}
+
+/// `own`, carried toward the medium's colour by how far away it stands.
+///
+/// **The one statement of the law on the prediction side.** `min(1, d / D)` in
+/// linear light, through the transfer pair `super::art` declares from
+/// IEC 61966-2-1 — which shares no code with the draw path. A second spelling of
+/// it would be two predictions that could part.
+///
+/// A medium declaring nothing carries nothing, and that is the arithmetic
+/// identity rather than a branch a caller has to remember.
+#[must_use]
+pub fn carried(own: [u8; 3], tint: Option<MediumTint>, along: f32) -> [u8; 3] {
+    tint.map_or(own, |medium| {
+        composited(
+            medium.color(),
+            own,
+            f64::from((along / medium.distance()).min(1.0)),
+        )
+    })
 }
 
 /// How near the nearest pair of `one` and `other` stand, in ΔE.

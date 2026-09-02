@@ -24,7 +24,7 @@ use mc_core::block::BlockRegistry;
 use mc_core::hud::source::InMemoryHudSource;
 use mc_core::hud::{HudLayout, HudOrigin};
 use mc_core::id::BlockName;
-use mc_render::camera::waiting_view;
+use mc_render::camera::{camera_view, waiting_view};
 use mc_render::gpu::{FrameRenderer, FrameSnapshot, RecordTarget};
 use mc_render::hud::{HudFrame, held_swatch};
 use mc_render::pass::TerrainPassConfig;
@@ -254,9 +254,19 @@ impl<'a> HudCapture<'a> {
     /// *indicator* rather than the block has to be able to move the choice off a
     /// block whose colours appear behind it.
     ///
+    /// **The eye's medium is resolved, never stated.** This capture is the one
+    /// the HUD golden is minted and verified from, and a hard-coded absence of a
+    /// tint would make that golden match whatever the draw path did — the frame
+    /// would be dry because this line said so rather than because the camera
+    /// stands in open air, and nothing would redden the day a tint reached it.
+    /// `support/goldens.rs` carries the same rule for the three terrain
+    /// captures, and both go through [`super::frames::snapshot_in`].
+    ///
     /// # Errors
     ///
-    /// Returns the preparation, pipeline, upload or spawn failure.
+    /// Returns the preparation, pipeline, upload or spawn failure, and the
+    /// registry's refusal for a block the prepared world holds and it does not
+    /// register.
     pub fn over(
         context: &'a CaptureContext,
         tick: u32,
@@ -265,19 +275,19 @@ impl<'a> HudCapture<'a> {
         let prepared = super::prepare_scene_at(root)?;
         let renderer = prepared_renderer(context, &prepared)?;
         let camera = super::frames::replay_camera(tick, &prepared.world, &prepared.registry)?;
+        let scene = Arc::new(prepared.scene.clone());
+        let snapshot = super::frames::snapshot_in(&prepared, tick, camera, &scene)?;
         let PreparedScene {
-            scene,
             resolution,
             world,
             registry,
             texels,
             ..
         } = prepared;
-        let scene = Arc::new(scene);
         Ok(Self {
             context,
             renderer,
-            snapshot: super::frames::snapshot(tick, camera, &scene),
+            snapshot,
             content: PreparedContent {
                 resolution,
                 registry,
@@ -285,6 +295,60 @@ impl<'a> HudCapture<'a> {
                 texels,
             },
         })
+    }
+
+    /// That same capture from a **declared** eye rather than the player's, with
+    /// the tint resolved for that eye by the simulation's own resolver.
+    ///
+    /// **The pose has to be declared and the tint has to be resolved.** No
+    /// judged tick puts the player's eye under the sea — `replay_oracle.rs`
+    /// asserts it — so a reading about what a medium does to a composited frame
+    /// has no camera to use unless it declares one, which is what
+    /// `support/submerged.rs` holds. And the tint comes from
+    /// [`super::frames::snapshot_in`] rather than from this fixture, so a frame
+    /// is tinted because the eye stands in a cell that declares one.
+    ///
+    /// # Errors
+    ///
+    /// Returns the preparation, pipeline, upload or resolver failure.
+    pub fn from_a_declared_eye(
+        context: &'a CaptureContext,
+        root: &Path,
+        pose: ([f32; 3], [f32; 3]),
+    ) -> Result<Self, Box<dyn Error>> {
+        let prepared = super::prepare_scene_at(root)?;
+        let renderer = prepared_renderer(context, &prepared)?;
+        let (eye, target) = pose;
+        let scene = Arc::new(prepared.scene.clone());
+        let snapshot = super::frames::snapshot_in(&prepared, 0, camera_view(eye, target), &scene)?;
+        let PreparedScene {
+            resolution,
+            world,
+            registry,
+            texels,
+            ..
+        } = prepared;
+        Ok(Self {
+            context,
+            renderer,
+            snapshot,
+            content: PreparedContent {
+                resolution,
+                registry,
+                world,
+                texels,
+            },
+        })
+    }
+
+    /// What the simulation's own resolver answered for the eye this capture
+    /// draws from.
+    ///
+    /// **Read off the snapshot rather than recomputed**, so a reading naming it
+    /// is naming the value this frame was actually drawn with.
+    #[must_use]
+    pub const fn published_tint(&self) -> Option<mc_core::block::MediumTint> {
+        self.snapshot.tint
     }
 
     /// One frame of the scene with `hud` over it, recorded through the client's
@@ -382,6 +446,10 @@ impl<'a> UnpreparedCapture<'a> {
                 tick: 0,
                 camera: waiting_view(),
                 scene: empty_scene(),
+                // A client still waiting for a world has none to stand in, and
+                // this is the state the shipped client's own first frames are
+                // drawn in rather than a value a fixture chose.
+                tint: None,
             },
         })
     }

@@ -415,6 +415,7 @@ fn snapshot_of_nothing() -> TerrainSnapshot {
         tick: TICK,
         camera: replay_camera(),
         scene: Arc::new(SceneGeometry::default()),
+        tint: None,
     }
 }
 

@@ -57,7 +57,8 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
 
-use mc_core::block::{BlockRegistry, RegistryError};
+use glam::Vec3;
+use mc_core::block::{BlockRegistry, MediumTint, RegistryError};
 use mc_core::id::BlockName;
 use mc_world::column::{ChunkColumn, ColumnCoordinate};
 use mc_world::section::{Contents, Section};
@@ -431,6 +432,44 @@ pub(crate) fn inside_the_world(at: BlockPos) -> Option<WorldPos> {
         y: at.y.try_into().ok()?,
         z: at.z.try_into().ok()?,
     })
+}
+
+/// The voxel a point lies in.
+///
+/// **Floor on every axis, never truncation.** A voxel fills `[v, v + 1)`, so a
+/// point at `-0.5` is inside the voxel at `-1` while `as i32` alone would answer
+/// `0` — and the same rule at the other end is what puts an eye a hair below a
+/// surface inside the cell that surface is the top face of.
+///
+/// One statement of the conversion for the ray walk, the collision box and the
+/// eye's medium alike: three spellings of it are three places for the rounding
+/// to differ.
+pub(crate) fn containing(point: Vec3) -> BlockPos {
+    BlockPos {
+        x: point.x.floor() as i32,
+        y: point.y.floor() as i32,
+        z: point.z.floor() as i32,
+    }
+}
+
+/// The tint declared by the block filling the cell `at` lies in, or nothing
+/// where that cell holds no block, lies outside the world, or holds a name this
+/// world's registry cannot resolve.
+///
+/// **Resolved through the registry this world holds now, every time it is
+/// asked.** An answer remembered from an earlier tick would survive a content
+/// reload that changed the tint or withdrew it, and the frame drawn from the
+/// next publish is the only thing that could report that.
+///
+/// The eye's own cell decides and nothing else enters into it: whether that
+/// block is drawn, occludes, stops a player or can be swum through are separate
+/// declarations, and none of them is a claim about what light does.
+#[must_use]
+pub fn eye_medium(world: &World, at: Vec3) -> Option<MediumTint> {
+    let Contents::Holds(name) = world.block_at(containing(at))? else {
+        return None;
+    };
+    world.registry().resolve(name).ok()?.tint
 }
 
 #[cfg(test)]

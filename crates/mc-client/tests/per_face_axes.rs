@@ -476,6 +476,7 @@ fn the_filler(origin: &DefinitionOrigin) -> Result<BlockDefinition, Box<dyn Erro
         swim_ascent: 9.0,
         opacity: Opacity::OPAQUE,
         origin: origin.clone(),
+        tint: None,
     })
 }
 
@@ -502,6 +503,7 @@ fn the_banded_block(origin: &DefinitionOrigin) -> Result<BlockDefinition, Box<dy
         swim_ascent: 9.0,
         opacity: Opacity::OPAQUE,
         origin: origin.clone(),
+        tint: None,
     })
 }
 

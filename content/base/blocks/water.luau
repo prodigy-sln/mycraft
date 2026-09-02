@@ -83,6 +83,30 @@
 -- and it is what a mesher reads. This says how much of the light a *drawn* face
 -- of it stops, which is what a fragment reads, and the loader refuses the two
 -- together at `occludes = true` precisely because they would then disagree.
+--
+-- **`tint` and `tint_distance` are what the sea does to a player standing
+-- *inside* it, and they are a different claim from `opacity`.** The degree above
+-- says how much light a face of the sea stops when you are looking *at* it from
+-- outside; these two say what the whole picture becomes once your eye is under
+-- the surface. A block can state either without the other, and the two are read
+-- by different halves of the frame — one by the mesher and the blend, one by the
+-- fragment's mix and the frame's clear colour.
+--
+-- **Both numbers are chosen, not derived.** `#3A6EA5` is a sea blue picked to
+-- read as water rather than as a filter over it: dark enough that the far
+-- lakebed goes to it, light enough that a nearby face still shows its own art.
+-- `12.0` blocks is how far you see before it takes over completely, and it is
+-- the number that makes the sea feel like a body of water at the scale this one
+-- is built at — the deepest channel is two blocks and the sea runs some thirty
+-- long, so a swimmer sees the bed beneath them nearly untouched and the far end
+-- of the channel almost wholly blue. Neither value is reachable from any Rust
+-- constant, and the engine asks only that the distance be finite and greater
+-- than zero: a shorter one is a murkier sea and a longer one a clearer one, and
+-- both are edits to this file alone that take effect without a restart.
+--
+-- **Stated together or not at all.** The loader refuses one without the other,
+-- because a colour with no distance states no strength and a distance with no
+-- colour states nothing to reach.
 return {
 	name = "base:water",
 	texture = "base:water",
@@ -96,4 +120,6 @@ return {
 	move_resistance = 0.5,
 	swim_ascent = 3.5,
 	opacity = 0.5,
+	tint = "#3A6EA5",
+	tint_distance = 12.0,
 }

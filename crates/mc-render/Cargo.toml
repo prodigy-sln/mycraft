@@ -118,6 +118,20 @@ name = "pass_format"
 path = "tests/pass_format.rs"
 required-features = ["gpu"]
 
+# The per-frame uniform's allocated size against the size naga derives from the
+# shader's own declaration. `FRAME_UNIFORM_BYTES` lives behind the feature, so
+# this is a target rather than a `cfg` inside `tests/shader_frame_record.rs`:
+# what that buys is granularity, since a guarded test would have gone missing
+# from a gpu-free run while its file reported the rest as a complete pass.
+#
+# It does not announce itself, and the comment above claims it does. Measured:
+# `cargo nextest run -p mc-render --no-default-features` reports `0 skipped` and
+# names neither this target nor `pass_format`.
+[[test]]
+name = "frame_uniform_size"
+path = "tests/frame_uniform_size.rs"
+required-features = ["gpu"]
+
 # The capability assertion the GPU draw shape rests on, and the offscreen terrain
 # suite itself. Same reasoning as above and it is the reason the entries are
 # written out rather than left to autodiscovery: `required-features` reports the

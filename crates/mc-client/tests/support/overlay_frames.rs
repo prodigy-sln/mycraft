@@ -75,6 +75,10 @@ impl<'a> OverlayFrames<'a> {
                 tick: 0,
                 camera: waiting_view(),
                 scene: empty_scene(),
+                // A client still waiting for a world has none to stand in, and
+                // this is the state the shipped client's own first frames are
+                // drawn in rather than a value a fixture chose.
+                tint: None,
             },
         })
     }
