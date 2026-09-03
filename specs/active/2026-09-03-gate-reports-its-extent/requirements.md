@@ -144,17 +144,62 @@ against the tree on this branch rather than taken from the issue text.
   (the size stage's `Measure-Object -Line` dropping blank lines) are separate
   issues against separate stages. Both are listed in Out of Scope.
 
-- [open] Q: Does this fix also make stage 2b's `&&` chain non-cancelling, so a
-  failure at `220` no longer skips the clippy at `221` and the run at `222`? →
-  Put to the owner during this phase with a recommendation. The spec is drafted
-  under **scope it to the flag and the label, and name the chain cancellation as
-  a residual**, because repairing the chain means changing `Invoke-Stage`'s
-  contract or accumulating exit status across four commands — new gate surface,
-  overturning the design decision recorded at `:215-217`, and a `decision`
-  work-type rather than a `low` fix. The flag still buys real ground at
-  `220`/`222`: a failure *inside* mc-testkit's suite reports that suite's full
-  extent instead of one test. If the owner rules the other way, spec §"Defect 1
-  root cause", Out of Scope and Notes item 1 all change together.
+- [resolved] Q: Does this fix also make stage 2b's `&&` chain non-cancelling? →
+  A: **No — ruled by the owner, who checked `Invoke-Stage` before answering.**
+  `Invoke-Stage` (`:147-157`) runs `& $Action` and inspects `$LASTEXITCODE`
+  exactly once. A PowerShell accumulator variable does not set `$LASTEXITCODE`,
+  so the alternatives are a contract change to `Invoke-Stage` — which affects
+  failure detection for all twelve stages, i.e. the gate's core mechanism — or a
+  `cmd /c exit N` hack. The first carries a circularity that decides the rigor:
+  **a change to how the gate detects failure cannot be validated by a green
+  gate**, which is the same reasoning that put PRO-982 at `high`. Filed as
+  **PRO-1011**, recommended there as `work-type: decision` above `low`.
+
+  Correction the owner made to my draft: the chain is **four** commands
+  (clippy mc-testkit, nextest mc-testkit, clippy mc-render, nextest mc-render),
+  so a failure in the first hides **three**. My draft said "the clippy at 221 and
+  the run at 222", which undercounts it. Fixed throughout.
+
+- [resolved] Q: Can stage 2b be split into two `Invoke-Stage` calls — mc-testkit,
+  then mc-render — each still `&&`-chaining its own clippy+nextest pair? Raised
+  by the owner, with the explicit instruction to measure it and decide rather
+  than take it on their say-so. → A: **Yes, and it is in scope (D1-S8).**
+  Measured on this branch:
+
+  - **No test holds a fixed stage list or asserts a stage count.**
+    `crates/mc-client/tests/gate_stage_order.rs` contains `Invoke-Stage` only
+    inside its own synthetic control fixtures (`:41-157`) — those are scripts the
+    test writes out to grade its own reading, never a reading of the real
+    script's stage list.
+  - `crates/mc-client/tests/gate_art_stages.rs` runs `-ArtOnly`, which selects
+    stages 7 and 8 and never reaches 2b.
+  - `GateReport::StagesFailed(..)` (`gate/running.rs:56`) carries the stages a run
+    listed, in the order listed, and asserts nothing about how many exist.
+  - Feature unification is per-invocation, so `-p mc-testkit
+    --no-default-features` behaves identically in one scriptblock or two. The
+    comment's reason for naming both crates explicitly is about avoiding
+    `--workspace`, not about the two sharing a stage — nothing in the recorded
+    rationale forbids the split.
+
+  The only thing it perturbs is the stage table in `docs/technical/testing.md`,
+  which this spec is amending anyway (D2-S4). So it is two calls plus one table
+  row: no contract change, no new surface. Taken.
+
+- [resolved] Q: How many places state the false `-Quick` claim? → A: **Three**,
+  not two. Found during this phase: `scripts/sdd-gate.ps1:173` (banner),
+  `:40-42` (`.PARAMETER Quick`), and **`docs/technical/testing.md:32`** — "`-Quick`
+  runs stages 1–3 only, for tight edit loops". Correcting two and leaving the
+  third is the owner's own "a corrected banner above a stale docstring is the
+  same defect twice", one step further on, in the document a reader is most
+  likely to consult *instead of* the script. All three are corrected (D2-S2).
+
+- [resolved] Q: Anything else wrong in that stage table? → A: Yes.
+  `docs/technical/testing.md:19-30` has rows for stages 1, 2, 2b, 3, 4, 5, 6, 7,
+  8, 9 and **no row for stage 2c** (`docs (rustdoc, no broken intra-doc links)`,
+  `scripts/sdd-gate.ps1:238`). The canonical stage table under-reports the gate by
+  a whole stage. Folded in as D2-S4 rather than deferred, because it is
+  load-bearing for the correction: `-Quick`'s contents cannot be stated correctly
+  in that document while a stage it reaches has no row to name.
 
 - [resolved] Q: Is `--max-fail=N` an alternative? nextest's own cancellation
   warning suggests it beside `--no-fail-fast`. → A: No. It still cancels, just
@@ -164,6 +209,6 @@ against the tree on this branch rather than taken from the issue text.
 
 ## Open questions
 
-One, above: whether stage 2b's `&&` chain is in scope. It does not block the
-scenarios — the spec is drafted under the recommended reading and the affected
-sections are named — but it must close before implementation starts.
+None. The one open question — the scope of stage 2b's `&&` chain — was ruled by
+the owner during this phase: split the stage (in scope), leave the chain
+mechanism alone (PRO-1011).

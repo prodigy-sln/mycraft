@@ -8,6 +8,7 @@ branch: bugfix/PRO-994-gate-reports-its-extent
 issue: PRO-994
 created: 2026-09-03
 updated: 2026-09-03
+approved: 2026-09-03
 author: spec-PRO-994
 ---
 
@@ -17,9 +18,11 @@ Two defects in `scripts/sdd-gate.ps1` with one shape: **the gate's own output
 says less than the reader takes it to say.**
 
 A red gate reports a cancelled test count as though it were a complete one, so
-nobody can tell one broken test from three hundred. And `-Quick` announces
-itself as running no tests while running two suites, so the same hole sits in
-the hot edit loop under a label that says it cannot.
+nobody can tell one broken test from three hundred — and one stage name stands
+for four `&&`-chained commands, so a failure in the first hides three. And
+`-Quick` announces itself as running no tests while running two suites, in three
+separate places, so the same hole sits in the hot edit loop under a label that
+says it cannot.
 
 Both are defects in an instrument, not in the game. That is the whole reason
 this spec is worth writing: every other spec in this project trusts what the
@@ -27,11 +30,20 @@ gate prints.
 
 ## Rigor
 
-`low`, set by the owner and confirmed against the work. The change is one flag
-on four command invocations and one corrected mode label, in one file. No crate
-is touched, no published surface moves, no persisted format or wire format
-changes, and nothing here is something a later spec must not break. TDD binds
-unchanged at `low`: tests are written first and their failing output is
+`low`, set by the owner and confirmed against the work. The change is one flag on
+four command invocations, one stage split into two calls of an unchanged helper,
+and one label corrected in the three places it is written. Two files change
+(`scripts/sdd-gate.ps1`, `docs/technical/testing.md`). No crate is touched, no
+published surface moves, no persisted or wire format changes, no helper contract
+moves, and nothing here is something a later spec must not break.
+
+**What would have forced rigor up is deliberately not here.** Changing how the
+gate *detects* failure — `Invoke-Stage`'s single inspection of `$LASTEXITCODE` —
+cannot be validated by a green gate, and that circularity is what puts PRO-982 at
+`high`. This spec leaves that mechanism untouched and files the part that needs
+it as PRO-1011.
+
+TDD binds unchanged at `low`: tests are written first and their failing output is
 displayed before any implementation. What `low` drops is the reviewer workflow,
 and the gate carries it.
 
@@ -68,6 +80,7 @@ evidence. What they can do afterwards that they cannot do today:
 | Stakeholder | What they can do that they cannot do today |
 |---|---|
 | Anyone reading a red gate | Read the true number of failing tests off the gate's own output, instead of re-running the suite by hand to find out |
+| Anyone reading a red GPU-free stage | See `mc-render`'s result even when `mc-testkit` failed, instead of one stage name standing for four commands |
 | Anyone running `-Quick` | Know that the mode runs two test suites and a documentation build, instead of a label claiming it runs neither |
 
 This is the case principle 5 contemplates: a gate amendment taken as a
@@ -123,38 +136,78 @@ nextest cancels on first failure unless told otherwise, and no invocation in
 faithfully report a stage as failed. The gate under-reports because the tool it
 calls stopped early, and the gate never asked it not to.
 
-**Line 220 amplifies this.** Lines 219-222 are `&&`-chained inside one
-`Invoke-Stage` (`:218-223`), deliberately: the stage's own comment at `:215-217`
-records that `Invoke-Stage` inspects `$LASTEXITCODE` once, after the whole
-scriptblock, so on separate lines a clippy failure would be silently overwritten
-by a passing test run. A failure at 220 therefore also cancels the clippy at 221
-and the run at 222, while the summary records only the stage name `gpu-free
-(mc-testkit + mc-render, no default features)`.
+**Stage 2b amplifies this.** Lines 219-222 are **four** `&&`-chained commands —
+clippy(mc-testkit), nextest(mc-testkit), clippy(mc-render), nextest(mc-render) —
+inside one `Invoke-Stage` (`:218-223`). A failure in the **first hides three**,
+while the summary records only the stage name `gpu-free (mc-testkit + mc-render,
+no default features)`.
 
-**That chain cancellation is a named residual of this fix, not a thing it
-repairs.** After `--no-fail-fast` lands on 220 and 222, each invocation runs its
-own suite to completion, so a failure *inside* mc-testkit's tests reports
-mc-testkit's full extent instead of one test. What still goes unreported is the
-two commands *after* the failing one. Removing that would mean changing
-`Invoke-Stage`'s contract or accumulating status across four commands — new gate
-surface, overturning a recorded design decision, and outside `low`. It is filed
-rather than built (see Notes).
+The chain is deliberate, and its reason is real: `Invoke-Stage` (`:147-157`) runs
+`& $Action` and then inspects `$LASTEXITCODE` **exactly once**, after the whole
+scriptblock. The comment at `:215-217` records that on separate lines a clippy
+failure would be silently overwritten by a passing test run that followed it.
+
+**Two of the four are recovered here; the rest is a named residual.**
+
+- `--no-fail-fast` on 220 and 222 makes each nextest invocation run its own suite
+  to completion, so a failure *inside* mc-testkit's tests reports mc-testkit's
+  full extent instead of one test.
+- **Stage 2b is split into two `Invoke-Stage` calls** — mc-testkit, then
+  mc-render — each still `&&`-chaining its own clippy+nextest pair. A failing
+  mc-testkit suite then stops hiding all of mc-render. This changes no contract:
+  it is two calls where there was one, with no new gate surface and no change to
+  `Invoke-Stage`. Nothing in the recorded rationale forbids it — the comment's
+  reason for naming both crates explicitly is about `--workspace` feature
+  unification, not about the two sharing a single stage.
+- **What remains** is the two-command residual *within* each new stage: a clippy
+  failure still hides its own crate's test run. Removing that needs either a
+  contract change to `Invoke-Stage` — which affects failure detection for every
+  stage, i.e. the gate's core mechanism — or a `cmd /c exit N` hack to force an
+  exit code, because a PowerShell accumulator variable does not set
+  `$LASTEXITCODE`. Filed as **PRO-1011**, recommended there as `work-type:
+  decision` above `low` rigor, because **a change to how the gate detects failure
+  cannot be validated by a green gate.** That circularity is the same one that
+  put PRO-982 at `high`.
+
+**The split was measured, not assumed.** No test holds a fixed stage list or
+asserts a stage count. `crates/mc-client/tests/gate_stage_order.rs` uses
+`Invoke-Stage` only inside its own synthetic control fixtures (`:41-157`), never
+as a reading of the real script's stage list, and
+`crates/mc-client/tests/gate_art_stages.rs` runs `-ArtOnly`, which selects stages
+7 and 8 and never reaches 2b. `GateReport::StagesFailed(..)` lists the stages a
+run named, in the order it named them, and asserts nothing about how many there
+are. The only thing the split perturbs is the stage table in
+`docs/technical/testing.md`, which this spec is already amending.
 
 ---
 
 ## Defect 2 — `-Quick` says it runs no tests, and it runs two suites
 
-- **Observed**: `scripts/sdd-gate.ps1:173` prints `mode: QUICK (format + lint +
-  size only)` and the `.PARAMETER Quick` docstring at `:40-42` says "Format,
-  lint and size only. For tight edit loops". Both are false. The `-Quick` early
-  exit is at `:294`; stage 2b (the GPU-free configuration, `:198-223`) and stage
-  2c (documentation links, `:225-241`) both sit above it. So `-Quick` runs
-  stages 1, 2, **2b**, **2c** and 3 — and stage 2b runs two real `cargo nextest`
+- **Observed**: The same false claim is made in **three** places, and a fourth
+  document under-reports the gate by a whole stage:
+
+  | where | what it says |
+  |---|---|
+  | `scripts/sdd-gate.ps1:173` | `mode: QUICK (format + lint + size only)` |
+  | `scripts/sdd-gate.ps1:40-42` | `.PARAMETER Quick` — "Format, lint and size only. For tight edit loops" |
+  | `docs/technical/testing.md:32` | "`-Quick` runs stages 1–3 only, for tight edit loops" |
+  | `docs/technical/testing.md:19-30` | the canonical stage table has **no row for stage 2c** (`docs (rustdoc)`) at all |
+
+  All three claims are false. The `-Quick` early exit is at `:294`; stage 2b (the
+  GPU-free configuration, `:198-223`) and stage 2c (documentation links,
+  `:225-241`) both sit above it. So `-Quick` runs stages 1, 2, **2b**, **2c** and
+  3 — and stage 2b runs **four** commands, two of them real `cargo nextest`
   suites.
 
-- **Expected**: The mode line and the parameter documentation name what the mode
-  actually runs. A reader deciding whether `-Quick` is safe in a tight loop is
-  entitled to know it builds documentation and runs two test suites.
+  The missing table row is folded in because it is load-bearing for the
+  correction rather than an adjacent tidy-up: `-Quick`'s contents cannot be
+  stated correctly in that document while a stage it reaches has no row to name.
+
+- **Expected**: Every place that describes `-Quick` names what the mode actually
+  runs, and the stage table names every stage the gate has. A reader deciding
+  whether `-Quick` is safe in a tight loop is entitled to know it builds
+  documentation and runs two test suites — whichever of the three they happen to
+  read.
 
 - **Reproduced**: 2026-09-03, by reading, and the reading is named as a reading.
   `:187` opens `if (-not $ArtOnly) {`; stage 2b's `Invoke-Stage` at `:218` and
@@ -168,15 +221,19 @@ rather than built (see Notes).
 
 ### Root cause
 
-Label drift. The mode line and the docstring were written when the claim was
-true and were not revisited when stages 2b and 2c were inserted above the early
-exit. Nothing in the gate ties the two together, so the label cannot go stale
-loudly — it can only go stale silently.
+Label drift. All three statements were written when the claim was true and none
+was revisited when stages 2b and 2c were inserted above the early exit. Nothing
+ties a label to the stages that label describes, so it cannot go stale loudly —
+it can only go stale silently, in as many places as it is written.
 
 **This is in scope for this fix and not a separate cleanup.** The consequence of
 the mislabel is precisely Defect 1's consequence: it places the fail-fast hole
-in the hot edit loop while telling the reader that loop runs no tests. Same
-file, same lines, same read.
+in the hot edit loop while telling the reader that loop runs no tests.
+
+**All three are corrected together, and that is the point.** A corrected banner
+above a stale docstring is the same defect twice; correcting two of three and
+leaving `docs/technical/testing.md:32` standing is the same defect a third time,
+in the document a reader is most likely to consult *instead of* the script.
 
 ---
 
@@ -245,6 +302,15 @@ improvement over the flag this spec chose.
 - **D1-S7**: IF a gate script carries `--ignore-run-fail` THEN THE SYSTEM SHALL
   report it as forbidden rather than as satisfying D1-S3.
 
+- **D1-S8**: THE SYSTEM SHALL run the `mc-testkit` and `mc-render` GPU-free
+  checks as two separately-reported stages, so that a failure in the `mc-testkit`
+  pair leaves the `mc-render` pair still run and still reported.
+
+- **D1-S9**: THE SYSTEM SHALL state, in the gate script's own comment beside the
+  `&&`-chained stage and in `docs/technical/testing.md`, that the chain still
+  cancels the commands after a failing one and therefore still hides part of that
+  stage's extent.
+
 **D1-S2 is the load-bearing control, and it is what makes D1-S1 falsifiable.**
 An implementation using `--ignore-run-fail` satisfies D1-S1 exactly — same
 count, same words, same bytes — and fails only D1-S2. **D1-S1 and D1-S2 must
@@ -259,16 +325,25 @@ finding invocations would report the shipped script as complete forever.
 - **D2-S1**: WHEN the gate is run with `-Quick` THE SYSTEM SHALL print a mode
   line naming test execution and documentation among what that mode runs.
 
-- **D2-S2**: THE SYSTEM SHALL describe `-Quick` consistently in the mode line it
-  prints and in its `.PARAMETER Quick` documentation, so the two cannot drift
-  apart unnoticed.
+- **D2-S2**: THE SYSTEM SHALL describe `-Quick` consistently in all three places
+  that describe it — the mode line at `:173`, the `.PARAMETER Quick` docstring at
+  `:40-42`, and `docs/technical/testing.md` — so that no two of them can stand in
+  disagreement.
 
 - **D2-S3**: IF a gate script's `-Quick` mode line omits a stage that mode
   reaches THEN THE SYSTEM SHALL report the label as understating the mode rather
   than reporting it as accurate.
 
+- **D2-S4**: THE SYSTEM SHALL give every stage the gate runs a row in the stage
+  table in `docs/technical/testing.md`, including the `docs (rustdoc)` stage that
+  has none today.
+
 **D2-S3 is the control.** A scan that graded every label as accurate would
 satisfy D2-S1 and D2-S2 against the shipped script and against any other.
+**D2-S2 is deliberately a three-way agreement rather than a two-way one**:
+correcting the banner and the docstring while `docs/technical/testing.md:32`
+still says "stages 1–3 only" is the same defect a third time, in the document a
+reader is most likely to consult instead of the script.
 
 ---
 
@@ -339,30 +414,42 @@ Binding. Recorded, not built.
 - **`sdd-artifact-lint`'s test-map and registry detectors** — PRO-1010.
 - **The size stage counting with `Measure-Object -Line`, which drops blank
   lines** — PRO-974. A gate defect, and a different stage.
-- **Restructuring the `&&` chain in stage 2b** so a failure at line 220 no
-  longer cancels lines 221-222. See Notes.
-- **Any change to `Invoke-Stage`'s contract**, to the summary format, or to
-  which stages `-Quick` runs. This spec corrects what `-Quick` *says*, never
-  what it *does*.
+- **Making the `&&` chain itself non-cancelling**, so a clippy failure no longer
+  hides its own crate's test run. **PRO-1011.** The stage *split* is in scope
+  (D1-S8) and halves the residual; removing the rest is not. See Notes 1.
+- **Any change to `Invoke-Stage`'s contract** or to the summary format. Splitting
+  stage 2b adds a second call to the existing `Invoke-Stage`; it changes nothing
+  about what `Invoke-Stage` does.
+- **Changing which stages `-Quick` runs.** This spec corrects what `-Quick`
+  *says*, never what it *does*. Whether stage 2b or 2c belongs above the early
+  exit at all is a separate question and is not asked here.
 
 ## Notes
 
 Deferred observations, recorded during the specify phase and not built here.
 
-1. **Stage 2b's `&&` chain still cancels.** With `--no-fail-fast` on 220 and
-   222, each invocation runs its own suite to completion, but a failure at 220
-   still short-circuits the clippy at 221 and the run at 222. Repairing that
-   means changing `Invoke-Stage`'s contract or accumulating exit status across
-   the chain — new gate surface, overturning the design decision recorded at
-   `:215-217`, and a `decision` work-type rather than a `low` fix. To be filed
-   as its own issue at completion.
+1. **The `&&` chain still cancels within each of the two new stages** — filed as
+   **PRO-1011**. After D1-S8's split and `--no-fail-fast`, a failure in one
+   crate's clippy still hides that crate's test run. Removing that needs either a
+   contract change to `Invoke-Stage` (`:147-157`), which affects failure
+   detection for every stage in the gate, or a `cmd /c exit N` hack to force an
+   exit code, since a PowerShell accumulator variable does not set
+   `$LASTEXITCODE`. PRO-1011 recommends `work-type: decision` above `low`,
+   because **a change to how the gate detects failure cannot be validated by a
+   green gate** — the same circularity that put PRO-982 at `high`.
 
 2. **Nothing ties a mode label to the stages that mode reaches.** Defect 2 is
-   label drift that went unnoticed because it cannot go stale loudly. D2-S2
-   asks the two descriptions to agree with each other, which is weaker than
-   asking either to agree with the stage list. A check deriving the label from
-   the stages, or grading it against them, is a larger piece of gate surface
-   than this fix should introduce.
+   label drift that went unnoticed because it cannot go stale loudly, and the
+   fact that it was written three times in three files is the evidence. D2-S2
+   asks the three descriptions to agree *with each other*, which is weaker than
+   asking any of them to agree with the stage list. A check deriving the label
+   from the stages, or grading it against them, is a larger piece of gate surface
+   than this fix should introduce — but it is the check that would actually close
+   this defect family, and it is worth a future issue.
+
+3. **The stage table in `docs/technical/testing.md` had no row for stage 2c** and
+   nothing noticed. D2-S4 adds it, but nothing prevents the next stage from
+   landing unrowed either. Same root as Note 2 and the same candidate fix.
 
 ## Open Questions
 
