@@ -569,6 +569,14 @@ Rigor `low`, so the gate carries the review. Every regression scenario's failing
 output was displayed before implementation and recorded in the commit that
 carried the tests: 10 tests, 6 assertion failures.
 
+**`sdd-artifact-lint.sh` exits non-zero at completion, on two findings that are
+not the same kind.** `test-map.md: 36 lines for 0 mappings` is the standing
+PRO-1010 detector fault, which scores zero against every test map in this
+project; `requirements.md: 236 lines (budget 150)` is a genuine overage against a
+check that works, knowingly accepted by the owner and annotated on PRO-1010
+rather than repeated here. The lint is not part of the merge condition
+(`git-workflow.md` §3), so neither blocks the merge.
+
 ### The reading this spec nearly shipped on
 
 **A gate reading is a statement about a tree, and this spec nearly settled itself
