@@ -336,7 +336,22 @@ finding invocations would report the shipped script as complete forever.
 
 - **D2-S4**: THE SYSTEM SHALL give every stage the gate runs a row in the stage
   table in `docs/technical/testing.md`, including the `docs (rustdoc)` stage that
-  has none today.
+  has none today, and SHALL NOT fold into one row two stages the gate reports
+  separately.
+
+**D2-S4's second half was measured after this spec was stamped, by the owner
+rather than by the spec author, and it is worse than one missing row.** The gate
+reports **twelve** stages — format · lint + complexity · gpu-free · docs · size ·
+deps · sast · secrets · art (generated set not committed) · art (voxforge build) ·
+tests · coverage — and the table has **ten**. Row 9, "tests + coverage",
+conflates two stages the gate prints apart: a run says `ok: tests` and then
+`ok: coverage 93.85%`, and adds `tests (…)` or `coverage (…% < …%)` to the
+failure list separately. So the table under-reports by two, not one. Both halves
+are the same defect in the same table on the same read, and shipping a table
+still short by a row would be the half-fix this spec exists to stop. The
+implement phase counted the gate side independently — from the script's own
+`Invoke-Stage` and `Write-Ok` calls rather than from the owner's run — and got
+the same twelve.
 
 **D2-S3 is the control.** A scan that graded every label as accurate would
 satisfy D2-S1 and D2-S2 against the shipped script and against any other.
@@ -380,6 +395,23 @@ exact defect at hand.
    would go red against a correct multi-line implementation, and the cheapest
    way to green it is to let the test dictate the script's formatting — which is
    backwards. Read the flag against the whole continued invocation.
+
+4. **Agreement is not enough: the three descriptions must enumerate.** Added
+   after approval, by the owner, and it is the `--ignore-run-fail` shape one
+   level up — *the cheapest way to satisfy the assertion degrades the artifact*.
+   D2-S2 as written asks the three descriptions to agree **with each other**, and
+   the cheapest way to satisfy that is to make all three vague: write "stages 1–3
+   only" in the banner, in the docstring and in `docs/technical/testing.md` and
+   they agree perfectly, while the banner has become *less* informative than it is
+   today. `docs/technical/testing.md:32` is what makes the trap live — unlike the
+   other two it is not flatly false but **ambiguous**, because that document's own
+   table numbers stages 1, 2, 2b and 3, so "stages 1–3" arguably already includes
+   the stage running the suites. The test is therefore written so mutual vagueness
+   cannot satisfy it: each of the three is graded against a **closed enumeration**
+   of what `-Quick` runs — format, lint, gpu-free **tests**, **docs**, size — and
+   `"stages 1-3 only"` is one of the control's inputs, graded as naming nothing.
+   The remedy is enumeration, never paraphrase. (`testing.md` §2, "an over-tight
+   assertion invites a real defect", read in its mirror image.)
 
 ---
 
@@ -476,6 +508,46 @@ the mechanism in each case, never to writing the residual down.
    noticed. D2-S4 adds the row; nothing prevents the next stage from landing
    unrowed. Same root as Note 2, folded into **PRO-1012** rather than filed
    separately.
+
+4. **The script's own `.DESCRIPTION` stage list was a fourth mirror, and the
+   implement phase corrected it.** Defect 2's table names three `-Quick` claims
+   and the document's stage table; it does not name the header block at
+   `scripts/sdd-gate.ps1:7-16`, which lists the gate's stages as 1 through 9 with
+   no 2b, no 2c, and `tests+cov` as one entry. **In scope, and the reasoning is
+   recorded rather than assumed**: it is the same defect — a list of the gate's
+   stages that under-reports the gate — in the file this spec is already
+   amending; it is *output*, since `Get-Help` prints it; and the stage split would
+   otherwise have left it describing a gate that no longer exists. Correcting
+   three mirrors and leaving a fourth is Defect 2's own root cause, repeated. No
+   behaviour changes and no gate surface is added. The recurrence check is still
+   **PRO-1012**.
+
+5. **`--ignore-run-fail` appears nowhere in the script, including in the warning
+   against it.** The spec forbids it "anywhere in the gate script" and the test
+   reads the raw text, so the `.DESCRIPTION` block describes the flag and points
+   at `docs/technical/testing.md` for its name and the measurement, rather than
+   carrying either. The document is where a reader looks anyway, and it now
+   carries the three-row table.
+
+6. **What the D1-S1/D1-S2 test does and does not catch, stated.** The fixture is
+   run through `cargo nextest run`, so an implementation carrying
+   `--ignore-run-fail` reddens it as `TheRunnerRefusedTheFlags` — nextest does
+   not accept an llvm-cov flag — rather than as the exit-0 verdict the spec
+   measured. It reddens either way, which is what the spec asks of a test
+   observing count and verdict together, and the exit-0 distinction is carried by
+   the reading's enumeration instead (D1-S7 tells `HidesTheFailureFromTheGate`
+   from `RunsEveryTestItWasGiven`). Running the fixture under
+   `cargo llvm-cov nextest` would close the last of the gap and was rejected: it
+   nests a coverage run inside the gate's own coverage run, on Windows, for no
+   falsifier the pair does not already provide.
+
+7. **`sdd-artifact-lint.sh` reports this folder red for two reasons that are not
+   this phase's to repair**, recorded so the complete phase is not surprised.
+   `test-map.md: 36 lines for 0 mappings` — the detector counts `→`/`->` and every
+   test map in `specs/archive/` uses a markdown table instead, so it counts zero
+   for all of them; that is **PRO-1010**, already Out of Scope above. And
+   `requirements.md: 236 lines (budget 150)`, which is the specify phase's
+   artifact and predates this phase.
 
 ## Open Questions
 
