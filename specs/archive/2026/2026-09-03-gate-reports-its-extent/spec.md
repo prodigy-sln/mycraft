@@ -1,7 +1,7 @@
 ---
 id: SPEC-034
 title: A red gate reports its own extent
-status: active
+status: implemented
 work-type: fix
 rigor: low
 branch: bugfix/PRO-994-gate-reports-its-extent
@@ -9,6 +9,7 @@ issue: PRO-994
 created: 2026-09-03
 updated: 2026-09-03
 approved: 2026-09-03
+completed: 2026-09-03
 author: spec-PRO-994
 ---
 
@@ -555,8 +556,9 @@ None.
 
 ## Validation
 
-**2026-09-03 — PASS.** `scripts/sdd-gate.ps1` exits 0 on tree
-`08b9ef20579148bec23c2926c350dcc0ca45ace9`, clean and unstashed: 13 stages all
+**2026-09-03 — PASS.** `scripts/sdd-gate.ps1` exits 0 at commit
+`08b9ef20579148bec23c2926c350dcc0ca45ace9` with an empty dirty list and an empty
+stash, which together identify the measured tree (`e8ed93e…`): 13 stages all
 `ok:`, `1757 tests run: 1757 passed (14 slow), 1 skipped`, lines 93.85%, regions
 92.4%. The count is bare rather than slashed, which is this spec's own subject —
 a complete run, not a cancelled one — and it is 1747 + 10, the ten regression
@@ -597,7 +599,10 @@ supposed to prove the defect fixed.
 ### What the re-run bought beyond the verdict
 
 The retaken log stamps `TREE=`, `DIRTY=[]` and `STASH=[]` into its own header
-before the gate's first stage. **That makes the reading date itself**, which is
+before the gate's first stage. (`TREE=` holds a commit rather than a tree object
+— a field naming something other than what it holds, which is Defect 2's own
+shape surviving into this spec's evidence. Recorded in
+`docs/technical/testing.md` with the correction for the next stamp.) **That makes the reading date itself**, which is
 strictly stronger than an external `git status` taken afterwards: an equality
 check performed later is a true statement about a *later* instant and cannot
 recover the tree the reading was taken on. Evidence carried inside the reading
