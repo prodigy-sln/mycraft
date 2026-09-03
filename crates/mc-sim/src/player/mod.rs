@@ -114,6 +114,25 @@ pub trait Targetable {
     fn is_targetable(&self, at: BlockPos) -> bool;
 }
 
+/// Whether a voxel blocks sight.
+///
+/// **A third narrow trait, and it exists for one question only: what the cell
+/// the eye is already inside does to a ray.** Every cell a ray *steps into* is
+/// judged by [`Targetable`] alone; the origin cell is judged by both, because a
+/// block you can see through is not what you are looking at when your own head
+/// is in it. Reading [`Solidity`] there would be the wrong question twice over —
+/// it is a fact about where a player may walk, and no player's eye is inside a
+/// block that stops them.
+///
+/// **Total**, by the same construction as [`Solidity`] and [`Targetable`]:
+/// every position has an answer, and everything outside the loaded world
+/// answers `false`, which is what makes an eye that has walked off the
+/// footprint see out of the cell it is in rather than into it.
+pub trait Occluding {
+    /// Whether the voxel at `at` blocks sight.
+    fn occludes(&self, at: BlockPos) -> bool;
+}
+
 /// What a voxel's volume does to something moving through it.
 ///
 /// Three independent declarations in one value, because a caller that could
@@ -207,6 +226,19 @@ pub trait Medium {
 pub trait Traversal: Solidity + Medium {}
 
 impl<T: Solidity + Medium + ?Sized> Traversal for T {}
+
+/// What the walk from an eye to what it is aiming at may ask of the world, and
+/// no more.
+///
+/// [`Solidity`] and [`Medium`] are deliberately absent, for the reason
+/// [`Traversal`] leaves [`Targetable`] out of itself: an aiming question and a
+/// collision question are declared independently by content, and a composite
+/// carrying both would hand each site the question it must never ask. The
+/// blanket impl means a caller writes nothing extra, and coercion only ever
+/// narrows — so the walk cannot reach a solidity view through this.
+pub trait Aiming: Targetable + Occluding {}
+
+impl<T: Targetable + Occluding + ?Sized> Aiming for T {}
 
 /// The camera the player's state implies.
 ///

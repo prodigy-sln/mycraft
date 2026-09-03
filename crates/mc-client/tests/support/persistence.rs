@@ -402,10 +402,7 @@ pub fn refusal(launched: &Launched) -> String {
 /// report a sink as a failed launch.
 fn shown_to_a_player(turned_away: &PreparationError) -> String {
     let mut sink = Vec::new();
-    match report(
-        &Ending::failed(turned_away, &turned_away.way_out()),
-        &mut sink,
-    ) {
+    match report(&Ending::failed(turned_away), &mut sink) {
         Ok(()) => String::from_utf8_lossy(&sink).into_owned(),
         Err(refused) => format!("what a player would be shown could not be written: {refused}"),
     }

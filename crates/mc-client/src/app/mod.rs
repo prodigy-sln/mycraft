@@ -36,14 +36,12 @@ use mc_core::hud::HudLayout;
 use mc_core::id::TextureKey;
 use mc_render::camera::{camera_view, waiting_view};
 use mc_render::geometry::scene::SceneGeometry;
-use mc_render::gpu::{FrameError, FrameRenderer, FrameSnapshot, RecordTarget, TerrainTextures};
+use mc_render::gpu::{FrameRenderer, FrameSnapshot, RecordTarget};
 use mc_render::hud::{HudFrame, held_swatch};
-use mc_render::pass::TerrainPassConfig;
 use mc_render::snapshot::{ScenePhase, TerrainSnapshot};
 use mc_render::surface::{
     FrameAction, ResizeAction, SurfaceErrorKind, SurfaceSize, resize_action, surface_error_action,
 };
-use mc_render::texture::sampler::TERRAIN_SAMPLER;
 use mc_render::time::clock::SystemFrameClock;
 use mc_render::window::{Ending, rendered};
 use mc_sim::reload::watching_shipped_content;
@@ -53,12 +51,14 @@ mod report;
 
 use crate::gpu_startup::Gpu;
 use crate::launch::{PreparationHandle, Starting, collect};
-use crate::notice;
+use crate::notice::{self, Notices};
 use crate::remesh::{Remesher, Retained};
 use crate::session::Session;
+
 use crate::session::reload::Remeshing;
 use crate::startup::{PreparationError, empty_hud, empty_scene};
-use crate::surface_setup::{SetupError, chosen_format, color_format, configuration_for};
+use crate::surface_setup::{SetupError, chosen_format, configuration_for, renderer_for};
+use report::SaidOnce;
 
 /// What a player is told when the re-mesh worker has gone.
 ///
@@ -112,19 +112,24 @@ pub struct App {
     /// The worker that turns an edit into a scene, once there is a world to
     /// edit. `None` until the preparation lands, exactly as the simulation is.
     remesher: Option<Remesher>,
-    /// The last frame error reported, so a fault that recurs every frame is
-    /// stated once instead of filling the terminal.
-    reported: Option<FrameError>,
-    /// The last re-mesh fault reported, for the same reason and separately: a
-    /// dropped frame and an edit that could not be shown are different faults,
-    /// and one recurring must not silence the other.
-    reported_remesh: Option<String>,
-    /// The last held block that drew no indicator, for the same reason again. It
-    /// recurs every frame for as long as that block is held, which is the whole
-    /// run.
-    reported_swatch: Option<String>,
-    /// The last content refusal printed, so a recurring one is said once.
-    reported_reload: Option<String>,
+    /// Where every non-fatal notice this client writes goes.
+    ///
+    /// Supplied by whoever started the run and held for the whole of it, so a
+    /// harness can read what a player would have read — and silence it by
+    /// supplying a sink that discards.
+    notices: Notices,
+    /// The dropped-frame line, so a fault that recurs every frame is stated once
+    /// instead of filling the terminal.
+    reported: SaidOnce,
+    /// The re-mesh line, for the same reason and separately: a dropped frame and
+    /// an edit that could not be shown are different faults, and one recurring
+    /// must not silence the other.
+    reported_remesh: SaidOnce,
+    /// The held-block line, for the same reason again. It recurs every frame for
+    /// as long as that block is held, which is the whole run.
+    reported_swatch: SaidOnce,
+    /// The content refusal, so a recurring one is said once.
+    reported_reload: SaidOnce,
 }
 
 impl App {
@@ -145,18 +150,8 @@ impl App {
         let format = chosen_format(&capabilities.formats)?;
         let configuration = configuration_for(&surface, &gpu, size, format)?;
         surface.configure(&gpu.device, &configuration);
-
-        // The supply is given once and held for the whole run, which is what
-        // makes a reload unable to lose it.
-        let renderer = FrameRenderer::new(
-            &gpu.device,
-            &gpu.queue,
-            &TerrainPassConfig::windowed(color_format(format)?),
-            &TerrainTextures {
-                supplied: &starting.texels,
-                sampler: TERRAIN_SAMPLER,
-            },
-        )?;
+        let renderer = renderer_for(&gpu, format, &starting.texels)?;
+        let notices = starting.notices;
 
         Ok(Self {
             gpu,
@@ -170,10 +165,11 @@ impl App {
             frame_clock: SystemFrameClock::started_now(),
             size,
             remesher: None,
-            reported: None,
-            reported_remesh: None,
-            reported_swatch: None,
-            reported_reload: None,
+            notices,
+            reported: SaidOnce::default(),
+            reported_remesh: SaidOnce::default(),
+            reported_swatch: SaidOnce::default(),
+            reported_reload: SaidOnce::default(),
         })
     }
 
@@ -198,7 +194,7 @@ impl App {
             return None;
         }
         if let Err(failure) = self.collect_preparation(session) {
-            return Some(Ending::failed(&failure, &failure.way_out()));
+            return Some(Ending::failed(&failure));
         }
         self.exchange_remesh(session);
         self.present(session)
@@ -221,15 +217,15 @@ impl App {
             .remesher
             .as_mut()
             .map(|remesher| session.collect_remesh(remesher));
+        // What to say is `said_about`'s decision and never this path's: the words a
+        // player reads when meshing stops are only assertable because nothing
+        // decides them inside a redraw. A worker that is gone is said through the
+        // same dedup a re-mesh fault uses, since it recurs on every frame left in
+        // the run and is the one absence waiting will not repair.
         match collected {
             Some(Remeshing::Show(scene)) => self.show(scene),
-            Some(Remeshing::Report(failure)) => self.report_remesh(&rendered(&failure)),
-            // Said through the same dedup a re-mesh fault uses: it recurs every frame
-            // and it is the one absence waiting will not repair.
-            Some(Remeshing::WorkerGone) => self.report_remesh(WORKER_GONE),
-            // A discarded batch's sections went back inside the collect, so there
-            // is nothing here to remember and nothing to forget.
-            Some(Remeshing::Discarded | Remeshing::NothingYet) | None => {}
+            Some(other) => self.say_about(&other),
+            None => {}
         }
         self.submit_remesh(session);
     }
@@ -454,7 +450,7 @@ impl App {
             .upload_textures(&self.gpu.queue, &prepared.resolution)?;
         let scene = Arc::new(prepared.scene);
         self.renderer.upload_scene(&self.gpu.queue, &scene)?;
-        notice::say_entering(prepared.clearing);
+        notice::say_entering(prepared.clearing, &self.notices);
         session.attach_simulation(prepared.simulation, prepared.holding);
         // What makes the whole reload path reachable by the person it is for: the
         // root the launch was prepared from goes under watch, and the session

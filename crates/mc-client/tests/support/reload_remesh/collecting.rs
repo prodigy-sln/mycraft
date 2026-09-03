@@ -55,11 +55,23 @@
 //! fewer than 40 over twenty runs — that reaches the arm at all, and exactly one
 //! test on each loop is what turns that inversion red.
 //!
-//! [`Collected::TheWorkerIsGone`] and [`Handled::TheWorkerIsGone`] have **no witness
-//! at all**, and neither does [`Handled::Failed`]. Constructing a gone worker means
-//! panicking the worker thread, which is not worth manufacturing for a fixture arm —
-//! recorded rather than chased, so that a future reader counts the defences that
-//! exist and not the arms that merely look tested.
+//! [`Collected::TheWorkerIsGone`] and [`Handled::TheWorkerIsGone`] are **reached by
+//! nothing here**, and neither is [`Handled::Failed`]. Constructing a gone worker
+//! means panicking the worker thread, which is not worth manufacturing for a fixture
+//! arm — recorded rather than chased, so that a future reader counts the defences
+//! that exist and not the arms that merely look tested.
+//!
+//! **What has a witness elsewhere is the *wording*, and not the state.** An earlier
+//! version of this paragraph said these arms had "no witness at all", which was true
+//! of both halves until PRO-949 and is now true of one. `report::said_about` decides
+//! what a player is told about a [`Remeshing`] verdict as a function of that verdict
+//! instead of inside a redraw, so `crates/mc-client/src/app/report_test.rs` asserts
+//! the sentence a stopped worker gets them: the `WorkerGone` arm answering nothing
+//! reddens exactly that reading. Nothing has moved on the state — no fixture can hold
+//! a live [`Remesher`] whose worker has died, because both ends of the channel are
+//! the `Remesher` itself — so these two arms stay unreached and the wiring that would
+//! carry a real occurrence to that sentence stays unasserted. Half-closed, not
+//! closed.
 //!
 //! What the unbounded wait costs is that a worker which never answers *and* never
 //! dies wedges the run rather than reddening it. A panicking worker does not: its

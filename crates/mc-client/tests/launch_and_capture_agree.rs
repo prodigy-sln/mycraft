@@ -51,6 +51,7 @@
 mod handed;
 
 use mc_client::launch::{PreparedLaunch, prepare_launch};
+use mc_client::notice::Notices;
 use mc_client::startup::{PreparationError, PreparedScene, prepare_scene};
 use mc_render::geometry::scene::SceneGeometry;
 use mc_world::persistence::{Acceptance, SavedPlayer};
@@ -86,7 +87,12 @@ fn a_launch_with_no_save_hands_over_the_geometry_the_capture_path_packs() -> Tes
     let content = shipped_content()?;
     let nowhere = TempDir::new()?;
 
-    let launched = prepare_launch(&content, &where_no_save_is(&nowhere), ACCEPTING);
+    let launched = prepare_launch(
+        &content,
+        &where_no_save_is(&nowhere),
+        ACCEPTING,
+        &Notices::discarding(),
+    );
     let captured = prepare_scene(&content);
 
     assert_eq!(
@@ -108,8 +114,13 @@ fn a_save_that_changes_nothing_hands_over_the_geometry_a_launch_with_no_save_han
     let nowhere = TempDir::new()?;
     let saved = resumed(&content, RECORDED_PLAYER, generated_blocks)?;
 
-    let resuming = prepare_launch(&content, &saved.save(), ACCEPTING);
-    let starting_fresh = prepare_launch(&content, &where_no_save_is(&nowhere), ACCEPTING);
+    let resuming = prepare_launch(&content, &saved.save(), ACCEPTING, &Notices::discarding());
+    let starting_fresh = prepare_launch(
+        &content,
+        &where_no_save_is(&nowhere),
+        ACCEPTING,
+        &Notices::discarding(),
+    );
 
     assert_eq!(
         (

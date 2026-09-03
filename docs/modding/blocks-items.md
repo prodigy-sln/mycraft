@@ -148,10 +148,11 @@ return {
   you wrote for `solid`. This is the field that lets a block be seen without
   stopping anybody, and the field that lets a block stop somebody without being
   seen.
-- **`occludes`** — does this block hide the face of a neighbour that meets it.
-  Absent means whatever you wrote for `solid`. Separate from `drawn` because a
-  block may be seen *and* let you see what is behind it, which is the whole of
-  what makes water look like water.
+- **`occludes`** — does this block hide the face of a neighbour that meets it,
+  and does it stop the swing of a player standing *inside* it. Absent means
+  whatever you wrote for `solid`. Separate from `drawn` because a block may be
+  seen *and* let you see what is behind it, which is the whole of what makes
+  water look like water.
 - **`targetable`** — can a swing find this block. Absent means whatever you wrote
   for `solid`. Whether the block then yields to that swing is `breakable`; this
   field decides only whether the swing arrives.
@@ -387,8 +388,11 @@ it**, and both answers are ordinary:
   [`voxel-models.md`](voxel-models.md) is the whole of how, end to end.
 - **A key nothing has baked** draws a **generated stand-in**: a two-colour
   pattern derived from the key's own spelling, deterministic and deliberately
-  implausible. This is what your first block draws, it is never a refusal, and
-  the client says so on startup so it does not read as something you did wrong.
+  implausible. This is what your first block draws and it is never a refusal.
+  **The launch names it** — every uncovered key, ascending, on the error stream —
+  so it does not read as something you did wrong and you do not have to spot the
+  checkerboard yourself. A launch covering every declared key says nothing at all.
+  [`voxel-models.md`](voxel-models.md) has the line and what to do about it.
 
 The fallback is **per key**, not per set. One key baked and one not, in the same
 content root, gives you one block drawing its art and its neighbour drawing a
@@ -611,11 +615,34 @@ you can declare, see, walk through and break.
 - **`drawn`** decides whether the mesher emits any face for your block. A block
   that is drawn and not solid is visible and walked through; one that is solid
   and not drawn stops you and is never seen.
-- **`occludes`** decides whether your block hides the face of a neighbour that
-  meets it, so `occludes = false` is what lets you see the block behind.
+- **`occludes`** decides two things. It decides whether your block hides the face
+  of a neighbour that meets it, so `occludes = false` is what lets you see the
+  block behind. It also decides what happens to the swing of a player whose eye
+  is **inside** your block: a block that can be seen through is passed over, and
+  one that cannot is what that player is aiming at.
 - **`targetable`** decides whether the walk a swing travels stops at your block.
   A ray stops at the first cell whose block declares it, and passes straight
   through everything else — including a block that stops a player.
+
+**The cell a player's eye is inside is judged by both fields, and every other
+cell by `targetable` alone.** That distinction only exists for a block somebody
+can stand inside, which means a block declaring `solid = false` — and it only
+matters for one that is also `targetable`. Water is exactly that block, and
+getting it wrong is what made a swimmer unable to interact with anything: while
+the eye's own cell was judged by `targetable` alone, every swing a swimmer made
+found the water their head was in, and every placement was refused for want of a
+face to build against.
+
+So if you declare a block a player can walk into and aim at:
+
+- `occludes = false` — standing in it, they aim **through** it at whatever is
+  beyond. This is water, mist, a force field.
+- `occludes = true` — standing in it, it **is** what they are aiming at, reported
+  at no distance and with no face, so a swing can break it and a placement is
+  refused for want of a face. This is a block that fills your view from inside.
+
+Neither is a fault and neither prints anything; they are two designs and the
+field is how you say which one you meant.
 
 **`targetable` is what makes `breakable` mean anything.** A swing has to arrive
 before a block can refuse it, so a block declaring `targetable = false` is a block

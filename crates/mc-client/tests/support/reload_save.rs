@@ -227,7 +227,7 @@ pub fn how_it_went(launched: &Launched) -> String {
     let Err(turned_away) = launched else {
         return STARTED.to_owned();
     };
-    reported(&Ending::failed(turned_away, &turned_away.way_out())).unwrap_or_else(|refused| {
+    reported(&Ending::failed(turned_away)).unwrap_or_else(|refused| {
         format!("what a player would be shown could not be written: {refused}")
     })
 }

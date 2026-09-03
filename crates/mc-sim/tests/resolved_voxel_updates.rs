@@ -43,7 +43,7 @@
 
 mod support;
 
-use mc_sim::player::{BlockPos, Solidity, Targetable};
+use mc_sim::player::{BlockPos, Occluding, Solidity, Targetable};
 use mc_sim::replay::{Extent, MediumIndex, ResolvedVoxels, VoxelAnswers};
 use mc_world::world::WorldPos;
 
@@ -73,28 +73,35 @@ const RAISED: WorldPos = WorldPos { x: 1, y: 3, z: 2 };
 /// A position inside the slab, which does both until it is written.
 const HOLLOWED: WorldPos = WorldPos { x: 3, y: 0, z: 1 };
 
-/// What one voxel answers about the two questions the tick asks of it: whether
-/// the player is stopped by it, and whether a ray may stop at it.
-type Answers = (bool, bool);
+/// What one voxel answers about the three `bool` questions asked of it: whether
+/// the player is stopped by it, whether a ray may stop at it, and whether it
+/// stops sight.
+type Answers = (bool, bool, bool);
 
-/// What both positions are settled as: an obstacle no ray stops at.
+/// What both positions are settled as: an obstacle that blocks sight and that no
+/// ray stops at.
 ///
-/// One pair written at two positions that started from different ones, so that
-/// exactly one of the two views may move at each and they are not the same view.
-const AN_OBSTACLE_NO_RAY_STOPS_AT: Answers = (true, false);
+/// One triple written at two positions that started from different ones, so that
+/// each of the three views is the only one that may move at one of them, and
+/// they are not the same view. The occlusion answer is what the position above
+/// the slab moves on — it started answering that nothing is there — so a write
+/// that settled two views and dropped the third lands that row on the wrong
+/// triple rather than going unnoticed.
+const AN_OBSTACLE_NO_RAY_STOPS_AT: Answers = (true, false, true);
 
 /// A pair of answers as the one value a write takes, carrying the medium every
 /// block this fixture's registry already answers.
 ///
-/// The two views' answers stay a *pair* declared once and named here, rather
-/// than three fields spelled at the call site: what this file is about is that
-/// the same pair reaches two positions that started from different ones, and a
+/// The three views' answers stay a *triple* declared once and named here, rather
+/// than fields spelled at the call site: what this file is about is that the
+/// same triple reaches two positions that started from different ones, and a
 /// second literal at the second position is a second place for that to drift.
 const fn settling(answers: Answers) -> VoxelAnswers {
-    let (solid, targetable) = answers;
+    let (solid, targetable, occludes) = answers;
     VoxelAnswers {
         solid,
         targetable,
+        occludes,
         medium: MediumIndex::NOTHING,
     }
 }
@@ -133,10 +140,14 @@ fn setting_one_voxels_answers_changes_that_voxel_and_no_other() -> TestResult {
     Ok(())
 }
 
-/// What the two views say about `at`: whether the player is stopped by it, and
-/// whether a ray may stop at it.
+/// What the three `bool` views say about `at`: whether the player is stopped by
+/// it, whether a ray may stop at it, and whether it stops sight.
 fn answers(resolved: &ResolvedVoxels, at: BlockPos) -> Answers {
-    (resolved.is_solid(at), resolved.is_targetable(at))
+    (
+        resolved.is_solid(at),
+        resolved.is_targetable(at),
+        resolved.occludes(at),
+    )
 }
 
 /// Every position inside the declared volume, in the order the bitset numbers

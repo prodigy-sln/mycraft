@@ -62,6 +62,7 @@ use std::error::Error;
 use std::path::Path;
 
 use mc_client::launch::{PreparedLaunch, prepare_launch};
+use mc_client::notice::Notices;
 use mc_client::startup::PreparationError;
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
@@ -127,7 +128,12 @@ fn a_launch_resuming_a_save_draws_it_against_content_no_world_could_be_generated
     let refused_generation = why_this_root_cannot_generate(root.path())?;
     let saved = resumed(root.path(), RECORDED_PLAYER, a_world_standing_the_beacon)?;
 
-    let launched = prepare_launch(root.path(), &saved.save(), ACCEPTING);
+    let launched = prepare_launch(
+        root.path(),
+        &saved.save(),
+        ACCEPTING,
+        &Notices::discarding(),
+    );
 
     assert_eq!(
         (
@@ -152,7 +158,12 @@ fn a_launch_with_no_save_refuses_naming_the_block_the_generator_could_not_place(
     let refused_generation = why_this_root_cannot_generate(root.path())?;
     let nowhere = TempDir::new()?;
 
-    let launched = prepare_launch(root.path(), &where_no_save_is(&nowhere), ACCEPTING);
+    let launched = prepare_launch(
+        root.path(),
+        &where_no_save_is(&nowhere),
+        ACCEPTING,
+        &Notices::discarding(),
+    );
 
     let answer = refusal(&launched)?;
     assert_eq!(
@@ -269,6 +280,6 @@ fn quads_in(launched: &Launched, origin: [i32; 3]) -> Result<Option<u32>, String
 fn refusal(launched: &Launched) -> Result<String, Box<dyn Error>> {
     match launched {
         Ok(_) => Ok("it prepared a launch".to_owned()),
-        Err(turned_away) => support::reported(&Ending::failed(turned_away, &turned_away.way_out())),
+        Err(turned_away) => support::reported(&Ending::failed(turned_away)),
     }
 }

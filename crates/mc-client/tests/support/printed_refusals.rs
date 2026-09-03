@@ -41,8 +41,9 @@
 //! # The notices a launch writes are next door, and the split is by responsibility
 //!
 //! A launch also writes lines that are **not** refusals: what entry did about a
-//! player it found inside solid rock, and which of a save's blocks no longer behave
-//! as it recorded them. Those live in `support/launch_notices.rs` and are appended
+//! player it found inside solid rock, which of a save's blocks no longer behave
+//! as it recorded them, and which declared texture keys the built set left
+//! uncovered. Those live in `support/launch_notices.rs` and are appended
 //! to the set below. The recogniser in `documented_refusals.rs` does not know the
 //! difference and must not — it matches the prefix the reporting writes — so a page
 //! quoting one of them is making exactly the promise a page quoting a refusal
@@ -61,6 +62,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use mc_client::session::reload::CONTENT_NOT_TAKEN_UP;
+use mc_client::startup::PreparationError;
 use mc_render::window::Ending;
 
 use crate::input::InputHarness;
@@ -297,8 +299,12 @@ fn over_the_layer_budget() -> Result<String, Box<dyn Error>> {
     let refused = mc_sim::content::load(root.path(), &spent)
         .err()
         .ok_or(THE_BUDGET_WAS_NOT_SPENT)?;
+    // Reported as the client's own refusal rather than as `mc-sim`'s, which is
+    // what the client does: a way out is a property of a *reported* failure, and
+    // only `PreparationError` is one. `Layers` is `#[error(transparent)]`, so what
+    // a person reads is unchanged.
     Ok(normalised(&support::reported(&Ending::failed(
-        &refused, "",
+        &PreparationError::from(refused),
     ))?))
 }
 

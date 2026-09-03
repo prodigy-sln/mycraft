@@ -64,7 +64,7 @@ use mc_world::column::{ChunkColumn, ColumnCoordinate};
 use mc_world::section::{Contents, Section};
 use mc_world::world::{Extent, VoxelWorld, WorldError, WorldPos};
 
-use crate::player::{BlockPos, Medium, Solidity, Targetable, VoxelMedium};
+use crate::player::{BlockPos, Medium, Occluding, Solidity, Targetable, VoxelMedium};
 use crate::replay::prepare::{PrepareError, SectionQuads, mesh_world};
 use crate::replay::{ResolvedVoxels, VoxelAnswers};
 
@@ -190,7 +190,7 @@ impl World {
     /// reason the crate-visible `blocks` accessor does not have to become `pub`
     /// for one: what comes back is owned quads, which is a value rather than
     /// the store, so the claim that nothing outside this module can write any
-    /// of the three views is untouched.
+    /// of the four views is untouched.
     ///
     /// Takes no registry, because this world owns the one its blocks were
     /// resolved against and a second opinion about a name is exactly the
@@ -247,7 +247,7 @@ impl World {
     ///
     /// Every answer is settled *before* any write, so a name the registry does
     /// not know refuses without having changed anything — and the store and all
-    /// three views are then written from that one resolve. Deleting any of those
+    /// four views are then written from that one resolve. Deleting any of those
     /// lines is the only way to make the views disagree with the store, which is
     /// what makes a test that notices worth having.
     ///
@@ -278,6 +278,7 @@ impl World {
                 VoxelAnswers {
                     solid: declared.is_solid,
                     targetable: declared.targetable,
+                    occludes: declared.occludes,
                     medium: self.resolved.medium_index_of(declared),
                 }
             }
@@ -300,7 +301,7 @@ impl World {
     /// view to a later refresh would reopen the disagreement this module's
     /// header is about, and no oracle in the tree could see it.
     ///
-    /// **All three views are replaced wholesale rather than written bit by
+    /// **All four views are replaced wholesale rather than written bit by
     /// bit**, so there is no arrangement of this function in which one is
     /// carried over from the registry that has stopped serving. A reload that
     /// changed only what a swing may find, or only what a volume does to
@@ -394,6 +395,14 @@ impl Solidity for World {
 impl Targetable for World {
     fn is_targetable(&self, at: BlockPos) -> bool {
         self.resolved.is_targetable(at)
+    }
+}
+
+/// What blocks sight is the **fourth bitset**, and the walk reads it at the one
+/// cell it does not step into: the one the eye is already in.
+impl Occluding for World {
+    fn occludes(&self, at: BlockPos) -> bool {
+        self.resolved.occludes(at)
     }
 }
 

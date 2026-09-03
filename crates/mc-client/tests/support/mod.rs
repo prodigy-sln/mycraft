@@ -286,6 +286,6 @@ pub fn refusal_printed_over(root: &Path) -> Result<String, Box<dyn Error>> {
             root.display()
         )
         .into()),
-        Err(refused) => reported(&Ending::failed(&refused, "")),
+        Err(refused) => reported(&Ending::failed(&refused)),
     }
 }

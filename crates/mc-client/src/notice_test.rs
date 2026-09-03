@@ -43,14 +43,34 @@
 //! sentence is that field arriving in the text. A hardcoded `8` satisfies that
 //! scenario and is caught by `both_refusals_name_the_reach…`, which asks with a
 //! reach of 3.
+//!
+//! # The stand-in readings, and why the empty answer is the one that matters
+//!
+//! `stand_ins` replaced a constant printed on every launch before the content
+//! root had been read: it named no key and read identically whether every
+//! declared key was covered or none was. So the reading that says the sentence is
+//! *absent* for a fully covered set is the one carrying the defect, and it is
+//! worth nothing beside a composer that never speaks — which is why the readings
+//! naming keys sit in the same file. An over-eager composer naming every declared
+//! key fails all four; an inert one fails the two that name keys.
+//!
+//! The fourth reading is the one none of the three scenarios reach: a key the set
+//! covers that no block declares. `declared.difference(covered)` passes it and
+//! `symmetric_difference` names it, and the three scenario readings above are
+//! green for both.
 
+use std::collections::BTreeSet;
 use std::error::Error;
 
 use glam::Vec3;
-use mc_core::id::BlockName;
+use mc_core::id::{BlockName, TextureKey};
 use mc_sim::world::Clearing;
 
-use super::{changed_blocks, entering, reloading};
+use super::recording::Recorder;
+use super::{
+    changed_blocks, entering, reloading, say_changed_blocks, say_entering, say_reloading,
+    say_stand_ins, stand_ins,
+};
 
 /// What the readings that parse a block name propagate with `?`.
 ///
@@ -260,4 +280,188 @@ fn one_changed_block_is_told_in_the_singular() -> TestResult {
          catches"
     );
     Ok(())
+}
+
+/// The keys `written` names, as the set a launch compares.
+///
+/// # Errors
+///
+/// Returns the parse failure of a fixture key that is not a namespaced id.
+fn keys(written: &[&str]) -> Result<BTreeSet<TextureKey>, Box<dyn Error>> {
+    written
+        .iter()
+        .map(|key| TextureKey::parse(key).map_err(Into::into))
+        .collect()
+}
+
+/// A launch whose built set covers everything says nothing at all, which is the
+/// half the constant this replaces got wrong.
+#[test]
+fn a_built_set_covering_every_declared_key_composes_no_line() -> TestResult {
+    let declared = keys(&["base:dirt", "base:stone", "base:water"])?;
+
+    assert_eq!(
+        stand_ins(&declared, &declared),
+        None,
+        "every key content declared has baked art and draws it, so there is nothing anybody can \
+         act on and a line here would be on every player's terminal on every run — which is \
+         exactly what the constant this replaces was. A composer that names the declared keys \
+         without consulting the built set prints all three"
+    );
+    Ok(())
+}
+
+/// Three uncovered names beside one that is covered, asked out of order.
+///
+/// Three is where a fold that dropped the last name, left a trailing separator or
+/// kept the order it was asked in stops being invisible, and the covered key is
+/// what keeps "name every declared key" from reading correctly.
+#[test]
+fn every_key_the_built_set_left_uncovered_is_named_in_ascending_order() -> TestResult {
+    let declared = keys(&["mod:tin", "mod:copper", "mod:iron", "mod:zinc"])?;
+    let covered = keys(&["mod:iron"])?;
+
+    assert_eq!(
+        stand_ins(&declared, &covered).as_deref(),
+        Some(
+            "mycraft: `mod:copper`, `mod:tin`, `mod:zinc` draw generated stand-ins because \
+             nothing has baked them, and that is not a failure"
+        ),
+        "a mod author has to go and bake each of these, so each has to be named — a bounded list \
+         is one they cannot act on, which is `changed_blocks`'s rule on reasoning that applies \
+         here word for word. `mod:iron` has art and is not among them"
+    );
+    Ok(())
+}
+
+/// The control: a key the set covers is never named, and the singular is the
+/// case a mod author's first block is in.
+#[test]
+fn a_key_the_built_set_covers_is_not_named_among_the_stand_ins() -> TestResult {
+    let declared = keys(&["mod:copper", "mod:iron"])?;
+    let covered = keys(&["mod:iron"])?;
+
+    assert_eq!(
+        stand_ins(&declared, &covered).as_deref(),
+        Some(
+            "mycraft: `mod:copper` draws a generated stand-in because nothing has baked it, and \
+             that is not a failure"
+        ),
+        "`mod:iron` has baked art and draws it, so naming it would send an author looking for a \
+         file that is already there. A composer naming every declared key reports both and reads \
+         perfectly well while doing it, which is why this reading exists"
+    );
+    Ok(())
+}
+
+/// A set covering a key nothing declares is not a stand-in and is not anybody's
+/// business.
+///
+/// The reading none of the three scenarios reach: `symmetric_difference` in place
+/// of `difference` names `mod:spare` here and satisfies all three of them.
+#[test]
+fn a_covered_key_no_block_declares_is_not_named_either() -> TestResult {
+    let declared = keys(&["mod:copper"])?;
+    let covered = keys(&["mod:copper", "mod:spare"])?;
+
+    assert_eq!(
+        stand_ins(&declared, &covered),
+        None,
+        "the line is about keys that draw a stand-in, and a key no block declares draws nothing \
+         at all. Naming it would send an author looking for the block that uses it, and there is \
+         none"
+    );
+    Ok(())
+}
+
+/// What a caller who supplied a sink reads back, exactly.
+///
+/// **The point of the sink is that this is answerable at all.** Every one of
+/// these lines went to the process error stream by name, so a harness could not
+/// read one, a caller could not route one elsewhere, and nothing could silence
+/// them. Four of the crate's nine are reachable by a direct call and are asserted
+/// here; `tests/no_notice_names_the_error_stream.rs` covers all nine, including
+/// the five that need a window.
+#[test]
+fn every_notice_a_caller_asks_for_is_read_back_off_the_sink_they_supplied() -> TestResult {
+    let (recorder, notices) = Recorder::listening();
+
+    say_entering(Clearing::MovedTo(Vec3::new(12.5, 10.0, 12.5)), &notices);
+    say_reloading(Clearing::NoClearSpaceWithin { blocks: 8 }, &notices);
+    say_changed_blocks(&[BlockName::parse("mod:copper")?], &notices);
+    say_stand_ins(&keys(&["mod:tin"])?, &BTreeSet::new(), &notices);
+
+    assert_eq!(
+        recorder.said(),
+        "mycraft: you would have entered the world inside solid blocks, so you were moved to \
+         (12.5, 10, 12.5)\n\
+         mycraft: the reload made your cell solid and nothing within 8 blocks is clear, so you \
+         were left where you were\n\
+         mycraft: `mod:copper` no longer behaves as it did when this world was saved, and it was \
+         loaded anyway\n\
+         mycraft: `mod:tin` draws a generated stand-in because nothing has baked it, and that is \
+         not a failure\n",
+        "this is the whole capability the sink exists for: a caller hands one in and reads back \
+         exactly what a person at the terminal would have read, in the order it was said. Four \
+         lines, four calls, nothing else"
+    );
+    Ok(())
+}
+
+/// The control: a notice whose composer answered `None` writes nothing.
+///
+/// **It carries a line that *is* said**, which is what keeps it from passing for
+/// the wrong reason. An implementation that wrote nothing at all satisfies "these
+/// three said nothing" perfectly well, and this reading rejects it because the
+/// fourth call is missing from the comparison. One that dropped the `if let Some`
+/// and wrote unconditionally fails on the three empty ones.
+#[test]
+fn a_notice_with_nothing_to_say_puts_nothing_on_the_sink() -> TestResult {
+    let (recorder, notices) = Recorder::listening();
+    let covered = keys(&["base:dirt"])?;
+
+    say_entering(Clearing::Unneeded, &notices);
+    say_reloading(Clearing::Unneeded, &notices);
+    say_stand_ins(&covered, &covered, &notices);
+    say_changed_blocks(&[BlockName::parse("mod:copper")?], &notices);
+
+    assert_eq!(
+        recorder.said(),
+        "mycraft: `mod:copper` no longer behaves as it did when this world was saved, and it was \
+         loaded anyway\n",
+        "three of these four had nothing to say and the fourth did, so the sink holds one line. \
+         Every ordinary launch takes the first three paths, and a client that wrote on them would \
+         put three lines on every player's terminal on every run"
+    );
+    Ok(())
+}
+
+/// A panic while the sink is held must not silence every later notice.
+///
+/// **This is the spec's own defect one level up.** A `Mutex` guarding a byte sink
+/// has no invariant a panic can corrupt, so treating a poisoned lock as fatal
+/// would mean one unrelated panic stops the client telling anybody anything —
+/// which is exactly the failure mode the sink was introduced to end.
+#[test]
+fn a_notice_is_still_said_after_a_panic_poisoned_the_sink() {
+    let (recorder, notices) = Recorder::listening();
+    let held = notices.clone();
+    let panicked = std::thread::spawn(move || {
+        // A panic this project's lints permit. `panic!`, `panic_any`, `unwrap`,
+        // `expect` and slice indexing are all denied workspace-wide, and this
+        // reading needs a real panic *while the lock is held* — that is what
+        // poisons it, and a poisoned lock is the whole subject.
+        held.with(|_| Vec::<u8>::new().remove(0));
+    })
+    .join();
+
+    notices.say("mycraft: said after the poisoning");
+
+    assert_eq!(
+        (panicked.is_err(), recorder.said()),
+        (true, "mycraft: said after the poisoning\n".to_owned()),
+        "the first element is the premise: a lock nobody poisoned would make this reading pass \
+         about nothing. A client that propagated the poisoning would go quiet for the rest of the \
+         run over a panic that had nothing to do with its sink"
+    );
 }

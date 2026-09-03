@@ -15,15 +15,33 @@
 //! and grades it through the process boundary: the real streams and the real exit
 //! status.
 //!
-//! **Three of the four readings need no device and no display server**, which is
+//! **Running the child lives in `support/shipped_child.rs` and grading it lives
+//! here.** The running is what grows — a second notice to wait for, a third
+//! argument to pass — and the grading is the guard, so the split follows that seam
+//! rather than a line count. Everything about *why* a reading is a subprocess at
+//! all stays below; everything about how a child is spawned, bounded and read
+//! stays there.
+//!
+//! **Four of the five readings need no device and no display server**, which is
 //! what makes them cheap enough to have. `run` asks for the content root first and
 //! returns on that refusal before it spawns the preparation and before it opens a
-//! device; and the changed-blocks *notice* is written from the preparation worker,
-//! above any device, so a bounded read of the stream catches it either way.
+//! device; and both *notices* — the changed blocks, and the keys nothing baked —
+//! are written from the preparation worker, above any device, so a bounded read of
+//! the stream catches them either way.
 //!
-//! **The fourth needs one, and the reason is structural rather than incidental** —
+//! **The fifth needs one, and the reason is structural rather than incidental** —
 //! see "The refusing side" below. It is called out here so nobody reads this file's
 //! old promise of a device-free suite and takes the new reading for a mistake.
+//!
+//! # The stand-in reading is the same mechanism as the changed-blocks one
+//!
+//! It exists for the same reason and its hole was measured the same way: with the
+//! `say_stand_ins` call deleted from `spawn_preparation`, **639 of 639 stayed
+//! green**. Every other reading of that line — `src/notice_test.rs` and
+//! `tests/uncovered_keys_are_named_at_launch.rs` alike — reaches the composer,
+//! which is agreement between two copies of one decision. Its fixture is the
+//! shipped content root with one block added declaring a key no manifest bakes,
+//! and no save, so the only notice on the stream is the one it waits for.
 //!
 //! # What it does not witness, and this must not be over-read
 //!
@@ -86,30 +104,26 @@
 //!   emits it. `docs/technical/testing.md` recorded that line as uncovered, and this
 //!   is what changed it.
 
+#[path = "support/shipped_child.rs"]
+mod shipped_child;
+
 use std::error::Error;
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
-use std::time::{Duration, Instant};
+use std::process::Command;
 
 use mc_client::startup::PreparationError;
 use mc_core::id::BlockName;
-use mc_render::window::rendered;
+use mc_render::window::{Reported, rendered};
 use mc_sim::persistence::LaunchError;
 use mc_world::persistence::LoadError;
 use tempfile::TempDir;
 
-type TestResult = Result<(), Box<dyn Error>>;
+use shipped_child::{
+    Ended, Exited, PATIENCE, Said, exit_of, the_line_the_binary_wrote, what_the_binary_said,
+};
 
-/// How long the child is given to say the line before the reading gives up.
-///
-/// Generous against its real cost — the child reads four block declarations and a
-/// 65 KB save before it says anything — because this bound exists to turn a
-/// missing line into a failure rather than to measure anything. A run that wedges
-/// gets blamed on the machine; a run that fails names the defect.
-const PATIENCE: Duration = Duration::from_secs(20);
+type TestResult = Result<(), Box<dyn Error>>;
 
 /// The clause the line carries whatever blocks it names, and so what the reading
 /// below waits for on the stream.
@@ -154,27 +168,33 @@ const SAVE: [&str; 2] = ["saves", "world.mcw"];
 /// fold goes over has grown since it was written.
 const THE_CHANGED_BLOCKS: [&str; 4] = ["base:dirt", "base:grass", "base:stone", "base:water"];
 
+/// The clause the stand-in line carries however many keys it names, and so what
+/// the reading below waits for.
+///
+/// Clear of the verb for [`THE_CLAUSE`]'s reason: the line reads `draws a
+/// generated stand-in` for one key and `draw generated stand-ins` for more than
+/// one, so a fragment reaching across either would wait forever on the other.
+const A_STAND_IN: &str = "generated stand-in";
+
+/// A block declaring a texture key no manifest bakes, and the file it is written
+/// into under the copied content root.
+const UNDRAWN_FILE: &str = "undrawn.luau";
+const UNDRAWN_DECLARATION: &str = "return {\n\tname = \"example:undrawn\",\n\ttexture = \"example:undrawn\",\n\tsolid = true,\n}\n";
+
+/// The whole line the child has to write for that root.
+///
+/// Written out rather than composed from the client's own pieces, on
+/// [`NAMES_ALL_FOUR`]'s rule. The singular clause, because one added block is a
+/// mod author's first block and is the case the line exists for.
+const NAMES_THE_UNDRAWN_KEY: &str = "mycraft: `example:undrawn` draws a generated stand-in because \
+                                     nothing has baked it, and that is not a failure";
+
 /// What a player types to have such a save refused rather than loaded.
 ///
 /// Spelled out rather than read from the client, because what is under test here is
 /// whether the *process* honours this exact text — a reading that took the client's
 /// own constant would agree with a binary that had quietly changed it.
 const REFUSE_CHANGED_BLOCKS: &str = "--refuse-changed-blocks";
-
-/// How a subprocess ended.
-///
-/// Three-valued rather than a boolean: a process killed by a signal carries no
-/// status at all, and that must not read as "it refused".
-#[derive(Debug, PartialEq, Eq)]
-enum Exited {
-    /// Successfully.
-    Zero,
-    /// With a failing status, whichever one — the mapping from ending to status
-    /// is graded where it lives and is not this test's subject.
-    NonZero,
-    /// Carrying no status at all.
-    WithoutACode,
-}
 
 #[test]
 fn the_shipped_binary_started_away_from_its_content_says_why_on_its_error_stream() -> TestResult {
@@ -202,12 +222,15 @@ fn the_shipped_binary_started_away_from_its_content_says_why_on_its_error_stream
             printed.contains(&refusal),
             printed.is_empty()
         ),
-        (expected.as_str(), Exited::NonZero, false, false),
+        (expected.as_str(), Exited::NonZero, false, true),
         "the shipped binary has to reach the reporting, write the whole refusal and nothing else \
          to the stream a mod author reads refusals on, and end with a status a shell can act on. \
          A silent error stream is also what a binary that never reported produces, and a refusal \
          on standard output is one a person piping the client's output past a pager would lose. \
-         What it printed was:\n{printed}"
+         Standard output is now empty on every path — the palette notice that used to fill it \
+         named no key and printed whether or not one was uncovered — and the exact error stream \
+         beside it is what says both streams were captured at all, so the emptiness is a reading \
+         and not a broken pipe. What it printed was:\n{printed}"
     );
     Ok(())
 }
@@ -217,7 +240,7 @@ fn the_shipped_binary_over_a_save_whose_blocks_behave_differently_names_them_on_
 -> TestResult {
     let game = a_game_directory_holding_the_older_save()?;
 
-    let (found, everything) = the_line_the_binary_wrote(game.path())?;
+    let (found, everything) = the_line_the_binary_wrote(game.path(), THE_CLAUSE)?;
 
     assert_eq!(
         found.as_deref(),
@@ -233,12 +256,34 @@ fn the_shipped_binary_over_a_save_whose_blocks_behave_differently_names_them_on_
 }
 
 #[test]
+fn the_shipped_binary_over_a_root_declaring_an_unbaked_key_names_it_on_its_error_stream()
+-> TestResult {
+    let game = a_game_directory_declaring_an_unbaked_key()?;
+
+    let (found, everything) = the_line_the_binary_wrote(game.path(), A_STAND_IN)?;
+
+    assert_eq!(
+        found.as_deref(),
+        Some(NAMES_THE_UNDRAWN_KEY),
+        "the sentence this replaces was a constant printed by `main` before the content root had \
+         been read: it named no key and printed whether or not anything was uncovered. Every other \
+         reading of the new line reaches the composer, so a client that composes it and never says \
+         it out loud leaves all of them green — measured, at 639 of 639. This is the only reading \
+         that can see the wire, and the shipped keys beside the added one all have art, so a line \
+         naming more than `example:undrawn` is the old sentence with names on it. Nothing matching \
+         `{A_STAND_IN}` inside {PATIENCE:?} is the client never saying it. What it wrote was:\n{}",
+        everything.join("\n")
+    );
+    Ok(())
+}
+
+#[test]
 fn neither_run_of_the_binary_touches_the_save_it_read() -> TestResult {
     let game = a_game_directory_holding_the_older_save()?;
     let save = game.path().join(SAVE.iter().collect::<PathBuf>());
     let before = fs::read(&save)?;
 
-    let _ = the_line_the_binary_wrote(game.path())?;
+    let _ = the_line_the_binary_wrote(game.path(), THE_CLAUSE)?;
     let after_the_killed_run = fs::read(&save)?;
     let _ = what_the_binary_said(game.path(), Some(REFUSE_CHANGED_BLOCKS))?;
 
@@ -343,84 +388,6 @@ fn answered_by(said: &Said, expected: &str) -> Answered {
     Answered::SaidSomethingElseAboutTheSave
 }
 
-/// Everything a run of the binary wrote to its error stream, and how it ended.
-#[derive(Debug)]
-struct Said {
-    text: String,
-    ended: Ended,
-}
-
-/// Whether a child finished inside the reading's patience.
-#[derive(Debug, PartialEq, Eq)]
-enum Ended {
-    /// It ended by itself, with this status.
-    OnItsOwn(Exited),
-    /// It was still running when the deadline passed, and was killed.
-    HadToBeKilled,
-}
-
-/// Runs the built client in `game`, optionally with `argument`, and reads its error
-/// stream until the child ends or [`PATIENCE`] runs out.
-///
-/// **Bounded rather than `output()`.** A child that ignores its argument never ends,
-/// and a wedged gate reports nothing about which mechanism broke.
-///
-/// # Errors
-///
-/// Returns an error if the child cannot be spawned, its error stream cannot be taken,
-/// or it cannot be waited on.
-fn what_the_binary_said(game: &Path, argument: Option<&str>) -> Result<Said, Box<dyn Error>> {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_mc-client"));
-    command
-        .current_dir(game)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-    if let Some(argument) = argument {
-        command.arg(argument);
-    }
-    let mut child = command.spawn()?;
-    let lines = lines_of(&mut child)?;
-    let (everything, ended_on_its_own) = until_it_stopped(&lines);
-    let ended = if ended_on_its_own {
-        Ended::OnItsOwn(exit_of(&child.wait()?))
-    } else {
-        drop(child.kill());
-        drop(child.wait());
-        Ended::HadToBeKilled
-    };
-    Ok(Said {
-        text: line_by_line(&everything),
-        ended,
-    })
-}
-
-/// Every line the child wrote, and whether its stream ended before the deadline.
-///
-/// A stream that ends is a child that has exited or closed it; a deadline that passes
-/// is a child still running. Those are different answers and the caller needs both.
-fn until_it_stopped(lines: &Receiver<String>) -> (Vec<String>, bool) {
-    let deadline = Instant::now() + PATIENCE;
-    let mut everything = Vec::new();
-    loop {
-        let left = deadline.saturating_duration_since(Instant::now());
-        match lines.recv_timeout(left) {
-            Ok(line) => everything.push(line),
-            Err(RecvTimeoutError::Disconnected) => return (everything, true),
-            Err(RecvTimeoutError::Timeout) => return (everything, false),
-        }
-    }
-}
-
-/// The lines put back together the way the child wrote them, so a whole-stream
-/// comparison is a comparison of what a person reads.
-fn line_by_line(everything: &[String]) -> String {
-    everything
-        .iter()
-        .map(|line| format!("{line}\n"))
-        .collect::<Vec<_>>()
-        .concat()
-}
-
 /// The whole line the child has to write, built by refusing the way the client
 /// refuses and rendering it through the shipped reporting.
 ///
@@ -486,81 +453,42 @@ fn a_game_directory_holding_the_older_save() -> Result<TempDir, Box<dyn Error>> 
     Ok(game)
 }
 
-/// Runs the built client in `game` and reads its error stream until it says the
-/// line, then kills it.
+/// A game directory whose content is the shipped root with one block added, and
+/// no save at all.
 ///
-/// Hands back what it was looking for and **everything it read on the way**, so a
-/// run that never said it fails with the child's own output in the message rather
-/// than with an empty absence.
+/// The added block declares a texture key no manifest bakes, which is a mod
+/// author's first block. **The built set beside it stays current** — it is judged
+/// by a fold over its own sources, and a block declaration is not one of them —
+/// so the launch proceeds and the key falls back to its generated texture rather
+/// than being refused.
 ///
-/// # Errors
-///
-/// Returns an error if the child cannot be spawned or its error stream cannot be
-/// taken.
-fn the_line_the_binary_wrote(game: &Path) -> Result<(Option<String>, Vec<String>), Box<dyn Error>> {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mc-client"))
-        .current_dir(game)
-        // Never read, so never piped: a pipe nobody drains is a child that blocks
-        // once it fills, which would be this reading's own hang.
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let lines = lines_of(&mut child)?;
-    let read = until_it_said(&lines, THE_CLAUSE);
-    // Killed rather than waited out: this launch succeeds, and a client whose
-    // launch succeeds goes on to open a window and take the pointer. Both answers
-    // are dropped deliberately — a child that has already gone is the outcome this
-    // asks for, and a failure to reap it says nothing about the line.
-    drop(child.kill());
-    drop(child.wait());
-    Ok(read)
-}
-
-/// The child's error stream, one line at a time, off a thread so that reading it
-/// can be given up on.
+/// No save, so this is a first launch and nothing is said about changed blocks:
+/// the only notice on the stream is the one under test.
 ///
 /// # Errors
 ///
-/// Returns an error if the stream was already taken.
-fn lines_of(child: &mut Child) -> Result<Receiver<String>, Box<dyn Error>> {
-    let stream = child
-        .stderr
-        .take()
-        .ok_or("the child was spawned without an error stream to read")?;
-    let (send, receive) = mpsc::channel();
-    // Stops of its own accord when the reader hangs up, which is what the `take_while`
-    // is: a send into a dropped receiver is the end of this thread's work.
-    std::thread::spawn(move || {
-        BufReader::new(stream)
-            .lines()
-            .map_while(Result::ok)
-            .take_while(|line| send.send(line.clone()).is_ok())
-            .for_each(drop);
-    });
-    Ok(receive)
-}
-
-/// Every line read until one contains `clause`, and that line where there was
-/// one.
-///
-/// Bounded by [`PATIENCE`] rather than by the stream ending, because the stream
-/// does not end: the child is still running when the line arrives.
-fn until_it_said(lines: &Receiver<String>, clause: &str) -> (Option<String>, Vec<String>) {
-    let deadline = Instant::now() + PATIENCE;
-    let mut everything = Vec::new();
-    let mut found = None;
-    while found.is_none() {
-        let left = deadline.saturating_duration_since(Instant::now());
-        let Ok(line) = lines.recv_timeout(left) else {
-            // Both ways of running out are the same answer: the line was not said.
-            // A stream that ended is a child that exited without saying it, and a
-            // deadline that passed is one still running and still silent.
-            return (None, everything);
-        };
-        found = line.contains(clause).then(|| line.clone());
-        everything.push(line);
+/// Returns an error if the repository root cannot be located, the copy fails, or
+/// the shipped root already declares that file — in which case the block under
+/// test would be the shipped content's rather than this fixture's.
+fn a_game_directory_declaring_an_unbaked_key() -> Result<TempDir, Box<dyn Error>> {
+    let game = TempDir::new()?;
+    let content = game.path().join(CONTENT.iter().collect::<PathBuf>());
+    copy_tree(
+        &repository_root()?.join(CONTENT.iter().collect::<PathBuf>()),
+        &content,
+    )?;
+    let declared = content.join("blocks").join(UNDRAWN_FILE);
+    if declared.exists() {
+        return Err(format!(
+            "this fixture adds `blocks/{UNDRAWN_FILE}` to a copy of the shipped content root, and \
+             the shipped root already declares it. What it would build is a root whose block came \
+             from the shipped content rather than from here, and the key this reading is about \
+             would be one nobody here wrote"
+        )
+        .into());
     }
-    (found, everything)
+    fs::write(&declared, UNDRAWN_DECLARATION)?;
+    Ok(game)
 }
 
 /// Whatever sits beside the save that is not the save itself.
@@ -617,13 +545,4 @@ fn copy_tree(from: &Path, into: &Path) -> Result<(), Box<dyn Error>> {
         }
     }
     Ok(())
-}
-
-/// How `status` ended, without pinning which failing code it chose.
-fn exit_of(status: &ExitStatus) -> Exited {
-    match status.code() {
-        Some(0) => Exited::Zero,
-        Some(_) => Exited::NonZero,
-        None => Exited::WithoutACode,
-    }
 }

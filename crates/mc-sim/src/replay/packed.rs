@@ -1,7 +1,7 @@
 //! One fixed-width value per voxel, packed into words.
 //!
 //! **The word arithmetic is stated here and nowhere else.** A resolved view
-//! carries three answers per voxel — two of them one bit wide and the third an
+//! carries four answers per voxel — three of them one bit wide and the fourth an
 //! index into a table of media — and a second copy of "which word holds this
 //! offset, and which bits of it" would be agreement between two copies of one
 //! decision rather than one decision read twice.

@@ -46,9 +46,9 @@ pub enum Remeshing {
 
 /// What a person reads above a refused reload's own chain.
 ///
-/// **Declared here rather than at the `eprintln!` that writes it**, which lives in a
-/// file nothing in this workspace can run — so this is the only place the sentence
-/// can be both printed and asked for.
+/// **Declared here rather than at the site that writes it**, which lives in a file
+/// nothing in this workspace can run — so this is the only place the sentence can be
+/// both printed and asked for.
 ///
 /// **It is quoted verbatim by `docs/modding/hot-reload.md`, and a guard holds the page
 /// to what a run prints.** Rewording it takes that page with it: change both, or the

@@ -165,6 +165,26 @@ The practical difference is that **you can no longer dig through water to what i
 under it by aiming at the water**. Aim at the lakebed from somewhere the water is
 not in the way, and it breaks as it always did.
 
+**While you are under the surface, you aim past the water your head is in.**
+That was broken and is now fixed. Because water can be aimed at, a swimmer's
+crosshair used to stop at the very cell their own eye was in — the block you are
+*inside* rather than the block you are looking at — and every swing came back
+"that cannot be broken" while every attempt to build came back with nothing to
+build against. A swimming player could interact with nothing at all. Now the
+water you are inside is passed over and the crosshair carries on to whatever
+stands beyond it: the lakebed where it rises beside you, a block you placed, or
+the next cell of water.
+
+The rule is the block's own declaration of whether you can see through it, not
+whether it stops you: you look **out** of anything you can see through, and a
+block you cannot see through is all there is to see when your head is in it.
+
+**In deep water the next thing along is usually more water**, and a swing at
+that is still refused, because water is declared unbreakable. What you get back
+is the ability to aim at something other than yourself — build against the water
+beside you, and break the lakebed wherever it stands next to you rather than a
+whole voxel away.
+
 **Building into water is unchanged.** Aim at a cell of water, place a block, and
 the block goes *into* that cell — water is declared as something a placement may
 overwrite, so you never have to clear it first. That is worth stating beside the
@@ -184,14 +204,25 @@ declares a block and ships no picture for it, that block draws a generated
 stand-in — a two-colour checkerboard derived from the texture's name,
 deterministic and unmistakably not real art — and the game runs.
 
-**The terminal explains the stand-in, but it never tells you a block is using
-one.** The line it prints at every launch says stand-ins exist and mean nothing
-is wrong; it does not name the block or the texture. So **seeing the
-checkerboard on screen is the only way to find out**, which is how the base
-game's own sea went three days as a magenta grid. If a surface comes up in a
-loud two-colour check, the mod that declares it has not shipped a picture for
-that texture — that is a missing file on the mod's side, not something you did
-wrong and not something to reinstall over.
+**The terminal names the textures nobody drew.** If anything in the content you
+launched declares a texture that has no picture, the launch says so and names
+every one of them:
+
+```text
+mycraft: `example:undrawn` draws a generated stand-in because nothing has baked it, and that is not a failure
+```
+
+More than one is one line naming all of them, alphabetically, never a count and
+never the first few. **A launch where everything has art says nothing at all**,
+so a line here is always about something, and the base game on its own is quiet.
+
+That line is the answer to "why is this surface a loud two-colour check": the mod
+that declares it has not shipped a picture for that texture. It is a missing file
+on the mod's side, not something you did wrong and not something to reinstall
+over. Until this build the launch printed a fixed sentence explaining that
+stand-ins exist and naming nothing, so **seeing the checkerboard on screen was the
+only way to find out** — which is how the base game's own sea went three days as a
+magenta grid with that sentence printing at every launch.
 
 ## An older save opens, and is told about once for each change it crosses
 
@@ -520,6 +551,21 @@ among the pictures that were already read; it does not go looking for new ones. 
 if you bake art for a key mid-session, the face keeps its stand-in until you quit
 and start again — and a key that was already drawing its picture goes on drawing
 it across every reload, rather than dropping back to a stand-in.
+
+**If your edits stop showing, the game says so.** Breaking and placing blocks is
+drawn by a worker running beside the game, and if that worker stops there is no
+way to start it again mid-run. Rather than leave you digging into a world that
+never changes, the terminal says it once:
+
+```text
+mycraft: an edit could not be shown: the worker that draws your edits has stopped; edits will not be shown for the rest of this run
+```
+
+Your edits are still being *made* — the world underneath is correct and a save
+written afterwards holds them — it is only the picture that has stopped keeping
+up. Quit and start again and the world comes back with everything you did. This
+should not happen, and if it does it is worth reporting; the line exists so that
+you find out from the game rather than from an hour of confusing play.
 
 ## Coming back to a save never leaves you inside a block
 

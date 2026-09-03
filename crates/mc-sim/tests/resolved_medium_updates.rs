@@ -36,6 +36,7 @@ mod support;
 
 use std::error::Error;
 
+use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 use mc_sim::player::{BlockPos, Medium};
 use mc_sim::replay::{Extent, ResolvedVoxels, VoxelAnswers};
@@ -73,17 +74,31 @@ type Answer = (bool, u32);
 /// The medium both positions are settled to, as this file compares media.
 const SLOWED_THRICE_ANSWER: Answer = (false, (3.0f32).to_bits());
 
+/// The write both positions are settled with: `block`'s medium, and every
+/// `bool` answer alike, so the medium view is the only one that may move.
+///
+/// The index is minted by the view that will hold it, which is the only door one
+/// comes through — a value no table produced is unspellable here.
+fn settling(
+    resolved: &ResolvedVoxels,
+    registry: &BlockRegistry,
+    block: &str,
+) -> Result<VoxelAnswers, Box<dyn Error>> {
+    Ok(VoxelAnswers {
+        solid: false,
+        targetable: false,
+        occludes: false,
+        medium: resolved.medium_index_of(registry.resolve(&BlockName::parse(block)?)?),
+    })
+}
+
 #[test]
 fn writing_a_medium_into_a_view_wider_than_one_bit_moves_that_voxel_and_no_other() -> TestResult {
     let registry = registry_of_many_media()?;
     let volume = holding(SLOWED_ONCE)?;
     let mut resolved = ResolvedVoxels::resolve(&volume, &registry)?;
     let before: Vec<Answer> = every_position().map(|at| answer(&resolved, at)).collect();
-    let settled = VoxelAnswers {
-        solid: false,
-        targetable: false,
-        medium: resolved.medium_index_of(registry.resolve(&BlockName::parse(SLOWED_THRICE)?)?),
-    };
+    let settled = settling(&resolved, &registry, SLOWED_THRICE)?;
 
     resolved.set(STEEPED, settled);
     resolved.set(HOLLOW, settled);

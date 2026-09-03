@@ -200,6 +200,15 @@ impl Medium for Chamber {
 /// reading solidity where it means targetability reports the wrong cell in both,
 /// and reports it in opposite directions, which is why there are two.
 ///
+/// [`SIGHT_STOPPING`] is the pair to [`AIMABLE`] one field along: the two agree
+/// that they stop nobody and that a ray stops at them, and disagree about
+/// whether they can be seen through. It is what makes the rule about the cell an
+/// eye is *inside* falsifiable at all — every block content ships has `occludes`
+/// and `is_solid` agreeing, so against shipped content alone a rule reading
+/// occlusion there and one reading solidity answer identically at every cell a
+/// player's eye can occupy, and the wrong reading would restore the defect while
+/// the whole suite stayed green.
+///
 /// [`BUILDABLE`] is the block that is **solid and replaceable at once**. Nothing
 /// content ships is: water is replaceable and stops nobody, and dirt, grass and
 /// stone stop a player and may not be built over. It is what lets a placement be
@@ -212,6 +221,7 @@ pub const UNBUILDABLE: &str = "fixture:unbuildable";
 pub const AIMABLE: &str = "fixture:aimable";
 pub const UNAIMABLE: &str = "fixture:unaimable";
 pub const BUILDABLE: &str = "fixture:buildable";
+pub const SIGHT_STOPPING: &str = "fixture:sight-stopping";
 
 /// What the fixture registry's definitions are attributed to.
 const FIXTURE_ORIGIN: &str = "a break-and-place test's declared registry";
@@ -228,6 +238,10 @@ struct Declared {
     /// Whether a ray may stop at this block, which is a separate claim from
     /// whether it stops a player and is stated per block for that reason.
     targetable: bool,
+    /// Whether this block stops sight, which is a third separate claim: it is
+    /// what the cell an eye is inside is judged by, and every other cell along a
+    /// ray is judged by `targetable` alone.
+    occludes: bool,
     replaceable: bool,
     breakable: bool,
     breaks_into: Option<&'static str>,
@@ -240,6 +254,7 @@ const fn solid(name: &'static str) -> Declared {
         name,
         is_solid: true,
         targetable: true,
+        occludes: true,
         replaceable: false,
         breakable: true,
         breaks_into: None,
@@ -252,6 +267,7 @@ const fn open(name: &'static str) -> Declared {
         name,
         is_solid: false,
         targetable: false,
+        occludes: false,
         replaceable: true,
         breakable: true,
         breaks_into: None,
@@ -289,11 +305,12 @@ const BASE_CONTENT: [Declared; 4] = [
 ];
 
 /// The blocks the `fixture:` overlay adds over base content.
-const OVERLAY: [Declared; 6] = [
+const OVERLAY: [Declared; 7] = [
     Declared {
         name: UNBREAKABLE,
         is_solid: true,
         targetable: true,
+        occludes: true,
         replaceable: false,
         breakable: false,
         breaks_into: None,
@@ -302,6 +319,7 @@ const OVERLAY: [Declared; 6] = [
         name: CRUMBLING,
         is_solid: true,
         targetable: true,
+        occludes: true,
         replaceable: false,
         breakable: true,
         breaks_into: Some("base:dirt"),
@@ -310,6 +328,7 @@ const OVERLAY: [Declared; 6] = [
         name: UNBUILDABLE,
         is_solid: false,
         targetable: false,
+        occludes: false,
         replaceable: false,
         breakable: true,
         breaks_into: None,
@@ -318,6 +337,7 @@ const OVERLAY: [Declared; 6] = [
         name: AIMABLE,
         is_solid: false,
         targetable: true,
+        occludes: false,
         replaceable: false,
         breakable: true,
         breaks_into: None,
@@ -326,6 +346,7 @@ const OVERLAY: [Declared; 6] = [
         name: UNAIMABLE,
         is_solid: true,
         targetable: false,
+        occludes: true,
         replaceable: false,
         breakable: true,
         breaks_into: None,
@@ -334,7 +355,17 @@ const OVERLAY: [Declared; 6] = [
         name: BUILDABLE,
         is_solid: true,
         targetable: true,
+        occludes: true,
         replaceable: true,
+        breakable: true,
+        breaks_into: None,
+    },
+    Declared {
+        name: SIGHT_STOPPING,
+        is_solid: false,
+        targetable: true,
+        occludes: true,
+        replaceable: false,
         breakable: true,
         breaks_into: None,
     },
@@ -401,7 +432,7 @@ fn declaring(
             breakable: block.breakable,
             breaks_into: block.breaks_into.map(BlockName::parse).transpose()?,
             drawn: block.is_solid,
-            occludes: block.is_solid,
+            occludes: block.occludes,
             targetable: block.targetable,
             // Constants, never derived from this fixture's own solidity: nothing
             // has ever answered these three, so a derived medium would make the air

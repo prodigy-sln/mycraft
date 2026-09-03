@@ -70,6 +70,7 @@ mod support;
 use std::error::Error;
 
 use mc_client::launch::{PreparedLaunch, prepare_launch};
+use mc_client::notice::Notices;
 use mc_client::startup::PreparationError;
 use mc_core::block::BlockRegistry;
 use mc_core::id::{BlockName, TextureKey};
@@ -166,8 +167,13 @@ fn a_save_whose_world_holds_no_stone_leaves_stone_on_the_layer_it_always_had() -
     let nowhere = TempDir::new()?;
     let saved = resumed(&content, RECORDED_PLAYER, a_world_without_stone)?;
 
-    let resuming = prepare_launch(&content, &saved.save(), ACCEPTING);
-    let starting_fresh = prepare_launch(&content, &where_no_save_is(&nowhere), ACCEPTING);
+    let resuming = prepare_launch(&content, &saved.save(), ACCEPTING, &Notices::discarding());
+    let starting_fresh = prepare_launch(
+        &content,
+        &where_no_save_is(&nowhere),
+        ACCEPTING,
+        &Notices::discarding(),
+    );
 
     assert_eq!(
         (
@@ -195,7 +201,12 @@ fn a_launch_draws_a_saved_block_whose_faces_the_generated_world_draws_nowhere() 
     let root = shipped_copy()?.declaring_block(BEACON_DECLARATION_FILE, BEACON_DECLARATION)?;
     let saved = resumed(root.path(), RECORDED_PLAYER, a_world_standing_the_beacon)?;
 
-    let launched = prepare_launch(root.path(), &saved.save(), ACCEPTING);
+    let launched = prepare_launch(
+        root.path(),
+        &saved.save(),
+        ACCEPTING,
+        &Notices::discarding(),
+    );
 
     assert_eq!(
         (

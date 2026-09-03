@@ -24,6 +24,7 @@
 //! stray save in a capture's working directory would then change what a committed
 //! image shows, for a reason no reader of the diff could see.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -31,7 +32,7 @@ use std::thread::JoinHandle;
 use mc_core::block::BlockRegistry;
 use mc_core::content::LayerAssignment;
 use mc_core::hud::HudLayout;
-use mc_core::id::BlockName;
+use mc_core::id::{BlockName, TextureKey};
 use mc_render::geometry::scene::SceneGeometry;
 use mc_render::texture::TextureResolution;
 use mc_sim::action::default_held_block;
@@ -45,6 +46,7 @@ use mc_world::persistence::Acceptance;
 use mc_render::texture::supplied::SuppliedTexels;
 
 use crate::content::ContentView;
+use crate::notice::Notices;
 use crate::startup::{PreparationError, scene_of};
 use crate::textures::{built_set, refusal_for};
 
@@ -127,6 +129,13 @@ pub struct Starting {
     pub texels: SuppliedTexels,
     /// The worker turning that root into a drawable world.
     pub preparation: PreparationHandle,
+    /// Where every non-fatal notice this run writes goes.
+    ///
+    /// Carried here rather than passed beside it, for the reason the two fields
+    /// above are: this is what a run is started with, and a caller holding a sink
+    /// without the run it belongs to has not made a mistake this signature should
+    /// let them express.
+    pub notices: Notices,
 }
 
 impl std::fmt::Debug for Starting {
@@ -154,14 +163,27 @@ pub fn start(
     root: PathBuf,
     save: PathBuf,
     accepting: Acceptance,
+    notices: &Notices,
 ) -> Result<Starting, PreparationError> {
     let (verdict, texels) = built_set(&root)?;
     if let Some(refused) = refusal_for(&verdict) {
         return Err(refused);
     }
+    // Taken before the texels are handed on, so the notice and the array texture
+    // answer out of one decode rather than out of two reads of the set.
+    let covered = texels.keys();
     Ok(Starting {
         texels,
-        preparation: spawn_preparation(root, save, accepting),
+        preparation: spawn_preparation(
+            root,
+            save,
+            accepting,
+            Reporting {
+                covered,
+                notices: notices.clone(),
+            },
+        ),
+        notices: notices.clone(),
     })
 }
 
@@ -226,9 +248,10 @@ pub fn simulation_to_play(
 fn played_and_reported(
     save: &Path,
     launching: Launching,
+    notices: &Notices,
 ) -> Result<(Seated, BlockName), PreparationError> {
     let (seated, holding) = simulation_to_play(save, launching)?;
-    crate::notice::say_changed_blocks(&seated.changed);
+    crate::notice::say_changed_blocks(&seated.changed, notices);
     Ok((seated, holding))
 }
 
@@ -244,8 +267,44 @@ fn played_and_reported(
 /// pool, so a caller that wanted to decide how many workers mesh the world would
 /// silently get the global one. Anything asking that question calls
 /// [`prepare_launch`] directly, on its own thread.
-pub fn spawn_preparation(root: PathBuf, save: PathBuf, accepting: Acceptance) -> PreparationHandle {
-    std::thread::spawn(move || prepare_launch(&root, &save, accepting))
+///
+/// **`covered` is passed in rather than read here**, because the set was already
+/// judged by the caller: a second read to answer the same question is a second
+/// opinion the notice could disagree with the array texture over.
+pub fn spawn_preparation(
+    root: PathBuf,
+    save: PathBuf,
+    accepting: Acceptance,
+    saying: Reporting,
+) -> PreparationHandle {
+    std::thread::spawn(move || {
+        let Reporting { covered, notices } = saying;
+        let prepared = prepare_launch(&root, &save, accepting, &notices)?;
+        // Said here rather than inside `prepare_launch` because this is where both
+        // halves are: the preparation is what says which keys content declares,
+        // and the set covering them was judged before this worker was spawned.
+        // `prepare_launch` is handed a root and never a set.
+        crate::notice::say_stand_ins(&declared_keys(&prepared.resolution), &covered, &notices);
+        Ok(prepared)
+    })
+}
+
+/// Every texture key the content a launch read declares.
+///
+/// **Read off the layer assignment rather than out of the registry**, which is
+/// what `tests/client_derives_no_layer_assignment.rs` refuses and refuses for a
+/// reason that outranks this notice: a client that builds its own key set has two
+/// participants numbering layers separately, and since a layer index rides inside
+/// every packed vertex, inserting one block then textures the whole world wrong
+/// with no error anywhere. The assignment states which keys the *serving* content
+/// names, so honouring it answers this question and derives nothing.
+#[must_use]
+pub fn declared_keys(resolution: &TextureResolution) -> BTreeSet<TextureKey> {
+    resolution
+        .layers()
+        .entries()
+        .map(|(key, _)| key.clone())
+        .collect()
 }
 
 /// Collects a finished preparation, translating a worker that panicked into an
@@ -258,6 +317,52 @@ pub fn spawn_preparation(root: PathBuf, save: PathBuf, accepting: Acceptance) ->
 /// anything at all.
 pub fn collect(handle: PreparationHandle) -> Result<PreparedLaunch, PreparationError> {
     handle.join().unwrap_or(Err(PreparationError::WorkerLost))
+}
+
+/// What a preparation says about the art it read, and where it says it.
+///
+/// **One value rather than two arguments**, on the rule
+/// `standards/global/code-quality.md` §2 states: the covered keys and the sink
+/// are the saying half of a preparation and travel together, and a caller holding
+/// one without the other cannot do anything with it.
+#[derive(Debug)]
+pub struct Reporting {
+    /// The texture keys the built set covers, judged before this worker started.
+    pub covered: BTreeSet<TextureKey>,
+    /// Where the notice about the rest of them goes.
+    pub notices: Notices,
+}
+
+/// The registry, the resolution and the published content the root at `root`
+/// declares.
+///
+/// Asked of the simulation, which is what reads a content root. The HUD comes
+/// back with it because a crosshair the content declares is content exactly as a
+/// block is, and the two are refused together. A launch has spent no layers,
+/// which is a fact rather than a decision, and passing it here is what makes the
+/// property visible at the call.
+///
+/// The resolution is asked of the registry and never of what was just meshed: a
+/// layer index rides inside every packed vertex, so a key set read off the played
+/// world would let a save renumber the array texture.
+///
+/// # Errors
+///
+/// Returns whatever reading the content root refused with.
+fn content_of(
+    root: &Path,
+) -> Result<(Arc<BlockRegistry>, TextureResolution, PublishedContent), PreparationError> {
+    let LoadedContent {
+        registry,
+        hud,
+        resolved,
+    } = mc_sim::content::load(root, &LayerAssignment::none())?;
+    let resolution = ContentView::of(&resolved).into_resolution();
+    Ok((
+        Arc::new(registry),
+        resolution,
+        PublishedContent::first(resolved, hud),
+    ))
 }
 
 /// Reads `root`, asks `mc-sim` which world this launch plays, meshes that world
@@ -288,24 +393,9 @@ pub fn prepare_launch(
     root: &Path,
     save: &Path,
     accepting: Acceptance,
+    notices: &Notices,
 ) -> Result<PreparedLaunch, PreparationError> {
-    // Asked of the simulation, which is what reads a content root. The HUD comes
-    // back with it because a crosshair the content declares is content exactly
-    // as a block is, and the two are refused together.
-    // A launch has spent no layers, which is a fact rather than a decision, and
-    // passing it here is what makes the property visible at the call.
-    let LoadedContent {
-        registry,
-        hud,
-        resolved,
-    } = mc_sim::content::load(root, &LayerAssignment::none())?;
-
-    let registry = Arc::new(registry);
-    // Asked of the registry and never of what was just meshed: a layer index
-    // rides inside every packed vertex, so a key set read off the played world
-    // would let a save renumber the array texture.
-    let resolution = ContentView::of(&resolved).into_resolution();
-    let content = PublishedContent::first(resolved, hud);
+    let (registry, resolution, content) = content_of(root)?;
     let hud = Arc::clone(&content.hud);
 
     let (seated, holding) = played_and_reported(
@@ -316,6 +406,7 @@ pub fn prepare_launch(
             content,
             accepting,
         },
+        notices,
     )?;
 
     let meshed = seated.simulation.world().mesh()?;

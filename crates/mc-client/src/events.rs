@@ -45,6 +45,7 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 use crate::app::App;
 use crate::gpu_startup::{Gpu, create_surface};
 use crate::launch::{Starting, save_path};
+use crate::notice::Notices;
 use crate::session::{KeyKind, MouseButtonKind, PointerPlatform, Session, ending_after_saving};
 
 /// What the window is called, and how large it opens.
@@ -64,7 +65,7 @@ const INITIAL_HEIGHT: u32 = 720;
 /// **The save is written on the way out of here**, once the loop has stopped and
 /// before the ending is reported: what a clean close does, and what a failed
 /// write makes of it, are decided in `session.rs` and only called from here.
-pub fn run(gpu: Gpu, starting: Starting) -> Ending {
+pub fn run(gpu: Gpu, starting: Starting, notices: &Notices) -> Ending {
     let event_loop = match EventLoop::new() {
         Ok(event_loop) => event_loop,
         Err(failure) => {
@@ -79,6 +80,7 @@ pub fn run(gpu: Gpu, starting: Starting) -> Ending {
     let mut client = Client {
         gpu: Some(gpu),
         starting: Some(starting),
+        notices: notices.clone(),
         window: None,
         app: None,
         session: None,
@@ -99,6 +101,9 @@ struct Client {
     /// Taken when the window arrives and the app is built from it.
     gpu: Option<Gpu>,
     starting: Option<Starting>,
+    /// Where every non-fatal notice goes, handed on to the app and to the
+    /// pointer so that one supplied sink catches all of them.
+    notices: Notices,
     window: Option<Arc<Window>>,
     app: Option<App>,
     /// Everything the client decides about input, once there is a window to ask
@@ -175,6 +180,7 @@ impl Client {
         // at before there was a session to make it.
         self.session = Some(Session::new(Box::new(WindowPointer {
             window: Arc::clone(&window),
+            notices: self.notices.clone(),
         })));
         self.window = Some(window);
         App::new(gpu, surface, size, starting)
@@ -384,6 +390,11 @@ const fn grab_mode(state: CaptureState) -> Option<CursorGrabMode> {
 /// asking.
 struct WindowPointer {
     window: Arc<Window>,
+    /// Where the one notice this can write goes.
+    ///
+    /// Held here rather than reached for, because a `PointerPlatform` is boxed
+    /// into the session and outlives every borrow the caller could lend it.
+    notices: Notices,
 }
 
 impl PointerPlatform for WindowPointer {
@@ -400,10 +411,10 @@ impl PointerPlatform for WindowPointer {
     /// line even though there is nothing further this client can do about it.
     fn release(&mut self) {
         if let Err(failure) = self.window.set_cursor_grab(CursorGrabMode::None) {
-            eprintln!(
+            self.notices.say(&format!(
                 "mycraft: the cursor could not be released: {}",
                 rendered(&failure)
-            );
+            ));
         }
     }
 

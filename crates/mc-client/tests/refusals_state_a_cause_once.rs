@@ -45,7 +45,7 @@ use mc_client::launch::simulation_to_play;
 use mc_client::startup::PreparationError;
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
-use mc_render::window::Ending;
+use mc_render::window::{Ending, Reported};
 use mc_sim::persistence::Launching;
 use mc_sim::replay::{ReplayWorld, WorldGenError};
 use mc_world::content::LuauFileDefinitionSource;
@@ -220,7 +220,7 @@ fn a_save_refused_only_for_redeclared_blocks_offers_the_way_out_once_after_it() 
 /// Returns an error if the sink refuses the bytes, which a `Vec` does not, or if
 /// what was written is not text.
 fn refusal_shown_for(turned_away: &PreparationError) -> Result<String, Box<dyn Error>> {
-    support::reported(&Ending::failed(turned_away, &turned_away.way_out()))
+    support::reported(&Ending::failed(turned_away))
 }
 
 /// What the client makes of the save at `save`, read against `registry` — or

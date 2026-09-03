@@ -236,7 +236,7 @@ fn a_missing_content_root_is_refused_naming_the_directory_that_was_looked_for() 
     };
     let whole = format!("mycraft: {refused}\n");
 
-    let said = support::reported(&Ending::failed(&refused, ""))?;
+    let said = support::reported(&Ending::failed(&refused))?;
 
     assert_eq!(
         (said.contains(&looked_for), said.as_str()),
@@ -260,7 +260,7 @@ fn the_shipped_content_registers_one_block_for_each_declaration_and_says_nothing
             scene.registry.registered_count(),
             support::reported(&Ending::Closed)?,
         ),
-        Err(refused) => (0, support::reported(&Ending::failed(refused, ""))?),
+        Err(refused) => (0, support::reported(&Ending::failed(refused))?),
     };
 
     assert_eq!(

@@ -556,8 +556,9 @@ no sub-boxes.
 | Look sensitivity | 0.0022 rad per raw pointer count | applied client-side in `InputState::look`; the intent carries radians |
 
 **Physics reads the world through `Solidity`, resolved once — and the walk a swing travels reads
-`Targetable`, resolved beside it.** `mc_sim::player::Solidity::is_solid(BlockPos) -> bool` and
-`mc_sim::player::Targetable::is_targetable(BlockPos) -> bool` are both total — outside the loaded
+`Targetable` and `Occluding`, resolved beside it.** `mc_sim::player::Solidity::is_solid(BlockPos) ->
+bool`, `mc_sim::player::Targetable::is_targetable(BlockPos) -> bool` and
+`mc_sim::player::Occluding::occludes(BlockPos) -> bool` are all total — outside the loaded
 world, below `y = 0` and every negative coordinate all answer `false` — so a caller has nothing to
 handle and nothing to swallow.
 
@@ -569,13 +570,15 @@ site reads several properties of one question, they travel in one value: `Medium
 `VoxelMedium { swimmable, resistance, swim_ascent }`, because splitting it would segregate nothing —
 `advance_player` reads them within a line or two of each other, from one fold over one box — while
 admitting a fixture that states one and inherits another. The composite `Traversal: Solidity +
-Medium` is where the physics' exclusion of `Targetable` is stated.
+Medium` is where the physics' exclusion of `Targetable` is stated, and `Aiming: Targetable +
+Occluding` is where the walk's exclusion of `Solidity` and `Medium` is stated. Coercion only ever
+narrows, so neither composite can reach the other's question.
 
 `ResolvedVoxels::resolve(volume: &dyn BlockVolume, registry: &BlockRegistry) ->
-Result<Self, RegistryError>` builds **three** per-voxel arrays once, over the volume's declared
+Result<Self, RegistryError>` builds **four** per-voxel arrays once, over the volume's declared
 extent, resolving every name it finds through the registry — each answer read from its own declared
-field, never derived from another. Two are one bit wide, and each costs
-1 048 576 voxels × 1 bit = **+128 KiB** once, at world scale. The third is an **index** into a table
+field, never derived from another. Three are one bit wide, and each costs
+1 048 576 voxels × 1 bit = **+128 KiB** once, at world scale. The fourth is an **index** into a table
 of the distinct `(swimmable, move_resistance, swim_ascent)` answers the *registry* declares, and its
 width is
 chosen once at resolve from `{1, 2, 4, 8, 16, 32}` — a power of two that divides 64, so a read stays
@@ -903,8 +906,8 @@ world's fixtures used it — moved to `mc_world::world` for the same reason `Wor
 `mc-sim` re-exporting it from its old path so existing fixtures keep compiling.
 
 **`Simulation` holds a concrete `mc_sim::world::World`, not a trait object.** `World` wraps a
-`VoxelWorld`, a `ResolvedVoxels` — itself two bitsets, one for what stops the player and one for what
-a ray may stop at — a dirty-section set and an `Arc<BlockRegistry>`, and keeps all four fields
+`VoxelWorld`, a `ResolvedVoxels` — itself three bitsets and a packed medium index: what stops the
+player, what a ray may stop at, what stops sight, and what medium each voxel is — a dirty-section set and an `Arc<BlockRegistry>`, and keeps all four fields
 private. It carries **no** name for empty space: `World::new(VoxelWorld, Arc<BlockRegistry>)`
 takes two parameters and there is no accessor handing one out, because a cell holds a block or
 nothing and nothing has no name to hand out (`technical/world-format.md`). Physics is unaffected: `advance_player` and the `collide` module still take `&dyn
@@ -912,7 +915,7 @@ Solidity`, so the cheap `Chamber`/`Ground` collision fixtures are untouched and 
 position collision scenarios changed. What changed is only what *feeds* solidity — a `World` now,
 where a bespoke test double used to stand in.
 
-**One private function writes all three views, and nothing else may.**
+**One private function writes all four views, and nothing else may.**
 
 ```rust
 // crates/mc-sim/src/world/mod.rs — no `pub`, visible in this module and its
@@ -925,24 +928,25 @@ fn write(&mut self, at: WorldPos, contents: Contents<&BlockName>) -> Result<(), 
             VoxelAnswers {
                 solid: declared.is_solid,
                 targetable: declared.targetable,
+                occludes: declared.occludes,
                 medium: self.resolved.medium_index_of(declared),  // minted by the table that holds it
             }
         }
     };
     // ... the store, from the same `contents` ...
-    self.resolved.set(at, answers);                       // all three resolved views, together
+    self.resolved.set(at, answers);                       // all four resolved views, together
     self.mark_dirty(at);                                  // remesh bookkeeping, see below
     Ok(())
 }
 ```
 
-The block store and the three resolved views cannot fall out of step because there is exactly one
+The block store and the four resolved views cannot fall out of step because there is exactly one
 function that can write any of them, and it writes them together or not at all. **`set` takes every
 answer in one call for that reason**: a caller able to write one without the others is the
 disagreement the type exists to make unspellable. It takes them as one `VoxelAnswers` whose fields
 are named at the call site, so a call still says which answer is which.
 
-**The medium is the one of the three that is a minted index rather than a value, and that is what
+**The medium is the one of the four that is a minted index rather than a value, and that is what
 keeps `set` total.** Every `bool` is writable, but a medium *value* is not: writing one means finding
 it in a table built at resolve time, and `set` is `pub`. Handed a value no registry produced, an
 implementation could only fall back silently, panic on a write path, or widen the packing under an
@@ -986,6 +990,31 @@ and what a swing can find are separate declarations — `base:water` stops nobod
 — so reading solidity here would put back a game rule content cannot override, at the one site every
 action's target comes from. The nine call sites that read `Solidity` all mean collision, and none of
 them is this one.
+
+**The cell the eye is already in is judged by `Targetable` *and* `Occluding`; every cell the walk
+steps into is judged by `Targetable` alone.** The walk considers its origin cell — at entry distance
+0 and with no entry face, since it crossed none — and that cell stops the ray only where the block
+both may be aimed at and stops sight. The reason is not symmetry, it is that a block you can see
+through is not what you are looking at when your own head is inside it.
+
+This is the rule PRO-961 was: it was one rule until content shipped a block a player can stand
+inside and a ray can stop at. `content/base/blocks/water.luau` declares `targetable = true` beside
+`occludes = false`, and from that commit every swing and every placement a submerged player made was
+answered by the cell their own eye occupied — refused as `Indestructible` because water declares
+`breakable = false`, and refused as `NoFace` because a ray that began inside a cell crossed no face
+to build against. A swimming player could interact with nothing.
+
+**A future change must not read `Solidity` here, and the reason it is tempting is the reason it is
+dangerous.** Solidity is the wrong question by construction — no player's eye is inside a block that
+stops them — and it is invisible to the suite: every block content ships has `occludes` and
+`is_solid` agreeing, so a walk reading solidity at the origin cell answers identically to the correct
+one at every cell a player can occupy. Only a fixture declaring a block where the two part can see
+it. `fixture:sight-stopping` in `crates/mc-sim/tests/support/chamber.rs` is that block — it stops
+nobody, a ray stops at it, and it stops sight — and
+`a_block_the_eye_is_inside_that_cannot_be_seen_through_is_the_target_at_no_distance` is the single
+test that reddens for either wrong reading. Both were measured: dropping the origin check entirely
+and pointing `Occluding for ResolvedVoxels` at the solid view each redden exactly that one test out
+of 247 (`cargo nextest run --no-fail-fast -p mc-sim`, complete runs).
 
 **The reach bound is a single site.** The walk goes in ascending entry distance and stops as soon as
 the next voxel's entry distance exceeds `REACH` (5.0 blocks) — there is no second, separate
@@ -1215,7 +1244,32 @@ replaced: a save whose blocks merely behave differently is loadable data, and re
 content update into a world nobody could open. Which blocks moved is *said* by
 `notice::say_changed_blocks`, called from `launch::played_and_reported` — so `acceptance_from` still
 does nothing but parse, and the sentence lives beside the other notices rather than inside the
-parse. `Session::save` is a
+parse.
+
+**Which texture keys drew a stand-in is said the same way, and where it is said is the whole of the
+fix.** `notice::stand_ins(declared, covered)` names the keys the built set left uncovered — every
+one, ascending, `changed_blocks`'s rule — or `None` where it covers all of them.
+`launch::spawn_preparation` says it from the preparation worker, above any device, for
+`say_changed_blocks`'s reason: which keys have art is settled once the content and the set beside it
+have been read. What it replaced was a `const` printed by `main` before the content root was read at
+all, so it named no key and printed identically whether every declared key was covered or none was —
+and `base:water` was uncovered for three days with that sentence printing at every launch.
+
+The two halves are taken where each is already settled and never re-read: `covered` is
+`SuppliedTexels::keys()`, taken in `launch::start` before the texels are handed to the renderer, so
+the notice and the array texture answer out of one decode. `declared` is `launch::declared_keys`,
+read off the **layer assignment** rather than out of the registry — `client_derives_no_layer_assignment`
+refuses a client that builds its own key set, and it outranks this notice: a layer index rides inside
+every packed vertex, so two participants numbering layers separately re-texture the whole world on
+the next reload with no error anywhere. The assignment already states which keys the serving content
+names, so honouring it answers the question and derives nothing.
+
+**Both notices are wired, not merely composed, and only a subprocess can say so.** Deleting the
+`say_stand_ins` call left **639 of 639** green; with `shipped_binary.rs`'s reading in place the same
+deletion reddens exactly one test and nothing else moves. That is the same measurement
+`say_changed_blocks` carries at 1 384 of 1 385, and it is why both readings live in a real process.
+
+`Session::save` is a
 three-line forward to `mc_sim::persistence::save`. The one piece of client-side logic that is more
 than wiring is `ending_after_saving`, in `session.rs` and not in `mc-sim` because it returns
 `mc_render::window::Ending` and `mc-sim` may not name `mc-render` — it decides that only a run that
@@ -2320,8 +2374,9 @@ That is what the scenarios grade, and it is why this is deferred rather than a d
 **2. `ResolvedVoxels::is_solid` answers `false` for every position past the world's
 footprint, and that is unsound wherever it is consulted — not only in the clearing
 search.** Outside the loaded world is *unknown*, not empty. Collision, meshing and the
-physics all read the same answer, and `is_targetable` answers the same way for the same
-reason — so a ray leaving the footprint meets nothing rather than meeting the unknown.
+physics all read the same answer, and `is_targetable` and `occludes` answer the same way for the
+same reason — so a ray leaving the footprint meets nothing rather than meeting the unknown, and an
+eye that has walked off it sees out of the cell it is in rather than into it.
 
 **In the clearing search it was a live defect and it is now closed**, because there
 the answer was acted on. The eligibility rule above is the repair: a candidate counts
@@ -2416,12 +2471,41 @@ that gains a layer, like a generated world reaching a malformed id, gains it
 because that layer was being dropped before.
 
 **A way out is not a cause.** Dropping `--refuse-changed-blocks` says what to
-do rather than what happened, so `PreparationError::way_out()` supplies it
-separately and `Ending::failed` appends it *after* the whole chain. Wrapping it
-around the front, which is what a `Display` suffix does, strands the advice ahead
-of the refusal it answers. The advice now names an argument to **stop** passing:
-a load refused for changed blocks alone can only have been refused because that
-argument was on the command line, since nothing else produces the decision.
+do rather than what happened, so the way out is supplied separately and
+`Ending::failed` appends it *after* the whole chain. Wrapping it around the
+front, which is what a `Display` suffix does, strands the advice ahead of the
+refusal it answers. The advice names an argument to **stop** passing: a load
+refused for changed blocks alone can only have been refused because that argument
+was on the command line, since nothing else produces the decision.
+
+**The way out is a property of the failure, not a parameter of the call that
+reports it.** `mc_render::window::Reported: Error` declares one method,
+`way_out()`, and `Ending::failed(&dyn Reported)` takes the failure alone.
+`PreparationError` implements it, and being the only implementor is the contract:
+a value that is not a *reported client failure* cannot reach an ending at all —
+the layer-budget producer in the test support now converts `mc-sim`'s
+`ContentError` into a `PreparationError` before reporting it, because there is no
+other door.
+
+The shape it replaces was `Ending::failed(failure, guidance)`, and what held the
+property was that the second parameter was not optional. **That is a shape
+argument and not a test.** The one production line that can emit the sentence —
+`App::redraw`, collecting a preparation the worker refused — runs inside a redraw
+needing a graphics device and a display server, so nothing in the suite reached
+it: PRO-940 measured that replacing the guidance argument on that line left the
+whole suite green. Every suite reading of the sentence supplied it itself, so all
+of them proved the constructor concatenates two strings it was handed.
+
+**Nothing a player or a mod author reads moved, and that is what a correct
+version of this change looks like.** The sites were all passing the right thing;
+what changed is that they can no longer pass the wrong thing. The falsifier is
+now real rather than structural: with `PreparationError::way_out` returning the
+empty string, **four** readings redden — the two that write the sentence out, the
+one counting the argument's occurrences, and `launch_acceptance`. Two others do
+**not**, and they are worth naming because they read like coverage and are not:
+`refusals_state_a_cause_once`'s expected text and `shipped_binary`'s both
+interpolate `way_out()`, so they agree with a failure that has stopped saying
+anything.
 
 **What the guards forbid, and what they do not.** A source scan over
 `crates/mc-client/src` reports any production file naming `Ending::Failed`,
@@ -2437,31 +2521,96 @@ The scan cannot see a report that is never *reached*, so a second test runs the
 shipped binary as a subprocess and asserts what it actually writes. The two are
 halves of one claim and neither is sufficient alone.
 
-**One deviation, recorded rather than smoothed over.** The reported ending goes
-through a caller-supplied `&mut dyn Write`, and `main.rs` is the only place that
-names `std::io::stderr()`. But **seven non-fatal notices** in the library still
-write to the process error stream directly with `eprintln!`:
+**The deviation is closed.** The reported ending goes through a caller-supplied
+`&mut dyn Write`, and **so does every non-fatal notice**. `main.rs` is the only
+place in the process that names `std::io::stderr()`, and it names it once: it
+builds a `notice::Notices` from it, hands that to the run, and reports the ending
+through the same handle. Nine notices used to write to the stream directly, so a
+harness could not read one, a caller could not route one elsewhere, and nothing
+could silence them. Silencing is now `Notices::discarding()` and costs one call.
 
 | Where | Notice |
 |---|---|
-| `app/mod.rs` | the dropped-frame notice |
-| `app/mod.rs` | the swatch notice |
-| `app/mod.rs` | the unshowable-edit notice |
+| `app/report.rs` | the dropped-frame notice |
+| `app/report.rs` | the swatch notice |
+| `app/report.rs` | the unshowable-edit notice |
 | `events.rs` | the cursor-release notice |
 | `app/reload.rs` | the refused-content-root notice |
 | `notice.rs` | what an **entry** did about a player it found inside solid blocks |
 | `notice.rs` | what a **reload** did about a player its swap trapped |
+| `notice.rs` | which blocks a loaded save no longer agrees with the content about |
+| `notice.rs` | which declared texture keys the built set left uncovered |
 
-**The count was four and the list omitted the two clearing notices**, which were
-inside `App::report_clearing` when it was written. Both now live in `notice.rs`
-beside the entry notice this seam gained — the composing half of each is a total
-function of a `Copy` verdict and the `eprintln!` is all that needs a running
-client, which is what made the exact words assertable at all. None of the seven
-ends a run and none goes through `report`, which is why the reporting guards do
-not cover them — they are a stream question rather than a rendering one. It does mean nothing can capture,
-redirect or silence them, and a library naming a stream is not the shape the
-sink parameter exists to establish. The spec that next touches client output
-should route them through a sink too.
+**That count was wrong every time anybody took it** — four in the issue, seven in
+this document (omitting the two clearing notices, then the changed-blocks one),
+eight in the spec, and nine once the spec's own stand-in notice landed. **The
+guard is a scan, not this table**: `tests/no_notice_names_the_error_stream.rs`
+walks the crate's production text for `eprintln!`, `println!` and their siblings
+and requires exactly one file to name a stream. A list of these sites is the
+thing that keeps failing, so nothing depends on this one being complete.
+
+**Shared, not borrowed, and the reason is a thread boundary.** `Notices` is an
+`Arc<Mutex<Box<dyn Write + Send>>>`. Two notices — the changed blocks and the
+uncovered keys — are written from the preparation worker; `thread::spawn` requires
+`Send + 'static` and `spawn_preparation` returns the handle, so a borrowed
+`&mut dyn Write` cannot reach them and `thread::scope` is not available either.
+The alternative was to hand those two lines back for the frame path to say, which
+moves them *below the device* and takes both `shipped_binary.rs` subprocess
+readings with them — the only instruments that can see whether either is ever
+actually said. The `dyn Write` is unchanged; only the sharing is new.
+
+Two behaviours are deliberate and each would be a defect if reversed. A
+**poisoned lock is recovered**: the mutex guards a byte sink with no invariant a
+panic can corrupt, so treating poisoning as fatal would let one unrelated panic
+silently disable every later notice — this defect, reintroduced by its own fix. A
+**failed write is swallowed**: there is nowhere to report a failure to report,
+and a notice must never be more fatal than the thing it describes. It is the one
+place in `mc-client` where swallowing an error is correct.
+
+**Silencing is a library capability and not a command-line one, and that is a
+ruling rather than an oversight.** The sink is reachable from Rust and only from
+Rust: a caller embedding `mc_client` supplies a `Notices` and reads back or
+discards every line, while `main.rs` builds one over `io::stderr()`
+unconditionally and `startup::acceptance_from` recognises exactly one argument,
+`--refuse-changed-blocks`. There is no `--quiet`, and it is recorded as PRO-1009
+rather than written, because a flag is published surface and the questions it has
+to answer first are not two lines of consequence: whether it silences refusals
+and the reported ending as well as the non-fatal notices, whether a silenced run
+still says why it refused to start, and whether silencing and redirection are one
+switch or two. Writing the two lines settles all three by accident, which is how
+a surface gets decided instead of designed.
+
+### What the evidence covers, and what it does not
+
+`mc-client` is excluded from the coverage denominator wholesale, so the
+percentage says nothing about this change. What was measured instead, one site at
+a time, with the tree restored between each:
+
+- **Back to the stream** — a site spelling `eprintln!` again. All four files
+  redden the scan. The scan reports the *file*, so `notice.rs`'s four sites and
+  `app/report.rs`'s three are one outcome each; that is the finest grain it has.
+- **Bypassing the sink** — a site that composes its line and says nothing. Four of
+  the nine redden: `say_changed_blocks` and `say_stand_ins` through the shipped
+  subprocess path in `shipped_binary.rs`, and `say_entering` and `say_reloading`
+  through the sink readings in `notice_test.rs`.
+- **Five redden nothing**, and this is a finding rather than an omission: the
+  three `app/report.rs` frame reporters, the reload refusal and the cursor
+  release. All five sit behind a window nothing in this workspace constructs. One
+  of the five is half-closed rather than untouched: moving the stopped-worker
+  line's choice out of the redraw into `report::said_about` made its *wording*
+  assertable and left its wiring exactly where it was.
+
+**Those are two counts of two different things and collapsing them into one hides
+which question was answered.** **Five of the nine hold their wording**, so four
+sites have no wording instrument; **four of the nine hold the call**, so five
+sites have no call instrument. Both figures were measured, one mutation at a time
+with the tree restored between. For the five with no call instrument the source
+scan is the whole of the evidence, and it is weak in two named ways: it is blind
+in one direction — it catches a site going *back* to the stream and can never
+catch one that goes silent — and it is file-granular, so `notice.rs`'s four sites
+and `app/report.rs`'s three are one outcome each. Making it per-site is cheap and
+strictly better whether or not a harness able to construct a window ever exists —
+recorded as PRO-1008, with the per-site table in `technical/testing.md`.
 
 ## Mechanically enforced invariants
 

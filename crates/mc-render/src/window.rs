@@ -193,18 +193,39 @@ pub enum Ending {
     },
 }
 
+/// A failure this client reports to a person, and what they can do about it.
+///
+/// **The way out is a property of the failure and never a parameter of the call
+/// that reports it.** It was the second argument of [`Ending::failed`], and what
+/// held it there was that the argument was not optional — a shape argument rather
+/// than a test, since the one production line that emits the sentence runs inside
+/// a redraw needing a graphics device, so nothing reached it. Measured: replacing
+/// that argument on that line left the whole suite green. A site has nothing left
+/// to supply now, so it has nothing left to supply wrongly.
+pub trait Reported: Error {
+    /// What to tell a person beyond what this failure already says — the way out
+    /// where there is one, and the empty string where there is not.
+    ///
+    /// A way out is not a link in the causal chain. A cause says what happened
+    /// and this says what to do about it, so it carries its own separator and is
+    /// said after the whole chain rather than inside it.
+    fn way_out(&self) -> String;
+}
+
 impl Ending {
-    /// `failure` and everything beneath it, then `guidance` where the site has
-    /// any.
+    /// `failure` and everything beneath it, then the way out `failure` carries.
     ///
     /// A way out is not a cause: it says what to do rather than what happened,
-    /// so it is said after the whole chain and never inside it. `guidance` is
-    /// empty where there is nothing to add, and carries its own separator where
-    /// there is.
+    /// so it is said after the whole chain and never inside it. A failure with
+    /// nothing to add answers the empty string, and nothing is appended.
     #[must_use]
-    pub fn failed(failure: &dyn Error, guidance: &str) -> Self {
+    pub fn failed(failure: &dyn Reported) -> Self {
         Self::Failed {
-            report: format!("{rendered}{guidance}", rendered = rendered(failure)),
+            report: format!(
+                "{rendered}{way_out}",
+                rendered = rendered(failure as &dyn Error),
+                way_out = failure.way_out()
+            ),
         }
     }
 

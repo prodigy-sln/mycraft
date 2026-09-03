@@ -1,5 +1,13 @@
-//! The binary: warn about the palette, run the client, hand the ending a stream
-//! to be said on, return the status it says.
+//! The binary: run the client, hand the ending a stream to be said on, return
+//! the status it says.
+//!
+//! **It says nothing about the art on its own account, and that is a repair.**
+//! The sentence about generated stand-ins used to be printed here — before the
+//! content root had been read and before any set had been judged — so it named no
+//! key and read identically whether every declared key was covered or none was.
+//! What replaced it is composed on the preparation worker, where the keys content
+//! declares and the keys the built set covers are both in hand, and it names the
+//! ones that had no image.
 //!
 //! **How a failure reads is not decided here, and that is deliberate.** A refusal
 //! is the only thing a mod author with a broken content file ever gets, and this
@@ -15,30 +23,19 @@
 use std::io;
 use std::process::ExitCode;
 
+use mc_client::notice::Notices;
 use mc_client::{events, gpu_startup, launch, startup};
 
 use mc_render::window::{Ending, exit_code, report};
 
-/// What the player is told before the window opens.
-///
-/// **The shipped blocks draw baked art now, and a key nothing baked still
-/// draws a generated stand-in.** That second half is the sentence worth
-/// printing: a mod author's first block declares a texture key nobody has drawn
-/// yet, and what they get is a deterministic, distinguishable, deliberately
-/// implausible texture derived from the key itself rather than a refusal. Saying
-/// so here is what stops the stand-in reading as a fault in the art build they
-/// have just run.
-const PALETTE_NOTICE: &str = "\
-mycraft: blocks whose art has been baked draw it; a texture key nothing has baked yet draws a
-         generated stand-in instead of refusing the launch. A stand-in is deterministic and
-         distinguishable, never lifelike, and it means nothing is wrong.";
-
 fn main() -> ExitCode {
-    println!("{PALETTE_NOTICE}");
-    let ending = run();
+    // The one place in this process that names a stream, and it names it once for
+    // the notices and the ending alike.
+    let notices = Notices::writing_to(Box::new(io::stderr()));
+    let ending = run(&notices);
     // A client that cannot write to its own error stream has nowhere left to say
     // so, and the status the shell reads is the same either way.
-    let _written = report(&ending, &mut io::stderr());
+    let _written = notices.with(|sink| report(&ending, sink));
     ExitCode::from(exit_code(&ending))
 }
 
@@ -47,10 +44,10 @@ fn main() -> ExitCode {
 ///
 /// The device is opened **before** the window: a machine that cannot draw this
 /// gets a message and a status, never a window that opens and then shows nothing.
-fn run() -> Ending {
+fn run(notices: &Notices) -> Ending {
     let root = match startup::shipped_content() {
         Ok(root) => root,
-        Err(failure) => return Ending::failed(&failure, &failure.way_out()),
+        Err(failure) => return Ending::failed(&failure),
     };
     // The command line is read here rather than where its answer is spent, so
     // that the one place this process looks at its own arguments is the one
@@ -66,13 +63,14 @@ fn run() -> Ending {
         root,
         launch::save_path(),
         startup::acceptance_from(std::env::args()),
+        notices,
     ) {
         Ok(starting) => starting,
-        Err(failure) => return Ending::failed(&failure, &failure.way_out()),
+        Err(failure) => return Ending::failed(&failure),
     };
 
     match gpu_startup::open() {
-        Ok(gpu) => events::run(gpu, starting),
+        Ok(gpu) => events::run(gpu, starting, notices),
         Err(ending) => ending,
     }
 }

@@ -20,6 +20,10 @@ use mc_render::surface::{FormatError, SurfaceFormatFacts, SurfaceSize, select_su
 use thiserror::Error;
 
 use crate::gpu_startup::Gpu;
+use mc_render::gpu::{FrameRenderer, TerrainTextures};
+use mc_render::pass::TerrainPassConfig;
+use mc_render::texture::sampler::TERRAIN_SAMPLER;
+use mc_render::texture::supplied::SuppliedTexels;
 
 /// Why the client could not be built around the window it was given.
 #[derive(Debug, Error)]
@@ -89,4 +93,29 @@ pub(crate) fn configuration_for(
     configuration.format = format;
     configuration.usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
     Ok(configuration)
+}
+
+/// The frame path that draws into a surface of `format`, built from `texels`.
+///
+/// **The supply is given once and held for the whole run**, which is what makes a
+/// reload unable to lose it.
+///
+/// # Errors
+///
+/// Returns [`SetupError`] when the format has no colour pass, or the pass cannot
+/// be built.
+pub fn renderer_for(
+    gpu: &Gpu,
+    format: wgpu::TextureFormat,
+    texels: &SuppliedTexels,
+) -> Result<FrameRenderer, SetupError> {
+    Ok(FrameRenderer::new(
+        &gpu.device,
+        &gpu.queue,
+        &TerrainPassConfig::windowed(color_format(format)?),
+        &TerrainTextures {
+            supplied: texels,
+            sampler: TERRAIN_SAMPLER,
+        },
+    )?)
 }

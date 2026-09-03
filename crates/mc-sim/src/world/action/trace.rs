@@ -24,10 +24,23 @@
 //! as in body, because this one reports the face it entered through and that one
 //! has no use for it.
 //!
-//! The voxel containing the origin is considered, at entry distance 0 and with
-//! no entry face. An eye inside a block a swing can find therefore has a target
-//! and no face to place against, which is the one thing the two arms answer
-//! differently.
+//! **The cell the origin is inside is judged by a different rule from every
+//! cell the walk steps into, and that rule is [`Occluding`].** A stepped cell
+//! stops the ray where a block declares a ray may stop at it. The origin cell
+//! stops it only where the block *also* blocks sight — because a block you can
+//! see through is not what you are looking at when your own head is in it.
+//! Solidity would be the wrong reading: no player's eye is inside a block that
+//! stops them, so it would restore the rule this exists to replace.
+//!
+//! It was one rule until content shipped a block a player can stand inside and a
+//! ray can stop at. Water declares `targetable = true` beside `occludes = false`,
+//! and from that moment every swing and every placement a swimmer made was
+//! answered by the cell their own eye was in: at distance 0, with no face to
+//! build against, and refused as indestructible.
+//!
+//! Where the origin cell *is* the answer it is still reported at entry distance
+//! 0 and with no entry face, which is the one thing the two arms of an action
+//! answer differently.
 
 use std::cmp::Ordering;
 
@@ -35,7 +48,7 @@ use glam::Vec3;
 use mc_world::mesh::Facing;
 use mc_world::section::Axis;
 
-use crate::player::{BlockPos, Targetable};
+use crate::player::{Aiming, BlockPos};
 use crate::world::containing;
 
 /// The voxel a ray met, how it entered, and how far along it that was.
@@ -56,13 +69,17 @@ pub struct Hit {
 /// makes `reach` mean blocks rather than multiples of whatever was passed. A
 /// direction of no length points nowhere and meets nothing.
 ///
-/// **`is_targetable` is the whole of what stops the walk, and that decides more
-/// than aiming.** Every rule read off the targeted cell — breakability first
-/// among them — is inert for a block no ray stops at, so what content declares
-/// here is what makes `Refusal::Indestructible` reachable for the shipped water
-/// at all. Aiming and yielding are separate claims, and this is the first.
+/// **`is_targetable` is the whole of what stops the walk at a cell it steps
+/// into, and that decides more than aiming.** Every rule read off the targeted
+/// cell — breakability first among them — is inert for a block no ray stops at,
+/// so what content declares here is what makes `Refusal::Indestructible`
+/// reachable for the shipped water at all. Aiming and yielding are separate
+/// claims, and this is the first.
+///
+/// **The cell the origin is inside also has to occlude**, which is the module
+/// header's subject and the whole of the difference between the two rules.
 #[must_use]
-pub fn targeted(origin: Vec3, direction: Vec3, reach: f32, world: &dyn Targetable) -> Option<Hit> {
+pub fn targeted(origin: Vec3, direction: Vec3, reach: f32, world: &dyn Aiming) -> Option<Hit> {
     let ray = direction.normalize_or_zero();
     let mut crossings = [
         Crossing::of(Axis::X, origin.x, ray.x)?,
@@ -74,26 +91,41 @@ pub fn targeted(origin: Vec3, direction: Vec3, reach: f32, world: &dyn Targetabl
         face: None,
         distance: 0.0,
     };
+    if world.is_targetable(met.cell) && world.occludes(met.cell) {
+        return Some(met);
+    }
     loop {
+        met = onward(met.cell, &mut crossings, reach)?;
         if world.is_targetable(met.cell) {
             return Some(met);
         }
-        // A ray of no length leaves all three crossings at infinity, so the
-        // first comparison below refuses it — the same site that bounds every
-        // other ray, rather than a special case beside it.
-        let next = crossings
-            .iter_mut()
-            .min_by(|one, other| one.at.total_cmp(&other.at))?;
-        if next.at > reach {
-            return None;
-        }
-        met = Hit {
-            cell: stepped(met.cell, next.advance),
-            face: Some(next.entered),
-            distance: next.at,
-        };
-        next.at += next.apart;
     }
+}
+
+/// The next voxel the ray enters after `from`, or nothing where the crossing
+/// that would take it there lies past `reach`.
+///
+/// **The reach bound is this comparison and there is no other.** A ray of no
+/// length leaves all three crossings at infinity, so this refuses it too — the
+/// same site that bounds every other ray, rather than a special case beside it.
+///
+/// Advancing the crossing that was taken is part of stepping and belongs with
+/// it: a caller that could step without advancing would walk the same boundary
+/// forever.
+fn onward(from: BlockPos, crossings: &mut [Crossing; 3], reach: f32) -> Option<Hit> {
+    let next = crossings
+        .iter_mut()
+        .min_by(|one, other| one.at.total_cmp(&other.at))?;
+    if next.at > reach {
+        return None;
+    }
+    let met = Hit {
+        cell: stepped(from, next.advance),
+        face: Some(next.entered),
+        distance: next.at,
+    };
+    next.at += next.apart;
+    Some(met)
 }
 
 /// Where one axis' voxel boundaries are crossed, and what crossing one does.

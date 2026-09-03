@@ -34,6 +34,7 @@ use std::ffi::OsStr;
 use std::path::Path;
 
 use mc_client::launch::prepare_launch;
+use mc_client::notice::Notices;
 use mc_core::block::{BlockDefinition, BlockId, BlockRegistry, DefinitionOrigin};
 use mc_world::persistence::Acceptance;
 use support::{TestResult, content, content_root};
@@ -218,7 +219,12 @@ fn a_content_root_declaring_nothing_solid_refuses_to_start_rather_than_opening_a
 /// Returns an error if the temporary save path cannot be used.
 fn launched_over(root: &Path, save: &Path) -> Result<Launched, Box<dyn Error>> {
     Ok(
-        match prepare_launch(root, save, Acceptance::OnlyUnchangedBlocks) {
+        match prepare_launch(
+            root,
+            save,
+            Acceptance::OnlyUnchangedBlocks,
+            &Notices::discarding(),
+        ) {
             Ok(prepared) => registered_in(&prepared.registry),
             Err(refused) => refusal(&refused),
         },
@@ -233,7 +239,12 @@ fn launched_over(root: &Path, save: &Path) -> Result<Launched, Box<dyn Error>> {
 /// Returns an error if the held block is not one the registry can resolve —
 /// which would mean a launch handing a player a name nothing declared.
 fn held_over(root: &Path, save: &Path) -> Result<Launched, Box<dyn Error>> {
-    let prepared = match prepare_launch(root, save, Acceptance::OnlyUnchangedBlocks) {
+    let prepared = match prepare_launch(
+        root,
+        save,
+        Acceptance::OnlyUnchangedBlocks,
+        &Notices::discarding(),
+    ) {
         Ok(prepared) => prepared,
         Err(refused) => return Ok(refusal(&refused)),
     };

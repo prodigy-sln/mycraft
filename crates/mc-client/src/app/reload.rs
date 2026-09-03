@@ -47,7 +47,7 @@ impl App {
                 layers,
                 clearing,
             }) => {
-                notice::say_reloading(clearing);
+                notice::say_reloading(clearing, &self.notices);
                 self.serve(&content, layers)
             }
         }
@@ -91,9 +91,7 @@ impl App {
     /// The simulation already reports a refusal once per save; this field is what
     /// stops the frame path repeating it every frame afterwards.
     fn report_reload(&mut self, reason: &str) {
-        if self.reported_reload.as_deref() != Some(reason) {
-            eprintln!("mycraft: {CONTENT_NOT_TAKEN_UP}: {reason}");
-            self.reported_reload = Some(reason.to_owned());
-        }
+        let said = format!("mycraft: {CONTENT_NOT_TAKEN_UP}: {reason}");
+        self.reported_reload.say(&self.notices, &said);
     }
 }

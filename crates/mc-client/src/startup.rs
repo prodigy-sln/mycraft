@@ -24,6 +24,7 @@ use mc_render::geometry::{GeometryError, SectionOrigin, build_section_geometry};
 use mc_render::gpu::RendererError;
 use mc_render::texture::TextureResolution;
 use mc_render::texture::supplied::SuppliedTexels;
+use mc_render::window::Reported;
 use mc_sim::content::{ContentError, LoadedContent};
 use mc_sim::persistence::LaunchError;
 use mc_sim::replay::{PrepareError, ReplayWorld, SectionQuads, WorldGenError, mesh_all};
@@ -244,21 +245,26 @@ pub enum PreparationError {
     TextureSetUnreadable(#[from] TextureSetError),
 }
 
-impl PreparationError {
+impl Reported for PreparationError {
     /// What to tell a player beyond what this refusal already says — the way out
     /// where there is one, and the empty string where there is not.
     ///
-    /// **A way out is not a link in the causal chain**, which is why it is asked
-    /// for separately rather than carried in a message. A cause says what
+    /// **A way out is not a link in the causal chain**, which is why it is
+    /// answered separately rather than carried in a message. A cause says what
     /// happened; dropping `--refuse-changed-blocks` says what to do about it, so
     /// it belongs after the whole chain rather than at the top of it, where a
     /// message wrapping its own source would strand it before the refusal it
     /// answers.
     ///
+    /// **The trait rather than an inherent method**, so that reporting this
+    /// failure and stating its way out are one act. It was a second argument to
+    /// `Ending::failed` and every site spelled it by hand; the one production
+    /// line that can emit the sentence needs a device, so nothing held those
+    /// sites to spelling it right.
+    ///
     /// The argument is still spelled in exactly one place, so the parse that
     /// recognises it and the refusal that names it cannot disagree.
-    #[must_use]
-    pub fn way_out(&self) -> String {
+    fn way_out(&self) -> String {
         match self {
             Self::Launch(failure) => way_out_of(failure),
             _ => String::new(),

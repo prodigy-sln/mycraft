@@ -16,7 +16,7 @@
 //! is the one the client's tests already bind, and narrowing that signature would
 //! make the phase which fills it widen a surface it does not own.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mc_core::id::TextureKey;
 
@@ -53,6 +53,17 @@ impl SuppliedTexels {
     #[must_use]
     pub fn covering(&self, key: &TextureKey) -> Option<&[[u8; 4]]> {
         self.supplied.get(key).map(Vec::as_slice)
+    }
+
+    /// Every key these texels cover, ascending.
+    ///
+    /// The claim [`covering`](Self::covering) answers one key at a time, in the
+    /// direction a caller comparing the whole set against what content declared
+    /// needs — and read off the same map, so the two cannot disagree about
+    /// whether a key is covered.
+    #[must_use]
+    pub fn keys(&self) -> BTreeSet<TextureKey> {
+        self.supplied.keys().cloned().collect()
     }
 }
 

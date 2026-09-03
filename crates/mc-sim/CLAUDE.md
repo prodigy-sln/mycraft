@@ -45,16 +45,36 @@ everything authoritative. `mc-render` reads what it publishes and never the othe
   would have forced `pub(crate)`, which is a much weaker claim. The dirty set is not
   one of the views that claim protects.
 
-- **There are three resolved views, not two, and they answer different questions.**
+- **There are four resolved views, and they answer different questions.**
   `ResolvedVoxels` carries a bitset for what stops the player, a second for what a
-  ray may stop at, and a packed index saying what medium each voxel's volume is,
-  behind three narrow traits — `Solidity`, `Targetable` and `Medium`. Content
-  declares them independently, so an engine that derived any from another would be
-  writing a game rule content could not override. Collision reads `Solidity` at nine
-  sites and means collision by it; the walk a swing travels reads `Targetable` and
-  nothing else does. **Keep those two traits two**: one trait with both methods
-  gives every collision site access to a question it must never ask, and a collision
-  test could then exercise aiming by accident.
+  ray may stop at, a third for what stops sight, and a packed index saying what
+  medium each voxel's volume is, behind four narrow traits — `Solidity`,
+  `Targetable`, `Occluding` and `Medium`. Content declares them independently, so an
+  engine that derived any from another would be writing a game rule content could
+  not override. Collision reads `Solidity` at nine sites and means collision by it;
+  the walk a swing travels reads `Targetable` and nothing else does. **Keep those
+  two traits two**: one trait with both methods gives every collision site access to
+  a question it must never ask, and a collision test could then exercise aiming by
+  accident.
+
+  **`Occluding` is read at exactly one site and it is not the obvious one.** Every
+  cell an aiming walk *steps into* is judged by `Targetable` alone. The cell the
+  walk *starts in* — the one the eye is already inside — is judged by both, because
+  a block you can see through is not what you are looking at when your own head is
+  in it. That rule shipped wrong: while only blocks that stop a player were aimable
+  it never mattered, and the moment `content/base/blocks/water.luau` declared
+  `targetable = true` beside `occludes = false`, every swing and every placement a
+  swimmer made was answered by the cell their own eye occupied — at distance 0, with
+  no face to build against, and refused as indestructible. **Never read `Solidity`
+  there instead.** It is the wrong question by construction, since no player's eye is
+  inside a block that stops them, and it is invisible: every block content ships has
+  `occludes` and `is_solid` agreeing, so the wrong reading passes the whole suite
+  unless a fixture declares a block where they part. `fixture:sight-stopping` in
+  `tests/support/chamber.rs` is that block and is the only thing that reddens for it.
+
+  The composite the walk takes is `Aiming: Targetable + Occluding`, for the reason
+  `Traversal` leaves `Targetable` out of itself: coercion only ever narrows, so no
+  site reaches a question it must not ask.
 
   **`Medium` is one trait returning one value** — `VoxelMedium { swimmable,
   resistance, swim_ascent }` — because one site reads all of its properties,

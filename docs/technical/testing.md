@@ -2810,6 +2810,80 @@ either sentence reaches the library directly, which is agreement between two cop
 of one decision — the binary can stop consulting the parse, or stop saying the
 line, and no library-level test in the workspace can tell.
 
+**The same shape recurred for the stand-in notice and was closed the same way.**
+Deleting `say_stand_ins` from `spawn_preparation` left **639 of 639 green**: every
+reading of that line reached the composer. A subprocess reading over a copy of the
+shipped content root with one block added declaring a key no manifest bakes now
+reddens exactly one test for that deletion, and nothing else moves.
+
+### The nine notices, and what each one's evidence is worth
+
+Routing every non-fatal notice through a caller-supplied sink made "does this site
+still say anything" a question worth asking nine times. `mc-client` is excluded
+from the coverage denominator wholesale, so the percentage answers none of it.
+Each site was measured on its own, with the tree restored between:
+
+**"Is this site covered" is two questions, and they have different answers.** A
+test may notice the *wording* changing, or notice the *call* disappearing, and a
+single figure hides which. Both were measured per site — nine sites, one mutation
+at a time, tree restored between, `cargo nextest run -p mc-client --no-fail-fast`,
+508 tests each run.
+
+| Site | Wording changed | Call deleted |
+|---|---|---|
+| `notice.rs` — entry | **7 reddened** | 1 reddened |
+| `notice.rs` — changed blocks | **8 reddened** | 3 reddened, incl. the shipped subprocess |
+| `notice.rs` — stand-ins | **6 reddened** | 2 reddened, incl. the shipped subprocess |
+| `notice.rs` — reload | **3 reddened** | 1 reddened |
+| `app/report.rs` — unshowable edit | **1 reddened** | nothing |
+| `app/report.rs` — dropped frame | nothing | nothing |
+| `app/report.rs` — swatch | nothing | nothing |
+| `app/reload.rs` — content not taken up | nothing | nothing |
+| `events.rs` — cursor release | nothing | nothing |
+
+**Five of nine hold their wording; four of nine hold the call.** The unshowable-edit
+row is the difference and it is worth reading carefully: moving that decision out
+of the redraw into `report::said_about` made its *text* assertable and left its
+*wiring* exactly as uninstrumented as the four below it. Half-closed, not closed,
+and reporting it as closed would be a false simplification of the kind this whole
+area exists to catch.
+
+Any file spelling `eprintln!` again reddens `no_notice_names_the_error_stream`,
+which is the only guard the last four rows have at all — and the only *call*
+instrument the **five** rows from the unshowable edit down have, which is the
+figure to quote when the question is whether a site can go silent. It is blind in
+one direction — it catches a site going *back* to the stream, never one that
+stops saying anything — and it is file-granular, so `notice.rs`'s four sites and
+`app/report.rs`'s three are one outcome each. **Making it per-site is cheap and
+strictly better** whether or not a harness able to construct a window ever exists.
+The gap is recorded as **PRO-1008**, which carries both counts rather than one:
+five of nine hold their wording, four of nine hold the call, and the two answer
+different questions.
+
+**One thing the measurement corrected about a neighbouring scan.**
+`the_entry_sentence_is_said_once` watches the entry sentence's *constant* and its
+*call site*, and reddens for a reworded constant — but not for a
+`say_entering` whose body stops writing, because the body is neither of the two
+things it reads. That is a fact about what that scan can observe, and it was found
+by a mutation predicted to redden it that did not.
+
+**And one about the documented-refusal guard, which is why the `app/reload.rs`
+row reads "nothing" in *both* columns.** `App::report_reload` composes
+`mycraft: {CONTENT_NOT_TAKEN_UP}: {reason}` and says it through the sink, and it
+was *predicted* to be held by `support/printed_refusals.rs`, since that fixture
+produces the reload refusals the modding pages quote. It is not. The fixture
+drives a real client and takes the chain out of `Session::take_reload_report`,
+then composes the printed line itself from the same production pieces the client
+composes it from — `CONTENT_NOT_TAKEN_UP` beside `ReloadReport`,
+`Ending::failed_under`'s joiner, `mc_render::window::report`'s prefix. Every part
+of the line is production's, and none of it is `App::report_reload`, so the two
+are copies that agree with each other and rewording the reporter reddens nothing
+there. **The prediction-then-miss is the reason this is written down**: a fixture
+built out of the right pieces looks like a witness for the function that assembles
+them, and the only thing that told the difference was a prediction recorded before
+the mutation ran. Composing from production parts closes a page drifting from the
+program; it does not close the frame path ceasing to say the line.
+
 **The two readings differ in what they cost, and the reason is where each sentence
 is said.** The notice is said above any device, so a bounded read of the stream
 catches it with no GPU; the way-out sentence is said inside a frame, so its reading
@@ -3860,14 +3934,27 @@ The only route is a panic inside the worker, which crate-wide `indexing_slicing`
 and `Result`-returning steps make un-inducible.
 
 So: **defect-reachable, fixture-unreachable.** The exhaustive match with no wildcard is
-what stops the arm being silently deleted; what is unheld is that the report is *reached*
-and that its wording is right, and that is a reviewer's. The arm still earns its place —
-it converts a silent, permanent stop into a reported one — and the discriminator that
-admits it is the one the unreachability rule already uses: **what would go wrong
-silently, not how hard it is to reach.** A seam that would make it witnessable is an
-*injectable worker*, which is a production door added to be observed; that is a real
-technique with precedent, and it belongs with a reading of a real occurrence rather than
-beside the arm it would test.
+what stops the arm being silently deleted. A seam that would make the *state* witnessable
+is an *injectable worker*, which is a production door added to be observed; that is a
+real technique with precedent, and it belongs with a reading of a real occurrence rather
+than beside the arm it would test. **That is still true and nothing here has changed it.**
+
+**What was reviewer-held and is now asserted is the wording.** The paragraph above ends
+"what is unheld is that the report is *reached* and that its wording is right", and those
+two are separable. The wording was unassertable only because `App::exchange_remesh` chose
+it *inside a redraw* — the same shape `notice.rs` exists to undo for the clearing
+sentences. `report::said_about` is now that choice as a function of the verdict, and
+`crates/mc-client/src/app/report_test.rs` asserts the whole sentence a player reads when
+the worker has stopped, beside the control that the three ordinary verdicts say nothing:
+a frame path reporting every collect would speak on most frames of a run, and the
+`WorkerGone` reading alone passes against it.
+
+Measured twice, and the pair is the point. The `WorkerGone` arm answering `None` reddens
+exactly that reading — 508 tests run, 507 passed, 1 failed — and so does rewording
+`unshowable_edit`. **Deleting the frame path's call to it still reddens nothing.** So this
+site's wording is held and its wiring is not: **half-closed, not closed**, which is why the
+table above carries two counts rather than one. Reaching the state, saying the right thing
+about it, and actually saying it are three claims, and exactly one is now held by a test.
 
 **The one that stayed open, with its reasoning.** `App` turning a clearing verdict into
 a line a person reads is unassertable for the same reason and stays reviewer-held —

@@ -1,6 +1,6 @@
-//! The world's voxels, resolved once into the three answers a tick reads: what
-//! stops the player, what a ray may stop at, and what medium a voxel's volume
-//! is.
+//! The world's voxels, resolved once into the four answers a tick reads: what
+//! stops the player, what a ray may stop at, what stops sight, and what medium a
+//! voxel's volume is.
 //!
 //! The tick asks a packed array and never a world. Resolving every voxel once,
 //! at construction, is what makes each answer **total**: afterwards a query is a
@@ -11,16 +11,22 @@
 //! world's own block query and the registry, so the two judgements share no
 //! lookup chain and cannot agree with each other's mistakes.
 //!
-//! **Three views and not one widened view.** Collision and aiming are separate
-//! claims content declares separately, so they are separate bits and separate
-//! traits; a medium is a third claim, and it is one view rather than two because
-//! one site reads both of its properties from one fold over one box. What they
-//! share is the walk that fills them and the write that keeps them in step. The
-//! cost is derived rather than estimated: the shipped world is
+//! **Four views and not one widened view.** Collision, aiming and sight are
+//! separate claims content declares separately, so they are separate bits and
+//! separate traits; a medium is a fourth claim, and it is one view rather than
+//! three because one site reads all of its properties from one fold over one
+//! box. What they share is the walk that fills them and the write that keeps
+//! them in step. The cost is derived rather than estimated: the shipped world is
 //! 64 × 64 × 256 = 1 048 576 voxels, so each one-bit view is **+128 KiB**, once,
 //! at world scale — and the medium view is an *index* whose width is chosen from
 //! how many distinct media the registry declares, which for the shipped content
 //! is one bit and so the same figure again.
+//!
+//! **Sight is a view rather than a second reading of solidity**, and that is
+//! what content already declares: `occludes` and `is_solid` are two fields, and
+//! a pane of glass is the block where they part. It is read at exactly one site
+//! — the cell an aiming walk starts in — and the walk is what the header of
+//! `world/action/trace.rs` explains.
 //!
 //! **The medium table is built from the registry and never from the world's
 //! contents.** A block the world does not yet hold must already have an index,
@@ -50,7 +56,7 @@ use mc_world::column::COLUMN_HEIGHT;
 use mc_world::section::Contents;
 use mc_world::world::{Extent, VoxelWorld, WorldPos};
 
-use crate::player::{BlockPos, Medium, Solidity, Targetable, VoxelMedium};
+use crate::player::{BlockPos, Medium, Occluding, Solidity, Targetable, VoxelMedium};
 
 use super::medium::{MediumIndex, MediumTable};
 use super::packed::PackedArray;
@@ -113,10 +119,10 @@ impl BlockVolume for VoxelWorld {
 }
 
 /// What each voxel of a volume answers about stopping the player, about stopping
-/// a ray, and about what its volume does to something moving through it,
-/// resolved once.
+/// a ray, about stopping sight, and about what its volume does to something
+/// moving through it, resolved once.
 ///
-/// **Named for no one question, because it answers three.** A type called after
+/// **Named for no one question, because it answers four.** A type called after
 /// one of the properties it carries is how a reader comes to believe the others
 /// are derived from it, and they are independent declarations.
 ///
@@ -129,6 +135,9 @@ pub struct ResolvedVoxels {
     extent: Extent,
     solid: PackedArray,
     targetable: PackedArray,
+    /// Whether each voxel blocks sight, which only the origin cell of an aiming
+    /// walk is judged by.
+    occluding: PackedArray,
     /// Which entry of [`media`](Self::media) each voxel's volume is.
     medium: PackedArray,
     /// The distinct media the registry declared, which
@@ -164,6 +173,7 @@ impl ResolvedVoxels {
         let mut recent = LastResolved::nothing();
         let mut solid = Vec::with_capacity(extent.voxel_count());
         let mut targetable = Vec::with_capacity(extent.voxel_count());
+        let mut occluding = Vec::with_capacity(extent.voxel_count());
         let mut medium = Vec::with_capacity(extent.voxel_count());
         for at in extent.positions() {
             let answers = match volume.block_at(at.x, at.y, at.z) {
@@ -176,6 +186,7 @@ impl ResolvedVoxels {
             };
             solid.push(u32::from(answers.solid));
             targetable.push(u32::from(answers.targetable));
+            occluding.push(u32::from(answers.occludes));
             medium.push(answers.medium.get());
         }
         let width = media.width_in_bits();
@@ -183,6 +194,7 @@ impl ResolvedVoxels {
             extent,
             solid: PackedArray::packing(solid, ONE_BIT),
             targetable: PackedArray::packing(targetable, ONE_BIT),
+            occluding: PackedArray::packing(occluding, ONE_BIT),
             medium: PackedArray::packing(medium, width),
             media,
         })
@@ -214,6 +226,7 @@ impl ResolvedVoxels {
             let offset = self.extent.offset(at);
             self.solid.set(offset, u32::from(answers.solid));
             self.targetable.set(offset, u32::from(answers.targetable));
+            self.occluding.set(offset, u32::from(answers.occludes));
             self.medium.set(offset, answers.medium.get());
         }
     }
@@ -242,9 +255,10 @@ impl ResolvedVoxels {
     /// the signed space the tick asks about, and zero outside the volume.
     ///
     /// The one place the bounds test and the sign refusal are spelled, so the
-    /// three views cannot come to disagree about what "outside" means. Zero is
-    /// the outside answer for all of them: not solid, not targetable, and entry
-    /// zero of the medium table, which is always [`VoxelMedium::NOTHING`].
+    /// four views cannot come to disagree about what "outside" means. Zero is
+    /// the outside answer for all of them: not solid, not targetable, not
+    /// occluding, and entry zero of the medium table, which is always
+    /// [`VoxelMedium::NOTHING`].
     fn held(&self, view: &PackedArray, at: BlockPos) -> u32 {
         inside_the_positive_octant(at)
             .filter(|voxel| self.extent.contains(*voxel))
@@ -252,9 +266,9 @@ impl ResolvedVoxels {
     }
 }
 
-/// What one voxel answers about the three questions a tick asks of it.
+/// What one voxel answers about the four questions a tick asks of it.
 ///
-/// A named triple rather than a tuple, because two of the three are the same
+/// A named struct rather than a tuple, because three of the four are the same
 /// type and reading them the wrong way round is a resolve that still compiles
 /// and still fills every view. Naming them is also what lets
 /// [`ResolvedVoxels::set`] take one value without losing the property loose
@@ -265,6 +279,8 @@ pub struct VoxelAnswers {
     pub solid: bool,
     /// Whether a ray may stop at this voxel.
     pub targetable: bool,
+    /// Whether this voxel blocks sight.
+    pub occludes: bool,
     /// Which medium this voxel's volume is, as an index minted by the view that
     /// will hold it.
     pub medium: MediumIndex,
@@ -278,6 +294,7 @@ impl VoxelAnswers {
     pub const NOTHING: Self = Self {
         solid: false,
         targetable: false,
+        occludes: false,
         medium: MediumIndex::NOTHING,
     };
 
@@ -292,6 +309,7 @@ impl VoxelAnswers {
         Self {
             solid: declared.is_solid,
             targetable: declared.targetable,
+            occludes: declared.occludes,
             medium: media.index_of(declared),
         }
     }
@@ -361,6 +379,19 @@ impl Solidity for ResolvedVoxels {
 impl Targetable for ResolvedVoxels {
     fn is_targetable(&self, at: BlockPos) -> bool {
         self.held(&self.targetable, at) != 0
+    }
+}
+
+/// What blocks sight is the **fourth bitset**, and it is read at one site: the
+/// cell an aiming walk starts in.
+///
+/// A view rather than a registry lookup for the same reason the other three are
+/// one — the walk that reads it has no failure to answer for — and a separate
+/// view rather than a reading of solidity because content declares the two
+/// independently and a glass wall is the block where they part.
+impl Occluding for ResolvedVoxels {
+    fn occludes(&self, at: BlockPos) -> bool {
+        self.held(&self.occluding, at) != 0
     }
 }
 

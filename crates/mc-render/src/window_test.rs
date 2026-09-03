@@ -44,8 +44,9 @@ use std::io;
 use crate::surface::{FatalReason, StartupError};
 
 use super::{
-    CaptureState, Ending, LoopAction, WindowEventKind, capture_after_click, capture_after_escape,
-    exit_code, first_capture_attempt, next_capture_attempt, rendered, report, window_event_action,
+    CaptureState, Ending, LoopAction, Reported, WindowEventKind, capture_after_click,
+    capture_after_escape, exit_code, first_capture_attempt, next_capture_attempt, rendered, report,
+    window_event_action,
 };
 
 #[test]
@@ -141,14 +142,17 @@ fn a_click_with_the_cursor_free_asks_for_the_capture_the_ladder_starts_at() {
 struct Layer {
     message: String,
     beneath: Option<Box<Layer>>,
+    /// The way out this failure carries, where it has one.
+    way_out: Option<String>,
 }
 
 impl Layer {
-    /// A failure with nothing beneath it.
+    /// A failure with nothing beneath it and no way out.
     fn stating(message: &str) -> Self {
         Self {
             message: message.to_owned(),
             beneath: None,
+            way_out: None,
         }
     }
 
@@ -157,7 +161,14 @@ impl Layer {
         Self {
             message: message.to_owned(),
             beneath: Some(Box::new(beneath)),
+            way_out: None,
         }
+    }
+
+    /// This failure, carrying `way_out` for whoever reports it.
+    fn offering(mut self, way_out: &str) -> Self {
+        self.way_out = Some(way_out.to_owned());
+        self
     }
 }
 
@@ -171,6 +182,18 @@ impl Error for Layer {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         let beneath = self.beneath.as_deref()?;
         Some(beneath)
+    }
+}
+
+impl Reported for Layer {
+    /// The way out this fixture carries, or none.
+    ///
+    /// Stated per value rather than derived from the message, which is the whole
+    /// question these readings ask: one failure has advice and its neighbour has
+    /// none, and a fixture that computed one from the other could not tell a
+    /// constructor that consults the failure from one that appends a constant.
+    fn way_out(&self) -> String {
+        self.way_out.clone().unwrap_or_default()
     }
 }
 
@@ -341,16 +364,31 @@ fn a_refusal_with_nothing_beneath_it_is_reported_as_its_own_sentence() -> io::Re
 }
 
 #[test]
-fn guidance_a_site_supplies_is_said_after_the_whole_chain_it_answers() -> io::Result<()> {
-    let refused = Layer::over(REFUSED_SAVE, Layer::stating(REDECLARED));
+fn the_way_out_a_failure_carries_is_said_after_the_whole_chain_it_answers() -> io::Result<()> {
+    let refused = Layer::over(REFUSED_SAVE, Layer::stating(REDECLARED)).offering(WAY_OUT);
 
     assert_eq!(
-        reported(&Ending::failed(&refused, WAY_OUT))?,
+        reported(&Ending::failed(&refused))?,
         format!("mycraft: {REFUSED_SAVE}: {REDECLARED}{WAY_OUT}\n"),
         "a way out is not a cause: it says what to do rather than what happened, so it is said \
          after the whole chain and never inside it. Guidance dropped on the floor here would take \
          a player's only route back into their world with it, and the refusal would read as \
-         final when it is not"
+         final when it is not. Nothing is handed to the constructor: the failure carries it"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_failure_carrying_no_way_out_is_reported_with_nothing_appended() -> io::Result<()> {
+    let refused = Layer::over(REFUSED_SAVE, Layer::stating(REDECLARED));
+
+    assert_eq!(
+        reported(&Ending::failed(&refused))?,
+        format!("mycraft: {REFUSED_SAVE}: {REDECLARED}\n"),
+        "the control on its neighbour above, and the pair is what separates a constructor that \
+         asks the failure from one that appends a sentence of its own. Two failures, identical but \
+         for what they carry, have to report differently — and advice under a refusal it does not \
+         apply to sends somebody to try a flag that will turn them away again"
     );
     Ok(())
 }

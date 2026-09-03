@@ -69,6 +69,7 @@ mod handed;
 use std::error::Error;
 
 use mc_client::launch::{PreparedLaunch, prepare_launch};
+use mc_client::notice::Notices;
 use mc_client::startup::{PreparationError, scene_of};
 use mc_core::block::{BlockId, BlockRegistry};
 use mc_core::id::BlockName;
@@ -122,7 +123,7 @@ fn a_launch_resuming_a_save_holds_no_quads_where_the_saved_world_holds_nothing()
     let content = shipped_content()?;
     let saved = a_save_with_the_landmarks_top_emptied(&content)?;
 
-    let launched = prepare_launch(&content, &saved.save(), ACCEPTING);
+    let launched = prepare_launch(&content, &saved.save(), ACCEPTING, &Notices::discarding());
 
     assert_eq!(
         (
@@ -147,7 +148,7 @@ fn a_launch_resuming_a_save_shows_the_face_the_emptied_cell_uncovered() -> TestR
     let content = shipped_content()?;
     let saved = a_save_with_the_landmarks_top_emptied(&content)?;
 
-    let launched = prepare_launch(&content, &saved.save(), ACCEPTING);
+    let launched = prepare_launch(&content, &saved.save(), ACCEPTING, &Notices::discarding());
 
     assert_eq!(
         (
@@ -177,7 +178,7 @@ fn a_launch_resuming_a_save_draws_a_block_the_generated_world_does_not_hold() ->
         Ok(blocks)
     })?;
 
-    let launched = prepare_launch(&content, &saved.save(), ACCEPTING);
+    let launched = prepare_launch(&content, &saved.save(), ACCEPTING, &Notices::discarding());
 
     assert_eq!(
         (
@@ -207,7 +208,7 @@ fn a_launch_packs_the_scene_it_hands_over_from_the_sections_it_retains() -> Test
     let content = shipped_content()?;
     let saved = a_save_with_the_landmarks_top_emptied(&content)?;
 
-    let launched = prepare_launch(&content, &saved.save(), ACCEPTING);
+    let launched = prepare_launch(&content, &saved.save(), ACCEPTING, &Notices::discarding());
 
     assert_eq!(
         repacked_compared(&launched),

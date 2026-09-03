@@ -39,6 +39,7 @@ use std::collections::BTreeSet;
 use std::error::Error;
 
 use mc_client::launch::prepare_launch;
+use mc_client::notice::Notices;
 use mc_core::block::{BlockId, BlockRegistry};
 use mc_core::id::TextureKey;
 use mc_render::texture::TextureLayers;
@@ -104,7 +105,12 @@ fn a_launch_puts_the_terrain_blocks_on_the_layers_the_committed_frames_were_shot
     let content = shipped_content()?;
     let nowhere = TempDir::new()?;
 
-    let prepared = prepare_launch(&content, &where_no_save_is(&nowhere), ACCEPTING)?;
+    let prepared = prepare_launch(
+        &content,
+        &where_no_save_is(&nowhere),
+        ACCEPTING,
+        &Notices::discarding(),
+    )?;
 
     assert_eq!(
         [
@@ -132,7 +138,12 @@ fn a_launch_gives_the_one_block_no_quad_draws_a_layer_of_its_own() -> TestResult
     let content = shipped_content()?;
     let nowhere = TempDir::new()?;
 
-    let prepared = prepare_launch(&content, &where_no_save_is(&nowhere), ACCEPTING)?;
+    let prepared = prepare_launch(
+        &content,
+        &where_no_save_is(&nowhere),
+        ACCEPTING,
+        &Notices::discarding(),
+    )?;
 
     assert_eq!(
         (

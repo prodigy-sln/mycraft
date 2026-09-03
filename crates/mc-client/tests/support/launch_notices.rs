@@ -1,6 +1,6 @@
-//! The notices a launch writes about the save it read — what entry did about a
-//! player it found inside solid rock, and which of that save's blocks no longer
-//! behave as they did.
+//! The notices a launch writes rather than refuses over — what entry did about a
+//! player it found inside solid rock, which of a save's blocks no longer behave
+//! as they did, and which of the texture keys the content declares had no image.
 //!
 //! # Why these live apart from the refusals
 //!
@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use glam::Vec3;
-use mc_client::notice::{changed_blocks, entering};
+use mc_client::notice::{changed_blocks, entering, stand_ins};
 use mc_core::block::BlockRegistry;
 use mc_core::id::BlockName;
 use mc_sim::world::Clearing;
@@ -48,14 +48,16 @@ use crate::printed_refusals::normalised;
 use crate::support;
 use crate::support::content::{BLOCK_DIRECTORY, ContentRoot, shipped_copy};
 
-/// Every line a launch writes about the save it read: the two an entry can write
-/// about where it put the player, and the two naming blocks that no longer behave
-/// as the save recorded them.
+/// Every line a launch writes rather than refuses over: the two an entry can
+/// write about where it put the player, the two naming blocks that no longer
+/// behave as the save recorded them, and the one naming a declared texture key
+/// nothing baked.
 ///
-/// **Four launches and not one.** One launch answers one thing about one player;
+/// **Five launches and not one.** One launch answers one thing about one player;
 /// the two entry answers differ in the world that was read rather than in
-/// anything asked for, and the two changed-block answers differ in *when the save
-/// was written*, which is what decides how many blocks a line names.
+/// anything asked for, the two changed-block answers differ in *when the save was
+/// written*, which is what decides how many blocks a line names, and the last
+/// reads a root that has no save at all.
 ///
 /// # Errors
 ///
@@ -68,7 +70,54 @@ pub fn launch_notices() -> Result<Vec<String>, Box<dyn Error>> {
         an_entry_with_nowhere_to_put_them()?,
         a_launch_over_a_save_whose_block_behaves_differently()?,
         a_launch_over_a_save_this_build_wrote_and_one_edited_declaration()?,
+        a_launch_over_a_root_declaring_a_key_nothing_baked()?,
     ])
+}
+
+/// A block declaring a texture key no manifest bakes, and the file it goes in.
+const UNDRAWN_FILE: &str = "undrawn.luau";
+const UNDRAWN_DECLARATION: &str = "return {\n\tname = \"example:undrawn\",\n\ttexture = \"example:undrawn\",\n\tsolid = true,\n}\n";
+const THE_UNDRAWN_KEY: &str = "example:undrawn";
+
+/// What a launch writes about the texture keys its built set left uncovered.
+///
+/// **One added block over the shipped root, so the line is the singular one.**
+/// That is a mod author's first block, which is the case `voxel-models.md` walks
+/// through — and the shipped keys beside it all have art, so a producer that
+/// named more than the added key would be reporting a root whose set had gone
+/// stale rather than one that gained a block.
+///
+/// Composed by [`mc_client::notice::stand_ins`] over the two sets a real
+/// preparation arrived at, through the same two calls the preparation worker
+/// makes. Nothing about the sentence is decided here.
+///
+/// # Errors
+///
+/// Returns an error if the fixture cannot be built, if the shipped root carries
+/// no built set to copy, if the preparation was turned away, or if the launch
+/// named anything other than the added key — a run that named the shipped keys
+/// too has none of this line for a page to quote.
+fn a_launch_over_a_root_declaring_a_key_nothing_baked() -> Result<String, Box<dyn Error>> {
+    let root = crate::support::built_sets::a_root_with_a_built_set()?
+        .declaring_block(UNDRAWN_FILE, UNDRAWN_DECLARATION)?;
+    let prepared = crate::support::prepare_scene_at(root.path())?;
+    let uncovered: Vec<String> = mc_client::launch::declared_keys(&prepared.resolution)
+        .difference(&prepared.texels.keys())
+        .map(|key| key.as_str().to_owned())
+        .collect();
+    entry::require(
+        uncovered == [THE_UNDRAWN_KEY],
+        format!(
+            "a page quoting the line for one unbaked key needs a launch that left one uncovered, \
+             and this preparation left {uncovered:?}"
+        ),
+    )?;
+    stand_ins(
+        &mc_client::launch::declared_keys(&prepared.resolution),
+        &prepared.texels.keys(),
+    )
+    .map(|said| normalised(&said))
+    .ok_or_else(|| "this producer's launch covered every key it declared".into())
 }
 
 /// How many chunk columns square the world an entry is driven in is.

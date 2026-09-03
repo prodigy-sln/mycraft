@@ -56,6 +56,7 @@ use std::error::Error;
 use std::path::Path;
 
 use mc_client::launch::{PreparedLaunch, prepare_launch};
+use mc_client::notice::Notices;
 use mc_client::startup::{PreparationError, scene_of};
 use mc_core::block::{BlockId, BlockRegistry};
 use mc_core::id::BlockName;
@@ -114,7 +115,7 @@ fn a_launch_resuming_a_save_draws_a_change_the_generated_world_never_held() -> T
     let content = shipped_content()?;
     let saved = a_save_holding_a_block_at(&content, FAR_FROM_THE_EDIT)?;
 
-    let launched = prepare_launch(&content, &saved.save(), ACCEPTING);
+    let launched = prepare_launch(&content, &saved.save(), ACCEPTING, &Notices::discarding());
 
     assert_eq!(
         (
@@ -139,7 +140,12 @@ fn a_launch_resuming_a_save_draws_a_change_the_generated_world_never_held() -> T
 fn an_edit_in_another_column_leaves_a_distant_saved_change_drawn() -> TestResult {
     let content = shipped_content()?;
     let saved = a_save_holding_a_block_at(&content, FAR_FROM_THE_EDIT)?;
-    let mut handed = Handed::resuming(prepare_launch(&content, &saved.save(), ACCEPTING)?);
+    let mut handed = Handed::resuming(prepare_launch(
+        &content,
+        &saved.save(),
+        ACCEPTING,
+        &Notices::discarding(),
+    )?);
 
     let broke = handed.advance(ActionIntent::Break);
     handed.hand_over()?;
@@ -170,7 +176,7 @@ fn a_launch_resuming_a_save_draws_a_change_on_its_sections_outermost_layer() -> 
     let content = shipped_content()?;
     let saved = a_save_holding_a_block_at(&content, WHERE_THE_FOOTPRINT_ENDS)?;
 
-    let launched = prepare_launch(&content, &saved.save(), ACCEPTING);
+    let launched = prepare_launch(&content, &saved.save(), ACCEPTING, &Notices::discarding());
 
     assert_eq!(
         (
@@ -195,7 +201,12 @@ fn a_launch_resuming_a_save_draws_a_change_on_its_sections_outermost_layer() -> 
 fn a_resumed_session_has_nothing_outstanding_to_re_mesh_before_the_first_edit() -> TestResult {
     let content = shipped_content()?;
     let saved = a_save_holding_a_block_at(&content, FAR_FROM_THE_EDIT)?;
-    let mut handed = Handed::resuming(prepare_launch(&content, &saved.save(), ACCEPTING)?);
+    let mut handed = Handed::resuming(prepare_launch(
+        &content,
+        &saved.save(),
+        ACCEPTING,
+        &Notices::discarding(),
+    )?);
 
     let before_any_edit = handed.outstanding();
     let broke = handed.advance(ActionIntent::Break);

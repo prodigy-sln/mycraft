@@ -960,15 +960,37 @@ different pair. Far enough from the camera the two average into one flat
 colour and the checkerboard disappears, so a distant surface reads as a
 solid implausible colour rather than as a grid.
 
-**Nothing will tell you about it, and that is the design.** The launch is
-correct, the set is current, the block is drawn, and no refusal is owed —
-so the only instrument that reports a stand-in is your own eye. The base
-game shipped a magenta sea for three days for exactly that reason, past
-1 300 passing tests: the key was declared in `water.luau`, the manifest
-had no entry for it, and every layer of the chain behaved as designed. If
-you ship a content root and want the stricter rule the base game holds
-itself to, compare the keys your `blocks/*.luau` declare against the `key`
-lines of your built `textures/index.txt` — they should be the same list.
+**The launch names every key that drew one.** It is still not a refusal — the
+launch is correct, the set is current, the block is drawn — but the client says
+which keys had no image, on its error stream, before the window opens:
+
+```text
+mycraft: `example:undrawn` draws a generated stand-in because nothing has baked it, and that is not a failure
+```
+
+Two or more read `mycraft: `a`, `b`, `c` draw generated stand-ins because nothing
+has baked them, and that is not a failure`. Every uncovered key is named,
+ascending, never truncated and never counted — you have to go and bake each one,
+so each is spelled out. **A launch whose set covers every declared key says
+nothing**, which is what makes the line worth reading when it appears.
+
+What to do about one: either bake art for the key — add a `[[texture]]` entry
+naming it to your `textures.toml` and run `voxforge build` — or leave it, because
+a stand-in is a working block. Check the spelling first: a key that draws a
+stand-in you did not expect is usually a typo, since the stand-in is derived from
+the spelling and a misspelt key is simply a key nobody baked.
+
+**The line is what this notice used to be missing.** Until this build the launch
+printed a fixed sentence explaining that stand-ins exist and naming nothing at
+all, so the only instrument that reported a stand-in was your own eye — and the
+base game shipped a magenta sea for three days for exactly that reason, past
+1 300 passing tests: the key was declared in `water.luau`, the manifest had no
+entry for it, and every layer of the chain behaved as designed. The stricter rule
+the base game holds itself to is still stricter than the notice, and still worth
+having if you ship a content root: compare the keys your `blocks/*.luau` declare
+against the `key` lines of your built `textures/index.txt` — they should be the
+same list, and a test that says so fails your build rather than printing a line
+somebody has to read.
 
 ## Refusals
 

@@ -126,7 +126,7 @@ fn a_content_root_declaring_no_hud_is_read_without_a_word_about_the_hud() -> Tes
 
     let ending = match mc_client::startup::prepare_scene(root.path()) {
         Ok(_) => Ending::Closed,
-        Err(refused) => Ending::failed(&refused, ""),
+        Err(refused) => Ending::failed(&refused),
     };
 
     assert_eq!(
