@@ -132,14 +132,19 @@ pub enum EveryStageRunsClaim {
 
 /// One `{ … }` of the script.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct Block {
-    open: usize,
-    close: usize,
-    depth: usize,
+pub struct Block {
+    /// The line the brace opened on.
+    pub open: usize,
+    /// The line it closed on.
+    pub close: usize,
+    /// How many blocks enclose it.
+    pub depth: usize,
 }
 
 impl Block {
-    fn holds(&self, line: usize) -> bool {
+    /// Whether `line` falls inside this block.
+    #[must_use]
+    pub fn holds(&self, line: usize) -> bool {
         self.open <= line && line <= self.close
     }
 }
@@ -376,7 +381,8 @@ fn runs_only_beside(chain: &[Block], recorded_in: &Block, running_at: &[usize]) 
 
 /// The script's lines with every whole-line comment blanked, so that prose
 /// quoting a command is not read as the command.
-fn code_only(text: &str) -> Vec<String> {
+#[must_use]
+pub fn code_only(text: &str) -> Vec<String> {
     let mut inside_block = false;
     text.lines()
         .map(|line| {
@@ -408,7 +414,8 @@ fn header_of(text: &str) -> String {
 }
 
 /// Every block of the code, and how many braces were left unclosed.
-fn blocks_of(code: &[String]) -> (Vec<Block>, usize) {
+#[must_use]
+pub fn blocks_of(code: &[String]) -> (Vec<Block>, usize) {
     let mut open_at: Vec<usize> = Vec::new();
     let mut blocks = Vec::new();
     for (index, line) in code.iter().enumerate() {

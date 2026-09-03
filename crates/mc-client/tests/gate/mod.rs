@@ -20,10 +20,15 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
+/// Reading how much of a suite the gate's invocations run, and what it says
+/// about the mode a reader runs in a tight loop.
+pub mod extent;
 /// Reading the gate script's text.
 pub mod reading;
 /// Running the gate script and reading what it reported.
 pub mod running;
+/// Running a five-test suite the way the gate's invocations are written to.
+pub mod suite;
 
 /// The repository's own root, located upwards from the crate this test binary
 /// belongs to.
