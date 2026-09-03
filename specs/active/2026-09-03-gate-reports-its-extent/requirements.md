@@ -207,8 +207,30 @@ against the tree on this branch rather than taken from the issue text.
   which is the only question this fix exists to answer. Recorded in the spec's
   rejected alternatives.
 
+- [resolved] Q: Is documenting the residual a deferral or a deliverable? → A: **A
+  deliverable, asserted as D1-S9.** Ruled by the owner. What is out of scope is
+  *restructuring* the chain; what is in scope is the remaining hole being stated
+  where a reader meets it — the gate script's own comment beside the chain, and
+  `docs/technical/testing.md`. The reason is concrete: the comment at `:215-217`
+  justifies the `&&` on the masking argument alone, and the moment
+  `--no-fail-fast` lands beside it that justification becomes true-but-incomplete.
+  A half-true justification standing beside a changed line is the defect family
+  this project keeps filing. The spec folder is archived at completion, so the
+  script and `docs/` are what survive for the reader.
+
+- [resolved] Q: Which issues are filed, and when? → A: **Both filed during this
+  phase, not deferred to completion**, at the owner's direction, because a reader
+  reaches for the tracker and `docs/` rather than a folder of superseded specs.
+  Both verified after creation as team `prodigy-solutions`, project
+  `MyCraft MVP 2: Scriptable Content`.
+
+  | issue | subject |
+  |---|---|
+  | **PRO-1011** | The gpu-free stage `&&`-chains four commands, so a failure in the first hides three — carries the four-command count, the `Invoke-Stage:147-157` single-inspection constraint, both escape routes, and the `decision`-not-`fix` recommendation |
+  | **PRO-1012** | Nothing ties a gate mode label to the stages that mode reaches — carries the three false `-Quick` statements, the missing stage 2c table row, and why D2-S2's three-way agreement is strictly weaker than agreeing with the stage list |
+
 ## Open questions
 
 None. The one open question — the scope of stage 2b's `&&` chain — was ruled by
-the owner during this phase: split the stage (in scope), leave the chain
-mechanism alone (PRO-1011).
+the owner during this phase: split the stage (in scope), document the residual
+(in scope, D1-S9), leave the chain mechanism alone (out of scope, PRO-1011).

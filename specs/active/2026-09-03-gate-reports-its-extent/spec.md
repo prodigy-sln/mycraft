@@ -415,8 +415,13 @@ Binding. Recorded, not built.
 - **The size stage counting with `Measure-Object -Line`, which drops blank
   lines** — PRO-974. A gate defect, and a different stage.
 - **Making the `&&` chain itself non-cancelling**, so a clippy failure no longer
-  hides its own crate's test run. **PRO-1011.** The stage *split* is in scope
-  (D1-S8) and halves the residual; removing the rest is not. See Notes 1.
+  hides its own crate's test run. **PRO-1011.** Two neighbouring things *are* in
+  scope and must not be read out of it: the stage **split** (D1-S8), which halves
+  the residual, and **stating the residual** in the script's comment and in
+  `docs/technical/testing.md` (D1-S9). What is excluded is the restructure alone.
+- **A check tying a mode label to the stages that mode reaches** — **PRO-1012**.
+  Correcting the three labels (D2-S2) and adding the missing stage row (D2-S4)
+  are in scope; the instrument that would stop them drifting again is not.
 - **Any change to `Invoke-Stage`'s contract** or to the summary format. Splitting
   stage 2b adds a second call to the existing `Invoke-Stage`; it changes nothing
   about what `Invoke-Stage` does.
@@ -426,30 +431,51 @@ Binding. Recorded, not built.
 
 ## Notes
 
-Deferred observations, recorded during the specify phase and not built here.
+Observations recorded during the specify phase. **Each says explicitly which part
+this spec builds and which part it does not** — "recorded, not built" applies to
+the mechanism in each case, never to writing the residual down.
 
 1. **The `&&` chain still cancels within each of the two new stages** — filed as
    **PRO-1011**. After D1-S8's split and `--no-fail-fast`, a failure in one
-   crate's clippy still hides that crate's test run. Removing that needs either a
-   contract change to `Invoke-Stage` (`:147-157`), which affects failure
-   detection for every stage in the gate, or a `cmd /c exit N` hack to force an
-   exit code, since a PowerShell accumulator variable does not set
-   `$LASTEXITCODE`. PRO-1011 recommends `work-type: decision` above `low`,
-   because **a change to how the gate detects failure cannot be validated by a
-   green gate** — the same circularity that put PRO-982 at `high`.
+   crate's clippy still hides that crate's test run.
 
-2. **Nothing ties a mode label to the stages that mode reaches.** Defect 2 is
-   label drift that went unnoticed because it cannot go stale loudly, and the
-   fact that it was written three times in three files is the evidence. D2-S2
-   asks the three descriptions to agree *with each other*, which is weaker than
-   asking any of them to agree with the stage list. A check deriving the label
-   from the stages, or grading it against them, is a larger piece of gate surface
-   than this fix should introduce — but it is the check that would actually close
-   this defect family, and it is worth a future issue.
+   **In scope, and asserted: D1-S9.** The residual is stated in the gate script's
+   own comment beside the chain, and in `docs/technical/testing.md`. This is not
+   optional polish. The comment at `:215-217` today justifies the `&&` on the
+   masking argument alone; the moment `--no-fail-fast` lands beside it that
+   justification becomes **true but incomplete** — it will not say the chain
+   still cancels and still hides part of the stage's extent. A half-true
+   justification standing beside a changed line is the defect family this project
+   keeps filing, and the reader who needs the warning meets it at that comment,
+   not in an archived spec folder.
 
-3. **The stage table in `docs/technical/testing.md` had no row for stage 2c** and
-   nothing noticed. D2-S4 adds it, but nothing prevents the next stage from
-   landing unrowed either. Same root as Note 2 and the same candidate fix.
+   **Out of scope: restructuring the chain.** That needs either a contract change
+   to `Invoke-Stage` (`:147-157`), which affects failure detection for every
+   stage in the gate, or a `cmd /c exit N` hack to force an exit code, since a
+   PowerShell accumulator variable does not set `$LASTEXITCODE`. PRO-1011
+   recommends `work-type: decision` above `low`, because **a change to how the
+   gate detects failure cannot be validated by a green gate** — the same
+   circularity that put PRO-982 at `high`.
+
+2. **Nothing ties a mode label to the stages that mode reaches** — filed as
+   **PRO-1012**. Defect 2 is label drift that went unnoticed because it cannot go
+   stale loudly, and being written three times in three files is the evidence.
+
+   **In scope: correcting all three statements (D2-S2) and adding the missing
+   stage row (D2-S4).** **Out of scope: the check that would stop it recurring.**
+   D2-S2 asks the three descriptions to agree *with each other*, which is
+   strictly weaker than asking any of them to agree with the stage list — three
+   mirrors can be made consistent and all three still wrong. A check deriving the
+   label from the stages, or grading it against them, is new gate surface and
+   larger than this fix should introduce. PRO-1012 carries the sizing, and notes
+   that `crates/mc-client/tests/gate/reading.rs` already reads the script's
+   stages and their nesting, so the instrument largely exists.
+
+3. **The stage table in `docs/technical/testing.md` had no row for stage 2c** —
+   the canonical table under-reported the gate by a whole stage and nothing
+   noticed. D2-S4 adds the row; nothing prevents the next stage from landing
+   unrowed. Same root as Note 2, folded into **PRO-1012** rather than filed
+   separately.
 
 ## Open Questions
 
