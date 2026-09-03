@@ -5,16 +5,30 @@
     validation, and before completion.
 
 .DESCRIPTION
-    Stages, in order:
-      1. format      cargo fmt --check
-      2. lint        clippy, zero warnings, with complexity thresholds (clippy.toml)
-      3. size        file-length limits from code-quality.md §2
-      4. deps        unused dependency detection (cargo-machete)
-      5. sast        vulnerabilities, licenses, bans, sources (cargo-deny)
-      6. secrets     credential scan (gitleaks, if installed)
-      7. art         no built texture image is under version control
-      8. art         the texture set is built from its manifest
-      9. tests+cov   suite under coverage instrumentation, with a threshold
+    Stages, in order, each reported under the name it is listed by here. A stage
+    is what a reader sees after `ok:`, which is why the two GPU-free crates and
+    the two verdicts of the instrumented run are listed apart: the gate reports
+    them apart, and a list that folded them together would under-report itself.
+      1.   format    cargo fmt --check
+      2.   lint      clippy, zero warnings, with complexity thresholds (clippy.toml)
+      2b.1 gpu-free  mc-testkit, clippy + tests with --no-default-features
+      2b.2 gpu-free  mc-render, clippy + tests with --no-default-features
+      2c.  docs      rustdoc, no broken or private intra-doc links
+      3.   size      file-length limits from code-quality.md §2
+      4.   deps      unused dependency detection (cargo-machete)
+      5.   sast      vulnerabilities, licenses, bans, sources (cargo-deny)
+      6.   secrets   credential scan (gitleaks, if installed)
+      7.   art       no built texture image is under version control
+      8.   art       the texture set is built from its manifest
+      9.1  tests     the suite, under coverage instrumentation
+      9.2  coverage  the line percentage that run measured, against a threshold
+
+    Every test invocation carries --no-fail-fast, so a red stage reports the
+    whole of its suite rather than stopping at the first failure. The flag costs
+    nothing on a green run. cargo-llvm-cov offers a neighbouring flag whose help
+    text reads more like that ask and which exits 0 on a failing suite; it is
+    forbidden here by name, and docs/technical/testing.md records the measurement
+    and the name so this script need not carry it.
 
     Every stage runs even if an earlier one fails, so a single invocation reports
     the full list of problems rather than one at a time. Exits non-zero if any
@@ -38,8 +52,11 @@
     only — CI and the validate phase must never use it.
 
 .PARAMETER Quick
-    Format, lint and size only. For tight edit loops; not a substitute for the
-    full gate at any phase boundary.
+    Stages 1 through 3: format, lint, the gpu-free clippy and test passes on
+    mc-testkit and mc-render, the rustdoc documentation build, and size. It runs
+    two real test suites and a documentation build — it is not a no-test mode.
+    For tight edit loops; not a substitute for the full gate at any phase
+    boundary.
 
 .PARAMETER ArtOnly
     Stages 7 and 8 only, then the summary. A stage selector like -Quick, and the
@@ -170,7 +187,7 @@ function Test-ToolPresent {
 
 Write-Host "MyCraft quality gate" -ForegroundColor White
 Write-Host "repo: $RepoRoot" -ForegroundColor DarkGray
-if ($Quick) { Write-Host "mode: QUICK (format + lint + size only)" -ForegroundColor Yellow }
+if ($Quick) { Write-Host "mode: QUICK (format, lint, gpu-free tests, docs, size — two test suites; not a full gate)" -ForegroundColor Yellow }
 
 $Banner = 'GATE'
 if ($ArtOnly) {
@@ -212,14 +229,29 @@ if (-not $ArtOnly) {
     # Deliberately NOT `--all-features`: that would re-enable `gpu` and make the
     # stage meaningless. Deliberately NOT `--no-tests=pass` either: a run with no
     # tests in it proves nothing, which is the one thing this stage exists to rule
-    # out. The commands are chained with `&&` because Invoke-Stage inspects
-    # $LASTEXITCODE once, after the whole scriptblock — on separate lines a clippy
-    # failure would be silently overwritten by a passing test run.
-    Invoke-Stage 'gpu-free (mc-testkit + mc-render, no default features)' {
+    # out.
+    #
+    # Each crate is its own Invoke-Stage. As one stage of four `&&`-chained
+    # commands, a failure in the first hid three and the summary still recorded a
+    # single name; now a failing mc-testkit pair leaves the mc-render pair run and
+    # reported.
+    #
+    # Within each stage the two commands are STILL chained with `&&`, because
+    # Invoke-Stage inspects $LASTEXITCODE once, after the whole scriptblock — on
+    # separate lines a clippy failure would be silently overwritten by a passing
+    # test run. **That chain still cancels whatever follows a failing command**,
+    # so a failing clippy here still hides its own crate's test run and the stage
+    # still reports less than its full extent. `--no-fail-fast` bounds the other
+    # half: a failing *test* now runs its whole suite and reports the complete
+    # count. Removing the residual needs a change to how Invoke-Stage detects
+    # failure, which is every stage's mechanism — filed as PRO-1011.
+    Invoke-Stage 'gpu-free (mc-testkit, no default features)' {
         cargo clippy -p mc-testkit --no-default-features --all-targets -- -D warnings &&
-        cargo nextest run -p mc-testkit --no-default-features &&
+        cargo nextest run -p mc-testkit --no-default-features --no-fail-fast
+    }
+    Invoke-Stage 'gpu-free (mc-render, no default features)' {
         cargo clippy -p mc-render --no-default-features --all-targets -- -D warnings &&
-        cargo nextest run -p mc-render --no-default-features
+        cargo nextest run -p mc-render --no-default-features --no-fail-fast
     }
 
     # ── 2c. Documentation links ────────────────────────────────────────────────
@@ -438,7 +470,7 @@ elseif ($SkipCoverage) {
     Write-Warn 'coverage skipped (-SkipCoverage). Not valid for CI or the validate phase.'
     if (Test-ToolPresent 'cargo-nextest' 'cargo install cargo-nextest --locked') {
         # --no-tests=pass: an empty suite is a valid skeleton state, not a failure.
-        Invoke-Stage 'tests (nextest)' { cargo nextest run --workspace --no-tests=pass }
+        Invoke-Stage 'tests (nextest)' { cargo nextest run --workspace --no-tests=pass --no-fail-fast }
     }
     else {
         $Failures.Add('tests (cargo-nextest missing)')
@@ -501,9 +533,15 @@ else {
 
         # --no-tests=pass: an empty suite is a valid skeleton state. The coverage
         # threshold below is what catches "code exists but is untested".
+        #
+        # --no-fail-fast is forwarded verbatim to nextest rather than consumed,
+        # and nextest's exit code is preserved — so a red suite still fails this
+        # stage, and its count is the complete `N tests run` form rather than the
+        # cancelled `N/M`.
         cargo llvm-cov nextest `
             --workspace `
             --no-tests=pass `
+            --no-fail-fast `
             --ignore-filename-regex $CoverageExclude `
             --json --output-path $covJson --summary-only
 

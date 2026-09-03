@@ -16,20 +16,31 @@ out of sync.
 Every stage runs even when an earlier one fails, so one invocation reports every problem — **with
 one exception, stated below: a refused art build stops stage 9 from running.**
 
+**A stage is what a reader sees after `ok:`.** One row per stage the gate reports, which is why the
+two GPU-free crates and the two verdicts of the instrumented run get a row each: the gate prints
+`ok: tests` and then `ok: coverage 93.85%`, and a table folding those into one row under-reports the
+gate by a whole stage. It did, in two places, until SPEC-034 counted both sides.
+
 | # | Stage | Tool | Fails on |
 |---|-------|------|----------|
 | 1 | format | `cargo fmt --check` | any deviation |
 | 2 | lint + complexity | `cargo clippy -D warnings` | any lint, incl. complexity thresholds |
-| 2b | gpu-free (`mc-testkit` + `mc-render`, no default features) | `cargo clippy` + `cargo nextest` with `--no-default-features` | any lint, or any test failure, in the configuration where `wgpu` is absent from the dependency graph |
+| 2b.1 | gpu-free (`mc-testkit`, no default features) | `cargo clippy` + `cargo nextest --no-fail-fast` with `--no-default-features` | any lint, or any test failure, in the configuration where `wgpu` is absent from the dependency graph |
+| 2b.2 | gpu-free (`mc-render`, no default features) | the same, against `mc-render`'s pure layer | the same, for `mc-render` |
+| 2c | docs (rustdoc) | `cargo doc --workspace --no-deps` under `RUSTDOCFLAGS` | a broken intra-doc link, or a public item's docs linking a private one |
 | 3 | size | built-in | source > 500 lines, tests > 600, or any declared root measuring zero files |
 | 4 | deps | `cargo machete` | any unused dependency |
 | 5 | sast | `cargo deny` | vulnerabilities, bad licenses, banned crates, untrusted sources |
 | 6 | secrets | `gitleaks` | credentials in the working tree |
 | 7 | art (generated set not committed) | `git ls-files -- <ContentRoot>/textures` | any tracked file under the output directory, or `git` failing to look at all |
 | 8 | art (voxforge build) | `cargo run -p voxforge -- build <Manifest>` | a non-zero exit from the build |
-| 9 | tests + coverage | `cargo llvm-cov nextest` | test failure, or lines < 80% |
+| 9.1 | tests | `cargo llvm-cov nextest --no-fail-fast` | any test failure |
+| 9.2 | coverage | the report that same run wrote | lines < 80% |
 
-Flags: `-Quick` runs stages 1–3 only, for tight edit loops. `-SkipCoverage` runs tests without
+Flags: `-Quick` runs stages 1 through 3 — format, lint, the gpu-free clippy and test passes on both
+crates, the rustdoc documentation build, and size. **It runs two real test suites and a
+documentation build**, so it is not a no-test mode, and the fail-fast question below is a question
+about the hot edit loop too. `-SkipCoverage` runs tests without
 instrumentation. `-ArtOnly` runs stages 7 and 8 and nothing else. None of the three is valid at a
 phase boundary or in CI. `-ContentRoot` (default `content/base`) and `-Manifest` (default
 `content/base/textures.toml`) name the paths stages 7 and 8 look at, and are used exactly as given —
@@ -56,6 +67,53 @@ different crate months apart. **The repair is never `#[allow]`** — the lint is
 documentation defect, because a public API's docs that send an external reader to a private function
 have failed that reader whether or not rustdoc complains. Inline what the public reader needs and
 leave the fuller explanation on the private item.
+
+### A red run reports how much is red
+
+**Every test invocation the gate makes carries `--no-fail-fast`** — the two GPU-free suites, the
+`-SkipCoverage` suite, and the instrumented run. nextest's default is to cancel at the first
+failure, and the summary it then prints is `N/M tests run`, which states nothing whatever about the
+M−N that never executed. PRO-994 recorded the gate reporting `1294/1591 tests run` with
+`297/1591 tests were not run due to test failure`; the phase that hit it re-ran the suite by hand
+and found `1591 tests run: 1590 passed, 1 failed, 1 skipped`. **It could not have known that from
+the gate.** So: a bare `N tests run` is a complete count, a slashed `N/M` is a cancelled one, and
+only the first bounds the damage.
+
+The flag costs **nothing on a green run** — every test executes anyway when none fails, so it
+changes no timing on the path the gate spends almost all of its life on. It costs time only on a red
+run, and that is time otherwise spent not knowing how much is broken.
+
+**`--ignore-run-fail` is forbidden and must never be reached for instead.** `cargo-llvm-cov`
+documents it as "Run all tests regardless of failure and generate report", which reads like a strict
+superset of `--no-fail-fast`'s "Run all tests regardless of failure" — and it produces a
+**byte-identical summary line**. The two differ only in exit code, and the exit code is the only
+thing `Invoke-Stage` inspects, so the gate would print `ok: tests` over a red suite. Measured on a
+five-test fixture with three failures, 2026-09-03, `-j1`:
+
+| flags | summary line | exit |
+|---|---|---|
+| none | `2/5 tests run: 1 passed, 1 failed` | 100 — cancelled |
+| `--no-fail-fast` | `5 tests run: 2 passed, 3 failed` | 100 — correct |
+| `--ignore-run-fail` | `5 tests run: 2 passed, 3 failed` | **0 — catastrophic** |
+
+`--max-fail=N` is not an alternative either: it still cancels, just later, and any bound below the
+suite size leaves the same question unanswered.
+
+**Stage 2b — the gpu-free configuration — is two stages, and a residual survives inside each.**
+`mc-testkit` and `mc-render` are reported separately so that a failing `mc-testkit` pair no longer
+hides everything `mc-render` would have said; as one stage of four `&&`-chained commands, a failure
+in the first hid three under a single stage name. Inside each of the two, the clippy and the test run
+are **still chained with `&&`**, because `Invoke-Stage` inspects `$LASTEXITCODE` once after the whole
+scriptblock and on separate lines a clippy failure would be silently overwritten by a passing test
+run. That chain still cancels whatever follows a failing command, so a failing clippy still hides its
+own crate's test run and the stage still reports less than its full extent. `--no-fail-fast` bounds
+the other half. Removing the residual needs a change to how `Invoke-Stage` detects failure — which
+is every stage's mechanism, and **a change to how the gate detects failure cannot be validated by a
+green gate**. Filed as **PRO-1011**, above `low` rigor for exactly that reason.
+
+Nothing ties any of these labels to the stages they describe, which is how the `-Quick` claim and the
+stage table above both went stale in silence — three descriptions of `-Quick` in three files, and a
+table two rows short. The check that would stop it recurring is **PRO-1012**.
 
 ### Reading a gate's verdict, and what it costs to run one
 
