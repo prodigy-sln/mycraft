@@ -99,6 +99,23 @@ stat entry, so `git status` shows ` M` on a file whose diff is empty. `git diff
 reporting a tree as dirty — twice in this spec a file was reported as modified when it
 was byte-identical to HEAD.
 
+**Put that provenance in the log rather than beside it.** A status reported next to an exit
+code is a *second* reading, and a second reading can be taken at the wrong moment — this
+project has quoted one taken after the tree had already been made to match. So whatever
+launches the gate stamps the shared-tree re-read above the gate's own banner, before its
+first stage:
+
+```
+COMMIT=<git rev-parse HEAD>
+DIRTY=<git status --short>
+STASH=<git stash list>
+```
+
+The log then answers the provenance question by itself, and a log without those lines is
+retaken rather than vouched for after the fact. `technical/testing.md` carries the measured
+instance, what each of the three lines buys, and why the first field is named `COMMIT` here
+and `TREE` in the log that established the practice.
+
 ### Another agent's red is a hypothesis with a timestamp — and so is your own
 
 Re-check a red against the tree before letting it gate you. One `cargo fmt --check` and

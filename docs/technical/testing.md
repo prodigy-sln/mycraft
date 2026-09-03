@@ -165,6 +165,49 @@ reads it next, even though nothing about the code has been judged. Check the log
 the two banners before treating an incomplete-looking run as a finding; an unterminated log says the
 run did not finish, never that it failed.
 
+### A gate reading that dates itself
+
+**A log that names its own tree cannot be quoted about a different one.** The gate prints no
+provenance of its own, so a reading is ordinarily vouched for by a `git status` reported beside the
+exit code — and that second reading can be taken at the wrong moment. This project has quoted one
+that was: an equality check run *after* the fact, against a working tree that had since been made to
+match the commit it was compared with, printing clean and standing as proof about a reading taken
+half an hour earlier. It was a true statement about the wrong instant, and the tree it was supposed
+to vouch for had never been committed, so no later check could have recovered it.
+
+The repair is to put the provenance **inside** the reading, before the first stage runs. SPEC-034's
+final gate log opens with three lines above the gate's own banner:
+
+```
+TREE=08b9ef20579148bec23c2926c350dcc0ca45ace9
+DIRTY=[]
+STASH=[]
+```
+
+That is the commit the working tree stood at, `git status --short`, and `git stash list` — the same
+pair `git-workflow.md` §5 already calls for on a shared tree, moved from *afterwards* to *before*.
+Whatever launches the gate stamps them; the script does not, and does not need to.
+
+**The `TREE=` label is a misnomer, quoted here as it was written.** `08b9ef2…` is a commit object;
+the tree it names is `e8ed93e…`. Nothing was wrong with the reading — a commit plus an empty `DIRTY`
+identifies the measured tree exactly — but a field naming something other than what it holds is this
+very spec's Defect 2 in miniature, and it survived into the log of the spec that fixed it. **Stamp
+`COMMIT=` next time**, or `TREE=` with `git rev-parse HEAD^{tree}` in it.
+
+**Only the combination pins a tree.** The commit alone describes what HEAD held, not what the stages
+read. An empty `DIRTY` is what makes the commit a complete description of the tree that was
+measured; a non-empty one bounds the difference rather than hiding it, which is still strictly more
+than an unstamped log says. `STASH` is there because a tree with work set aside can change under a
+run without anyone editing a file.
+
+**Evidence carried inside a reading cannot be taken at the wrong moment**, which is the property
+`standards/global/testing.md` §2 calls *a reading that dates itself* and the same one that makes
+`git show <commit>:<path>` answer a question a `grep` cannot. It generalises past gate logs to any
+number that will later be quoted about a tree — a suite count, a coverage percentage, a mutation
+outcome. And it is one-directional: a stamp taken at launch is evidence, while an external check
+taken afterwards is not a repair for an unstamped reading. That reading is retaken, not argued
+about.
+
 ### The two art stages, and the one exception to "every stage runs"
 
 The base game's texture set is derived from `content/base/textures.toml` by `voxforge build`
@@ -878,7 +921,10 @@ historical question**: `git log -S '<needle>' -- <path>` for when a string
 entered or left, `git show <commit>:<path>` for what a file held at a commit,
 `git diff <commit> -- <path>` for whether a range touched it. Each of those is
 dated by construction and cannot be taken at the wrong moment, which is the
-property `standards/global/testing.md` §2 calls *a reading that dates itself*.
+property `standards/global/testing.md` §2 calls *a reading that dates itself*. A
+reading with no such instrument available is given one instead — a gate log is
+stamped with its commit, its dirty list and its stash list before its first
+stage, for exactly this reason.
 
 Two agents on one spec made the same claim the same way and both settled it
 correctly the moment they were pointed at the dating instrument — so this is not
