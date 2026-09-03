@@ -552,3 +552,57 @@ the mechanism in each case, never to writing the residual down.
 ## Open Questions
 
 None.
+
+## Validation
+
+**2026-09-03 — PASS.** `scripts/sdd-gate.ps1` exits 0 on tree
+`08b9ef20579148bec23c2926c350dcc0ca45ace9`, clean and unstashed: 13 stages all
+`ok:`, `1757 tests run: 1757 passed (14 slow), 1 skipped`, lines 93.85%, regions
+92.4%. The count is bare rather than slashed, which is this spec's own subject —
+a complete run, not a cancelled one — and it is 1747 + 10, the ten regression
+tests this spec added. `gpu-free` appears twice, for `mc-testkit` and
+`mc-render`, which is D1-S8's stage split visible in the gate's own output.
+
+Rigor `low`, so the gate carries the review. Every regression scenario's failing
+output was displayed before implementation and recorded in the commit that
+carried the tests: 10 tests, 6 assertion failures.
+
+### The reading this spec nearly shipped on
+
+**A gate reading is a statement about a tree, and this spec nearly settled itself
+by reasoning about which files changed instead of measuring them.** A full gate
+was in flight when two comment-only edits landed. The proposal was to report that
+in-flight reading, on the argument that the delta was provably confined to files
+only three test binaries read. The argument was *probably correct* — the size
+stage filters `*.rs` (`sdd-gate.ps1:295`), so neither changed file was measured
+there, and no Rust changed, so coverage could not move. It was overruled and the
+gate re-run on a committed quiet tree, and the prediction held.
+
+**Being right about the outcome and having measured it are different things, and
+only one of them is evidence.** That is `standards/global/testing.md` §2's named
+failure mode reached verbatim — arguing about which files changed in order to
+predict what a re-run would say.
+
+The sharper reason it could not stand is specific to this file. **PowerShell
+parses the whole script at launch**, so the in-flight run was executing the
+*pre-edit* `sdd-gate.ps1`. Its verdict described the old gate — and this spec's
+subject *is* that script. The instrument under test was the instrument taking the
+reading.
+
+**The irony is the lesson.** The spec written to stop the gate under-reporting
+its own extent nearly shipped on a gate reading whose extent was reasoned about
+rather than measured: the same defect, one level up, in the artefact that was
+supposed to prove the defect fixed.
+
+### What the re-run bought beyond the verdict
+
+The retaken log stamps `TREE=`, `DIRTY=[]` and `STASH=[]` into its own header
+before the gate's first stage. **That makes the reading date itself**, which is
+strictly stronger than an external `git status` taken afterwards: an equality
+check performed later is a true statement about a *later* instant and cannot
+recover the tree the reading was taken on. Evidence carried inside the reading
+cannot be taken at the wrong moment. The technique generalises past this gate and
+is consolidated into `docs/technical/testing.md`.
+
+Both halves are carried into `docs/technical/testing.md` rather than left here —
+the archive is history, not documentation.
