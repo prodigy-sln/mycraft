@@ -28,7 +28,7 @@ against the tree on this branch rather than taken from the issue text.
 
 - [resolved] Q: Is `-Quick` in scope? The gate's own label says it runs no
   tests. → A: **In scope, and the label is wrong.** The early exit is at
-  `scripts/sdd-gate.ps1:294`; stage 2b is `198-227`. So `-Quick` runs stages 1,
+  `scripts/sdd-gate.ps1:294`; stage 2b is `198-223`. So `-Quick` runs stages 1,
   2, 2b, 2c and 3 — two real test suites among them — while `:173` prints
   `mode: QUICK (format + lint + size only)` and the `.PARAMETER Quick`
   docstring at `:40-42` says "Format, lint and size only". The fail-fast hole is
@@ -54,6 +54,15 @@ against the tree on this branch rather than taken from the issue text.
   'tests'` runs, the coverage read proceeds, and the gate passes with three red
   tests. Also measured: `cargo-llvm-cov` forwards `--no-fail-fast` verbatim to
   nextest rather than consuming it, and preserves nextest's exit code.
+
+  **Re-measured independently during this phase**, on this branch, against a
+  fresh five-test crate outside the repository (deleted afterwards). All four
+  readings reproduced, including the byte-identical summary lines and the exit-0
+  from `--ignore-run-fail`. The help text was read directly rather than quoted:
+  `--no-fail-fast` at `cargo llvm-cov --help:169-170` ("Run all tests regardless
+  of failure") and `--ignore-run-fail` at `:172-175`, adjacent, the latter's
+  description a strict superset of the former's. That adjacency plus the superset
+  wording is why the trap is live rather than theoretical.
 
 - [resolved] Q: What does that trap force on the scenarios? → A: At least one
   scenario must pin the gate's **verdict** alongside the count. A scenario
@@ -135,6 +144,26 @@ against the tree on this branch rather than taken from the issue text.
   (the size stage's `Measure-Object -Line` dropping blank lines) are separate
   issues against separate stages. Both are listed in Out of Scope.
 
+- [open] Q: Does this fix also make stage 2b's `&&` chain non-cancelling, so a
+  failure at `220` no longer skips the clippy at `221` and the run at `222`? →
+  Put to the owner during this phase with a recommendation. The spec is drafted
+  under **scope it to the flag and the label, and name the chain cancellation as
+  a residual**, because repairing the chain means changing `Invoke-Stage`'s
+  contract or accumulating exit status across four commands — new gate surface,
+  overturning the design decision recorded at `:215-217`, and a `decision`
+  work-type rather than a `low` fix. The flag still buys real ground at
+  `220`/`222`: a failure *inside* mc-testkit's suite reports that suite's full
+  extent instead of one test. If the owner rules the other way, spec §"Defect 1
+  root cause", Out of Scope and Notes item 1 all change together.
+
+- [resolved] Q: Is `--max-fail=N` an alternative? nextest's own cancellation
+  warning suggests it beside `--no-fail-fast`. → A: No. It still cancels, just
+  later. Any bound below the suite size leaves "how much is broken" unanswered,
+  which is the only question this fix exists to answer. Recorded in the spec's
+  rejected alternatives.
+
 ## Open questions
 
-None.
+One, above: whether stage 2b's `&&` chain is in scope. It does not block the
+scenarios — the spec is drafted under the recommended reading and the affected
+sections are named — but it must close before implementation starts.
