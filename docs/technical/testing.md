@@ -99,6 +99,12 @@ five-test fixture with three failures, 2026-09-03, `-j1`:
 `--max-fail=N` is not an alternative either: it still cancels, just later, and any bound below the
 suite size leaves the same question unanswered.
 
+**That name belongs here and nowhere in `sdd-gate.ps1`** — not even in a comment warning against it.
+A regression test scans the script for the literal and fails on any occurrence, which is what stops
+it being reintroduced as an apparent improvement, and a warning comment would redden the suite while
+looking like diligence. The script's header says so at the point where the next reader would be
+tempted, and points back here.
+
 **Stage 2b — the gpu-free configuration — is two stages, and a residual survives inside each.**
 `mc-testkit` and `mc-render` are reported separately so that a failing `mc-testkit` pair no longer
 hides everything `mc-render` would have said; as one stage of four `&&`-chained commands, a failure
@@ -114,6 +120,17 @@ green gate**. Filed as **PRO-1011**, above `low` rigor for exactly that reason.
 Nothing ties any of these labels to the stages they describe, which is how the `-Quick` claim and the
 stage table above both went stale in silence — three descriptions of `-Quick` in three files, and a
 table two rows short. The check that would stop it recurring is **PRO-1012**.
+
+**A gate reading is a statement about a tree, and reasoning about which files changed only predicts
+what a re-run would say.** The spec that fixed all of the above nearly shipped that same defect one
+level up: a full gate was in flight when two comment-only edits landed, and the delta was confined
+enough that the outcome was almost certainly unaffected — the size stage filters `*.rs`, no Rust
+changed, so no stage could move. The reading was retaken on a committed, quiet tree anyway, and the
+prediction held. **Being right about the outcome and having measured it are different things, and
+only one of them is evidence.** The reason is sharper still for this particular file: **PowerShell
+parses the whole script at launch**, so a gate already running is executing the script as it was when
+it started. A run of the old gate cannot vouch for the new one, however small the edit — and when
+the script *is* the thing under test, that is the whole of the question.
 
 ### Reading a gate's verdict, and what it costs to run one
 

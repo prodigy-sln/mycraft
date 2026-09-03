@@ -26,9 +26,16 @@
     Every test invocation carries --no-fail-fast, so a red stage reports the
     whole of its suite rather than stopping at the first failure. The flag costs
     nothing on a green run. cargo-llvm-cov offers a neighbouring flag whose help
-    text reads more like that ask and which exits 0 on a failing suite; it is
-    forbidden here by name, and docs/technical/testing.md records the measurement
-    and the name so this script need not carry it.
+    text reads more like that ask and which exits 0 on a failing suite, so it
+    would make this gate pass over red tests.
+
+    DO NOT NAME THAT FLAG IN THIS FILE, not even in a comment warning against it.
+    A regression test scans this script for the literal and fails on any
+    occurrence, which is what stops it being reintroduced as an apparent
+    improvement. Its name, its help text and the measurement that condemns it
+    live in docs/technical/testing.md, under "A red run reports how much is red"
+    — which is where this project's gate-reading doctrine already lives, and so
+    the right home rather than a workaround.
 
     Every stage runs even if an earlier one fails, so a single invocation reports
     the full list of problems rather than one at a time. Exits non-zero if any
